@@ -80,7 +80,7 @@
 		"customEditors": [
 			{
 				"viewType": "drawio-ai",
-				"displayName": "Draw.io (Binary)",
+				"displayName": "Draw.io AI (Binary)",
 				"selector": [
 					{
 						"filenamePattern": "*.drawio.png"
@@ -93,7 +93,7 @@
 			},
 			{
 				"viewType": "drawio-ai-text",
-				"displayName": "Draw.io",
+				"displayName": "Draw.io AI",
 				"selector": [
 					{
 						"filenamePattern": "*.drawio"
@@ -112,7 +112,7 @@
 			},
 			{
 				"viewType": "drawio-ai.inline.drawioEditor",
-				"displayName": "Draw.io Inline Editor",
+				"displayName": "Draw.io AI Inline Editor",
 				"selector": [
 					{
 						"filenamePattern": "*.drawio"
