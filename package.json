@@ -1,12 +1,12 @@
 {
-	"name": "vscode-drawio",
+	"name": "vscode-drawio-ai",
 	"private": true,
-	"displayName": "Draw.io Integration",
-	"description": "This unofficial extension integrates Draw.io into VS Code.",
-	"version": "1.17.0",
+	"displayName": "Draw.io AI",
+	"description": "Draw.io in VS Code with an AI that edits your diagrams live. Fork of hediet/vscode-drawio.",
+	"version": "0.1.0",
 	"preRelease": false,
 	"license": "GPL-3.0",
-	"publisher": "hediet",
+	"publisher": "drawio-ai",
 	"keywords": [
 		"drawio",
 		"diagram",
@@ -30,7 +30,7 @@
 		"workspace"
 	],
 	"engines": {
-		"vscode": "^1.70.0"
+		"vscode": "^1.105.0"
 	},
 	"categories": [
 		"Visualization"
@@ -49,10 +49,13 @@
 			"supported": "limited",
 			"description": "In Restricted Mode, workspace settings cannot load custom libraries or plugins, or change which Draw.io app the editor loads.",
 			"restrictedConfigurations": [
-				"hediet.vscode-drawio.customLibraries",
-				"hediet.vscode-drawio.plugins",
-				"hediet.vscode-drawio.offline",
-				"hediet.vscode-drawio.online-url"
+				"drawio-ai.customLibraries",
+				"drawio-ai.plugins",
+				"drawio-ai.offline",
+				"drawio-ai.online-url",
+				"drawio-ai.anthropic.baseUrl",
+				"drawio-ai.openai.baseUrl",
+				"drawio-ai.openai.authHeader"
 			]
 		}
 	},
@@ -76,7 +79,7 @@
 		],
 		"customEditors": [
 			{
-				"viewType": "hediet.vscode-drawio",
+				"viewType": "drawio-ai",
 				"displayName": "Draw.io (Binary)",
 				"selector": [
 					{
@@ -89,7 +92,7 @@
 				"priority": "default"
 			},
 			{
-				"viewType": "hediet.vscode-drawio-text",
+				"viewType": "drawio-ai-text",
 				"displayName": "Draw.io",
 				"selector": [
 					{
@@ -108,107 +111,629 @@
 				"priority": "default"
 			},
 			{
-				"viewType": "drawio-inline-editor.drawioEditor",
+				"viewType": "drawio-ai.inline.drawioEditor",
 				"displayName": "Draw.io Inline Editor",
 				"selector": [
-					{ "filenamePattern": "*.drawio" },
-					{ "filenamePattern": "*.dio" }
+					{
+						"filenamePattern": "*.drawio"
+					},
+					{
+						"filenamePattern": "*.dio"
+					}
 				],
 				"priority": "option"
 			},
 			{
-				"viewType": "drawio-inline-editor.markdownEditor",
+				"viewType": "drawio-ai.inline.markdownEditor",
 				"displayName": "Markdown with Diagrams (Experimental)",
 				"selector": [
-					{ "filenamePattern": "*.md" }
+					{
+						"filenamePattern": "*.md"
+					}
 				],
 				"priority": "option"
 			}
 		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "drawio-ai",
+					"title": "Draw.io AI",
+					"icon": "media/drawio-ai.svg"
+				}
+			]
+		},
+		"views": {
+			"drawio-ai": [
+				{
+					"type": "webview",
+					"id": "drawio-ai.chatView",
+					"name": "Chat"
+				}
+			]
+		},
+		"chatParticipants": [
+			{
+				"id": "drawio-ai.participant",
+				"name": "drawio",
+				"fullName": "Draw.io AI",
+				"description": "Edit the open draw.io diagram live",
+				"isSticky": true,
+				"commands": [
+					{
+						"name": "selection",
+						"description": "Change only the selected shapes"
+					},
+					{
+						"name": "layout",
+						"description": "Tidy up the layout"
+					},
+					{
+						"name": "style",
+						"description": "Restyle consistently"
+					},
+					{
+						"name": "explain",
+						"description": "Explain the diagram"
+					}
+				]
+			}
+		],
+		"languageModelTools": [
+			{
+				"name": "drawio_get_diagram",
+				"displayName": "Get Draw.io Diagram",
+				"toolReferenceName": "drawio-get-diagram",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Get Draw.io Diagram",
+				"modelDescription": "Read the open draw.io diagram (current page) as structured JSON: cells with ids, kind, label, style, geometry, parent, edge source/target, plus the user's current selection. Call this before editing. Use scope='selection' to focus on what the user selected (adjacent cells are included and marked context=true).",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"scope": {
+							"type": "string",
+							"enum": [
+								"page",
+								"selection"
+							]
+						},
+						"includeStyles": {
+							"type": "boolean",
+							"description": "Default true."
+						},
+						"maxCells": {
+							"type": "number",
+							"description": "Default 400."
+						}
+					}
+				}
+			},
+			{
+				"name": "drawio_apply_operations",
+				"displayName": "Edit Draw.io Diagram",
+				"toolReferenceName": "drawio-apply-operations",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Edit Draw.io Diagram",
+				"modelDescription": "Apply a batch of edits to the open draw.io diagram in ONE undoable step; the user sees them live. Batch everything for one request into a single call. New cells get a tempId you can reference later in the same batch (e.g. add two shapes then an edge between them). Atomic by default: if any op fails, nothing is applied and per-op errors are returned so you can fix and retry. Returns new ids for every tempId.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"ops": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"description": "One edit. Set `op` and only the fields that operation uses (listed in each field's description).",
+								"properties": {
+									"op": {
+										"type": "string",
+										"enum": [
+											"addShape",
+											"addEdge",
+											"update",
+											"delete",
+											"move",
+											"resize",
+											"group",
+											"ungroup",
+											"align",
+											"distribute",
+											"zOrder",
+											"layout",
+											"insertXml",
+											"replaceAll"
+										]
+									},
+									"tempId": {
+										"type": "string",
+										"description": "[addShape, addEdge, group] Your own handle (e.g. \"$db\") for the new cell. Later operations in the SAME batch can use it anywhere an id is expected."
+									},
+									"id": {
+										"type": "string",
+										"description": "[update] Id of the cell to change."
+									},
+									"ids": {
+										"type": "array",
+										"items": {
+											"type": "string"
+										},
+										"description": "[delete, move, resize, group, ungroup, align, distribute, zOrder, layout] Target cell ids."
+									},
+									"label": {
+										"type": "string",
+										"description": "[addShape, addEdge, update, group] Plain text; use \\n for line breaks. Simple HTML is kept as-is when the style has html=1."
+									},
+									"style": {
+										"type": "string",
+										"description": "[addShape, addEdge, update, group] Full draw.io style string, e.g. \"shape=cylinder3;whiteSpace=wrap;html=1;\". On update it REPLACES the style; prefer styleProps for small changes."
+									},
+									"styleProps": {
+										"type": "object",
+										"description": "draw.io style keys to set, merged into the existing/base style. Values are strings/numbers/booleans; null removes a key. Example: {\"fillColor\":\"#dae8fc\",\"strokeColor\":\"#6c8ebf\",\"fontStyle\":1}"
+									},
+									"x": {
+										"type": "number",
+										"description": "[addShape, update] Left, relative to parent."
+									},
+									"y": {
+										"type": "number",
+										"description": "[addShape, update] Top, relative to parent."
+									},
+									"width": {
+										"type": "number",
+										"description": "[addShape, update, resize]"
+									},
+									"height": {
+										"type": "number",
+										"description": "[addShape, update, resize]"
+									},
+									"scale": {
+										"type": "number",
+										"description": "[resize] Multiply width and height."
+									},
+									"dx": {
+										"type": "number",
+										"description": "[move, insertXml] Horizontal offset."
+									},
+									"dy": {
+										"type": "number",
+										"description": "[move, insertXml] Vertical offset."
+									},
+									"parent": {
+										"type": "string",
+										"description": "[addShape, addEdge, update, layout, insertXml] Container/group id. Omit for the default layer."
+									},
+									"placement": {
+										"type": "object",
+										"description": "[addShape] Position relative to an existing cell instead of x/y. Inherits that cell's parent.",
+										"properties": {
+											"relativeTo": {
+												"type": "string"
+											},
+											"side": {
+												"type": "string",
+												"enum": [
+													"right",
+													"left",
+													"above",
+													"below"
+												]
+											},
+											"gap": {
+												"type": "number",
+												"description": "Default 60."
+											}
+										},
+										"required": [
+											"relativeTo",
+											"side"
+										]
+									},
+									"source": {
+										"type": "string",
+										"description": "[addEdge, update] Source cell id."
+									},
+									"target": {
+										"type": "string",
+										"description": "[addEdge, update] Target cell id."
+									},
+									"points": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"properties": {
+												"x": {
+													"type": "number"
+												},
+												"y": {
+													"type": "number"
+												}
+											},
+											"required": [
+												"x",
+												"y"
+											]
+										},
+										"description": "[addEdge] Optional waypoints."
+									},
+									"data": {
+										"type": "object",
+										"description": "[addShape, update] Custom string attributes (tooltip, link, metadata). null removes on update."
+									},
+									"includeEdges": {
+										"type": "boolean",
+										"description": "[delete] Also delete connected edges. Default true."
+									},
+									"padding": {
+										"type": "number",
+										"description": "[group] Default 20."
+									},
+									"align": {
+										"type": "string",
+										"enum": [
+											"left",
+											"center",
+											"right",
+											"top",
+											"middle",
+											"bottom"
+										],
+										"description": "[align]"
+									},
+									"direction": {
+										"type": "string",
+										"enum": [
+											"horizontal",
+											"vertical"
+										],
+										"description": "[distribute]"
+									},
+									"position": {
+										"type": "string",
+										"enum": [
+											"front",
+											"back"
+										],
+										"description": "[zOrder]"
+									},
+									"type": {
+										"type": "string",
+										"enum": [
+											"hierarchical",
+											"horizontalHierarchical",
+											"tree",
+											"horizontalTree",
+											"radialTree",
+											"organic",
+											"circle",
+											"grid"
+										],
+										"description": "[layout] Automatic layout (draw.io's ELK engine). hierarchical = top-down flow; horizontalHierarchical = left-to-right. Lays out the children of `parent` (default: the page, or the common parent of `ids`); with `ids`, only those cells and the edges between them move."
+									},
+									"spacing": {
+										"type": "number",
+										"description": "[layout] Default 50."
+									},
+									"xml": {
+										"type": "string",
+										"description": "[insertXml, replaceAll] mxGraphModel XML or bare <mxCell> elements. Ids you choose are kept unless they collide (the result maps them). parent/source/target may reference existing cells."
+									}
+								},
+								"required": [
+									"op"
+								]
+							},
+							"minItems": 1
+						},
+						"atomic": {
+							"type": "boolean",
+							"description": "Default true."
+						},
+						"selectResult": {
+							"type": "boolean",
+							"description": "Select the changed cells afterwards. Default false."
+						}
+					},
+					"required": [
+						"ops"
+					]
+				}
+			},
+			{
+				"name": "drawio_find_cells",
+				"displayName": "Find Draw.io Cells",
+				"toolReferenceName": "drawio-find-cells",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Find Draw.io Cells",
+				"modelDescription": "Search the current page for cells by label text (case-insensitive substring or /regex/), kind, or style fragment. Returns compact matches with ids.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string"
+						},
+						"kind": {
+							"type": "string",
+							"enum": [
+								"vertex",
+								"edge",
+								"container",
+								"group"
+							]
+						},
+						"styleContains": {
+							"type": "string"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Default 50."
+						}
+					}
+				}
+			},
+			{
+				"name": "drawio_select_cells",
+				"displayName": "Select Draw.io Cells",
+				"toolReferenceName": "drawio-select-cells",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Select Draw.io Cells",
+				"modelDescription": "Select (and optionally scroll to and highlight) cells in the editor, e.g. to show the user what you are referring to.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"ids": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						},
+						"reveal": {
+							"type": "boolean",
+							"description": "Default true."
+						}
+					},
+					"required": [
+						"ids"
+					]
+				}
+			},
+			{
+				"name": "drawio_render_image",
+				"displayName": "Render Draw.io Diagram",
+				"toolReferenceName": "drawio-render-image",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Render Draw.io Diagram",
+				"modelDescription": "Render the current page (or only the given cells) to a PNG so you can visually check layout, overlaps and readability after editing.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"ids": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							}
+						}
+					}
+				}
+			},
+			{
+				"name": "drawio_search_shapes",
+				"displayName": "Search Draw.io Shape Library",
+				"toolReferenceName": "drawio-search-shapes",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Search Draw.io Shape Library",
+				"modelDescription": "Search draw.io's built-in shape libraries (thousands of shapes: AWS, Azure, GCP, Kubernetes, Cisco/network, UML, BPMN, ER, C4, flowchart, mockups, ...) and get each shape's exact style string and default size. ALWAYS use this before adding vendor icons or specialised shapes instead of guessing `shape=mxgraph...` names. Multi-cell templates (e.g. UML class, table) include xml for insertXml.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string",
+							"description": "Keywords, e.g. \"aws lambda\", \"azure sql database\", \"kubernetes pod\", \"uml class\"."
+						},
+						"limit": {
+							"type": "number",
+							"description": "Default 8, max 25."
+						}
+					},
+					"required": [
+						"query"
+					]
+				}
+			},
+			{
+				"name": "drawio_style_reference",
+				"displayName": "Draw.io Style Reference",
+				"toolReferenceName": "drawio-style-reference",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Draw.io Style Reference",
+				"modelDescription": "Concise reference for common draw.io style strings: basic shapes, edge styles and arrowheads, the default colour palette, containers/swimlanes, and text. For vendor icons use drawio_search_shapes.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"topic": {
+							"type": "string",
+							"enum": [
+								"basics",
+								"edges",
+								"colors",
+								"containers",
+								"text",
+								"all"
+							]
+						}
+					},
+					"required": [
+						"topic"
+					]
+				}
+			},
+			{
+				"name": "drawio_get_xml",
+				"displayName": "Get Draw.io XML",
+				"toolReferenceName": "drawio-get-xml",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Get Draw.io XML",
+				"modelDescription": "Return the raw draw.io file XML (all pages). Only needed for exact copying of complex styles or multi-page questions; prefer drawio_get_diagram.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {}
+				}
+			}
+		],
 		"commands": [
 			{
-				"command": "hediet.vscode-drawio.convert",
+				"command": "drawio-ai.openChat",
+				"title": "Open AI Chat",
+				"category": "Draw.io AI",
+				"icon": "$(sparkle)"
+			},
+			{
+				"command": "drawio-ai.askAboutSelection",
+				"title": "Ask AI About Selection",
+				"category": "Draw.io AI"
+			},
+			{
+				"command": "drawio-ai.lassoSelect",
+				"title": "Lasso Select for AI",
+				"category": "Draw.io AI"
+			},
+			{
+				"command": "drawio-ai.newChat",
+				"title": "New AI Chat",
+				"category": "Draw.io AI"
+			},
+			{
+				"command": "drawio-ai.selectModel",
+				"title": "Select AI Provider and Model",
+				"category": "Draw.io AI"
+			},
+			{
+				"command": "drawio-ai.setApiKey",
+				"title": "Set API Key",
+				"category": "Draw.io AI"
+			},
+			{
+				"command": "drawio-ai.convert",
 				"title": "Convert To...",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.export",
+				"command": "drawio-ai.export",
 				"title": "Export To...",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.toggleCodeLinkActivation",
+				"command": "drawio-ai.toggleCodeLinkActivation",
 				"title": "Toggle Code Link Activation",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.changeTheme",
+				"command": "drawio-ai.changeTheme",
 				"title": "Change Theme",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.editDiagramAsText",
+				"command": "drawio-ai.editDiagramAsText",
 				"title": "Edit Diagram As Text (Experimental)",
-				"enablement": "hediet.vscode-drawio.experimentalFeaturesEnabled",
+				"enablement": "drawio-ai.experimentalFeaturesEnabled",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.linkCodeWithSelectedNode",
+				"command": "drawio-ai.linkCodeWithSelectedNode",
 				"title": "Link Code with Selected Node",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.newDiagram",
+				"command": "drawio-ai.newDiagram",
 				"title": "New Draw.io Diagram",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.linkFileWithSelectedNode",
+				"command": "drawio-ai.linkFileWithSelectedNode",
 				"title": "Link File With Selected Node",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.linkSymbolWithSelectedNode",
+				"command": "drawio-ai.linkSymbolWithSelectedNode",
 				"title": "Link Symbol With Selected Node",
 				"category": "Draw.io"
 			},
 			{
-				"command": "hediet.vscode-drawio.linkWsSymbolWithSelectedNode",
+				"command": "drawio-ai.linkWsSymbolWithSelectedNode",
 				"title": "Link Workspace Symbol With Selected Node",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.editDiagram",
+				"command": "drawio-ai.inline.editDiagram",
 				"title": "Edit Diagram",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.insertDiagram",
+				"command": "drawio-ai.inline.insertDiagram",
 				"title": "Insert New Diagram",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.toggleLock",
+				"command": "drawio-ai.inline.toggleLock",
 				"title": "Toggle Diagram Lock",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.previewDiagram",
+				"command": "drawio-ai.inline.previewDiagram",
 				"title": "Preview Diagram",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.inlinePreview",
+				"command": "drawio-ai.inline.inlinePreview",
 				"title": "Open Inline Preview",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.convertMermaid",
+				"command": "drawio-ai.inline.convertMermaid",
 				"title": "Convert Mermaid to Draw.io",
 				"category": "Draw.io"
 			},
 			{
-				"command": "drawio-inline-editor.convertPlantUml",
+				"command": "drawio-ai.inline.convertPlantUml",
 				"title": "Convert PlantUML to Draw.io",
 				"category": "Draw.io"
 			}
@@ -240,38 +765,132 @@
 		],
 		"keybindings": [
 			{
-				"command": "hediet.vscode-drawio.linkCodeWithSelectedNode",
+				"command": "drawio-ai.askAboutSelection",
+				"key": "alt+k",
+				"when": "drawio-ai.active"
+			},
+			{
+				"command": "drawio-ai.lassoSelect",
+				"key": "alt+l",
+				"when": "drawio-ai.active"
+			},
+			{
+				"command": "drawio-ai.linkCodeWithSelectedNode",
 				"key": "shift+F3",
 				"when": "!findWidgetVisible"
 			}
 		],
 		"configuration": [
 			{
+				"title": "AI",
+				"order": 5,
+				"properties": {
+					"drawio-ai.provider": {
+						"type": "string",
+						"enum": [
+							"vscode-lm",
+							"anthropic",
+							"openai"
+						],
+						"enumDescriptions": [
+							"Models from VS Code's Language Model API (GitHub Copilot, ...). No API key needed.",
+							"Anthropic API with your own key.",
+							"Any OpenAI-compatible Chat Completions API (OpenAI, Azure OpenAI, OpenRouter, Ollama, ...)."
+						],
+						"default": "vscode-lm",
+						"description": "Default AI provider for the Draw.io AI chat panel. (The @drawio chat participant always uses the model selected in Copilot Chat.)"
+					},
+					"drawio-ai.maxToolRounds": {
+						"type": "number",
+						"default": 16,
+						"minimum": 1,
+						"description": "Maximum number of tool-calling rounds per request."
+					},
+					"drawio-ai.flashChanges": {
+						"type": "boolean",
+						"default": true,
+						"description": "Briefly highlight cells changed by the AI."
+					},
+					"drawio-ai.selectChangedCells": {
+						"type": "boolean",
+						"default": false,
+						"description": "Select cells changed by the AI after each edit."
+					},
+					"drawio-ai.maxCellsInContext": {
+						"type": "number",
+						"default": 400,
+						"minimum": 20,
+						"description": "Maximum number of cells sent to the model when it reads the diagram."
+					},
+					"drawio-ai.anthropic.baseUrl": {
+						"type": "string",
+						"default": "https://api.anthropic.com",
+						"scope": "machine-overridable",
+						"description": "Anthropic API base URL."
+					},
+					"drawio-ai.anthropic.model": {
+						"type": "string",
+						"default": "",
+						"description": "Anthropic model id. Empty = newest model returned by the API (or pick one in the chat panel)."
+					},
+					"drawio-ai.anthropic.maxTokens": {
+						"type": "number",
+						"default": 8192,
+						"description": "max_tokens for Anthropic responses. Large diagram edits need room for tool-call JSON."
+					},
+					"drawio-ai.openai.baseUrl": {
+						"type": "string",
+						"default": "https://api.openai.com/v1",
+						"scope": "machine-overridable",
+						"markdownDescription": "Base URL of an OpenAI-compatible API (must serve `/chat/completions`). Examples: `https://YOUR-RESOURCE.openai.azure.com/openai/v1`, `https://openrouter.ai/api/v1`, `http://localhost:11434/v1`."
+					},
+					"drawio-ai.openai.model": {
+						"type": "string",
+						"default": "",
+						"description": "Model (or Azure deployment) name. Can also be picked in the chat panel."
+					},
+					"drawio-ai.openai.authHeader": {
+						"type": "string",
+						"enum": [
+							"bearer",
+							"api-key"
+						],
+						"default": "bearer",
+						"description": "How to send the key: 'Authorization: Bearer' (OpenAI, OpenRouter) or 'api-key' header (Azure OpenAI)."
+					},
+					"drawio-ai.openai.supportsImages": {
+						"type": "boolean",
+						"default": true,
+						"description": "Whether the selected model accepts images (enables the render-and-check tool)."
+					}
+				}
+			},
+			{
 				"title": "General",
 				"order": 10,
 				"properties": {
-					"hediet.vscode-drawio.offline": {
+					"drawio-ai.offline": {
 						"type": "boolean",
 						"default": true,
 						"title": "Use Offline Mode",
 						"description": "When enabled, the bundled instance of Draw.io is used.",
 						"order": 10
 					},
-					"hediet.vscode-drawio.online-url": {
+					"drawio-ai.online-url": {
 						"type": "string",
 						"default": "https://embed.diagrams.net/",
 						"title": "Online URL",
 						"description": "The app to use when offline mode is disabled.",
 						"order": 11
 					},
-					"hediet.vscode-drawio.codeLinkActivated": {
+					"drawio-ai.codeLinkActivated": {
 						"type": "boolean",
 						"default": false,
 						"title": "Code Link Enabled",
 						"description": "When activated, selecting a node will navigate to an associated code section.",
 						"order": 20
 					},
-					"hediet.vscode-drawio.local-storage": {
+					"drawio-ai.local-storage": {
 						"anyOf": [
 							{
 								"type": "object"
@@ -286,14 +905,14 @@
 						"description": "Only change this property if you know what you are doing. Manual changes to this property are not supported!",
 						"order": 30
 					},
-					"hediet.vscode-drawio.simpleLabels": {
+					"drawio-ai.simpleLabels": {
 						"type": "boolean",
 						"default": false,
 						"title": "Use SimpleLabels",
 						"description": "When enabled, no ForeignObjects are used in the svg.",
 						"order": 40
 					},
-					"hediet.vscode-drawio.svgAppearance": {
+					"drawio-ai.svgAppearance": {
 						"type": "string",
 						"default": "light",
 						"enum": [
@@ -310,20 +929,20 @@
 						"description": "The appearance of `.drawio.svg` files and SVG exports. It does not depend on the theme of the editor.",
 						"order": 45
 					},
-					"hediet.vscode-drawio.zoomFactor": {
+					"drawio-ai.zoomFactor": {
 						"type": "number",
 						"default": 1.2,
 						"title": "Draw.io zoom factor",
 						"description": "Defines the zoom factor for mouse wheel and trackpad zoom.",
 						"order": 50
 					},
-					"hediet.vscode-drawio.globalVars": {
+					"drawio-ai.globalVars": {
 						"type": "object",
 						"title": "Draw.io global variables.",
 						"description": "Defines global variables for system-wide placeholders using a JSON structure with key, value pairs. Keep the number of global variables small.",
 						"order": 60
 					},
-					"hediet.vscode-drawio.resizeImages": {
+					"drawio-ai.resizeImages": {
 						"type": [
 							"boolean",
 							"null"
@@ -333,21 +952,21 @@
 						"default": null,
 						"order": 70
 					},
-					"hediet.vscode-drawio.showTooltipIcons": {
+					"drawio-ai.showTooltipIcons": {
 						"type": "boolean",
 						"default": false,
 						"title": "Show Tooltip Icons",
 						"description": "Specifies whether tooltip icons are shown.",
 						"order": 80
 					},
-					"hediet.vscode-drawio.showLinkIcons": {
+					"drawio-ai.showLinkIcons": {
 						"type": "boolean",
 						"default": false,
 						"title": "Show Link Icons",
 						"description": "Specifies whether link icons are shown.",
 						"order": 90
 					},
-					"hediet.vscode-drawio.showConnectHandle": {
+					"drawio-ai.showConnectHandle": {
 						"type": "boolean",
 						"default": false,
 						"title": "Show Connect Handle",
@@ -360,23 +979,30 @@
 				"title": "Inline Editor",
 				"order": 15,
 				"properties": {
-					"drawio-inline-editor.theme": {
+					"drawio-ai.inline.theme": {
 						"type": "string",
 						"default": "auto",
-						"enum": ["auto", "kennedy", "min", "atlas", "dark", "sketch"],
+						"enum": [
+							"auto",
+							"kennedy",
+							"min",
+							"atlas",
+							"dark",
+							"sketch"
+						],
 						"description": "Editor UI theme"
 					},
-					"drawio-inline-editor.autoLock": {
+					"drawio-ai.inline.autoLock": {
 						"type": "boolean",
 						"default": false,
 						"description": "Automatically lock diagrams after editing"
 					},
-					"drawio-inline-editor.minimalUI": {
+					"drawio-ai.inline.minimalUI": {
 						"type": "boolean",
 						"default": true,
 						"description": "Use minimal draw.io UI (hides sidebar, format panel, scrollbars)"
 					},
-					"drawio-inline-editor.diagramPadding": {
+					"drawio-ai.inline.diagramPadding": {
 						"type": "number",
 						"default": 28,
 						"minimum": 0,
@@ -389,7 +1015,7 @@
 				"title": "Plugins",
 				"order": 20,
 				"properties": {
-					"hediet.vscode-drawio.plugins": {
+					"drawio-ai.plugins": {
 						"type": "array",
 						"items": {
 							"anyOf": [
@@ -409,7 +1035,7 @@
 						"markdownDescription": "Loads Draw.io plugins from the local filesystem.  See description of the `file` property. See [plugins documentation](https://github.com/hediet/vscode-drawio/blob/master/docs/plugins.md).",
 						"order": 10
 					},
-					"hediet.vscode-drawio.knownPlugins": {
+					"drawio-ai.knownPlugins": {
 						"type": "array",
 						"items": {
 							"type": "object",
@@ -431,7 +1057,7 @@
 						"scope": "application",
 						"order": 15
 					},
-					"hediet.vscode-drawio.customLibraries": {
+					"drawio-ai.customLibraries": {
 						"type": "array",
 						"items": {
 							"type": "object",
@@ -490,7 +1116,7 @@
 				"title": "Theme and styles",
 				"order": 30,
 				"properties": {
-					"hediet.vscode-drawio.styles": {
+					"drawio-ai.styles": {
 						"title": "Styles",
 						"description": "Defines an array of objects that contain the colours (fontColor, fillColor, strokeColor and gradientColor) for the Style tab of the format panel if the selection is empty. These objects can have a commonStyle (which is applied to both vertices and edges), vertexStyle (applied to vertices) and edgeStyle (applied to edges), and a graph with background and gridColor. An empty object means apply the default colors",
 						"type": "array",
@@ -525,22 +1151,22 @@
 							}
 						}
 					},
-					"hediet.vscode-drawio.defaultVertexStyle": {
+					"drawio-ai.defaultVertexStyle": {
 						"title": "Default Vertex Style",
 						"description": "Default styling of vertices (shapes).",
 						"type": "object"
 					},
-					"hediet.vscode-drawio.defaultEdgeStyle": {
+					"drawio-ai.defaultEdgeStyle": {
 						"title": "Default Edge Style",
 						"description": "Default styling of edges.",
 						"type": "object"
 					},
-					"hediet.vscode-drawio.colorNames": {
+					"drawio-ai.colorNames": {
 						"title": "Color Names",
 						"description": "Names for colors, eg. {‘FFFFFF’: ‘White’, ‘000000’: ‘Black’} that are used as tooltips (uppercase, no leading # for the colour codes)",
 						"type": "object"
 					},
-					"hediet.vscode-drawio.presetColors": {
+					"drawio-ai.presetColors": {
 						"title": "Preset Colors",
 						"description": "Color codes for the upper palette in the color dialog.",
 						"type": "array",
@@ -549,7 +1175,7 @@
 							"description": "Use hex codes without # at the beginning only (FFFFFF for absolute white, for example)."
 						}
 					},
-					"hediet.vscode-drawio.customColorSchemes": {
+					"drawio-ai.customColorSchemes": {
 						"title": "Custom Color Schemes",
 						"markdownDescription": "Available color schemes in the style section at the top of the format panel. See example [here](https://www.diagrams.net/doc/faq/custom-colours-confluence-cloud#default-colour-schemes---format-panel)",
 						"type": "array",
@@ -583,7 +1209,7 @@
 							}
 						}
 					},
-					"hediet.vscode-drawio.customFonts": {
+					"drawio-ai.customFonts": {
 						"type": "array",
 						"items": {
 							"type": "string"
@@ -592,7 +1218,7 @@
 						"title": "Custom Fonts",
 						"description": "Configures the Draw.io editor to use custom fonts."
 					},
-					"hediet.vscode-drawio.theme": {
+					"drawio-ai.theme": {
 						"title": "Draw.io Theme",
 						"type": "string",
 						"default": "kennedy",
@@ -605,7 +1231,7 @@
 						],
 						"description": "The theme to use for the Draw.io editor. Use \"automatic\" to automatically choose a Draw.io theme that matches your current VS Code theme."
 					},
-					"hediet.vscode-drawio.appearance": {
+					"drawio-ai.appearance": {
 						"title": "Draw.io Appearance",
 						"type": "string",
 						"default": "light",
@@ -622,17 +1248,24 @@
 			}
 		],
 		"menus": {
+			"editor/title": [
+				{
+					"command": "drawio-ai.openChat",
+					"when": "drawio-ai.active",
+					"group": "navigation"
+				}
+			],
 			"explorer/context": [
 				{
-					"when": "hediet.vscode-drawio.active",
-					"command": "hediet.vscode-drawio.linkFileWithSelectedNode",
+					"when": "drawio-ai.active",
+					"command": "drawio-ai.linkFileWithSelectedNode",
 					"group": "Draw.io"
 				}
 			],
 			"commandPalette": [
 				{
 					"when": "false",
-					"command": "hediet.vscode-drawio.linkFileWithSelectedNode"
+					"command": "drawio-ai.linkFileWithSelectedNode"
 				}
 			]
 		}
@@ -649,7 +1282,11 @@
 		"package-extension-preRelease": "vsce package --yarn --out ./dist/extension.vsix --pre-release",
 		"dev": "webpack --mode development --watch",
 		"dev-drawio-plugins": "webpack --mode development --watch --config ./drawio-custom-plugins/webpack.config.ts",
-		"dev-drawio-plugins-web": "webpack-dev-server --hot --config ./drawio-custom-plugins/webpack.config.ts"
+		"dev-drawio-plugins-web": "webpack-dev-server --hot --config ./drawio-custom-plugins/webpack.config.ts",
+		"sync-lm-tools": "node scripts/sync-lm-tools.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js",
+		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
+		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js"
 	},
 	"files": [
 		"dist/custom-drawio-plugins/**/*",
@@ -681,7 +1318,7 @@
 		"@types/copy-webpack-plugin": "^8.0.1",
 		"@types/mithril": "^2.0.4",
 		"@types/node": "^22.10.10",
-		"@types/vscode": "1.70.0",
+		"@types/vscode": "~1.105.0",
 		"@types/xml-formatter": "^1.1.0",
 		"@vscode/vsce": "^3.2.1",
 		"@vscode/web-editors": "0.0.2-76",
@@ -689,6 +1326,7 @@
 		"copy-webpack-plugin": "^9.0.1",
 		"css-loader": "^3.4.2",
 		"ovsx": "^0.1.0-next.e000fdb",
+		"playwright-core": "^1.50.0",
 		"prettier": "^2.3.2",
 		"raw-loader": "^4.0.1",
 		"style-loader": "^1.1.3",

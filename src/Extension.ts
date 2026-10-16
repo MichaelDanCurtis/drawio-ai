@@ -7,6 +7,7 @@ import { DrawioEditorService } from "./DrawioEditorService";
 import { LinkCodeWithSelectedNodeService } from "./features/CodeLinkFeature";
 import { EditDiagramAsTextFeature } from "./features/EditDiagramAsTextFeature";
 import { LiveshareFeature } from "./features/LiveshareFeature";
+import { AiFeature } from "./features/ai/AiFeature";
 import { DrawioClientFactory } from "./DrawioClient";
 import { registerFailableCommand } from "./utils/registerFailableCommand";
 
@@ -35,11 +36,14 @@ export class Extension {
 	private readonly liveshareFeature = this.dispose.track(
 		new LiveshareFeature(this.editorService, this.config)
 	);
+	private readonly aiFeature = this.dispose.track(
+		new AiFeature(this.context, this.editorService)
+	);
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.dispose.track(
 			vscode.window.registerCustomEditorProvider(
-				"hediet.vscode-drawio-text",
+				"drawio-ai-text",
 				new DrawioEditorProviderText(this.editorService),
 				{ webviewOptions: { retainContextWhenHidden: true } }
 			)
@@ -47,7 +51,7 @@ export class Extension {
 
 		this.dispose.track(
 			vscode.window.registerCustomEditorProvider(
-				"hediet.vscode-drawio",
+				"drawio-ai",
 				new DrawioEditorProviderBinary(this.editorService),
 				{
 					supportsMultipleEditorsPerDocument: false,
@@ -58,7 +62,7 @@ export class Extension {
 
 		this.dispose.track(
 			registerFailableCommand(
-				"hediet.vscode-drawio.newDiagram",
+				"drawio-ai.newDiagram",
 				async () => {
 					const targetUri = await vscode.window.showSaveDialog({
 						saveLabel: "Create",
@@ -77,7 +81,7 @@ export class Extension {
 						await vscode.commands.executeCommand(
 							"vscode.openWith",
 							targetUri,
-							"hediet.vscode-drawio-text"
+							"drawio-ai-text"
 						);
 					} catch (e) {
 						console.error("Cannot create or open file", e);

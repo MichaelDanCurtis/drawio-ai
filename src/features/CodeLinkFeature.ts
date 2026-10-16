@@ -25,15 +25,15 @@ import { path } from "../utils/path";
 import { registerFailableCommand } from "../utils/registerFailableCommand";
 
 const toggleCodeLinkActivationCommandName =
-	"hediet.vscode-drawio.toggleCodeLinkActivation";
+	"drawio-ai.toggleCodeLinkActivation";
 const linkCodeWithSelectedNodeCommandName =
-	"hediet.vscode-drawio.linkCodeWithSelectedNode";
+	"drawio-ai.linkCodeWithSelectedNode";
 const linkSymbolWithSelectedNodeCommandName =
-	"hediet.vscode-drawio.linkSymbolWithSelectedNode";
+	"drawio-ai.linkSymbolWithSelectedNode";
 const linkWsSymbolWithSelectedNodeCommandName =
-	"hediet.vscode-drawio.linkWsSymbolWithSelectedNode";
+	"drawio-ai.linkWsSymbolWithSelectedNode";
 const linkFileWithSelectedNodeCommandName =
-	"hediet.vscode-drawio.linkFileWithSelectedNode";
+	"drawio-ai.linkFileWithSelectedNode";
 
 const symbolNameMap: Record<SymbolKind, string> = {
 	[SymbolKind.File]: "symbol-file",

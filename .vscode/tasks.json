@@ -4,6 +4,11 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "dev-all",
+			"dependsOn": ["npm: dev", "npm: dev-drawio-plugins"],
+			"dependsOrder": "parallel"
+		},
+		{
 			"type": "npm",
 			"script": "dev",
 			"problemMatcher": {

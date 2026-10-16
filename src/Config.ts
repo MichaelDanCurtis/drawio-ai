@@ -24,8 +24,8 @@ import {
 } from "./vscode-utils/VsCodeSetting";
 import * as packageJson from "../package.json";
 
-const extensionId = "hediet.vscode-drawio";
-const experimentalFeaturesEnabled = "vscode-drawio.experimentalFeaturesEnabled";
+const extensionId = "drawio-ai";
+const experimentalFeaturesEnabled = "drawio-ai.experimentalFeaturesEnabled";
 
 export async function setContext(
 	key: string,
@@ -545,29 +545,35 @@ export class DiagramConfig {
 		);
 
 		const resizeImages = this.resizeImages;
+		const rawConfig = localStorage[".drawio-config"];
 
-		try {
-			const drawioConfig = JSON.parse(localStorage[".drawio-config"]);
-			drawioConfig.resizeImages = resizeImages;
-			localStorage[".drawio-config"] = JSON.stringify(drawioConfig);
-		} catch (e) {
-			console.error(e);
+		if (rawConfig !== undefined) {
+			try {
+				const drawioConfig = JSON.parse(rawConfig);
+				drawioConfig.resizeImages = resizeImages;
+				localStorage[".drawio-config"] = JSON.stringify(drawioConfig);
+			} catch (e) {
+				console.error(e);
+			}
 		}
 
 		return localStorage;
 	}
 
 	public setLocalStorage(value: Record<string, string>): void {
-		try {
-			const drawioConfig = JSON.parse(value[".drawio-config"]) as {
-				resizeImages?: boolean;
-			};
-			if (drawioConfig.resizeImages !== this.resizeImages) {
-				this.isResizeImageUpdating = true;
-				this.setResizeImages(drawioConfig.resizeImages);
+		const rawConfig = value[".drawio-config"];
+		if (rawConfig !== undefined) {
+			try {
+				const drawioConfig = JSON.parse(rawConfig) as {
+					resizeImages?: boolean;
+				};
+				if (drawioConfig.resizeImages !== this.resizeImages) {
+					this.isResizeImageUpdating = true;
+					this.setResizeImages(drawioConfig.resizeImages);
+				}
+			} catch (e) {
+				console.error(e);
 			}
-		} catch (e) {
-			console.error(e);
 		}
 		this.memento.update(`${extensionId}.local-storage`, value);
 	}

@@ -2,6 +2,22 @@
 	"version": "0.2.0",
 	"configurations": [
 		{
+			"name": "Extension + AI (Copilot enabled)",
+			"type": "extensionHost",
+			"request": "launch",
+			"runtimeExecutable": "${execPath}",
+			"args": [
+				"--disable-extension=hediet.vscode-drawio",
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"${workspaceFolder}/examples"
+			],
+			"outFiles": ["${workspaceFolder}/dist/**/*.js"],
+			"preLaunchTask": "dev-all",
+			"env": {
+				"DEV": "1"
+			}
+		},
+		{
 			"name": "Launch Drawio To Debug Plugins",
 			"request": "launch",
 			"type": "pwa-chrome",

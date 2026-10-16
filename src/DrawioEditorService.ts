@@ -20,7 +20,7 @@ import {
 import { DrawioBinaryDocument } from "./DrawioEditorProviderBinary";
 import { registerFailableCommand } from "./utils/registerFailableCommand";
 
-const drawioChangeThemeCommand = "hediet.vscode-drawio.changeTheme";
+const drawioChangeThemeCommand = "drawio-ai.changeTheme";
 
 export class DrawioEditorService {
 	public readonly dispose = Disposable.fn();
@@ -57,7 +57,7 @@ export class DrawioEditorService {
 			}
 			commands.executeCommand(
 				"setContext",
-				"hediet.vscode-drawio.active",
+				"drawio-ai.active",
 				!!a
 			);
 		});
@@ -73,7 +73,7 @@ export class DrawioEditorService {
 		);
 
 		this.dispose.track(
-			registerFailableCommand("hediet.vscode-drawio.convert", () => {
+			registerFailableCommand("drawio-ai.convert", () => {
 				const activeDrawioEditor = this.activeDrawioEditor;
 				if (!activeDrawioEditor) {
 					return;
@@ -84,7 +84,7 @@ export class DrawioEditorService {
 
 		this.dispose.track(
 			registerFailableCommand(
-				"hediet.vscode-drawio.reload-webview",
+				"drawio-ai.reload-webview",
 				() => {
 					for (const e of this.openedEditors) {
 						e.drawioClient.reloadWebview();
@@ -94,7 +94,7 @@ export class DrawioEditorService {
 		);
 
 		this.dispose.track(
-			registerFailableCommand("hediet.vscode-drawio.export", () => {
+			registerFailableCommand("drawio-ai.export", () => {
 				const activeDrawioEditor = this.activeDrawioEditor;
 				if (!activeDrawioEditor) {
 					return;
