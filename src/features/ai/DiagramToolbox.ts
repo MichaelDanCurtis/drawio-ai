@@ -123,6 +123,7 @@ export class DiagramToolbox {
 			atomic: input.atomic !== false,
 			selectResult: input.selectResult ?? settings.selectChangedCells,
 			flash: settings.flashChanges,
+			review: settings.reviewChanges,
 		});
 
 		const failed = result.results.filter((r) => !r.ok);
@@ -135,6 +136,11 @@ export class DiagramToolbox {
 			failed: failed.map((f) => ({ index: f.index, op: f.op, error: f.error })),
 			idMap: result.idMap,
 			affectedIds: createdOrChanged.slice(0, 200),
+			...(settings.reviewChanges && !result.rolledBack && okCount > 0
+				? {
+						note: "Applied and shown to the user as pending changes they can keep or revert. Keep working normally; do not ask them to accept.",
+				  }
+				: {}),
 		};
 		const summary =
 			failed.length === 0

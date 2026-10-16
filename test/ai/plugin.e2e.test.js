@@ -305,3 +305,155 @@ test("replaceAll swaps the page content", async () => {
 	const model = await getModel();
 	assert.deepEqual(model.cells.map((c) => c.id), ["only"]);
 });
+
+// ---------------------------------------------------------------------------
+// Review mode: AI edits stay pending until the user keeps or reverts them.
+// ---------------------------------------------------------------------------
+
+const applyReview = (ops) =>
+	request({ action: "aiApplyOps", ops, atomic: true, flash: false, selectResult: false, review: true });
+const lastReview = () => [...inbox].reverse().find((m) => m.event === "aiReview");
+const resolve = async (decision, cellIds) => {
+	inbox.length = 0;
+	await send({ action: "aiResolveReview", decision, cellIds });
+	return waitFor((m) => m.event === "aiReview");
+};
+const historyLength = () => page.evaluate(() => editorUi.editor.undoManager.indexOfNextAdd);
+const byId = (model, id) => model.cells.find((c) => c.id === id);
+
+async function freshBaseline() {
+	const xml =
+		`<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>` +
+		`<mxCell id="api" value="API" style="rounded=1;html=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell>` +
+		`<mxCell id="db" value="DB" style="shape=cylinder3;html=1;" vertex="1" parent="1"><mxGeometry x="300" y="40" width="80" height="80" as="geometry"/></mxCell>` +
+		`<mxCell id="e1" style="html=1;" edge="1" parent="1" source="api" target="db"><mxGeometry relative="1" as="geometry"/></mxCell>` +
+		`</root></mxGraphModel>`;
+	await apply([{ op: "replaceAll", xml }]);
+}
+
+test("review: AI changes are flagged as pending and Reject all restores the original", async () => {
+	await freshBaseline();
+	const before = await getModel();
+	inbox.length = 0;
+	const r = await applyReview([
+		{ op: "addShape", tempId: "$cache", label: "Cache", placement: { relativeTo: "api", side: "below" } },
+		{ op: "addEdge", source: "api", target: "$cache" },
+		{ op: "update", id: "api", label: "Gateway", styleProps: { fillColor: "#dae8fc" } },
+		{ op: "move", ids: ["db"], dx: 100, dy: 0 },
+	]);
+	assert.equal(r.rolledBack, false);
+	const evt = lastReview();
+	assert.ok(evt?.pending, "no pending review event");
+	assert.deepEqual(evt.summary, { added: 2, changed: 2, removed: 0 });
+	assert.deepEqual(byId({ cells: evt.changes }, "api").fields.sort(), ["label", "style"]);
+	assert.deepEqual(byId({ cells: evt.changes }, "db").fields, ["geometry"]);
+
+	const ui = await page.evaluate(() => ({
+		bar: !!document.querySelector("[data-ai-review-bar]"),
+		ghosts: [...document.querySelectorAll("[data-ai-ghost]")].map((e) => e.getAttribute("data-ai-ghost")),
+	}));
+	assert.ok(ui.bar, "review bar missing");
+	assert.deepEqual(ui.ghosts, ["changed"], "moved shape should leave a ghost");
+
+	const done = await resolve("reject");
+	assert.equal(done.pending, false);
+	assert.equal(done.resolved, "rejected");
+	const after = await getModel();
+	assert.deepEqual(
+		after.cells.map((c) => [c.id, c.label, c.style, JSON.stringify(c.geometry), c.source, c.target]),
+		before.cells.map((c) => [c.id, c.label, c.style, JSON.stringify(c.geometry), c.source, c.target])
+	);
+	assert.equal(await page.evaluate(() => !!document.querySelector("[data-ai-review-bar]")), false);
+});
+
+test("review: reverting one deleted shape brings back its connections; the rest can be kept", async () => {
+	await freshBaseline();
+	inbox.length = 0;
+	await applyReview([
+		{ op: "delete", ids: ["db"] },
+		{ op: "addShape", tempId: "$q", label: "Queue", x: 40, y: 300 },
+	]);
+	let evt = lastReview();
+	assert.deepEqual(evt.summary, { added: 1, changed: 0, removed: 2 }, JSON.stringify(evt.changes));
+	assert.ok(await page.evaluate(() => document.querySelectorAll('[data-ai-ghost="removed"]').length >= 1));
+
+	evt = await resolve("reject", ["db"]);
+	assert.equal(evt.pending, true);
+	assert.deepEqual(evt.summary, { added: 1, changed: 0, removed: 0 });
+	const model = await getModel();
+	assert.equal(byId(model, "db").label, "DB");
+	assert.equal(byId(model, "e1").source, "api");
+	assert.equal(byId(model, "e1").target, "db");
+
+	evt = await resolve("accept");
+	assert.equal(evt.pending, false);
+	assert.equal(evt.resolved, "mixed");
+	assert.ok((await getModel()).cells.some((c) => c.label === "Queue"));
+});
+
+test("review: reverting an added shape also removes the edges the AI attached to it", async () => {
+	await freshBaseline();
+	inbox.length = 0;
+	const r = await applyReview([
+		{ op: "addShape", tempId: "$w", label: "Worker", x: 40, y: 400 },
+		{ op: "addEdge", tempId: "$we", source: "$w", target: "db" },
+		{ op: "update", id: "e1", target: "$w" },
+	]);
+	const evt = await resolve("reject", [r.idMap.$w]);
+	assert.equal(evt.pending, false, JSON.stringify(evt));
+	const model = await getModel();
+	assert.equal(byId(model, r.idMap.$w), undefined);
+	assert.equal(byId(model, r.idMap.$we), undefined);
+	assert.equal(byId(model, "e1").target, "db", "existing edge should be reconnected to its original target");
+});
+
+test("review: several AI batches form one review and one undo step; user edits are not flagged", async () => {
+	await freshBaseline();
+	const history = await historyLength();
+	inbox.length = 0;
+	await applyReview([{ op: "addShape", label: "One", x: 40, y: 500 }]);
+	await page.evaluate(() => {
+		const g = editorUi.editor.graph;
+		g.insertVertex(g.getDefaultParent(), "mine", "Mine", 600, 500, 80, 40);
+	});
+	await applyReview([{ op: "update", id: "api", label: "Two" }]);
+	await new Promise((r) => setTimeout(r, 150));
+	const evt = lastReview();
+	assert.deepEqual(evt.summary, { added: 1, changed: 1, removed: 0 }, JSON.stringify(evt.changes));
+	assert.ok(!evt.changes.some((c) => c.id === "mine"), "the user's own shape must not be flagged");
+
+	await resolve("accept");
+	assert.equal(await historyLength(), history + 3, "batch 1, the user's edit, batch 2");
+
+	inbox.length = 0;
+	await applyReview([{ op: "addShape", label: "Three" }]);
+	await applyReview([{ op: "addShape", label: "Four" }]);
+	assert.equal(await historyLength(), history + 4, "consecutive AI batches in one review share an undo step");
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+	await new Promise((r) => setTimeout(r, 150));
+	const labels = (await getModel()).cells.map((c) => c.label);
+	assert.ok(!labels.includes("Three") && !labels.includes("Four"));
+	assert.equal(lastReview().pending, false, "undoing the AI's changes ends the review");
+});
+
+test("review: the in-diagram bar keeps or reverts the selection", async () => {
+	await freshBaseline();
+	inbox.length = 0;
+	const r = await applyReview([
+		{ op: "addShape", tempId: "$a", label: "KeepMe", x: 40, y: 300 },
+		{ op: "addShape", tempId: "$b", label: "DropMe", x: 240, y: 300 },
+	]);
+	await request({ action: "aiSetSelection", cellIds: [r.idMap.$b], reveal: false });
+	const buttons = await page.evaluate(() =>
+		[...document.querySelectorAll("[data-ai-review]")].map((b) => b.getAttribute("data-ai-review"))
+	);
+	assert.deepEqual(buttons, ["Revert 1 selected", "Keep 1 selected", "Reject all", "Accept all"]);
+	inbox.length = 0;
+	await page.click('[data-ai-review="Revert 1 selected"]');
+	await waitFor((m) => m.event === "aiReview" && m.summary.added === 1);
+	await page.click('[data-ai-review="Accept all"]');
+	const end = await waitFor((m) => m.event === "aiReview" && !m.pending);
+	assert.equal(end.resolved, "mixed");
+	const labels = (await getModel()).cells.map((c) => c.label);
+	assert.ok(labels.includes("KeepMe") && !labels.includes("DropMe"));
+});

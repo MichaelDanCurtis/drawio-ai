@@ -55,6 +55,19 @@ export class CustomizedDrawioClient extends DrawioClient<
 	private readonly onAiLassoEmitter = new EventEmitter<AiLassoEvent>();
 	public readonly onAiLasso = this.onAiLassoEmitter.asEvent();
 
+	private readonly onAiReviewEmitter = new EventEmitter<AiReviewEvent>();
+	/** The set of pending AI changes awaiting the user's review changed. */
+	public readonly onAiReview = this.onAiReviewEmitter.asEvent();
+
+	private latestReview: AiReviewEvent | undefined;
+	public get pendingReview(): AiReviewEvent | undefined {
+		return this.latestReview?.pending ? this.latestReview : undefined;
+	}
+
+	public aiResolveReview(decision: "accept" | "reject", cellIds?: string[]): void {
+		this.sendCustomAction({ action: "aiResolveReview", decision, cellIds });
+	}
+
 	private selectedCellIds: string[] = [];
 	public get currentSelection(): readonly string[] {
 		return this.selectedCellIds;
@@ -104,7 +117,7 @@ export class CustomizedDrawioClient extends DrawioClient<
 
 	public async aiApplyOps(
 		ops: AiOp[],
-		options: { selectResult: boolean; flash: boolean; atomic: boolean }
+		options: { selectResult: boolean; flash: boolean; atomic: boolean; review: boolean }
 	): Promise<{
 		results: AiOpResult[];
 		idMap: Record<string, string>;
@@ -230,6 +243,7 @@ export class CustomizedDrawioClient extends DrawioClient<
 		} else if (evt.event === "pluginLoaded") {
 			if (evt.pluginId === "ai") {
 				this.aiPluginLoaded = true;
+				this.latestReview = undefined;
 				this.aiPluginWaiters.splice(0).forEach((resolve) => resolve());
 			}
 			this.onCustomPluginLoadedEmitter.emit({ pluginId: evt.pluginId });
@@ -246,6 +260,9 @@ export class CustomizedDrawioClient extends DrawioClient<
 			this.onAiAskEmitter.emit(evt);
 		} else if (evt.event === "aiLasso") {
 			this.onAiLassoEmitter.emit(evt);
+		} else if (evt.event === "aiReview") {
+			this.latestReview = evt;
+			this.onAiReviewEmitter.emit(evt);
 		} else if (evt.event === "invokeCommand") {
 			this.onInvokeCommandEmitter.emit({ command: evt.command });
 		} else if (evt.event === "selectedRectangleChanged") {

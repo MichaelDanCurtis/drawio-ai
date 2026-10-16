@@ -14,6 +14,7 @@ export function getAiSettings() {
 		defaultProvider: c.get<ProviderId>("provider", "vscode-lm"),
 		maxToolRounds: Math.max(1, c.get<number>("maxToolRounds", 16)),
 		flashChanges: c.get<boolean>("flashChanges", true),
+		reviewChanges: c.get<boolean>("reviewChanges", true),
 		selectChangedCells: c.get<boolean>("selectChangedCells", false),
 		maxCellsInContext: Math.max(20, c.get<number>("maxCellsInContext", 400)),
 		anthropic: {

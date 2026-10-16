@@ -760,6 +760,26 @@ Draw.loadPlugin((ui: any) => {
 	}
 
 	async function applyOps(action: AiApplyOpsAction): Promise<AiApplyOpsResultEvent> {
+		if (review && model.getRoot() !== review.root) refreshReview();
+		const reviewBefore = action.review && !review ? snapAll() : undefined;
+		aiEditing++;
+		try {
+			const result = await applyOpsInner(action);
+			if (action.review && !result.rolledBack && result.results.some((r) => r.ok)) {
+				if (reviewBefore) {
+					review = { root: model.getRoot(), before: reviewBefore, changes: [], edit: undefined, accepted: false, rejected: false };
+				}
+				absorbIntoReviewEdit(result.historyBefore);
+				refreshReview();
+			}
+			const { historyBefore: _, ...event } = result;
+			return event;
+		} finally {
+			aiEditing--;
+		}
+	}
+
+	async function applyOpsInner(action: AiApplyOpsAction): Promise<AiApplyOpsResultEvent & { historyBefore: number }> {
 		const idMap: Record<string, string> = {};
 		const results: AiOpResult[] = [];
 		const touched = new Set<any>();
@@ -836,7 +856,7 @@ Draw.loadPlugin((ui: any) => {
 			}
 		}
 
-		return { event: "aiApplyOpsResult", message: action, results, idMap, rolledBack };
+		return { event: "aiApplyOpsResult", message: action, results, idMap, rolledBack, historyBefore };
 	}
 
 	function flash(cells: any[]) {
@@ -846,6 +866,485 @@ Draw.loadPlugin((ui: any) => {
 			return h;
 		});
 		setTimeout(() => highlights.forEach((h) => h.destroy()), 1400);
+	}
+
+	// ---------------------------------------------------------------------
+	// Review: AI edits are applied (so the AI can inspect its own result) but
+	// stay pending until the user keeps or reverts them. Reverting restores the
+	// state each cell had before the AI first touched it.
+	// ---------------------------------------------------------------------
+
+	const ADDED = "#16a34a";
+	const CHANGED = "#d97706";
+	const REMOVED = "#dc2626";
+	const SVGNS = "http://www.w3.org/2000/svg";
+
+	interface CellSnap {
+		cell: any;
+		parentId: string | undefined;
+		index: number;
+		depth: number;
+		value: any;
+		valueKey: string;
+		style: string;
+		geo: any;
+		geoKey: string;
+		sourceId: string | undefined;
+		targetId: string | undefined;
+		/** Where the cell was drawn, in graph coordinates; used for ghosts of moved/removed cells. */
+		bounds?: AiRect;
+		path?: { x: number; y: number }[];
+	}
+
+	interface Review {
+		root: any;
+		before: Map<string, CellSnap>;
+		changes: AiChange[];
+		edit: any;
+		accepted: boolean;
+		rejected: boolean;
+	}
+
+	let review: Review | undefined;
+	/** > 0 while the AI (or a review action) is changing the model, so those edits are not mistaken for the user's. */
+	let aiEditing = 0;
+
+	const cloneValue = (v: any) => (v != null && typeof v === "object" && typeof v.cloneNode === "function" ? v.cloneNode(true) : v);
+	const valueKey = (v: any) => (v == null ? "" : typeof v === "object" ? mx.utils.getXml(v) : String(v));
+	const r2 = (n: number) => Math.round((n || 0) * 100) / 100;
+	const geoKey = (g: any) =>
+		g
+			? JSON.stringify([
+					r2(g.x), r2(g.y), r2(g.width), r2(g.height), !!g.relative,
+					(g.points || []).map((p: any) => [r2(p.x), r2(p.y)]),
+					g.offset ? [r2(g.offset.x), r2(g.offset.y)] : null,
+			  ])
+			: "";
+	const live = (id: string | undefined) => (id ? model.getCell(id) ?? null : null);
+
+	function depthOf(cell: any): number {
+		let d = 0;
+		for (let p = model.getParent(cell); p && !isLayer(p) && p !== model.getRoot(); p = model.getParent(p)) d++;
+		return d;
+	}
+
+	function snapCell(cell: any, depth = depthOf(cell)): CellSnap {
+		const parent = model.getParent(cell);
+		const value = model.getValue(cell);
+		const geo = model.getGeometry(cell);
+		const snap: CellSnap = {
+			cell,
+			parentId: parent?.id,
+			index: parent ? parent.getIndex(cell) : 0,
+			depth,
+			value: cloneValue(value),
+			valueKey: valueKey(value),
+			style: model.getStyle(cell) ?? "",
+			geo: geo ? geo.clone() : null,
+			geoKey: geoKey(geo),
+			sourceId: model.getTerminal(cell, true)?.id,
+			targetId: model.getTerminal(cell, false)?.id,
+		};
+		const state = graph.view.getState(cell);
+		if (state) {
+			const { scale, translate: t } = graph.view;
+			const toModel = (p: any) => ({ x: p.x / scale - t.x, y: p.y / scale - t.y });
+			if (model.isEdge(cell)) {
+				snap.path = (state.absolutePoints || []).filter(Boolean).map(toModel);
+			} else {
+				snap.bounds = { ...toModel(state), width: state.width / scale, height: state.height / scale };
+			}
+		}
+		return snap;
+	}
+
+	function snapAll(): Map<string, CellSnap> {
+		const result = new Map<string, CellSnap>();
+		const visit = (cell: any, depth: number) => {
+			for (const child of model.getChildren(cell) || []) {
+				result.set(child.id, snapCell(child, depth));
+				visit(child, depth + 1);
+			}
+		};
+		layers().forEach((layer) => visit(layer, 0));
+		return result;
+	}
+
+	function computeChanges(before: Map<string, CellSnap>): AiChange[] {
+		const out: AiChange[] = [];
+		const now = new Map<string, any>(allCells().map((c) => [c.id, c]));
+		for (const [id, cell] of now) {
+			const cellKind = model.isEdge(cell) ? "edge" : "vertex";
+			const b = before.get(id);
+			if (!b) {
+				out.push({ id, change: "added", cellKind, label: plainLabel(cell) });
+				continue;
+			}
+			const fields: NonNullable<AiChange["fields"]> = [];
+			if (b.valueKey !== valueKey(model.getValue(cell))) fields.push("label");
+			if (b.style !== (model.getStyle(cell) ?? "")) fields.push("style");
+			if (b.geoKey !== geoKey(model.getGeometry(cell))) fields.push("geometry");
+			if (b.parentId !== model.getParent(cell)?.id) fields.push("parent");
+			if (b.sourceId !== model.getTerminal(cell, true)?.id || b.targetId !== model.getTerminal(cell, false)?.id) {
+				fields.push("connection");
+			}
+			if (fields.length > 0 || b.cell !== cell) {
+				out.push({ id, change: "changed", cellKind, label: plainLabel(cell), fields });
+			}
+		}
+		for (const [id, b] of before) {
+			// A removed group is reported once, not once per descendant.
+			if (now.has(id) || (b.parentId && before.has(b.parentId) && !now.has(b.parentId))) continue;
+			out.push({
+				id,
+				change: "removed",
+				cellKind: model.isEdge(b.cell) ? "edge" : "vertex",
+				label: plainLabel(b.cell),
+			});
+		}
+		return out;
+	}
+
+	function summarize(changes: AiChange[]): AiReviewSummary {
+		const count = (k: AiChange["change"]) => changes.filter((c) => c.change === k).length;
+		return { added: count("added"), changed: count("changed"), removed: count("removed") };
+	}
+
+	let lastReviewEvent = "";
+	function publishReview(resolved?: AiReviewEvent["resolved"]) {
+		const changes = review?.changes ?? [];
+		const evt: AiReviewEvent = {
+			event: "aiReview",
+			pending: !!review,
+			summary: summarize(changes),
+			changes: changes.slice(0, 300),
+			resolved,
+		};
+		const key = JSON.stringify(evt);
+		if (key === lastReviewEvent) return;
+		lastReviewEvent = key;
+		sendEvent(evt);
+	}
+
+	function endReview(resolved: AiReviewEvent["resolved"]) {
+		review = undefined;
+		paintReview();
+		publishReview(resolved);
+	}
+
+	let refreshTimer: any;
+	function scheduleReviewRefresh() {
+		if (!review) return;
+		clearTimeout(refreshTimer);
+		refreshTimer = setTimeout(refreshReview, 40);
+	}
+
+	function refreshReview() {
+		clearTimeout(refreshTimer);
+		if (!review) return;
+		if (model.getRoot() !== review.root) {
+			// Page switch or the file was reloaded: the snapshot no longer describes this model.
+			return endReview("accepted");
+		}
+		review.changes = computeChanges(review.before);
+		if (review.changes.length === 0) {
+			return endReview(review.accepted && review.rejected ? "mixed" : review.accepted ? "accepted" : "rejected");
+		}
+		paintReview();
+		publishReview();
+	}
+
+	/** Folds the newest history entry into the review's entry, so the whole review is a single Ctrl+Z. */
+	function absorbIntoReviewEdit(historyBefore: number) {
+		if (!review) return;
+		const um = ui.editor.undoManager;
+		if (um.indexOfNextAdd !== historyBefore + 1) return;
+		if (review.edit && historyBefore > 0 && um.history[historyBefore - 1] === review.edit) {
+			squashHistory(historyBefore - 1);
+		}
+		review.edit = um.history[um.indexOfNextAdd - 1];
+	}
+
+	function pendingIds(): Set<string> {
+		return new Set((review?.changes ?? []).map((c) => c.id));
+	}
+
+	function acceptCells(ids: string[]) {
+		if (!review) return;
+		const before = review.before;
+		for (const id of ids) {
+			const cell = model.getCell(id);
+			if (cell) {
+				const keep = (c: any) => {
+					before.set(c.id, snapCell(c));
+					(model.getChildren(c) || []).forEach(keep);
+				};
+				keep(cell);
+			} else {
+				const gone = new Set([id]);
+				for (const [bid, b] of before) {
+					if (b.parentId && gone.has(b.parentId)) gone.add(bid);
+				}
+				gone.forEach((g) => before.delete(g));
+			}
+		}
+		review.accepted = true;
+	}
+
+	function revertCells(ids: string[]) {
+		if (!review) return;
+		const before = review.before;
+		const byId = new Map(review.changes.map((c) => [c.id, c]));
+		const set = new Set(ids);
+
+		// Reverting one thing must not leave the diagram half-connected: pull in
+		// removed ancestors/descendants and pending edges attached to it.
+		for (let changed = true; changed; ) {
+			changed = false;
+			const add = (id: string | undefined) => {
+				if (id && !set.has(id)) {
+					set.add(id);
+					changed = true;
+				}
+			};
+			for (const id of [...set]) {
+				const b = before.get(id);
+				if (b && !model.getCell(id)) {
+					for (let p = b.parentId; p && before.has(p) && !model.getCell(p); p = before.get(p)!.parentId) add(p);
+					for (const [bid, other] of before) {
+						if (model.getCell(bid)) continue;
+						if (other.parentId === id || other.sourceId === id || other.targetId === id) add(bid);
+					}
+				}
+				if (byId.get(id)?.change === "added") {
+					const cell = model.getCell(id);
+					for (const edge of cell ? model.getEdges(cell) || [] : []) {
+						if (byId.get(edge.id)?.change === "changed") add(edge.id);
+					}
+				}
+			}
+		}
+
+		const toRestore = [...set]
+			.map((id) => before.get(id))
+			.filter((b): b is CellSnap => !!b)
+			.sort((a, b) => Number(model.isEdge(a.cell)) - Number(model.isEdge(b.cell)) || a.depth - b.depth);
+		const toRemove = [...set].filter((id) => !before.has(id)).map((id) => model.getCell(id)).filter(Boolean);
+
+		const um = ui.editor.undoManager;
+		const historyBefore = um.indexOfNextAdd;
+		aiEditing++;
+		model.beginUpdate();
+		try {
+			for (const b of toRestore) {
+				const current = model.getCell(b.cell.id);
+				if (current && current !== b.cell) model.remove(current);
+				const parent = live(b.parentId) ?? graph.getDefaultParent();
+				if (model.getParent(b.cell) !== parent || !model.contains(b.cell)) {
+					model.add(parent, b.cell, Math.min(b.index, model.getChildCount(parent)));
+				}
+			}
+			for (const b of toRestore) {
+				const c = b.cell;
+				if (valueKey(model.getValue(c)) !== b.valueKey) model.setValue(c, cloneValue(b.value));
+				if ((model.getStyle(c) ?? "") !== b.style) model.setStyle(c, b.style);
+				if (geoKey(model.getGeometry(c)) !== b.geoKey) model.setGeometry(c, b.geo ? b.geo.clone() : null);
+				if (model.getTerminal(c, true)?.id !== b.sourceId) model.setTerminal(c, live(b.sourceId), true);
+				if (model.getTerminal(c, false)?.id !== b.targetId) model.setTerminal(c, live(b.targetId), false);
+			}
+			if (toRemove.length > 0) graph.removeCells(toRemove, true);
+		} finally {
+			model.endUpdate();
+			aiEditing--;
+		}
+		absorbIntoReviewEdit(historyBefore);
+		review.rejected = true;
+	}
+
+	function resolveReview(decision: "accept" | "reject", cellIds?: string[]) {
+		if (!review) return;
+		refreshReview();
+		if (!review) return;
+		const pending = pendingIds();
+		const targets = (cellIds ?? [...pending]).filter((id) => pending.has(id));
+		if (targets.length === 0) return;
+		if (decision === "accept") {
+			if (targets.length === pending.size) {
+				review.accepted = true;
+				return endReview(review.rejected ? "mixed" : "accepted");
+			}
+			acceptCells(targets);
+		} else {
+			revertCells(targets);
+		}
+		refreshReview();
+	}
+
+	/** The user's own edits while a review is open become part of the baseline, unless they touch a pending cell. */
+	function absorbUserEdit(edit: any) {
+		if (!review || !edit?.changes) return;
+		const pending = pendingIds();
+		const touched = new Set<any>();
+		for (const ch of edit.changes) {
+			for (const c of [ch.cell, ch.child]) if (c && c !== model.getRoot() && !isLayer(c)) touched.add(c);
+		}
+		for (const cell of touched) {
+			if (pending.has(cell.id)) continue;
+			if (model.contains(cell)) review.before.set(cell.id, snapCell(cell));
+			else review.before.delete(cell.id);
+		}
+		scheduleReviewRefresh();
+	}
+
+	// Decorations: outlines on pending cells, ghosts where cells used to be, and a review bar.
+	let highlights: any[] = [];
+	let ghostLayer: SVGGElement | undefined;
+	let reviewBar: HTMLDivElement | undefined;
+
+	function paintGhosts() {
+		ghostLayer?.remove();
+		ghostLayer = undefined;
+		if (!review) return;
+		const { scale, translate: t } = graph.view;
+		const vx = (x: number) => (x + t.x) * scale;
+		const vy = (y: number) => (y + t.y) * scale;
+		const g = document.createElementNS(SVGNS, "g") as SVGGElement;
+		g.setAttribute("pointer-events", "none");
+		for (const ch of review.changes.slice(0, 300)) {
+			const moved = ch.change === "changed" && ch.fields?.some((f) => f === "geometry" || f === "parent");
+			if (ch.change !== "removed" && !moved) continue;
+			const b = review.before.get(ch.id);
+			const color = ch.change === "removed" ? REMOVED : CHANGED;
+			let el: SVGElement | undefined;
+			if (b?.bounds) {
+				el = document.createElementNS(SVGNS, "rect");
+				el.setAttribute("x", String(vx(b.bounds.x)));
+				el.setAttribute("y", String(vy(b.bounds.y)));
+				el.setAttribute("width", String(b.bounds.width * scale));
+				el.setAttribute("height", String(b.bounds.height * scale));
+				el.setAttribute("rx", "4");
+				el.setAttribute("fill", color);
+				el.setAttribute("fill-opacity", ch.change === "removed" ? "0.08" : "0.04");
+			} else if (b?.path && b.path.length > 1) {
+				el = document.createElementNS(SVGNS, "polyline");
+				el.setAttribute("points", b.path.map((p) => `${vx(p.x)},${vy(p.y)}`).join(" "));
+				el.setAttribute("fill", "none");
+			}
+			if (!el) continue;
+			el.setAttribute("stroke", color);
+			el.setAttribute("stroke-width", "1.5");
+			el.setAttribute("stroke-dasharray", "5 4");
+			el.setAttribute("data-ai-ghost", ch.change);
+			g.appendChild(el);
+		}
+		ghostLayer = g;
+		graph.view.getOverlayPane().appendChild(g);
+	}
+
+	function paintReview() {
+		highlights.forEach((h) => h.destroy());
+		highlights = [];
+		if (review) {
+			for (const ch of review.changes.slice(0, 300)) {
+				if (ch.change === "removed") continue;
+				const state = graph.view.getState(model.getCell(ch.id));
+				if (!state) continue;
+				const h = new W.mxCellHighlight(graph, ch.change === "added" ? ADDED : CHANGED, 2, true);
+				h.highlight(state);
+				highlights.push(h);
+			}
+		}
+		paintGhosts();
+		renderReviewBar();
+	}
+
+	function selectedPending(): string[] {
+		const pending = pendingIds();
+		return graph.getSelectionCells().map((c: any) => c.id).filter((id: string) => pending.has(id));
+	}
+
+	function renderReviewBar() {
+		if (!review) {
+			reviewBar?.remove();
+			reviewBar = undefined;
+			return;
+		}
+		if (!reviewBar) {
+			reviewBar = document.createElement("div");
+			reviewBar.setAttribute("data-ai-review-bar", "");
+			Object.assign(reviewBar.style, {
+				position: "fixed", left: "50%", bottom: "16px", transform: "translateX(-50%)", zIndex: "10001",
+				display: "flex", gap: "8px", alignItems: "center", padding: "6px 8px 6px 12px",
+				borderRadius: "10px", font: "12px system-ui, sans-serif", boxShadow: "0 6px 20px rgba(0,0,0,.25)",
+				whiteSpace: "nowrap",
+			});
+			for (const type of ["mousedown", "pointerdown", "click", "dblclick", "wheel"]) {
+				reviewBar.addEventListener(type, (e) => e.stopPropagation());
+			}
+			document.body.appendChild(reviewBar);
+		}
+		const bar = reviewBar;
+		themed(bar);
+		bar.style.borderColor = ACCENT;
+		bar.replaceChildren();
+
+		const s = summarize(review.changes);
+		const title = document.createElement("span");
+		title.style.fontWeight = "600";
+		title.textContent = "✦ AI changes";
+		bar.appendChild(title);
+		for (const [n, label, color] of [
+			[s.added, "added", ADDED], [s.changed, "changed", CHANGED], [s.removed, "removed", REMOVED],
+		] as const) {
+			if (!n) continue;
+			const part = document.createElement("span");
+			part.style.color = color;
+			part.textContent = `${n} ${label}`;
+			bar.appendChild(part);
+		}
+
+		const button = (text: string, title: string, onClick: () => void, primary = false) => {
+			const b = document.createElement("button");
+			b.textContent = text;
+			b.title = title;
+			b.setAttribute("data-ai-review", text);
+			Object.assign(b.style, {
+				font: "inherit", padding: "3px 10px", borderRadius: "6px", cursor: "pointer",
+				border: `1px solid ${primary ? ACCENT : isDark() ? "#3f3f46" : "#d0d7de"}`,
+				background: primary ? ACCENT : "transparent", color: primary ? "white" : "inherit",
+			});
+			b.addEventListener("click", (e) => {
+				e.stopPropagation();
+				onClick();
+			});
+			bar.appendChild(b);
+		};
+		const sel = selectedPending();
+		if (sel.length > 0) {
+			button(`Revert ${sel.length} selected`, "Restore the selected items to how they were before the AI changed them", () =>
+				resolveReview("reject", sel)
+			);
+			button(`Keep ${sel.length} selected`, "Accept the AI's change for the selected items", () => resolveReview("accept", sel));
+		}
+		button("Reject all", "Undo every pending AI change", () => resolveReview("reject"));
+		button("Accept all", "Keep every pending AI change", () => resolveReview("accept"), true);
+	}
+
+	ui.editor.undoManager.addListener(W.mxEvent.ADD, (_sender: any, evt: any) => {
+		if (review && aiEditing === 0) absorbUserEdit(evt.getProperty("edit"));
+	});
+	for (const name of [W.mxEvent.UNDO, W.mxEvent.REDO]) {
+		ui.editor.undoManager.addListener(name, (_sender: any, evt: any) => {
+			const edit = evt.getProperty("edit");
+			if (!review) return;
+			if (edit === review.edit) scheduleReviewRefresh();
+			else absorbUserEdit(edit);
+		});
+	}
+	model.addListener(W.mxEvent.CHANGE, () => scheduleReviewRefresh());
+	graph.getSelectionModel().addListener(W.mxEvent.CHANGE, () => review && renderReviewBar());
+	for (const name of [W.mxEvent.SCALE, W.mxEvent.TRANSLATE, W.mxEvent.SCALE_AND_TRANSLATE]) {
+		graph.view.addListener(name, () => review && paintGhosts());
 	}
 
 	function exportImage(action: AiExportImageAction): Promise<AiExportImageEvent> {
@@ -1193,6 +1692,11 @@ Draw.loadPlugin((ui: any) => {
 		menu.addSeparator();
 		menu.addItem("✦ Ask AI…  (Alt+K)", null, () => openPrompt());
 		menu.addItem("✦ Lasso select for AI  (Alt+L)", null, () => setLasso(true));
+		const sel = selectedPending();
+		if (sel.length > 0) {
+			menu.addItem(`✦ Keep AI change${sel.length > 1 ? "s" : ""}`, null, () => resolveReview("accept", sel));
+			menu.addItem(`✦ Revert AI change${sel.length > 1 ? "s" : ""}`, null, () => resolveReview("reject", sel));
+		}
 	};
 
 	document.addEventListener(
@@ -1272,6 +1776,10 @@ Draw.loadPlugin((ui: any) => {
 				break;
 			case "aiSearchShapes":
 				sendEvent(await searchShapes(data));
+				break;
+			case "aiResolveReview":
+				await applyQueue;
+				resolveReview(data.decision, data.cellIds);
 				break;
 		}
 	});

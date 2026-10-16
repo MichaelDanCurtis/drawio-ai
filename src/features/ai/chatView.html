@@ -51,6 +51,11 @@
 	textarea:focus { border-color: var(--vscode-focusBorder); }
 	.row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
 	.hint { font-size: 11px; opacity: .6; }
+	#review { display: flex; gap: 6px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--accent); border-radius: var(--radius); font-size: 12px; }
+	#review .counts span { margin-right: 6px; }
+	#review .added { color: var(--vscode-gitDecoration-addedResourceForeground, #16a34a); }
+	#review .changed { color: var(--vscode-gitDecoration-modifiedResourceForeground, #d97706); }
+	#review .removed { color: var(--vscode-gitDecoration-deletedResourceForeground, #dc2626); }
 </style>
 </head>
 <body>
@@ -78,6 +83,13 @@
 		</div>
 	</div>
 	<footer>
+		<div id="review" class="hidden" role="status">
+			<span class="counts"><strong>✦ Pending AI changes:</strong> <span id="reviewCounts"></span></span>
+			<span>
+				<button id="reviewReject" title="Revert every pending AI change">Reject</button>
+				<button id="reviewAccept" class="primary" title="Keep every pending AI change">Accept</button>
+			</span>
+		</div>
 		<textarea id="input" rows="2" placeholder="Describe a change… (Enter to send, Shift+Enter for newline)"></textarea>
 		<div class="row">
 			<span class="hint" id="hint">Edits are undoable with Ctrl/Cmd+Z in the diagram.</span>
@@ -217,7 +229,22 @@
 		sel.textContent = "◉ " + state.selectionCount + " selected";
 		$("lasso").classList.toggle("active", !!state.lassoActive);
 		$("lasso").disabled = $("askInDiagram").disabled = !state.file;
+		renderReview(state.review);
 		setBusy(state.busy);
+	}
+
+	function renderReview(summary) {
+		$("review").classList.toggle("hidden", !summary);
+		const counts = $("reviewCounts");
+		counts.textContent = "";
+		if (!summary) return;
+		for (const k of ["added", "changed", "removed"]) {
+			if (!summary[k]) continue;
+			const s = document.createElement("span");
+			s.className = k;
+			s.textContent = summary[k] + " " + k;
+			counts.appendChild(s);
+		}
 	}
 
 	function setBusy(busy) {
@@ -242,6 +269,8 @@
 	$("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
 	$("lasso").addEventListener("click", () => vscode.postMessage({ type: "lasso" }));
 	$("askInDiagram").addEventListener("click", () => vscode.postMessage({ type: "askInDiagram" }));
+	$("reviewAccept").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "accept" }));
+	$("reviewReject").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "reject" }));
 	$("provider").addEventListener("change", (e) => vscode.postMessage({ type: "pickProvider", providerId: e.target.value }));
 	$("model").addEventListener("change", (e) => { if (e.target.value) vscode.postMessage({ type: "pickModel", modelId: e.target.value }); });
 	for (const b of document.querySelectorAll(".suggestions button")) {

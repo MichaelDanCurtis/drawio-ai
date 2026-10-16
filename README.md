@@ -17,6 +17,14 @@ Mentioned in the official diagrams.net [blog](https://www.diagrams.net/blog/embe
 -   Multiple Draw.io themes are available.
 -   Use Liveshare to collaboratively edit a diagram with others.
 -   Nodes/edges can be linked with code spans.
+-   Chat with AI to edit the open diagram live (see below).
+
+## AI Diagram Editing
+
+Describe changes in the **Draw.io AI** chat panel, with `@drawio` in Copilot Chat, or via the `drawio_*` language model tools in agent mode. Providers: GitHub Copilot, Anthropic, or any OpenAI-compatible endpoint (`Draw.io AI: Set API Key`).
+
+-   **Scope edits to part of the diagram**: select cells, or use the lasso (`Draw.io AI: Lasso Select for AI`) to circle a region, then ask about just that.
+-   **Review before apply**: AI edits appear immediately but are held as pending changes: added cells are outlined green, changed ones amber, and removed ones are shown as red ghosts. Keep or revert them all from the review bar in the editor, the strip in the chat panel, the `@drawio` response buttons, or the `Draw.io AI: Accept AI Changes` / `Reject AI Changes` commands. You can also keep or revert a single cell from its context menu. A whole review is one undo step. Turn this off with `drawio-ai.reviewChanges`.
 
 ## Demo
 

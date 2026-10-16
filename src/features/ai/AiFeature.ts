@@ -45,6 +45,7 @@ export class AiFeature {
 						fileName: fileName(editor),
 						selection: { cellIds: editor.drawioClient.currentSelection },
 						setBusy: (busy, text) => editor.drawioClient.aiSetStatus(busy, text),
+						reviewPending: () => !!editor.drawioClient.pendingReview,
 					};
 				},
 			})
@@ -54,7 +55,9 @@ export class AiFeature {
 		this.dispose.track({
 			dispose: autorun(() => {
 				void this.editorService.lastActiveDrawioEditor;
+				void this.editorService.activeDrawioEditor;
 				this.chatView.onActiveDiagramChanged();
+				this.onTargetReviewChanged();
 			}),
 		});
 		this.dispose.track(
@@ -87,7 +90,19 @@ export class AiFeature {
 				this.chatView.pickProviderAndModel()
 			),
 			vscode.commands.registerCommand("drawio-ai.setApiKey", () => this.setApiKey()),
+			vscode.commands.registerCommand("drawio-ai.acceptChanges", () =>
+				this.targetEditor()?.drawioClient.aiResolveReview("accept")
+			),
+			vscode.commands.registerCommand("drawio-ai.rejectChanges", () =>
+				this.targetEditor()?.drawioClient.aiResolveReview("reject")
+			),
 		]);
+	}
+
+	private onTargetReviewChanged(): void {
+		const pending = !!this.targetEditor()?.drawioClient.pendingReview;
+		void vscode.commands.executeCommand("setContext", "drawio-ai.reviewPending", pending);
+		this.chatView.onActiveDiagramChanged();
 	}
 
 	/** The diagram the AI acts on: the focused one, else the one used most recently. */
@@ -103,6 +118,9 @@ export class AiFeature {
 		const subs = [
 			editor.drawioClient.onSelectedCellsChanged.sub(() => {
 				if (editor === this.targetEditor()) this.chatView.onActiveDiagramChanged();
+			}),
+			editor.drawioClient.onAiReview.sub(() => {
+				if (editor === this.targetEditor()) this.onTargetReviewChanged();
 			}),
 			editor.drawioClient.onAiLasso.sub((evt) => {
 				this.chatView.setLassoActive(evt.lassoModeEnabled);

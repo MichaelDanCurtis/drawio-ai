@@ -167,6 +167,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			case "askInDiagram":
 				this.getEditor()?.drawioClient.aiOpenPrompt();
 				break;
+			case "review":
+				if (msg.decision === "accept" || msg.decision === "reject") {
+					this.getEditor()?.drawioClient.aiResolveReview(msg.decision);
+				}
+				break;
 			case "pickProvider":
 				await this.setSelected({ providerId: msg.providerId });
 				this.models = [];
@@ -208,6 +213,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				modelId: selected.modelId ?? this.models[0]?.id,
 				modelsError: this.modelsError,
 				modelsLoading: this.modelsLoading,
+				review: editor?.drawioClient.pendingReview?.summary,
 			},
 		});
 	}

@@ -152,6 +152,22 @@ async function runSteps() {
 		assert.ok(db.y > web.y, `expected top-down layout, got ${JSON.stringify({ web, db })}`);
 	});
 
+	await step("review: pending AI changes are kept or reverted with the Accept/Reject commands", async () => {
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes("drawio-ai.acceptChanges") && commands.includes("drawio-ai.rejectChanges"));
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		const result = JSON.parse(
+			await invoke("drawio_apply_operations", { ops: [{ op: "update", id: ids.$db, label: "Renamed DB" }] })
+		);
+		assert.match(result.note ?? "", /pending changes/, JSON.stringify(result));
+		await vscode.commands.executeCommand("drawio-ai.rejectChanges");
+		const model = await waitFor(async () => {
+			const m = JSON.parse(await invoke("drawio_get_diagram", {}));
+			return m.cells.find((c) => c.id === ids.$db)?.label === "Orders DB" ? m : undefined;
+		}, "Reject to restore the label");
+		assert.ok(model.cells.some((c) => c.label === "Web Server"), "accepted changes must survive the reject");
+	});
+
 	await step("render_image returns a PNG", async () => {
 		const result = await vscode.lm.invokeTool("drawio_render_image", { input: {}, toolInvocationToken: undefined });
 		const text = result.content.map((p) => p.value ?? "").join("");

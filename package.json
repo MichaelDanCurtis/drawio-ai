@@ -642,6 +642,16 @@
 				"category": "Draw.io AI"
 			},
 			{
+				"command": "drawio-ai.acceptChanges",
+				"title": "Accept AI Changes",
+				"category": "Draw.io AI"
+			},
+			{
+				"command": "drawio-ai.rejectChanges",
+				"title": "Reject AI Changes",
+				"category": "Draw.io AI"
+			},
+			{
 				"command": "drawio-ai.newChat",
 				"title": "New AI Chat",
 				"category": "Draw.io AI"
@@ -810,6 +820,11 @@
 						"default": 16,
 						"minimum": 1,
 						"description": "Maximum number of tool-calling rounds per request."
+					},
+					"drawio-ai.reviewChanges": {
+						"type": "boolean",
+						"default": true,
+						"markdownDescription": "Show AI edits as pending changes (green = added, amber = changed, red = removed) that you keep or revert, instead of accepting them immediately. Changes are applied while pending, so the diagram and file already contain them until you revert."
 					},
 					"drawio-ai.flashChanges": {
 						"type": "boolean",
@@ -1271,6 +1286,14 @@
 				{
 					"when": "false",
 					"command": "drawio-ai.linkFileWithSelectedNode"
+				},
+				{
+					"when": "drawio-ai.reviewPending",
+					"command": "drawio-ai.acceptChanges"
+				},
+				{
+					"when": "drawio-ai.reviewPending",
+					"command": "drawio-ai.rejectChanges"
 				}
 			]
 		}

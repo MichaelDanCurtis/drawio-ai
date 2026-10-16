@@ -2,10 +2,12 @@
 declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | GetVerticesAction
     | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
-    | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction;
+    | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
+    | AiResolveReviewAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
-    | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent;
+    | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
+    | AiReviewEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -95,6 +97,8 @@ declare interface AiApplyOpsAction {
     flash: boolean;
     /** Stop at the first failing operation and roll the whole batch back. */
     atomic: boolean;
+    /** Keep the result as a pending AI change the user accepts or rejects. */
+    review?: boolean;
 }
 
 declare interface AiSetSelectionAction {
@@ -295,4 +299,40 @@ declare interface ParticipantSelectedRectangleInfo {
     id: string;
     color: string;
     rectangle: Rectangle;
+}
+
+// ---------------------------------------------------------------------------
+// Review: AI edits are applied but stay pending until the user accepts them
+// ---------------------------------------------------------------------------
+
+declare interface AiChange {
+    id: string;
+    change: "added" | "removed" | "changed";
+    cellKind: "vertex" | "edge";
+    label: string;
+    /** For changed cells: which aspects differ from before the AI touched them. */
+    fields?: ("label" | "style" | "geometry" | "parent" | "connection")[];
+}
+
+declare interface AiReviewSummary {
+    added: number;
+    changed: number;
+    removed: number;
+}
+
+/** Sent whenever the set of pending AI changes changes; empty when nothing is pending. */
+declare interface AiReviewEvent {
+    event: "aiReview";
+    pending: boolean;
+    summary: AiReviewSummary;
+    changes: AiChange[];
+    /** How the last review ended, if it just ended. */
+    resolved?: "accepted" | "rejected" | "mixed";
+}
+
+/** Accept (keep) or reject (revert) pending AI changes; all of them when cellIds is omitted. */
+declare interface AiResolveReviewAction {
+    action: "aiResolveReview";
+    decision: "accept" | "reject";
+    cellIds?: string[];
 }

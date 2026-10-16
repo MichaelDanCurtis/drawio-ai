@@ -18,7 +18,14 @@ const COMMAND_PROMPTS: Record<string, string> = {
 export interface ParticipantDeps {
 	agent: DiagramAgent;
 	toolbox: DiagramToolbox;
-	getDiagram(): { fileName: string; selection: SelectionContext; setBusy(busy: boolean, text?: string): void } | undefined;
+	getDiagram():
+		| {
+				fileName: string;
+				selection: SelectionContext;
+				setBusy(busy: boolean, text?: string): void;
+				reviewPending(): boolean;
+		  }
+		| undefined;
 }
 
 /** `@drawio` in Copilot Chat, driven by whichever model the user picked in the chat UI. */
@@ -53,6 +60,10 @@ export function registerChatParticipant(deps: ParticipantDeps): vscode.Disposabl
 				});
 				if (error) {
 					response.markdown(`\n\n**Error:** ${String((error as any)?.message ?? error)}`);
+				}
+				if (diagram.reviewPending()) {
+					response.button({ command: "drawio-ai.acceptChanges", title: "Accept Changes" });
+					response.button({ command: "drawio-ai.rejectChanges", title: "Reject Changes" });
 				}
 			} finally {
 				diagram.setBusy(false);

@@ -142,6 +142,22 @@ test("provider/model pickers and toolbar post their messages", async () => {
 	assert.equal(posted[0].providerId, "anthropic");
 });
 
+test("pending AI changes show a review strip whose buttons resolve the review", async () => {
+	assert.equal(await page.locator("#review").isVisible(), false);
+	await post({ type: "state", state: state({ transcriptVersion: 2, review: { added: 2, changed: 1, removed: 0 } }) });
+	assert.equal(await page.locator("#review").isVisible(), true);
+	assert.equal(await text("#reviewCounts"), "2 added1 changed");
+	posted.length = 0;
+	await page.click("#reviewReject");
+	await page.click("#reviewAccept");
+	assert.deepEqual(posted, [
+		{ type: "review", decision: "reject" },
+		{ type: "review", decision: "accept" },
+	]);
+	await post({ type: "state", state: state({ transcriptVersion: 2 }) });
+	assert.equal(await page.locator("#review").isVisible(), false);
+});
+
 test("no script errors or CSP violations", () => {
 	assert.deepEqual(errors, []);
 });
