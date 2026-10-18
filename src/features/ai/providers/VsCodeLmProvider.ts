@@ -121,6 +121,10 @@ function toLmMessage(msg: ChatMessage, vision: boolean): vscode.LanguageModelCha
 	for (const p of msg.parts) {
 		if (p.type === "text" && p.text) {
 			parts.push(new vscode.LanguageModelTextPart(p.text));
+		} else if (p.type === "image") {
+			if (vision && DataPart?.image) {
+				parts.push(DataPart.image(base64ToBytes(p.image.base64), p.image.mimeType));
+			}
 		} else if (p.type === "toolResult") {
 			const content: unknown[] = [new vscode.LanguageModelTextPart(p.text)];
 			if (p.image && vision && DataPart?.image) {

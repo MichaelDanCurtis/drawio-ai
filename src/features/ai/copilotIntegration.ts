@@ -1,7 +1,8 @@
 import * as vscode from "vscode";
 import type { DiagramAgent } from "./DiagramAgent";
 import type { DiagramToolbox } from "./DiagramToolbox";
-import type { ChatMessage } from "./providers/types";
+import type { ChatMessage, ImageData } from "./providers/types";
+import { MAX_IMAGE_BASE64, readImage } from "./images";
 import { VsCodeLmClient } from "./providers/VsCodeLmProvider";
 import { describeContext, SelectionContext } from "./systemPrompt";
 import { getAiSettings } from "./aiSettings";
@@ -13,6 +14,10 @@ const COMMAND_PROMPTS: Record<string, string> = {
 	explain: "Explain what this diagram shows. Do not modify it.",
 	selection: "Apply the following change ONLY to the selected items:",
 	style: "Improve the visual style consistently (colours per concept, fonts, edge styles) without changing structure:",
+	review:
+		"Review this diagram. Call drawio_lint first, then also judge clarity, naming and structure. Fix clear mistakes (dangling or duplicate connectors, overlaps, template violations) directly; list judgement calls as short suggestions instead of applying them.",
+	sketch:
+		"Recreate the attached sketch/screenshot as an editable diagram: same shapes, labels, connections and layout, using proper draw.io shapes (search the libraries for recognisable icons). Place it in empty space and render it to compare with the original.",
 };
 
 export interface ParticipantDeps {
@@ -24,6 +29,7 @@ export interface ParticipantDeps {
 				selection: SelectionContext;
 				setBusy(busy: boolean, text?: string): void;
 				reviewPending(): boolean;
+				systemExtra(): Promise<string | undefined>;
 		  }
 		| undefined;
 }
@@ -43,6 +49,7 @@ export function registerChatParticipant(deps: ParticipantDeps): vscode.Disposabl
 			const prefix = request.command ? COMMAND_PROMPTS[request.command] : undefined;
 			const userText = [prefix, request.prompt].filter(Boolean).join("\n") || "Continue.";
 
+			const images = await imagesFromReferences(request.references);
 			diagram.setBusy(true, `${request.model.name} is editing…`);
 			try {
 				const { error } = await deps.agent.run({
@@ -50,6 +57,8 @@ export function registerChatParticipant(deps: ParticipantDeps): vscode.Disposabl
 					history: historyFromContext(context),
 					userText,
 					context: describeContext(diagram.fileName, diagram.selection),
+					systemExtra: await diagram.systemExtra(),
+					images,
 					maxRounds: getAiSettings().maxToolRounds,
 					token,
 					sink: {
@@ -81,8 +90,31 @@ function progressLabel(tool: string): string {
 		case "drawio_apply_operations": return "Editing the diagram…";
 		case "drawio_search_shapes": return "Searching shape libraries…";
 		case "drawio_render_image": return "Checking the rendered result…";
+		case "drawio_lint": return "Checking the diagram for problems…";
+		case "drawio_get_template": return "Reading the design template…";
 		default: return "Working…";
 	}
+}
+
+/** Images attached in Copilot Chat (pasted images or image files). */
+async function imagesFromReferences(refs: readonly vscode.ChatPromptReference[]): Promise<ImageData[]> {
+	const out: ImageData[] = [];
+	for (const ref of refs) {
+		const v: any = ref.value;
+		try {
+			if (v instanceof vscode.Uri) {
+				const img = await readImage(v);
+				if (img) out.push(img);
+			} else if (v && typeof v.mimeType === "string" && /^image\/(png|jpeg|gif|webp)$/.test(v.mimeType) && typeof v.data === "function") {
+				const bytes: Uint8Array = await v.data();
+				const base64 = Buffer.from(bytes).toString("base64");
+				if (base64.length <= MAX_IMAGE_BASE64) out.push({ mimeType: v.mimeType, base64 });
+			}
+		} catch {
+			// unreadable or too large; ignore
+		}
+	}
+	return out.slice(0, 4);
 }
 
 function historyFromContext(context: vscode.ChatContext): ChatMessage[] {

@@ -146,6 +146,11 @@ function toAnthropicMessage(msg: ChatMessage): { role: string; content: any[] } 
 	for (const p of msg.parts) {
 		if (p.type === "text") {
 			if (p.text) content.push({ type: "text", text: p.text });
+		} else if (p.type === "image") {
+			content.push({
+				type: "image",
+				source: { type: "base64", media_type: p.image.mimeType, data: p.image.base64 },
+			});
 		} else if (p.type === "toolCall") {
 			content.push({ type: "tool_use", id: p.id, name: p.name, input: p.input ?? {} });
 		} else {

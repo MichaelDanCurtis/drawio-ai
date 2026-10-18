@@ -1,6 +1,8 @@
 import * as webpack from "webpack";
 import path = require("path");
 import { CleanWebpackPlugin } from "clean-webpack-plugin";
+// Bundled with webpack. ASCII-only output keeps the UI glyphs (✦, —, …) intact however draw.io loads the script.
+const TerserPlugin = require("terser-webpack-plugin");
 
 const r = (file: string) => path.resolve(__dirname, file);
 
@@ -40,6 +42,9 @@ module.exports = {
 	},
 	node: {
 		__dirname: false,
+	},
+	optimization: {
+		minimizer: [new TerserPlugin({ terserOptions: { format: { ascii_only: true } } })],
 	},
 	plugins: [new CleanWebpackPlugin()],
 } as webpack.Configuration;

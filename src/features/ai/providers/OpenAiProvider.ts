@@ -161,6 +161,8 @@ class OpenAiClient implements AiModelClient {
 					}
 				} else if (p.type === "text" && p.text) {
 					texts.push(p.text);
+				} else if (p.type === "image" && this.model.vision) {
+					images.push(`data:${p.image.mimeType};base64,${p.image.base64}`);
 				}
 			}
 			// Chat Completions cannot carry images in tool messages; attach them as a follow-up user turn.
@@ -171,7 +173,7 @@ class OpenAiClient implements AiModelClient {
 						images.length === 0
 							? texts.join("\n\n")
 							: [
-									{ type: "text", text: texts.join("\n\n") || "Rendered diagram from the previous tool call:" },
+									{ type: "text", text: texts.join("\n\n") || "Image from the previous tool call:" },
 									...images.map((url) => ({ type: "image_url", image_url: { url } })),
 							  ],
 				});

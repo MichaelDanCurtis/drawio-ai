@@ -3,11 +3,11 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
-    | AiResolveReviewAction;
+    | AiResolveReviewAction | AiSetMarkupModeAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent;
+    | AiReviewEvent | AiMarkupEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -187,6 +187,22 @@ declare interface AiAskEvent {
     prompt: string;
     cellIds: string[];
     region?: AiRect;
+    /** How the request was made in the diagram; defaults to the inline prompt. */
+    source?: "prompt" | "markup" | "image";
+    /** Number of marks, for source=markup. */
+    markCount?: number;
+    images?: { mimeType: "image/png"; base64: string }[];
+}
+
+declare interface AiSetMarkupModeAction {
+    action: "aiSetMarkupMode";
+    enabled: boolean;
+}
+
+/** Markup mode was entered or left inside the diagram. */
+declare interface AiMarkupEvent {
+    event: "aiMarkup";
+    active: boolean;
 }
 
 /** The user finished a lasso selection inside the diagram. */

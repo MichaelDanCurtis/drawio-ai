@@ -1684,6 +1684,381 @@ Draw.loadPlugin((ui: any) => {
 		});
 	}
 
+	// ---------------------------------------------------------------------
+	// Markup: arrows, strike-throughs and pinned notes drawn over the diagram
+	// (not part of the model), sent to the AI as one request.
+	// ---------------------------------------------------------------------
+
+	type Pt = { x: number; y: number };
+	type Mark =
+		| { kind: "arrow"; from: Pt; to: Pt; fromCell?: string; toCell?: string; note?: string }
+		| { kind: "strike"; points: Pt[]; cells: string[] }
+		| { kind: "note"; at: Pt; cell?: string; text: string };
+	type MarkTool = "arrow" | "strike" | "note";
+	const MARK = "#e11d48";
+
+	let markup:
+		| { marks: Mark[]; tool: MarkTool; overlay: HTMLDivElement; bar: HTMLDivElement; instructions: HTMLInputElement; draft?: Pt[]; noteInput?: HTMLDivElement }
+		| undefined;
+	let markLayer: SVGGElement | undefined;
+
+	function cellAtView(view: Pt, verticesOnly: boolean): any | undefined {
+		const cell = graph.getCellAt(view.x, view.y, null, true, !verticesOnly);
+		return cell && !isLayer(cell) && cell !== model.getRoot() ? cell : undefined;
+	}
+
+	function describeCellForPrompt(id: string | undefined): string {
+		const cell = id ? model.getCell(id) : undefined;
+		if (!cell) return "empty space";
+		const label = plainLabel(cell);
+		if (model.isEdge(cell)) {
+			const ends = [cell.source, cell.target].map((c: any) => (c ? `"${plainLabel(c) || c.id}"` : "?"));
+			return `connector ${label ? `"${label}" ` : ""}${ends.join("→")} [id ${id}]`;
+		}
+		return `${label ? `"${label}"` : "unlabeled shape"} [id ${id}]`;
+	}
+
+	function markupPrompt(marks: Mark[], instructions: string): { prompt: string; cellIds: string[] } {
+		const ids = new Set<string>();
+		const at = (p: Pt) => `(x=${Math.round(p.x)}, y=${Math.round(p.y)})`;
+		const lines = marks.map((m, i) => {
+			const n = `${i + 1}.`;
+			if (m.kind === "arrow") {
+				[m.fromCell, m.toCell].forEach((id) => id && ids.add(id));
+				const from = m.fromCell ? describeCellForPrompt(m.fromCell) : `empty space ${at(m.from)}`;
+				const to = m.toCell ? describeCellForPrompt(m.toCell) : `empty space ${at(m.to)}`;
+				return `${n} Arrow from ${from} to ${to}${m.note ? ` — "${m.note}"` : ""}`;
+			}
+			if (m.kind === "strike") {
+				m.cells.forEach((id) => ids.add(id));
+				return `${n} Strike-through over ${m.cells.map(describeCellForPrompt).join(", ")}`;
+			}
+			if (m.cell) ids.add(m.cell);
+			return `${n} Note on ${m.cell ? describeCellForPrompt(m.cell) : `empty space ${at(m.at)}`}: "${m.text}"`;
+		});
+		return {
+			cellIds: [...ids],
+			prompt: [
+				"I marked up the diagram (numbers match the marks I drew):",
+				...lines,
+				"",
+				instructions || "Apply these marks.",
+				"",
+				"How to read the marks: an arrow means connect / data flow between the two ends (or move something there, if its note says so); a strike-through means remove the struck items; a note is a change request for the item or place it is pinned to. Coordinates are page coordinates.",
+			].join("\n"),
+		};
+	}
+
+	function paintMarkup() {
+		markLayer?.remove();
+		markLayer = undefined;
+		if (!markup) return;
+		const { scale, translate: t } = graph.view;
+		const v = (p: Pt) => ({ x: (p.x + t.x) * scale, y: (p.y + t.y) * scale });
+		const g = document.createElementNS(SVGNS, "g") as SVGGElement;
+		g.setAttribute("pointer-events", "none");
+		g.setAttribute("data-ai-markup-layer", "");
+		const el = (name: string, attrs: Record<string, string | number>) => {
+			const e = document.createElementNS(SVGNS, name);
+			for (const [k, val] of Object.entries(attrs)) e.setAttribute(k, String(val));
+			g.appendChild(e);
+			return e;
+		};
+		const badge = (p: Pt, n: number, text?: string, kind?: string) => {
+			const circle = el("circle", { cx: p.x, cy: p.y, r: 9, fill: MARK });
+			if (kind) circle.setAttribute("data-ai-mark", kind);
+			const num = el("text", { x: p.x, y: p.y + 4, "text-anchor": "middle", "font-size": 11, "font-family": "system-ui,sans-serif", fill: "white", "font-weight": 700 });
+			num.textContent = String(n);
+			if (text) {
+				const label = text.length > 48 ? text.slice(0, 47) + "…" : text;
+				const w = label.length * 6.4 + 12;
+				el("rect", { x: p.x + 12, y: p.y - 10, width: w, height: 20, rx: 4, fill: "#fff1f2", stroke: MARK });
+				const tx = el("text", { x: p.x + 18, y: p.y + 4, "font-size": 11, "font-family": "system-ui,sans-serif", fill: "#881337" });
+				tx.textContent = label;
+			}
+		};
+		const all: (Mark | { kind: "draft"; points: Pt[] })[] = [...markup.marks];
+		if (markup.draft) all.push({ kind: "draft", points: markup.draft });
+		all.forEach((m, i) => {
+			if (m.kind === "arrow" || (m.kind === "draft" && markup!.tool === "arrow")) {
+				const a = v(m.kind === "arrow" ? m.from : m.points[0]);
+				const b = v(m.kind === "arrow" ? m.to : m.points[m.points.length - 1]);
+				const ang = Math.atan2(b.y - a.y, b.x - a.x);
+				const head = (d: number) => `${b.x - 12 * Math.cos(ang + d)},${b.y - 12 * Math.sin(ang + d)}`;
+				el("line", { x1: a.x, y1: a.y, x2: b.x, y2: b.y, stroke: MARK, "stroke-width": 3, "stroke-linecap": "round", "data-ai-mark": "arrow" });
+				el("polygon", { points: `${b.x},${b.y} ${head(0.45)} ${head(-0.45)}`, fill: MARK });
+				if (m.kind === "arrow") badge({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, i + 1, m.note);
+			} else if (m.kind === "strike" || m.kind === "draft") {
+				const pts = m.points.map(v);
+				el("polyline", { points: pts.map((p) => `${p.x},${p.y}`).join(" "), fill: "none", stroke: MARK, "stroke-width": 4, "stroke-opacity": 0.75, "stroke-linecap": "round", "stroke-linejoin": "round", "data-ai-mark": m.kind });
+				if (m.kind === "strike") badge(pts[0], i + 1);
+			} else {
+				badge(v(m.at), i + 1, m.text, "note");
+			}
+		});
+		markLayer = g;
+		graph.view.getOverlayPane().appendChild(g);
+	}
+
+	function closeNoteInput() {
+		markup?.noteInput?.remove();
+		if (markup) markup.noteInput = undefined;
+	}
+
+	/** Small text field at a client position; resolves with the text, or undefined when cancelled. */
+	function askNote(clientX: number, clientY: number, placeholder: string): Promise<string | undefined> {
+		closeNoteInput();
+		return new Promise((resolve) => {
+			if (!markup) return resolve(undefined);
+			const box = document.createElement("div");
+			markup.noteInput = box;
+			themed(box);
+			Object.assign(box.style, {
+				position: "fixed", zIndex: "10003", left: `${Math.min(clientX + 8, window.innerWidth - 270)}px`,
+				top: `${Math.min(clientY + 8, window.innerHeight - 44)}px`, padding: "4px", borderRadius: "8px",
+				borderColor: MARK, boxShadow: "0 6px 20px rgba(0,0,0,.25)",
+			});
+			const input = document.createElement("input");
+			input.placeholder = placeholder;
+			input.setAttribute("data-ai-markup-note", "");
+			Object.assign(input.style, { width: "250px", font: "12px system-ui, sans-serif", padding: "4px 6px", border: "none", outline: "none", background: "transparent", color: "inherit" });
+			box.appendChild(input);
+			document.body.appendChild(box);
+			for (const type of ["mousedown", "pointerdown", "click", "dblclick", "wheel"]) box.addEventListener(type, (e) => e.stopPropagation());
+			let done = false;
+			const finish = (value: string | undefined) => {
+				if (done) return;
+				done = true;
+				closeNoteInput();
+				resolve(value);
+			};
+			input.addEventListener("keydown", (e) => {
+				e.stopPropagation();
+				// preventDefault also suppresses the keypress, which draw.io would turn into a new text cell.
+				if (e.key === "Enter" && !e.isComposing) {
+					e.preventDefault();
+					finish(input.value.trim());
+				} else if (e.key === "Escape") {
+					e.preventDefault();
+					finish(undefined);
+				}
+			});
+			input.addEventListener("keyup", (e) => e.stopPropagation());
+			input.addEventListener("keypress", (e) => e.stopPropagation());
+			input.addEventListener("blur", () => setTimeout(() => !box.contains(document.activeElement) && finish(input.value.trim() || undefined), 0));
+			input.focus();
+			setTimeout(() => input.focus(), 0);
+		});
+	}
+
+	function renderMarkupBar() {
+		if (!markup) return;
+		const bar = markup.bar;
+		themed(bar);
+		bar.style.borderColor = MARK;
+		for (const b of Array.from(bar.querySelectorAll<HTMLButtonElement>("button[data-tool]"))) {
+			const active = b.dataset.tool === markup.tool;
+			b.style.background = active ? MARK : "transparent";
+			b.style.color = active ? "white" : "inherit";
+		}
+		const count = bar.querySelector<HTMLSpanElement>("[data-ai-markup-count]");
+		if (count) count.textContent = markup.marks.length ? `${markup.marks.length} mark${markup.marks.length === 1 ? "" : "s"}` : "";
+		const send = bar.querySelector<HTMLButtonElement>('[data-ai-markup="send"]');
+		if (send) send.disabled = markup.marks.length === 0;
+	}
+
+	function sendMarkup() {
+		if (!markup || markup.marks.length === 0) return;
+		const { prompt, cellIds } = markupPrompt(markup.marks, markup.instructions.value.trim());
+		const markCount = markup.marks.length;
+		setMarkup(false);
+		sendEvent({ event: "aiAsk", prompt, cellIds, source: "markup", markCount });
+	}
+
+	function setMarkup(enabled: boolean) {
+		if (!enabled) {
+			if (!markup) return;
+			closeNoteInput();
+			markup.overlay.remove();
+			markup.bar.remove();
+			markup = undefined;
+			paintMarkup();
+			sendEvent({ event: "aiMarkup", active: false });
+			return;
+		}
+		if (markup) return;
+		if (lassoEl) setLasso(false);
+		closePrompt();
+		if (graph.isEditing()) graph.stopEditing(false);
+		(document.activeElement as HTMLElement | null)?.blur?.();
+
+		const rect = graph.container.getBoundingClientRect();
+		const overlay = document.createElement("div");
+		overlay.setAttribute("data-ai-markup-overlay", "");
+		Object.assign(overlay.style, {
+			position: "fixed", left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px`,
+			zIndex: "10000", cursor: "crosshair", background: "rgba(225,29,72,0.03)", touchAction: "none",
+		});
+
+		const bar = document.createElement("div");
+		bar.setAttribute("data-ai-markup-bar", "");
+		Object.assign(bar.style, {
+			position: "fixed", left: `${rect.left + rect.width / 2}px`, top: `${rect.top + 10}px`, transform: "translateX(-50%)",
+			zIndex: "10002", display: "flex", gap: "6px", alignItems: "center", padding: "5px 6px 5px 10px", borderRadius: "10px",
+			font: "12px system-ui, sans-serif", boxShadow: "0 6px 20px rgba(0,0,0,.25)", whiteSpace: "nowrap",
+		});
+		for (const type of ["mousedown", "pointerdown", "click", "dblclick", "wheel", "keydown", "keyup", "keypress"]) {
+			bar.addEventListener(type, (e) => e.stopPropagation());
+		}
+		const title = document.createElement("span");
+		title.style.fontWeight = "600";
+		title.textContent = "✎ Markup";
+		bar.appendChild(title);
+		const button = (text: string, key: string, tip: string, onClick: () => void, tool?: MarkTool) => {
+			const b = document.createElement("button");
+			b.textContent = text;
+			b.title = tip;
+			b.setAttribute("data-ai-markup", key);
+			if (tool) b.dataset.tool = tool;
+			Object.assign(b.style, {
+				font: "inherit", padding: "3px 8px", borderRadius: "6px", cursor: "pointer",
+				border: `1px solid ${isDark() ? "#3f3f46" : "#d0d7de"}`, background: "transparent", color: "inherit",
+			});
+			b.addEventListener("click", (e) => {
+				e.stopPropagation();
+				onClick();
+			});
+			bar.appendChild(b);
+			return b;
+		};
+		const pick = (tool: MarkTool) => () => {
+			if (!markup) return;
+			markup.tool = tool;
+			renderMarkupBar();
+		};
+		button("➜ Arrow", "arrow", "Drag from one shape (or spot) to another (A)", pick("arrow"), "arrow");
+		button("✕ Strike", "strike", "Scribble across shapes or connectors to remove them (S)", pick("strike"), "strike");
+		button("✎ Note", "note", "Click a shape or empty spot and type a request (N)", pick("note"), "note");
+		button("↶", "undo", "Remove the last mark (Ctrl/Cmd+Z)", () => {
+			markup?.marks.pop();
+			paintMarkup();
+			renderMarkupBar();
+		});
+		const instructions = document.createElement("input");
+		instructions.placeholder = "Anything else? (optional)";
+		instructions.setAttribute("data-ai-markup-instructions", "");
+		Object.assign(instructions.style, {
+			width: "190px", font: "inherit", padding: "3px 6px", borderRadius: "6px", outline: "none", color: "inherit",
+			background: isDark() ? "#141417" : "#f6f8fa", border: `1px solid ${isDark() ? "#3f3f46" : "#d0d7de"}`,
+		});
+		instructions.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" && !e.isComposing) {
+				e.preventDefault();
+				sendMarkup();
+			} else if (e.key === "Escape") {
+				e.preventDefault();
+				setMarkup(false);
+			}
+		});
+		bar.appendChild(instructions);
+		const count = document.createElement("span");
+		count.setAttribute("data-ai-markup-count", "");
+		count.style.opacity = ".7";
+		bar.appendChild(count);
+		const send = button("Send to AI", "send", "Send all marks as one request (Enter)", sendMarkup);
+		Object.assign(send.style, { background: ACCENT, borderColor: ACCENT, color: "white" });
+		button("✕", "close", "Leave markup mode (Esc)", () => setMarkup(false));
+
+		document.body.append(overlay, bar);
+		markup = { marks: [], tool: "arrow", overlay, bar, instructions };
+		renderMarkupBar();
+		sendEvent({ event: "aiMarkup", active: true });
+
+		overlay.addEventListener("wheel", (e) => {
+			e.preventDefault();
+			graph.container.scrollLeft += e.deltaX;
+			graph.container.scrollTop += e.deltaY;
+		}, { passive: false });
+
+		let start: { client: Pt; view: Pt; model: Pt } | undefined;
+		overlay.addEventListener("pointerdown", (e) => {
+			if (!markup || e.button !== 0) return;
+			e.preventDefault();
+			e.stopPropagation();
+			closeNoteInput();
+			const p = toGraph(e.clientX, e.clientY);
+			start = { client: { x: e.clientX, y: e.clientY }, view: p.view, model: p.model };
+			if (markup.tool !== "note") {
+				overlay.setPointerCapture(e.pointerId);
+				markup.draft = [p.model];
+			}
+		});
+		overlay.addEventListener("pointermove", (e) => {
+			if (!markup?.draft || !start) return;
+			const p = toGraph(e.clientX, e.clientY).model;
+			if (markup.tool === "arrow") markup.draft = [markup.draft[0], p];
+			else markup.draft.push(p);
+			paintMarkup();
+		});
+		overlay.addEventListener("pointerup", async (e) => {
+			e.stopPropagation();
+			if (!markup || !start) return;
+			const s = start;
+			start = undefined;
+			const end = toGraph(e.clientX, e.clientY);
+			const draft = markup.draft ?? [];
+			markup.draft = undefined;
+			const moved = Math.hypot(e.clientX - s.client.x, e.clientY - s.client.y);
+			if (markup.tool === "note") {
+				const cell = cellAtView(s.view, false);
+				const text = await askNote(e.clientX, e.clientY, cell ? `Note on "${plainLabel(cell) || cell.id}"…` : "Note for this spot…");
+				if (markup && text) markup.marks.push({ kind: "note", at: s.model, cell: cell?.id, text });
+			} else if (markup.tool === "arrow" && moved > 12) {
+				const mark: Mark = {
+					kind: "arrow", from: s.model, to: end.model,
+					fromCell: cellAtView(s.view, true)?.id, toCell: cellAtView(end.view, true)?.id,
+				};
+				markup.marks.push(mark);
+				paintMarkup();
+				renderMarkupBar();
+				const note = await askNote(e.clientX, e.clientY, "What does this arrow mean? (optional, Enter)");
+				if (note) mark.note = note;
+			} else if (markup.tool === "strike" && moved > 12) {
+				const { scale, translate: t } = graph.view;
+				const ids: string[] = [];
+				for (const p of draft) {
+					const cell = cellAtView({ x: (p.x + t.x) * scale, y: (p.y + t.y) * scale }, false);
+					if (cell && !ids.includes(cell.id)) ids.push(cell.id);
+				}
+				if (ids.length) markup.marks.push({ kind: "strike", points: draft, cells: ids });
+			}
+			paintMarkup();
+			renderMarkupBar();
+		});
+	}
+
+	for (const name of [W.mxEvent.SCALE, W.mxEvent.TRANSLATE, W.mxEvent.SCALE_AND_TRANSLATE]) {
+		graph.view.addListener(name, () => markup && paintMarkup());
+	}
+
+	// Turn the selected image (or any shape) into an editable diagram.
+	async function convertToDiagram(cell: any) {
+		const result = await exportImage({ action: "aiExportImage", cellIds: [cell.id], maxSize: 1600 });
+		const prefix = "data:image/png;base64,";
+		if (!result.dataUrl.startsWith(prefix)) return;
+		const g = cell.geometry;
+		sendEvent({
+			event: "aiAsk",
+			source: "image",
+			cellIds: [cell.id],
+			images: [{ mimeType: "image/png", base64: result.dataUrl.slice(prefix.length) }],
+			prompt:
+				`Convert the attached image (cell ${cell.id}${g ? ` at x=${Math.round(g.x)}, y=${Math.round(g.y)}, ${Math.round(g.width)}x${Math.round(g.height)}` : ""}) into an editable diagram: recreate its shapes, labels, connections and layout with real draw.io shapes (search the libraries for recognisable icons), placed where the image is. Then delete the image cell ${cell.id} and render the result to compare.`,
+		});
+	}
+
+	const isImageCell = (cell: any) => !!cell && model.isVertex(cell) && /(^|;)(image|shape=image)(;|$)|(^|;)image=/.test(cell.style || "");
+
 	// Context menu entries.
 	const menus = ui.menus;
 	const originalCreatePopupMenu = menus.createPopupMenu;
@@ -1692,6 +2067,11 @@ Draw.loadPlugin((ui: any) => {
 		menu.addSeparator();
 		menu.addItem("✦ Ask AI…  (Alt+K)", null, () => openPrompt());
 		menu.addItem("✦ Lasso select for AI  (Alt+L)", null, () => setLasso(true));
+		menu.addItem("✦ Mark up for AI  (Alt+M)", null, () => setMarkup(true));
+		const selected = graph.getSelectionCells();
+		if (selected.length === 1 && model.isVertex(selected[0]) && (isImageCell(selected[0]) || !plainLabel(selected[0]))) {
+			menu.addItem("✦ Convert image to diagram", null, () => void convertToDiagram(selected[0]));
+		}
 		const sel = selectedPending();
 		if (sel.length > 0) {
 			menu.addItem(`✦ Keep AI change${sel.length > 1 ? "s" : ""}`, null, () => resolveReview("accept", sel));
@@ -1704,6 +2084,42 @@ Draw.loadPlugin((ui: any) => {
 		(e) => {
 			if (e.key === "Escape" && lassoEl) {
 				setLasso(false);
+				e.stopPropagation();
+				return;
+			}
+			if (markup?.noteInput && !markup.noteInput.contains(e.target as Node)) {
+				// A key arrived before the note field got focus: keep it away from draw.io's single-key shortcuts.
+				const input = markup.noteInput.querySelector("input");
+				if (input && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) input.value += e.key;
+				input?.focus();
+				if (e.key === "Escape" || e.key === "Enter") input?.dispatchEvent(new KeyboardEvent("keydown", { key: e.key }));
+				e.preventDefault();
+				e.stopPropagation();
+				return;
+			}
+			if (markup && !markup.noteInput) {
+				const target = e.target as HTMLElement | null;
+				// draw.io keeps an invisible "typing shim" textarea focused so typing edits the selected cell; that is not a field.
+				const inField = !!target && /^(INPUT|TEXTAREA)$/.test(target.tagName) && !target.classList.contains("mxTypingShim");
+				if (inField) return;
+				const mod = e.ctrlKey || e.metaKey;
+				if (e.key === "Escape") {
+					setMarkup(false);
+				} else if (mod && e.key.toLowerCase() === "z") {
+					markup.marks.pop();
+					paintMarkup();
+					renderMarkupBar();
+				} else if (!mod && !e.altKey && /^[asn]$/i.test(e.key)) {
+					markup.tool = ({ a: "arrow", s: "strike", n: "note" } as const)[e.key.toLowerCase() as "a"];
+					renderMarkupBar();
+				} else if (e.key === "Enter") {
+					sendMarkup();
+				} else if (!mod && (e.key.length === 1 || e.key === "Delete" || e.key === "Backspace")) {
+					// Swallow typing and deletion so they cannot edit the diagram underneath the markup.
+				} else {
+					return;
+				}
+				e.preventDefault();
 				e.stopPropagation();
 				return;
 			}
@@ -1720,6 +2136,10 @@ Draw.loadPlugin((ui: any) => {
 				e.preventDefault();
 				e.stopPropagation();
 				setLasso(!lassoEl);
+			} else if (e.code === "KeyM") {
+				e.preventDefault();
+				e.stopPropagation();
+				setMarkup(!markup);
 			}
 		},
 		true
@@ -1776,6 +2196,9 @@ Draw.loadPlugin((ui: any) => {
 				break;
 			case "aiSearchShapes":
 				sendEvent(await searchShapes(data));
+				break;
+			case "aiSetMarkupMode":
+				setMarkup(data.enabled);
 				break;
 			case "aiResolveReview":
 				await applyQueue;

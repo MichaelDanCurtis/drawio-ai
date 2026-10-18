@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Draw.io AI: chat with AI to edit the open diagram live (chat panel, `@drawio` in Copilot Chat, `drawio_*` language model tools), scoped to the selection or a lasso
+- Review before apply: AI edits are held as pending changes (green/amber/red) that you keep or revert, all at once or per shape (`drawio-ai.reviewChanges`)
+- Markup mode (`Alt+M`): arrows, strike-throughs and pinned notes on the canvas, sent to the AI as one request
+- Sketch/screenshot → diagram: paste, drop or attach images in the chat panel, `@drawio /sketch`, or **Convert image to diagram** on an image in the diagram
+- Code → diagram: module dependencies, class diagrams, database ERDs (SQL, Prisma) and infrastructure (Terraform, docker-compose, Kubernetes), with shapes code-linked to their source
+- Diagram review/lint (`Draw.io AI: Review Diagram (Lint)`, `@drawio /review`, `drawio_lint`) with AI fixes as pending changes
+- Repository design templates (`.drawio-ai/templates/`) built from example diagrams, shape libraries, style guides (Markdown, Word, PDF) and images; the AI follows them and lint flags violations (`drawio-ai.template`)
+
+### Fixed
+
+- The custom draw.io plugins are bundled as ASCII so their UI glyphs render correctly regardless of how the webview decodes the script
+
 ## [1.17.0]
 
 ### Added

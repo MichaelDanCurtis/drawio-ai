@@ -3,12 +3,13 @@ import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
 import type { DiagramAgent } from "./DiagramAgent";
 import type { ProviderRegistry } from "./providers/ProviderRegistry";
-import type { ChatMessage, ModelInfo, ProviderId } from "./providers/types";
+import type { AiModelClient, ChatMessage, ImageData, ModelInfo, ProviderId } from "./providers/types";
 import { describeContext, SelectionContext } from "./systemPrompt";
 import html from "./chatView.html";
+import { MAX_IMAGES, MAX_PICKED_IMAGE_BASE64, readImage, sanitizeImages } from "./images";
 
 type TranscriptItem =
-	| { kind: "user"; text: string; scope?: string }
+	| { kind: "user"; text: string; scope?: string; attachments?: string[] }
 	| { kind: "assistant"; text: string }
 	| { kind: "tool"; id: string; summary: string; status: "running" | "ok" | "error" }
 	| { kind: "error"; text: string; action?: { title: string; command: string } };
@@ -21,6 +22,19 @@ interface Conversation {
 }
 
 const MODEL_STATE_KEY = "drawio-ai.selectedModel";
+
+export interface SendExtras {
+	images?: ImageData[];
+	/** Large hidden inputs (e.g. code analysis); the transcript only shows `name`. */
+	attachments?: { name: string; text: string }[];
+	/** Target diagram; defaults to the active one. */
+	editor?: DrawioEditor;
+}
+
+export interface TemplateInfo {
+	name: string;
+	prompt: string;
+}
 let versionCounter = 0;
 
 export class ChatViewProvider implements vscode.WebviewViewProvider {
@@ -33,13 +47,22 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private modelsError: string | undefined;
 	private modelsLoading = false;
 	private lassoActive = false;
+	private templateName: string | undefined;
+	private templateRequest = 0;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly registry: ProviderRegistry,
 		private readonly agent: DiagramAgent,
-		private readonly getEditor: () => DrawioEditor | undefined
+		private readonly getEditor: () => DrawioEditor | undefined,
+		private readonly getTemplate: (editor: DrawioEditor | undefined) => Promise<TemplateInfo | undefined> = async () => undefined
 	) {}
+
+	/** The client for the provider/model picked in this panel. */
+	public async currentClient(): Promise<AiModelClient> {
+		const { providerId, modelId } = this.selected;
+		return this.registry.get(providerId).getClient(modelId);
+	}
 
 	// ----- selection of provider / model -----
 
@@ -109,6 +132,15 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	public onActiveDiagramChanged(): void {
 		this.postState();
+		void this.refreshTemplate();
+	}
+
+	public async refreshTemplate(): Promise<void> {
+		const request = ++this.templateRequest;
+		const info = await this.getTemplate(this.getEditor()).catch(() => undefined);
+		if (request !== this.templateRequest || info?.name === this.templateName) return;
+		this.templateName = info?.name;
+		this.postState();
 	}
 
 	public setLassoActive(active: boolean): void {
@@ -152,9 +184,30 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				this.postState();
 				if (this.models.length === 0 && !this.modelsLoading) void this.refreshModels();
 				break;
-			case "send":
-				if (typeof msg.text === "string") await this.send(msg.text);
+			case "send": {
+				const images = sanitizeImages(msg.images);
+				if (typeof msg.text === "string" && (msg.text.trim() || images.length)) {
+					await this.send(msg.text.trim() || DEFAULT_IMAGE_PROMPT, undefined, { images });
+				}
 				break;
+			}
+			case "pickImage": {
+				const picked = await vscode.window.showOpenDialog({
+					canSelectMany: true,
+					openLabel: "Attach",
+					filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] },
+				});
+				const images = await Promise.all(
+					(picked ?? []).slice(0, MAX_IMAGES).map((uri) =>
+						readImage(uri, MAX_PICKED_IMAGE_BASE64).catch((e) => {
+							void vscode.window.showErrorMessage(String(e?.message ?? e));
+							return undefined;
+						})
+					)
+				);
+				this.view?.webview.postMessage({ type: "addImages", images: images.filter(Boolean) });
+				break;
+			}
 			case "stop":
 				this.conversation().running?.cancel();
 				break;
@@ -214,6 +267,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				modelsError: this.modelsError,
 				modelsLoading: this.modelsLoading,
 				review: editor?.drawioClient.pendingReview?.summary,
+				template: this.templateName,
 			},
 		});
 	}
@@ -225,8 +279,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	// ----- running the agent -----
 
-	public async send(text: string, origin?: SelectionContext): Promise<void> {
-		const editor = this.getEditor();
+	public async send(text: string, origin?: SelectionContext, extras: SendExtras = {}): Promise<void> {
+		const editor = extras.editor ?? this.getEditor();
 		const c = this.conversation(editor);
 		if (c.running) {
 			this.push(c, { kind: "error", text: "Still working on the previous request — press Stop first." });
@@ -237,12 +291,20 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 			cellIds: editor?.drawioClient.currentSelection ?? [],
 		};
 		const scope =
-			selection.cellIds.length > 0
+			selection.source === "markup"
+				? `✎ ${selection.markCount ?? ""} mark${selection.markCount === 1 ? "" : "s"}`
+				: selection.source === "image"
+				? "🖼 image → diagram"
+				: selection.cellIds.length > 0
 				? `${selection.viaLasso ? "◌ lasso" : "◉"} ${selection.cellIds.length} selected`
 				: selection.region
 				? "◌ empty area"
 				: undefined;
-		this.push(c, { kind: "user", text, scope });
+		const attached = [
+			...(extras.images?.length ? [`🖼 ${extras.images.length} image${extras.images.length === 1 ? "" : "s"}`] : []),
+			...(extras.attachments ?? []).map((a) => `📎 ${a.name}`),
+		];
+		this.push(c, { kind: "user", text, scope, attachments: attached.length ? attached : undefined });
 
 		if (!editor) {
 			this.push(c, {
@@ -261,8 +323,8 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		const settings = getAiSettings();
 
 		try {
-			const { providerId, modelId } = this.selected;
-			const client = await this.registry.get(providerId).getClient(modelId);
+			const client = await this.currentClient();
+			const template = await this.getTemplate(editor).catch(() => undefined);
 			editor.drawioClient.aiSetStatus(true, `${client.model.name} is editing…`);
 
 			const { messages, error } = await this.agent.run({
@@ -270,6 +332,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				history: c.messages,
 				userText: text,
 				context: describeContext(decodeURIComponent(editor.uri.path.split("/").pop() ?? ""), selection),
+				systemExtra: template?.prompt,
+				images: extras.images,
+				attachments: extras.attachments,
 				maxRounds: settings.maxToolRounds,
 				token: cts.token,
 				onRoundStart: () => (assistant = undefined),
@@ -325,6 +390,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	}
 }
 
+export const DEFAULT_IMAGE_PROMPT =
+	"Recreate the attached sketch/screenshot as an editable diagram: same shapes, labels, connections and overall layout, using proper draw.io shapes (search the shape libraries for recognisable icons). Place it in empty space on the page, then render it to compare with the original.";
+
 function newConversation(): Conversation {
 	return { messages: [], transcript: [], version: ++versionCounter };
 }
@@ -338,6 +406,8 @@ function toolLabel(name: string): string {
 		case "drawio_render_image": return "Rendering preview…";
 		case "drawio_search_shapes": return "Searching shape libraries…";
 		case "drawio_style_reference": return "Looking up styles…";
+		case "drawio_lint": return "Checking the diagram…";
+		case "drawio_get_template": return "Reading the design template…";
 		default: return `${name}…`;
 	}
 }

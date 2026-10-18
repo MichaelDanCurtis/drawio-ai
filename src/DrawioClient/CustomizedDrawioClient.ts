@@ -55,6 +55,9 @@ export class CustomizedDrawioClient extends DrawioClient<
 	private readonly onAiLassoEmitter = new EventEmitter<AiLassoEvent>();
 	public readonly onAiLasso = this.onAiLassoEmitter.asEvent();
 
+	private readonly onAiMarkupEmitter = new EventEmitter<AiMarkupEvent>();
+	public readonly onAiMarkup = this.onAiMarkupEmitter.asEvent();
+
 	private readonly onAiReviewEmitter = new EventEmitter<AiReviewEvent>();
 	/** The set of pending AI changes awaiting the user's review changed. */
 	public readonly onAiReview = this.onAiReviewEmitter.asEvent();
@@ -143,6 +146,10 @@ export class CustomizedDrawioClient extends DrawioClient<
 
 	public aiSetLassoMode(enabled: boolean): void {
 		this.sendCustomAction({ action: "aiSetLassoMode", enabled });
+	}
+
+	public aiSetMarkupMode(enabled: boolean): void {
+		this.sendCustomAction({ action: "aiSetMarkupMode", enabled });
 	}
 
 	public aiSetStatus(busy: boolean, text?: string): void {
@@ -260,6 +267,8 @@ export class CustomizedDrawioClient extends DrawioClient<
 			this.onAiAskEmitter.emit(evt);
 		} else if (evt.event === "aiLasso") {
 			this.onAiLassoEmitter.emit(evt);
+		} else if (evt.event === "aiMarkup") {
+			this.onAiMarkupEmitter.emit(evt);
 		} else if (evt.event === "aiReview") {
 			this.latestReview = evt;
 			this.onAiReviewEmitter.emit(evt);

@@ -1,5 +1,7 @@
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
+import { lintDiagram } from "./lint";
+import type { LoadedTemplate } from "./templates/profile";
 import type { ImageData, ToolSpec } from "./providers/types";
 import { getStyleReference } from "./styleReference";
 import { TOOL_SCHEMAS } from "./toolSchemas";
@@ -21,7 +23,10 @@ const MAX_XML_CHARS = 80_000;
  * (or was last active), so tools keep working while the chat has focus.
  */
 export class DiagramToolbox {
-	constructor(private readonly getEditor: () => DrawioEditor | undefined) {}
+	constructor(
+		private readonly getEditor: () => DrawioEditor | undefined,
+		private readonly getTemplate: (editor: DrawioEditor) => Promise<LoadedTemplate | undefined> = async () => undefined
+	) {}
 
 	public specs(options: { vision: boolean }): ToolSpec[] {
 		return TOOL_SCHEMAS.filter((t) => options.vision || !t.requiresVision).map((t) => ({
@@ -67,6 +72,24 @@ export class DiagramToolbox {
 						summary: `Read XML (${Math.round(xml.length / 1024)} KB)`,
 					};
 				}
+				case "drawio_lint":
+					return await this.lint(editor, input);
+				case "drawio_get_template": {
+					const t = await this.getTemplate(editor);
+					if (!t) {
+						return { text: "No design template is active for this repository. Use general good practice.", summary: "No template" };
+					}
+					return {
+						text: JSON.stringify({
+							name: t.manifest.name,
+							enforce: t.manifest.enforce,
+							rules: t.rules,
+							profile: t.manifest.profile,
+							hint: "Use profile.shapes[].style / profile.library[].style verbatim for new shapes of that kind.",
+						}),
+						summary: `Template "${t.manifest.name}"`,
+					};
+				}
 				default:
 					throw new ToolInputError(`Unknown tool "${name}"`);
 			}
@@ -86,8 +109,12 @@ export class DiagramToolbox {
 			includeStyles: input.includeStyles !== false,
 			maxCells: clampNumber(input.maxCells, 1, 5000) ?? getAiSettings().maxCellsInContext,
 		});
+		const template = await this.getTemplate(editor);
 		const notes = [
 			"Geometry x/y are relative to the cell's parent container.",
+			template
+				? `The repository's design template "${template.manifest.name}" is active: follow it (drawio_get_template has the rules and styles).`
+				: undefined,
 			model.truncated
 				? `Truncated: showing ${model.cells.length} of ${model.totalCells} cells. Use drawio_find_cells or scope "selection" to narrow down.`
 				: undefined,
@@ -149,6 +176,32 @@ export class DiagramToolbox {
 				? `Rolled back: ${failed[0].error?.slice(0, 60)}`
 				: `Applied ${okCount}, ${failed.length} failed`;
 		return { text: JSON.stringify(payload), summary, isError: failed.length > 0 };
+	}
+
+	/** Lint the whole page (with the active template); used by the tool and the review command. */
+	public async lintEditor(editor: DrawioEditor) {
+		const [model, template] = await Promise.all([
+			editor.drawioClient.aiGetModel({ scope: "page", includeStyles: true, maxCells: 20000 }),
+			this.getTemplate(editor),
+		]);
+		return { issues: lintDiagram(model, template), template };
+	}
+
+	private async lint(editor: DrawioEditor, input: Record<string, any>): Promise<ToolResult> {
+		const { issues, template } = await this.lintEditor(editor);
+		const ids: string[] = Array.isArray(input.ids) ? input.ids.map(String) : [];
+		const shown = ids.length ? issues.filter((i) => i.cellIds.length === 0 || i.cellIds.some((id) => ids.includes(id))) : issues;
+		return {
+			text: JSON.stringify({
+				template: template?.manifest.name ?? null,
+				issueCount: shown.length,
+				issues: shown,
+				hint: shown.length
+					? "Fix errors and warnings that relate to your task; mention template violations the user asked for instead of silently reverting them."
+					: undefined,
+			}),
+			summary: shown.length === 0 ? "No lint issues" : `${shown.length} lint issue${shown.length === 1 ? "" : "s"}`,
+		};
 	}
 
 	private async findCells(editor: DrawioEditor, input: Record<string, any>): Promise<ToolResult> {

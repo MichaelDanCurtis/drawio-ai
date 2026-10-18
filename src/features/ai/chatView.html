@@ -56,6 +56,14 @@
 	#review .added { color: var(--vscode-gitDecoration-addedResourceForeground, #16a34a); }
 	#review .changed { color: var(--vscode-gitDecoration-modifiedResourceForeground, #d97706); }
 	#review .removed { color: var(--vscode-gitDecoration-deletedResourceForeground, #dc2626); }
+	#attachments { display: flex; gap: 8px; flex-wrap: wrap; }
+	#attachments:empty { display: none; }
+	.att { position: relative; }
+	.att img { height: 48px; max-width: 96px; object-fit: cover; border-radius: 4px; border: 1px solid var(--vscode-panel-border); display: block; }
+	.att button { position: absolute; top: -6px; right: -6px; padding: 0 5px; border-radius: 999px; font-size: 11px; line-height: 16px; }
+	.msg.user .attached { display: block; font-size: 11px; opacity: .75; margin-top: 2px; }
+	#template { cursor: pointer; background: none; }
+	body.dragging footer { outline: 2px dashed var(--accent); outline-offset: -4px; }
 </style>
 </head>
 <body>
@@ -69,11 +77,14 @@
 		<span class="chip hidden" id="selection"></span>
 		<button id="lasso" title="Draw around shapes in the diagram to select them (Alt+L in the diagram)">◌ Lasso</button>
 		<button id="askInDiagram" title="Open the inline prompt next to the selection (Alt+K in the diagram)">✦ Inline</button>
+		<button id="markup" title="Draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M in the diagram)">✎ Markup</button>
+		<button id="lint" title="Check the diagram for problems and template violations">✓ Review</button>
+		<button id="template" class="chip" title="Design template the AI follows (click to change)">◆ No template</button>
 	</div>
 	<div id="messages">
 		<div id="empty">
 			<h3>✦ Draw.io AI</h3>
-			<p>Describe a change and watch the diagram update. Select or lasso shapes to change only those.</p>
+			<p>Describe a change and watch the diagram update. Select or lasso shapes to change only those. Paste or drop a sketch or screenshot to turn it into an editable diagram.</p>
 			<div class="suggestions">
 				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
 				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
@@ -90,10 +101,12 @@
 				<button id="reviewAccept" class="primary" title="Keep every pending AI change">Accept</button>
 			</span>
 		</div>
-		<textarea id="input" rows="2" placeholder="Describe a change… (Enter to send, Shift+Enter for newline)"></textarea>
+		<div id="attachments"></div>
+		<textarea id="input" rows="2" placeholder="Describe a change… (Enter to send, Shift+Enter for newline, paste images)"></textarea>
 		<div class="row">
 			<span class="hint" id="hint">Edits are undoable with Ctrl/Cmd+Z in the diagram.</span>
 			<span>
+				<button id="attach" class="icon" title="Attach a sketch, whiteboard photo or screenshot">🖼</button>
 				<button id="stop" class="hidden">■ Stop</button>
 				<button id="send" class="primary">Send</button>
 			</span>
@@ -157,6 +170,12 @@
 				el.appendChild(s);
 			}
 			el.appendChild(document.createTextNode(item.text));
+			if (item.attachments && item.attachments.length) {
+				const a = document.createElement("span");
+				a.className = "attached";
+				a.textContent = item.attachments.join(" · ");
+				el.appendChild(a);
+			}
 			lastAssistant = null;
 		} else if (item.kind === "assistant") {
 			el.className = "msg assistant";
@@ -228,7 +247,8 @@
 		sel.classList.toggle("hidden", !state.selectionCount);
 		sel.textContent = "◉ " + state.selectionCount + " selected";
 		$("lasso").classList.toggle("active", !!state.lassoActive);
-		$("lasso").disabled = $("askInDiagram").disabled = !state.file;
+		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
+		$("template").textContent = "◆ " + (state.template || "No template");
 		renderReview(state.review);
 		setBusy(state.busy);
 	}
@@ -254,10 +274,78 @@
 		$("hint").textContent = busy ? "Working… watch the diagram." : "Edits are undoable with Ctrl/Cmd+Z in the diagram.";
 	}
 
+	// Providers accept at most 5 MB of base64 per image; larger or huge images are re-encoded smaller.
+	const MAX_IMAGES = 4, MAX_SEND_B64 = 5000000, MAX_SIDE = 2048;
+	let images = [];
+	function renderAttachments() {
+		const box = $("attachments");
+		box.textContent = "";
+		images.forEach((img, i) => {
+			const wrap = document.createElement("span");
+			wrap.className = "att";
+			const el = document.createElement("img");
+			el.src = "data:" + img.mimeType + ";base64," + img.base64;
+			el.alt = "attached image " + (i + 1);
+			const x = document.createElement("button");
+			x.textContent = "×";
+			x.title = "Remove";
+			x.addEventListener("click", () => { images.splice(i, 1); renderAttachments(); });
+			wrap.append(el, x);
+			box.appendChild(wrap);
+		});
+	}
+	function flashHint(text) {
+		$("hint").textContent = text;
+		setTimeout(() => setBusy(state.busy), 4000);
+	}
+	function addImageDataUrl(url) {
+		const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/.exec(url);
+		if (!m || images.length >= MAX_IMAGES) return;
+		const img = new Image();
+		img.onload = () => {
+			if (images.length >= MAX_IMAGES) return;
+			const w = img.naturalWidth, h = img.naturalHeight;
+			if (m[2].length <= MAX_SEND_B64 && Math.max(w, h) <= MAX_SIDE) {
+				images.push({ mimeType: m[1], base64: m[2] });
+			} else {
+				const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+				const canvas = document.createElement("canvas");
+				canvas.width = Math.max(1, Math.round(w * scale));
+				canvas.height = Math.max(1, Math.round(h * scale));
+				const ctx = canvas.getContext("2d");
+				ctx.fillStyle = "#ffffff";
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+				ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+				let out = "", quality = 0.9;
+				do {
+					out = canvas.toDataURL("image/jpeg", quality).split(",")[1];
+					quality -= 0.15;
+				} while (out.length > MAX_SEND_B64 && quality > 0.3);
+				if (out.length > MAX_SEND_B64) return flashHint("That image is too large to send.");
+				images.push({ mimeType: "image/jpeg", base64: out });
+			}
+			renderAttachments();
+		};
+		img.onerror = () => flashHint("Could not read that image.");
+		img.src = url;
+	}
+	function addFiles(files) {
+		for (const f of files) {
+			if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) continue;
+			const r = new FileReader();
+			r.onload = () => addImageDataUrl(String(r.result));
+			r.readAsDataURL(f);
+		}
+	}
+
 	function send(text) {
 		text = (text ?? input.value).trim();
-		if (!text || state.busy) return;
-		vscode.postMessage({ type: "send", text });
+		if ((!text && images.length === 0) || state.busy) return;
+		const msg = { type: "send", text };
+		if (images.length) msg.images = images;
+		vscode.postMessage(msg);
+		images = [];
+		renderAttachments();
 		input.value = "";
 		autosize();
 	}
@@ -269,6 +357,21 @@
 	$("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
 	$("lasso").addEventListener("click", () => vscode.postMessage({ type: "lasso" }));
 	$("askInDiagram").addEventListener("click", () => vscode.postMessage({ type: "askInDiagram" }));
+	$("markup").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.markup" }));
+	$("lint").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.reviewDiagram" }));
+	$("template").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.selectTemplate" }));
+	$("attach").addEventListener("click", () => vscode.postMessage({ type: "pickImage" }));
+	input.addEventListener("paste", (e) => {
+		const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+		if (files.length) { e.preventDefault(); addFiles(files); }
+	});
+	document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
+	document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+	document.addEventListener("drop", (e) => {
+		e.preventDefault();
+		document.body.classList.remove("dragging");
+		addFiles([...(e.dataTransfer?.files || [])]);
+	});
 	$("reviewAccept").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "accept" }));
 	$("reviewReject").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "reject" }));
 	$("provider").addEventListener("change", (e) => vscode.postMessage({ type: "pickProvider", providerId: e.target.value }));
@@ -303,6 +406,7 @@
 			}
 			case "busy": setBusy(m.busy); break;
 			case "focusInput": input.focus(); break;
+			case "addImages": (m.images || []).forEach((img) => addImageDataUrl("data:" + img.mimeType + ";base64," + img.base64)); input.focus(); break;
 		}
 	});
 

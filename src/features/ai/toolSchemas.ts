@@ -267,6 +267,25 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 			"Return the raw draw.io file XML (all pages). Only needed for exact copying of complex styles or multi-page questions; prefer drawio_get_diagram.",
 		inputSchema: { type: "object", properties: {} },
 	},
+	{
+		name: "drawio_lint",
+		displayName: "Lint Draw.io Diagram",
+		description:
+			"Check the current page for problems: dangling or duplicate connectors, overlapping or almost-aligned shapes, unlabeled shapes, disconnected shapes, tiny text, and violations of the repository's active design template (palette, fonts, connector style, required title/legend). Returns issues with cell ids. Use it after larger edits and when asked to review a diagram.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				ids: { type: "array", items: { type: "string" }, description: "Only report issues involving these cells." },
+			},
+		},
+	},
+	{
+		name: "drawio_get_template",
+		displayName: "Get Draw.io Design Template",
+		description:
+			"Return the repository's active design template in full: its rules, extracted style profile (palette, fonts, shape style per role, connector style) and every library shape with its exact style. Follow it when creating or restyling shapes.",
+		inputSchema: { type: "object", properties: {} },
+	},
 ];
 
 export function getToolSchema(name: string): ToolSchema {

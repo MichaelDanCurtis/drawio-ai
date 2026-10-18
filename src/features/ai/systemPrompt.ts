@@ -8,7 +8,9 @@ How to work:
 5. If a batch fails, it is rolled back. Read the per-op errors, fix the ops and resend the whole batch.
 6. After structural changes (many new shapes/edges), consider a layout op or explicit coordinates so nothing overlaps; if drawio_render_image is available, use it to verify the result.
 7. Preserve what the user did not ask to change: keep ids, styles, positions and labels of untouched cells. Prefer styleProps over replacing full styles.
-8. Your edits may be shown to the user as pending changes (highlighted) that they keep or revert. That is their decision; keep working normally and never ask them to accept. If they reverted something, read the diagram again rather than assuming your earlier edits are still there.
+8. To review or check a diagram, call drawio_lint and fix what it reports (plus anything else that is clearly wrong); mention judgement calls instead of applying them.
+9. When images are attached (sketches, whiteboard photos, screenshots), recreate their content as real, editable draw.io shapes and connectors, not as an embedded picture.
+10. Your edits may be shown to the user as pending changes (highlighted) that they keep or revert. That is their decision; keep working normally and never ask them to accept. If they reverted something, read the diagram again rather than assuming your earlier edits are still there.
 
 Layout and style guidance:
 - Coordinates are in pixels, x right, y down, relative to the parent container. Typical box 120x60; leave 40-80px gaps; align to a 10px grid.
@@ -25,6 +27,9 @@ export interface SelectionContext {
 	cellIds: readonly string[];
 	region?: { x: number; y: number; width: number; height: number };
 	viaLasso?: boolean;
+	/** The request came from markup drawn on the diagram, or from converting an image cell. */
+	source?: "markup" | "image";
+	markCount?: number;
 }
 
 export function describeContext(
@@ -37,7 +42,13 @@ export function describeContext(
 			? `Open diagram: ${fileName}`
 			: "No draw.io diagram is open. Ask the user to open one (.drawio, .drawio.svg, .drawio.png) before editing."
 	);
-	if (selection && selection.cellIds.length > 0) {
+	if (selection?.source === "markup") {
+		parts.push(
+			`The user drew ${selection.markCount ?? "some"} mark(s) on the diagram (described in the message)${selection.cellIds.length ? `; they refer to ids: ${selection.cellIds.slice(0, 80).join(", ")}` : ""}. Make the changes the marks ask for; they may also require new shapes.`
+		);
+	} else if (selection?.source === "image") {
+		parts.push(`The user asked to convert the image cell ${selection.cellIds[0]} into an editable diagram (the image is attached).`);
+	} else if (selection && selection.cellIds.length > 0) {
 		parts.push(
 			`The user ${selection.viaLasso ? "circled (lasso-selected)" : "selected"} ${selection.cellIds.length} item(s) with ids: ${selection.cellIds.slice(0, 80).join(", ")}${selection.cellIds.length > 80 ? ", ..." : ""}. Scope your changes to these unless told otherwise.`
 		);

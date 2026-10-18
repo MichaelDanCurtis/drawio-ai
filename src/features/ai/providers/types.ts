@@ -1,12 +1,13 @@
 import type { CancellationToken } from "vscode";
 
 export interface ImageData {
-	mimeType: "image/png";
+	mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 	base64: string;
 }
 
 export type ChatPart =
 	| { type: "text"; text: string }
+	| { type: "image"; image: ImageData }
 	| { type: "toolCall"; id: string; name: string; input: unknown }
 	| {
 			type: "toolResult";

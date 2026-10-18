@@ -1,6 +1,6 @@
 import type { CancellationToken } from "vscode";
 import type { DiagramToolbox, ToolResult } from "./DiagramToolbox";
-import type { AiModelClient, ChatMessage, ChatPart } from "./providers/types";
+import type { AiModelClient, ChatMessage, ChatPart, ImageData } from "./providers/types";
 import { SYSTEM_PROMPT } from "./systemPrompt";
 
 export interface AgentSink {
@@ -16,6 +16,11 @@ export interface AgentRun {
 	userText: string;
 	/** Per-turn context (open file, selection); sent with this turn only. */
 	context: string;
+	/** Appended to the system prompt (e.g. the active design template). */
+	systemExtra?: string;
+	/** Large inputs for this turn (e.g. code analysis); shrunk in later turns. */
+	attachments?: readonly { name: string; text: string }[];
+	images?: readonly ImageData[];
 	sink: AgentSink;
 	token: CancellationToken;
 	maxRounds: number;
@@ -35,10 +40,23 @@ export class DiagramAgent {
 		const produced: ChatMessage[] = [
 			{
 				role: "user",
-				parts: [{ type: "text", text: `<context>\n${run.context}\n</context>\n\n${run.userText}` }],
+				parts: [
+					{ type: "text", text: `<context>\n${run.context}\n</context>\n\n${run.userText}` },
+					...(run.attachments ?? []).map(
+						(a): ChatPart => ({ type: "text", text: `${ATTACHMENT_OPEN}${escapeAttr(a.name)}">\n${a.text}\n</attachment>` })
+					),
+					...(run.images ?? []).map((image): ChatPart => ({ type: "image", image })),
+				],
 			},
 		];
+		if (run.images?.length && !run.client.model.vision) {
+			return {
+				messages: [],
+				error: new Error(`${run.client.model.name} cannot read images. Pick a model with vision support (e.g. Claude or GPT-4o) and try again.`),
+			};
+		}
 		const tools = this.toolbox.specs({ vision: run.client.model.vision });
+		const system = run.systemExtra ? `${SYSTEM_PROMPT}\n\n${run.systemExtra}` : SYSTEM_PROMPT;
 
 		for (let round = 0; round < run.maxRounds; round++) {
 			if (run.token.isCancellationRequested) {
@@ -51,7 +69,7 @@ export class DiagramAgent {
 			const calls: { id: string; name: string; input: unknown }[] = [];
 			try {
 				for await (const evt of run.client.stream(
-					{ system: SYSTEM_PROMPT, messages: [...compact(run.history), ...produced], tools },
+					{ system, messages: [...compact(run.history), ...produced], tools },
 					run.token
 				)) {
 					if (evt.type === "text") {
@@ -119,6 +137,11 @@ export class DiagramAgent {
 
 const KEEP_FULL_TURNS = 2;
 const MAX_OLD_RESULT_CHARS = 1500;
+const ATTACHMENT_OPEN = '<attachment name="';
+
+function escapeAttr(s: string): string {
+	return s.replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`);
+}
 
 /** Shrinks tool results and drops images from older turns to save tokens. */
 function compact(history: readonly ChatMessage[]): ChatMessage[] {
@@ -131,18 +154,25 @@ function compact(history: readonly ChatMessage[]): ChatMessage[] {
 			? m
 			: {
 					role: m.role,
-					parts: m.parts.map((p) =>
-						p.type === "toolResult"
-							? {
-									...p,
-									image: undefined,
-									text:
-										p.text.length > MAX_OLD_RESULT_CHARS
-											? p.text.slice(0, MAX_OLD_RESULT_CHARS) + "…[older result truncated; re-read the diagram for current state]"
-											: p.text,
-							  }
-							: p
-					),
+					parts: m.parts.map((p): ChatPart => {
+						if (p.type === "toolResult") {
+							return {
+								...p,
+								image: undefined,
+								text:
+									p.text.length > MAX_OLD_RESULT_CHARS
+										? p.text.slice(0, MAX_OLD_RESULT_CHARS) + "…[older result truncated; re-read the diagram for current state]"
+										: p.text,
+							};
+						}
+						if (p.type === "image") {
+							return { type: "text", text: "[image from an earlier turn omitted]" };
+						}
+						if (p.type === "text" && p.text.startsWith(ATTACHMENT_OPEN) && p.text.length > MAX_OLD_RESULT_CHARS) {
+							return { type: "text", text: p.text.slice(0, MAX_OLD_RESULT_CHARS) + "\n…[older attachment truncated]\n</attachment>" };
+						}
+						return p;
+					}),
 			  }
 	);
 }

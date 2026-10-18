@@ -174,6 +174,88 @@ async function runSteps() {
 		assert.match(text, /Rendered PNG attached/);
 	});
 
+	await step("v2 commands and tools are registered", async () => {
+		const commands = await vscode.commands.getCommands(true);
+		for (const c of ["drawio-ai.markup", "drawio-ai.reviewDiagram", "drawio-ai.createTemplate", "drawio-ai.selectTemplate", "drawio-ai.diagramFromImage", "drawio-ai.diagramFromCode"]) {
+			assert.ok(commands.includes(c), `command ${c} missing`);
+		}
+		const names = vscode.lm.tools.map((t) => t.name);
+		assert.ok(names.includes("drawio_lint") && names.includes("drawio_get_template"));
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		const lint = JSON.parse(await invoke("drawio_lint", {}));
+		assert.equal(lint.template, null);
+		assert.equal(typeof lint.issueCount, "number");
+		assert.match(await invoke("drawio_get_template", {}), /No design template is active/);
+	});
+
+	await step("a design template created from an example diagram and a style guide drives lint", async () => {
+		const example = path.join(dir, "example.drawio");
+		fs.writeFileSync(
+			example,
+			'<mxfile><diagram name="x"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>' +
+				'<mxCell id="a" value="Service" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontFamily=Inter;" vertex="1" parent="1"><mxGeometry width="120" height="60" as="geometry"/></mxCell>' +
+				'<mxCell id="b" value="Store" style="shape=cylinder3;fillColor=#d5e8d4;strokeColor=#82b366;fontFamily=Inter;" vertex="1" parent="1"><mxGeometry x="200" width="80" height="80" as="geometry"/></mxCell>' +
+				'<mxCell id="e" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;" edge="1" parent="1" source="a" target="b"><mxGeometry relative="1" as="geometry"/></mxCell>' +
+				"</root></mxGraphModel></diagram></mxfile>"
+		);
+		const guide = path.join(dir, "guide.md");
+		fs.writeFileSync(guide, "# House style\n\nServices are blue rounded rectangles. Stores are green cylinders.\n");
+		const t = await vscode.commands.executeCommand("drawio-ai.createTemplate", {
+			name: "Team Style",
+			sources: [example, guide],
+			enforce: { palette: true, fonts: true, edges: true, title: false, legend: false },
+			rules: "extracted",
+			root: dir,
+			silent: true,
+		});
+		assert.equal(t.id, "team-style");
+		const folder = path.join(dir, ".drawio-ai/templates/team-style");
+		assert.ok(fs.existsSync(path.join(folder, "sources/example.drawio")));
+		assert.match(fs.readFileSync(path.join(folder, "rules.md"), "utf8"), /#dae8fc[\s\S]*Services are blue rounded rectangles/);
+		const manifest = JSON.parse(fs.readFileSync(path.join(folder, "template.json"), "utf8"));
+		assert.deepEqual(manifest.sources.map((s) => s.kind), ["diagram", "guide"]);
+
+		const tpl = JSON.parse(await invoke("drawio_get_template", {}));
+		assert.equal(tpl.name, "Team Style");
+		assert.equal(tpl.profile.fonts[0].value, "Inter");
+		const model = JSON.parse(await invoke("drawio_get_diagram", {}));
+		assert.ok(model.notes.some((n) => /design template "Team Style" is active/.test(n)));
+
+		const added = JSON.parse(await invoke("drawio_apply_operations", { ops: [{ op: "addShape", tempId: "$r", label: "Rogue", x: 600, y: 400, style: "rounded=1;fillColor=#ff0000;fontFamily=Comic Sans MS;" }] }));
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		const lint = JSON.parse(await invoke("drawio_lint", { ids: [added.idMap.$r] }));
+		assert.equal(lint.template, "Team Style");
+		const rules = lint.issues.map((i) => i.rule);
+		assert.ok(rules.includes("template-palette") && rules.includes("template-font"), JSON.stringify(lint));
+		const issues = await vscode.commands.executeCommand("drawio-ai.reviewDiagram", { fix: "none" });
+		assert.ok(issues.some((i) => i.rule === "template-palette" && i.cellIds.includes(added.idMap.$r)));
+	});
+
+	await step("diagram from code: SQL schema analysis and codeRef → code links", async () => {
+		const sql = path.join(dir, "schema.sql");
+		fs.writeFileSync(sql, "CREATE TABLE users (\n  id int primary key,\n  org_id int references orgs(id)\n);\n\nCREATE TABLE orgs (id int primary key);\n");
+		const text = await vscode.commands.executeCommand("drawio-ai.diagramFromCode", { paths: [sql], kind: "erd", analyzeOnly: true });
+		assert.match(text, /\(erd\): 2 entities, 1 relations/);
+		assert.match(text, /"codeRef":"e1","kind":"table","name":"users"/);
+
+		const r = JSON.parse(await invoke("drawio_apply_operations", { ops: [{ op: "addShape", tempId: "$u", label: "users", x: 40, y: 600, data: { codeRef: "e1" } }, { op: "addShape", tempId: "$o", label: "orgs", x: 300, y: 600 }] }));
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		// No model is available in the test host, so the AI request fails fast; linking still runs on what is on the page.
+		await vscode.commands.executeCommand("drawio-ai.diagramFromCode", { paths: [sql], kind: "erd", target: "current" });
+		const model = await waitFor(async () => {
+			const m = JSON.parse(await invoke("drawio_get_diagram", {}));
+			return m.cells.find((c) => c.id === r.idMap.$o)?.data?.hedietLinkedDataV1_path ? m : undefined;
+		}, "shapes to be linked");
+		const users = model.cells.find((c) => c.id === r.idMap.$u);
+		assert.equal(users.data.codeRef, undefined, "codeRef is replaced by the link");
+		assert.equal(users.data.hedietLinkedDataV1_path, "../schema.sql");
+		assert.equal(users.data["hedietLinkedDataV1_start_line_x-num"], "0");
+		assert.equal(users.data["hedietLinkedDataV1_end_line_x-num"], "3");
+		const orgs = model.cells.find((c) => c.id === r.idMap.$o);
+		assert.equal(orgs.data["hedietLinkedDataV1_start_line_x-num"], "5", "unreferenced shapes are linked by exact name");
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+	});
+
 	await step("saving writes the AI edits to disk", async () => {
 		const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === file.fsPath);
 		await doc.save();

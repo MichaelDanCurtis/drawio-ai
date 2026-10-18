@@ -457,3 +457,147 @@ test("review: the in-diagram bar keeps or reverts the selection", async () => {
 	const labels = (await getModel()).cells.map((c) => c.label);
 	assert.ok(labels.includes("KeepMe") && !labels.includes("DropMe"));
 });
+
+// ---------------------------------------------------------------------------
+// Markup and image conversion
+// ---------------------------------------------------------------------------
+
+/** Scrolls all cells into view once, then returns their centres in client coordinates. */
+async function clientCenters(...ids) {
+	return page.evaluate((cellIds) => {
+		const graph = editorUi.editor.graph;
+		const cells = cellIds.map((id) => graph.model.getCell(id));
+		graph.zoomTo(1);
+		editorUi.resetScrollbars();
+		graph.scrollCellToVisible(cells[0], true);
+		const r = graph.container.getBoundingClientRect();
+		return cells.map((c) => {
+			const s = graph.view.getState(c);
+			return { x: r.left + s.getCenterX() - graph.container.scrollLeft, y: r.top + s.getCenterY() - graph.container.scrollTop, w: s.width };
+		});
+	}, ids);
+}
+
+async function resetMarkup() {
+	await send({ action: "aiSetMarkupMode", enabled: false });
+	await page.keyboard.press("Escape");
+	await page.evaluate(() => editorUi.editor.graph.clearSelection());
+}
+
+async function drag(from, to) {
+	await page.mouse.move(from.x, from.y);
+	await page.mouse.down();
+	await page.mouse.move(to.x, to.y, { steps: 10 });
+	await page.mouse.up();
+}
+
+test("markup: arrow, strike-through and note become one AI request; nothing is added to the diagram", async () => {
+	await freshBaseline();
+	await apply([{ op: "insertXml", xml: '<mxCell id="cache" value="Cache" style="rounded=1;html=1;" vertex="1" parent="1"><mxGeometry x="40" y="200" width="120" height="60" as="geometry"/></mxCell>' }]);
+	const before = (await getModel()).totalCells;
+	await resetMarkup();
+	const [api, db, cache] = await clientCenters("api", "db", "cache");
+	inbox.length = 0;
+	await send({ action: "aiSetMarkupMode", enabled: true });
+	await waitFor((m) => m.event === "aiMarkup" && m.active === true);
+
+	await drag(api, db);
+	await page.waitForSelector("[data-ai-markup-note]");
+	await page.keyboard.type("through a queue");
+	await page.keyboard.press("Enter");
+
+	await page.keyboard.press("s");
+	await drag({ x: cache.x - cache.w / 2 - 10, y: cache.y }, { x: cache.x + cache.w / 2 + 10, y: cache.y + 4 });
+
+	await page.keyboard.press("n");
+	await page.mouse.click(db.x + 200, cache.y + 60);
+	await page.waitForSelector("[data-ai-markup-note]");
+	await page.keyboard.type("add a CDN here");
+	await page.keyboard.press("Enter");
+
+	assert.equal(await page.locator("[data-ai-markup-count]").innerText(), "3 marks");
+	assert.ok((await page.locator("[data-ai-mark]").count()) >= 3, "marks are drawn on the canvas");
+	assert.equal((await getModel()).totalCells, before, "marks are overlays, not cells");
+
+	await page.fill("[data-ai-markup-instructions]", "keep the colours");
+	await page.click('[data-ai-markup="send"]');
+	const ask = await waitFor((m) => m.event === "aiAsk");
+	assert.equal(ask.source, "markup");
+	assert.equal(ask.markCount, 3);
+	assert.deepEqual([...ask.cellIds].sort(), ["api", "cache", "db"]);
+	assert.match(ask.prompt, /1\. Arrow from "API" \[id api\] to "DB" \[id db\] — "through a queue"/);
+	assert.match(ask.prompt, /2\. Strike-through over "Cache" \[id cache\]/);
+	assert.match(ask.prompt, /3\. Note on empty space \(x=\d+, y=\d+\): "add a CDN here"/);
+	assert.match(ask.prompt, /keep the colours/);
+	await waitFor((m) => m.event === "aiMarkup" && m.active === false);
+	assert.equal(await page.locator("[data-ai-markup-bar], [data-ai-markup-layer]").count(), 0);
+});
+
+test("markup: undo removes the last mark, Escape leaves without sending", async () => {
+	await freshBaseline();
+	await resetMarkup();
+	const [api, db] = await clientCenters("api", "db");
+	inbox.length = 0;
+	await send({ action: "aiSetMarkupMode", enabled: true });
+	await waitFor((m) => m.event === "aiMarkup" && m.active);
+	await drag(api, db);
+	await page.waitForSelector("[data-ai-markup-note]");
+	await page.keyboard.press("Escape");
+	assert.equal(await page.locator("[data-ai-markup-count]").innerText(), "1 mark", "skipping the arrow note keeps the arrow");
+	await page.click('[data-ai-markup="undo"]');
+	assert.equal(await page.locator("[data-ai-markup-count]").innerText(), "");
+	assert.equal(await page.locator('[data-ai-markup="send"]').isDisabled(), true);
+	await page.keyboard.press("Escape");
+	await waitFor((m) => m.event === "aiMarkup" && m.active === false);
+	assert.ok(!inbox.some((m) => m.event === "aiAsk"));
+});
+
+function tinyPng() {
+	const zlib = require("zlib");
+	const crcTable = Array.from({ length: 256 }, (_, n) => {
+		let c = n;
+		for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+		return c >>> 0;
+	});
+	const crc = (buf) => {
+		let c = 0xffffffff;
+		for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8);
+		return (c ^ 0xffffffff) >>> 0;
+	};
+	const chunk = (type, data) => {
+		const len = Buffer.alloc(4);
+		len.writeUInt32BE(data.length);
+		const td = Buffer.concat([Buffer.from(type), data]);
+		const c = Buffer.alloc(4);
+		c.writeUInt32BE(crc(td));
+		return Buffer.concat([len, td, c]);
+	};
+	const w = 8, h = 8;
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(w, 0);
+	ihdr.writeUInt32BE(h, 4);
+	ihdr[8] = 8; ihdr[9] = 2;
+	const raw = Buffer.concat(Array.from({ length: h }, () => Buffer.concat([Buffer.from([0]), Buffer.from(Array(w).fill([220, 40, 40]).flat())])));
+	return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]).toString("base64");
+}
+
+test("image cells offer 'Convert image to diagram', which sends the rendered image to the AI", async () => {
+	await freshBaseline();
+	const r = await apply([
+		{ op: "addShape", tempId: "$img", label: "", x: 500, y: 300, width: 160, height: 120, style: `shape=image;html=1;imageAspect=0;image=data:image/png,${tinyPng()};` },
+	]);
+	const id = r.idMap.$img;
+	await resetMarkup();
+	const [c] = await clientCenters(id);
+	await request({ action: "aiSetSelection", cellIds: [id], reveal: false });
+	inbox.length = 0;
+	await page.mouse.click(c.x, c.y, { button: "right" });
+	await page.click("text=✦ Convert image to diagram");
+	const ask = await waitFor((m) => m.event === "aiAsk");
+	assert.equal(ask.source, "image");
+	assert.deepEqual(ask.cellIds, [id]);
+	assert.equal(ask.images.length, 1);
+	assert.equal(ask.images[0].mimeType, "image/png");
+	assert.ok(ask.images[0].base64.length > 200);
+	assert.match(ask.prompt, new RegExp(`delete the image cell ${id}`));
+});
