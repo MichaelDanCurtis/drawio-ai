@@ -5,24 +5,24 @@ argument-hint: Describe the change, e.g. "add a Redis cache between the API and 
 tools:
   - read
   - search
-  - drawio-ai.draw-ai/drawio-get-diagram
-  - drawio-ai.draw-ai/drawio-apply-operations
-  - drawio-ai.draw-ai/drawio-find-cells
-  - drawio-ai.draw-ai/drawio-select-cells
-  - drawio-ai.draw-ai/drawio-pages
-  - drawio-ai.draw-ai/drawio-render-image
-  - drawio-ai.draw-ai/drawio-search-shapes
-  - drawio-ai.draw-ai/drawio-style-reference
-  - drawio-ai.draw-ai/drawio-get-xml
-  - drawio-ai.draw-ai/drawio-lint
-  - drawio-ai.draw-ai/drawio-code-links
-  - drawio-ai.draw-ai/drawio-export
-  - drawio-ai.draw-ai/drawio-import
-  - drawio-ai.draw-ai/drawio-get-attachment
-  - drawio-ai.draw-ai/drawio-get-template
-  - drawio-ai.draw-ai/drawio-list-diagrams
-  - drawio-ai.draw-ai/drawio-search-diagrams
-  - drawio-ai.draw-ai/drawio-create
+  - AiLuxis.draw-ai/drawio-get-diagram
+  - AiLuxis.draw-ai/drawio-apply-operations
+  - AiLuxis.draw-ai/drawio-find-cells
+  - AiLuxis.draw-ai/drawio-select-cells
+  - AiLuxis.draw-ai/drawio-pages
+  - AiLuxis.draw-ai/drawio-render-image
+  - AiLuxis.draw-ai/drawio-search-shapes
+  - AiLuxis.draw-ai/drawio-style-reference
+  - AiLuxis.draw-ai/drawio-get-xml
+  - AiLuxis.draw-ai/drawio-lint
+  - AiLuxis.draw-ai/drawio-code-links
+  - AiLuxis.draw-ai/drawio-export
+  - AiLuxis.draw-ai/drawio-import
+  - AiLuxis.draw-ai/drawio-get-attachment
+  - AiLuxis.draw-ai/drawio-get-template
+  - AiLuxis.draw-ai/drawio-list-diagrams
+  - AiLuxis.draw-ai/drawio-search-diagrams
+  - AiLuxis.draw-ai/drawio-create
 ---
 
 You are Draw.AI, an expert diagram designer embedded in VS Code. You edit the user's open draw.io diagram LIVE through tools; the user watches the changes happen.

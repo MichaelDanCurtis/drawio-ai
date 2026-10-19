@@ -63,10 +63,22 @@ try {
 } catch {
 	errors.push("languageModelTools are out of sync: run `node scripts/sync-lm-tools.js`.");
 }
+try {
+	// The Claude Code / Codex plugin manifests carry the version.
+	execFileSync(process.execPath, [path.join(__dirname, "generate-agent-plugin.js"), "--check"], { stdio: "pipe" });
+} catch {
+	errors.push("The agent plugin is out of date: run `node scripts/generate-agent-plugin.js`.");
+}
 
 if (process.argv.includes("--built")) {
 	for (const f of ["dist/extension/index.js", "dist/custom-drawio-plugins/index.js", "drawio/src/main/webapp/index.html"]) {
 		if (!exists(f)) errors.push(`${f} is missing; build first (and init the drawio submodule).`);
+	}
+	// vsce does not follow symbolic links: a linked draw.io would be left out of the .vsix.
+	for (const p of ["drawio", "drawio/src", "drawio/src/main", "drawio/src/main/webapp"]) {
+		if (exists(p) && fs.lstatSync(path.join(root, p)).isSymbolicLink()) {
+			errors.push(`${p} is a symbolic link; vsce would leave draw.io out of the package. Use a real copy (init the drawio submodule).`);
+		}
 	}
 	if (exists("dist/custom-drawio-plugins/index.js") && /[^\x00-\x7f]/.test(fs.readFileSync(path.join(root, "dist/custom-drawio-plugins/index.js"), "utf8"))) {
 		errors.push("dist/custom-drawio-plugins/index.js is not ASCII-only.");
