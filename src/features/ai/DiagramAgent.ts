@@ -111,7 +111,7 @@ export class DiagramAgent {
 					result = { text: "Cancelled by the user.", summary: "Cancelled", isError: true };
 				} else {
 					run.sink.toolStart(call);
-					result = await this.toolbox.invoke(call.name, call.input);
+					result = await this.toolbox.invoke(call.name, call.input, { scoped: true });
 					run.sink.toolEnd(call, result);
 				}
 				results.push({

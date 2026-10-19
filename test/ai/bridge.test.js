@@ -15,7 +15,7 @@ require("ts-node").register({
 });
 
 const src = (p) => path.resolve(__dirname, "../../src", p);
-const { pickInstance, readInstances, writeInstance, removeInstance, writeLauncher, launcherPath } = require(src("agent-bridge/discovery.ts"));
+const { pickInstance, readInstances, writeInstance, removeInstance, writeLauncher, launcherPath, batchPath } = require(src("agent-bridge/discovery.ts"));
 const { AgentBridge, NOT_RUNNING } = require(src("agent-bridge/bridge.ts"));
 const { createMcpListener } = require(src("features/ai/mcp.ts"));
 const { toMcpTools } = require(src("features/ai/toolSchemas.ts"));
@@ -52,6 +52,27 @@ test("routing: the window with the diagram open wins, then the folder that holds
 	assert.deepEqual(pickInstance(all, { roots: ["/work/api/src"], exists: none }), { instance: a, reason: "root" });
 	assert.deepEqual(pickInstance(all, { roots: [], exists: none }), { instance: c, reason: "focus" }, "the focused window beats a more recent timestamp");
 	assert.equal(pickInstance([], { roots: [] }), undefined);
+});
+
+test("routing: a relative file is the one in the agent's folder, resolved to an absolute path; new files never go to an unrelated window", () => {
+	const proj = instance({ pid: 1, workspaceFolders: ["/proj"], openDiagrams: ["/proj/sub/docs/a.drawio"] });
+	const other = instance({ pid: 2, workspaceFolders: ["/other"], focused: true, lastFocusedAt: 9 });
+	const exists = (p) => p === "/proj/docs/a.drawio" || p === "/proj/sub/docs/a.drawio";
+	assert.deepEqual(pickInstance([proj, other], { file: "docs/a.drawio", roots: ["/proj/sub"], exists }), { instance: proj, reason: "open", file: "/proj/sub/docs/a.drawio" });
+	const created = pickInstance([proj, other], { file: "docs/new.drawio", roots: ["/proj/sub"], exists, requireFolder: true });
+	assert.deepEqual(created, { instance: proj, reason: "workspace", file: "/proj/sub/docs/new.drawio" });
+	assert.equal(pickInstance([proj, other], { file: "docs/new.drawio", roots: ["/elsewhere"], exists, requireFolder: true }), undefined);
+	assert.equal(pickInstance([proj, other], { file: "docs/new.drawio", roots: [], exists }).reason, "focus", "other tools still fall back to focus");
+});
+
+test("Windows launcher paths: the profile folder becomes a variable and percent signs are escaped", () => {
+	const env = { LOCALAPPDATA: "C:\\Users\\José\\AppData\\Local", USERPROFILE: "C:\\Users\\José" };
+	assert.equal(batchPath("C:\\Users\\José\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", env), "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe");
+	assert.equal(batchPath("C:\\Users\\José\\.vscode\\ext\\100%\\b.js", env), "%USERPROFILE%\\.vscode\\ext\\100%%\\b.js");
+	assert.equal(batchPath('D:\\tools\\"x"%', env), "D:\\tools\\x%%");
+	const home = tmp("win");
+	const file = writeLauncher(home, { execPath: "C:\\Users\\José\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", bridgePath: "C:\\Users\\José\\.vscode\\b.js", platform: "win32", env });
+	assert.equal(fs.readFileSync(file, "utf8"), '@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe" "%USERPROFILE%\\.vscode\\b.js" %*\r\n');
 });
 
 test("discovery files are user-only, and entries of windows that are gone are dropped", () => {
@@ -155,6 +176,7 @@ test("forwards tool calls to the right window, with the agent's name, and passes
 
 	const toA = await call("tools/call", { name: "drawio_apply_operations", arguments: { file: "flow.drawio", ops: [] } });
 	assert.equal(toA.result.content[0].text, "A:drawio_apply_operations", "relative path found in A's folder");
+	assert.deepEqual(a.calls[0].args, { file: path.join(folderA, "flow.drawio"), ops: [] }, "forwarded as the absolute path it was routed on");
 
 	const create = await call("tools/call", { name: "drawio_create", arguments: { path: "/elsewhere/new.drawio" } });
 	assert.equal(create.result.content[0].text, "B:drawio_create", "drawio_create routes by its path");
@@ -198,10 +220,33 @@ test("skips a window that stopped answering, reports a refused token, and explai
 	assert.equal(refused.result.isError, true);
 	assert.match(refused.result.content[0].text, /HTTP 401/);
 
+	const noFolder = await bridgeFor(home, { CLAUDE_PROJECT_DIR: "/not/open/anywhere" }).call("tools/call", { name: "drawio_create", arguments: { path: "docs/new.drawio" } });
+	assert.match(noFolder.result.content[0].text, /No VS Code window has the folder you are working in open/);
+
 	const { call: callNone } = bridgeFor(tmp("none"));
 	const init = await callNone("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "x", version: "1" } });
 	assert.match(init.result.instructions, /Draw\.AI extension/, "generic instructions without a window");
 	const none = await callNone("tools/call", { name: "drawio_get_diagram", arguments: {} });
 	assert.equal(none.result.isError, true);
 	assert.equal(none.result.content[0].text, NOT_RUNNING);
+});
+
+test("never resends a call that may already have run", async () => {
+	const other = await startWindow("OTHER");
+	let delivered = 0;
+	const flaky = http.createServer((req, res) => {
+		delivered++;
+		req.resume();
+		req.on("end", () => req.socket.destroy()); // the window goes away mid-call
+	});
+	await new Promise((r) => flaky.listen(0, "127.0.0.1", r));
+	after(() => flaky.close());
+	const home = tmp("flaky");
+	writeInstance(home, instance({ pid: process.pid, port: flaky.address().port, token: "x", focused: true, lastFocusedAt: 9 }));
+	writeInstance(home, instance({ pid: process.ppid, port: other.port, token: other.token, lastFocusedAt: 1 }));
+	const res = await bridgeFor(home).call("tools/call", { name: "drawio_apply_operations", arguments: { ops: [{ op: "addShape" }] } });
+	assert.equal(res.result.isError, true);
+	assert.match(res.result.content[0].text, /may or may not have run/);
+	assert.equal(delivered, 1);
+	assert.equal(other.calls.length, 0, "not sent to another window");
 });

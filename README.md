@@ -42,7 +42,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 -   Nothing is sent anywhere until you ask the AI something. Then the relevant diagram content, plus any images or code analysis you attach, goes to the model provider you picked.
 -   API keys are kept in VS Code's secret storage.
 -   Saved chats stay on your machine in VS Code's extension storage (`drawio-ai.persistChat`). Design templates are plain files in your repository.
--   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, token, folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`).
+-   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, a session token that only works while that window runs, its folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`). The long-lived token you copy for hand-configured clients never goes there.
 -   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
 -   Exports, including Visio files, are made inside VS Code. Nothing is uploaded.
 

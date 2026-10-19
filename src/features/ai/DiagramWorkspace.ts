@@ -1,7 +1,9 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import * as nodePath from "path";
+import * as vm from "vm";
 import type { DrawioEditor, DrawioEditorService } from "../../DrawioEditorService";
-import { normalizeFsPath } from "../../agent-bridge/discovery";
+import { isWithin, normalizeFsPath } from "../../agent-bridge/discovery";
 import type { DiagramWorkspace as DiagramWorkspaceApi, ToolResult } from "./DiagramToolbox";
 import { assertNoSymbolicLinks, isDiagramFile } from "./exportDiagram";
 import { decodeEntities, decompressDrawio, labelText, parseCells } from "./templates/profile";
@@ -10,6 +12,8 @@ const DIAGRAM_GLOB = "**/*.{drawio,dio,drawio.svg,dio.svg,drawio.png,dio.png}";
 const EXCLUDE_GLOB = "**/{node_modules,.git,dist,out,build,.venv,venv,target,coverage,.next}/**";
 const MAX_FILES = 2000;
 const MAX_SEARCH_BYTES = 5_000_000;
+/** An agent's /regex/ runs in a separate context with this budget per file, so a runaway pattern cannot freeze the window. */
+const REGEX_BUDGET_MS = 200;
 
 /**
  * Diagrams other than the focused one, for the `file` argument and the
@@ -85,15 +89,24 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 		if (!query) throw new Error("`query` is required.");
 		const limit = clamp(input.limit, 1, 500, 50);
 		const re = /^\/(.+)\/([a-z]*)$/.exec(query);
-		let matches: (s: string) => boolean;
+		let filter: (labels: string[]) => boolean[];
 		if (re) {
 			// Without g/y, test() keeps no state between labels.
 			const flags = re[2].replace(/[gy]/g, "");
-			const regex = new RegExp(re[1], flags.includes("i") ? flags : flags + "i");
-			matches = (s) => regex.test(s);
+			const context = vm.createContext({ source: re[1], flags: flags.includes("i") ? flags : flags + "i", labels: [] as string[] });
+			vm.runInContext("regex = new RegExp(source, flags)", context);
+			const script = new vm.Script("labels.map((l) => regex.test(l))");
+			filter = (labels) => {
+				context.labels = labels;
+				try {
+					return script.runInContext(context, { timeout: REGEX_BUDGET_MS });
+				} catch {
+					throw new Error("The /regex/ took too long; use a simpler pattern or plain text.");
+				}
+			};
 		} else {
 			const q = query.toLowerCase();
-			matches = (s) => s.toLowerCase().includes(q);
+			filter = (labels) => labels.map((s) => s.toLowerCase().includes(q));
 		}
 		const results: { path: string; page: string; cellId: string; kind: string; label: string }[] = [];
 		let skipped = 0;
@@ -105,14 +118,17 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 				continue;
 			}
 			for (const page of pagesOf(content)) {
-				for (const cell of parseCells(page.xml)) {
-					const label = labelText(cell.value);
-					if (!label || !matches(label)) continue;
+				const cells = parseCells(page.xml)
+					.map((cell) => ({ cell, label: labelText(cell.value) }))
+					.filter((c) => c.label);
+				const hits = filter(cells.map((c) => c.label));
+				cells.forEach(({ cell, label }, i) => {
+					if (!hits[i]) return;
 					total++;
 					if (results.length < limit) {
 						results.push({ path: this.shown(uri), page: page.name, cellId: cell.id, kind: cell.edge ? "edge" : "vertex", label: label.slice(0, 200) });
 					}
-				}
+				});
 			}
 		}
 		return {
@@ -138,11 +154,17 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 		const folder = uri && vscode.workspace.getWorkspaceFolder(uri);
 		if (!uri || !folder) throw new Error("path must be inside the workspace folder.");
 		await assertNoSymbolicLinks(folder.uri, uri);
-		if (await exists(uri)) {
-			throw new Error(`${this.shown(uri)} already exists. Pass it as \`file\` to edit it.`);
-		}
+		const taken = () => new Error(`${this.shown(uri)} already exists. Pass it as \`file\` to edit it.`);
+		if (await exists(uri)) throw taken();
 		await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));
-		await vscode.workspace.fs.writeFile(uri, new Uint8Array());
+		if (uri.scheme === "file") {
+			// Exclusive create: never replaces a file (or a link) that appeared since the check.
+			await fs.promises.writeFile(uri.fsPath, "", { flag: "wx" }).catch((e) => {
+				throw e?.code === "EEXIST" ? taken() : e;
+			});
+		} else {
+			await vscode.workspace.fs.writeFile(uri, new Uint8Array());
+		}
 		await this.openEditor(uri);
 		const shown = this.shown(uri);
 		return {
@@ -170,10 +192,16 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 		return [...this.editorService.openedEditors].find((e) => e.uri.scheme === uri.scheme && normalizeFsPath(e.uri.fsPath) === key);
 	}
 
-	/** Opens the diagram where the user can see it, without taking focus from where they are typing. */
+	/**
+	 * Opens the diagram where the user can see it without taking focus: in the column
+	 * of a diagram already showing, else beside the active editor, never over it.
+	 */
 	private async openEditor(uri: vscode.Uri): Promise<DrawioEditor> {
 		const viewType = /\.png$/i.test(uri.path) ? "drawio-ai" : "drawio-ai-text";
-		await vscode.commands.executeCommand("vscode.openWith", uri, viewType, { preserveFocus: true, preview: false });
+		// A diagram showing in another column than the one the user works in (never the active one).
+		const showing = [...this.editorService.openedEditors].find((e) => e.webviewPanel.visible && !e.webviewPanel.active)?.webviewPanel.viewColumn;
+		const viewColumn = showing ?? (vscode.window.activeTextEditor || vscode.window.tabGroups.activeTabGroup.activeTab ? vscode.ViewColumn.Beside : vscode.ViewColumn.Active);
+		await vscode.commands.executeCommand("vscode.openWith", uri, viewType, { preserveFocus: true, preview: false, viewColumn });
 		for (let i = 0; i < 300; i++) {
 			const editor = this.findEditor(uri);
 			if (editor) return editor;
@@ -182,9 +210,19 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 		throw new Error(`Could not open ${this.shown(uri)} in the Draw.AI editor.`);
 	}
 
+	/** Diagram files whose real location is inside a workspace folder (findFiles follows symbolic links). */
 	private async files(): Promise<vscode.Uri[]> {
-		if (!vscode.workspace.workspaceFolders?.length) return [];
-		return vscode.workspace.findFiles(DIAGRAM_GLOB, EXCLUDE_GLOB, MAX_FILES);
+		const folders = (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
+		if (!folders.length) return [];
+		const roots = await Promise.all(folders.map((f) => fs.promises.realpath(f.uri.fsPath).catch(() => f.uri.fsPath)));
+		const found = await vscode.workspace.findFiles(DIAGRAM_GLOB, EXCLUDE_GLOB, MAX_FILES);
+		const inside = await Promise.all(
+			found.map(async (u) => {
+				const real = await fs.promises.realpath(u.fsPath).catch(() => undefined);
+				return !!real && roots.some((r) => isWithin(r, real));
+			})
+		);
+		return found.filter((_, i) => inside[i]);
 	}
 
 	/** The open editor's text when there is one (it may be unsaved), else the file. */

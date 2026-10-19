@@ -412,7 +412,8 @@ async function agentSteps(firstFile, outsideDir) {
 			return e.openDiagrams.includes(second) ? e : undefined;
 		}, "discovery entry listing second.drawio");
 		assert.equal(`http://127.0.0.1:${entry.port}/mcp`, info.url);
-		assert.equal(entry.token, info.token);
+		assert.match(entry.token, /^[0-9a-f]{48}$/);
+		assert.notEqual(entry.token, info.token, "discovery holds a per-window session token, not the long-lived one");
 		assert.deepEqual(entry.workspaceFolders, [folder.uri.fsPath]);
 		if (process.platform !== "win32") assert.equal(fs.statSync(entryFile).mode & 0o777, 0o600);
 

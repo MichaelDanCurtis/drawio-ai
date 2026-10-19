@@ -125,7 +125,8 @@ function originOk(origin: string | undefined, port: number): boolean {
  * token; rejects foreign Host/Origin headers (DNS rebinding) and oversized bodies.
  */
 export function createMcpListener(options: {
-	token: () => string;
+	/** Accepted bearer tokens: the long-lived one for hand-configured clients, and the window's session token. */
+	token: () => string | string[];
 	port: () => number;
 	deps: McpHandlerDeps;
 	onCall?: (name: string, meta: McpRequestMeta) => void;
@@ -147,8 +148,9 @@ export function createMcpListener(options: {
 			return send(res, 404, error(null, -32000, "Not found; the endpoint is /mcp"));
 		}
 		const auth = req.headers.authorization ?? "";
-		const token = options.token();
-		if (!token || !auth.startsWith("Bearer ") || !timingSafeEqual(auth.slice(7).trim(), token)) {
+		const tokens = ([] as string[]).concat(options.token()).filter(Boolean);
+		const presented = auth.startsWith("Bearer ") ? auth.slice(7).trim() : "";
+		if (!presented || !tokens.some((t) => timingSafeEqual(presented, t))) {
 			req.resume();
 			return send(res, 401, error(null, -32001, "Missing or invalid bearer token"), { "www-authenticate": 'Bearer realm="drawio-ai"' });
 		}

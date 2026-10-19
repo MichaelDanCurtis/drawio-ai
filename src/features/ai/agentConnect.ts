@@ -55,8 +55,8 @@ export class AgentConnector {
 		if (!agents) return empty;
 
 		const info = await this.mcp.setupCommand({ show: false, enable: args.confirm === false ? true : undefined });
-		if (!info.running) {
-			void vscode.window.showWarningMessage("Draw.AI's MCP server is off, so agents could not reach your diagrams. Nothing was connected.");
+		if (!info.running || !(await this.mcp.ensureDiscovery(args.confirm !== false))) {
+			void vscode.window.showWarningMessage("Agents could not reach your diagrams without Draw.AI's MCP server and its discovery files. Nothing was connected.");
 			return empty;
 		}
 		const pluginDir = this.installPluginFiles();
@@ -144,6 +144,13 @@ export class AgentConnector {
 		fs.cpSync(source, target, { recursive: true });
 		// A VSIX does not keep file modes.
 		fs.chmodSync(path.join(target, "bin", "draw-ai-mcp"), 0o755);
+		if (process.platform === "win32") {
+			// Neither agent can start the sh launcher on Windows: point both at the .cmd one.
+			for (const file of [".mcp.json", ".codex-mcp.json"]) {
+				const p = path.join(target, file);
+				fs.writeFileSync(p, fs.readFileSync(p, "utf8").replace(/bin\/draw-ai-mcp"/g, 'bin/draw-ai-mcp.cmd"'));
+			}
+		}
 		return target;
 	}
 
@@ -235,7 +242,8 @@ function findExecutable(name: string, extraDirs: string[]): string | undefined {
 		"/opt/homebrew/bin",
 		"/usr/local/bin",
 	].filter(Boolean);
-	const exts = process.platform === "win32" ? ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").map((e) => e.toLowerCase())] : [""];
+	// On Windows only real executables: npm also puts an extensionless sh script next to claude.cmd.
+	const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter(Boolean).map((e) => e.toLowerCase()) : [""];
 	for (const dir of dirs) {
 		for (const ext of exts) {
 			const p = path.join(dir, name + ext);

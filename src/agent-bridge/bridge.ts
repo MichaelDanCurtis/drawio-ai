@@ -3,7 +3,7 @@ import { fileURLToPath } from "url";
 import { CLIENT_HEADER, handleMcpMessage, McpHandlerDeps } from "../features/ai/mcp";
 import { mcpInstructions } from "../features/ai/systemPrompt";
 import { toMcpTools } from "../features/ai/toolSchemas";
-import { AgentInstance, pickInstance, readInstances } from "./discovery";
+import { AgentInstance, pickInstance, readInstances, Route } from "./discovery";
 
 // The agent bridge: a stdio MCP server that Claude Code, Codex and other agents
 // start through the Draw.AI agent plugin. It lists the tools itself (so they are
@@ -86,30 +86,50 @@ export class AgentBridge {
 		return [...this.roots, env.DRAWIO_AI_WORKSPACE, env.CLAUDE_PROJECT_DIR, env.PWD].filter((r): r is string => !!r);
 	}
 
-	private route(file: string | undefined, skip: Set<number>): AgentInstance | undefined {
+	private route(file: string | undefined, skip: Set<number>, requireFolder = false): Route | undefined {
 		const instances = readInstances(this.options.home).filter((i) => !skip.has(i.pid));
-		return pickInstance(instances, { file, roots: this.hintRoots() })?.instance;
+		return pickInstance(instances, { file, roots: this.hintRoots(), requireFolder });
 	}
 
-	/** Forwards a tools/call; retries another window if one is gone, and re-reads the token once on 401. */
+	/**
+	 * Forwards a tools/call. A relative `file` (or drawio_create's `path`) is sent as
+	 * the absolute path it was routed on, so the window edits the diagram the agent
+	 * meant. Only a window that refused the connection is skipped for another: once
+	 * a request may have arrived, it is never sent again, since it may have run.
+	 */
 	private async forward(msg: any): Promise<object> {
-		const args = msg.params?.arguments ?? {};
-		const file =
-			typeof args.file === "string" ? args.file : msg.params?.name === "drawio_create" && typeof args.path === "string" ? args.path : undefined;
+		const name = msg.params?.name;
+		const args = msg.params?.arguments && typeof msg.params.arguments === "object" ? msg.params.arguments : {};
+		const key = name === "drawio_create" ? "path" : "file";
+		const file = typeof args[key] === "string" && args[key].trim() ? args[key] : undefined;
 		const skip = new Set<number>();
 		let unauthorized = 0;
 		for (let attempt = 0; attempt < 4; attempt++) {
-			const instance = this.route(file, skip);
-			if (!instance) break;
+			const route = this.route(file, skip, name === "drawio_create");
+			if (!route) {
+				return toolError(
+					msg.id,
+					name === "drawio_create" && readInstances(this.options.home).length
+						? "No VS Code window has the folder you are working in open, so the new diagram has nowhere to go. Ask the user to open the project in VS Code, or pass an absolute path inside an open workspace folder."
+						: NOT_RUNNING
+				);
+			}
+			const params = route.file && file ? { ...msg.params, arguments: { ...args, [key]: route.file } } : msg.params;
 			try {
-				const reply = await this.post(instance, { jsonrpc: "2.0", id: msg.id, method: "tools/call", params: msg.params });
-				if (reply.status === 401 && unauthorized++ === 0) continue; // the token was regenerated; read it again
+				const reply = await this.post(route.instance, { jsonrpc: "2.0", id: msg.id, method: "tools/call", params });
+				if (reply.status === 401 && unauthorized++ === 0) continue; // the token changed; read it again
 				if (reply.status === 200 && reply.body?.id === msg.id) return reply.body;
 				const reason = typeof reply.body?.error?.message === "string" ? `: ${reply.body.error.message}` : "";
 				return toolError(msg.id, `Draw.AI in VS Code refused the call (HTTP ${reply.status}${reason}).`);
 			} catch (e: any) {
-				this.options.log?.(`window ${instance.pid} (port ${instance.port}) did not answer: ${e?.code ?? e?.message ?? e}`);
-				skip.add(instance.pid);
+				this.options.log?.(`window ${route.instance.pid} (port ${route.instance.port}): ${e?.code ?? e?.message ?? e}`);
+				if (e?.code !== "ECONNREFUSED") {
+					return toolError(
+						msg.id,
+						`The VS Code window stopped answering during ${name} (${e?.code ?? "error"}); the call may or may not have run. Read the diagram again before retrying.`
+					);
+				}
+				skip.add(route.instance.pid);
 			}
 		}
 		return toolError(msg.id, NOT_RUNNING);
@@ -156,7 +176,7 @@ export class AgentBridge {
 
 	/** The window's own instructions (they include the repository's design template), else the generic ones. */
 	private async instructions(): Promise<string> {
-		const instance = this.route(undefined, new Set());
+		const instance = this.route(undefined, new Set())?.instance;
 		if (instance) {
 			try {
 				const reply = await this.post(

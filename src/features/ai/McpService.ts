@@ -30,6 +30,8 @@ export class McpService {
 	private busyTimer: ReturnType<typeof setTimeout> | undefined;
 	private busyEditor: DrawioEditor | undefined;
 	private discoveryTimer: ReturnType<typeof setTimeout> | undefined;
+	/** This window's token for the agent bridge: in its discovery entry, valid only while the server runs. */
+	private sessionToken = "";
 	private lastFocusedAt = vscode.window.state.focused ? Date.now() : 0;
 
 	constructor(
@@ -49,7 +51,11 @@ export class McpService {
 				this.announceSoon();
 			}),
 			vscode.workspace.onDidChangeWorkspaceFolders(() => this.announceSoon()),
-			vscode.window.tabGroups.onDidChangeTabs(() => this.announceSoon())
+			vscode.window.tabGroups.onDidChangeTabs(() => this.announceSoon()),
+			// "Regenerate token" in another window must disconnect old clients here too.
+			this.context.secrets.onDidChange(async (e) => {
+				if (e.key === TOKEN_KEY) this.token = (await this.context.secrets.get(TOKEN_KEY)) ?? this.token;
+			})
 		);
 		void this.sync();
 	}
@@ -69,7 +75,7 @@ export class McpService {
 		await this.starting;
 		const { enabled, port } = this.config;
 		if (!enabled) return this.stop();
-		if (this.server && this.configuredPort === port) return;
+		if (this.server && this.configuredPort === port) return this.announce(); // e.g. discovery was turned on or off
 		await this.stop();
 		this.starting = this.start(port).finally(() => (this.starting = undefined));
 		await this.starting;
@@ -85,8 +91,9 @@ export class McpService {
 			void vscode.window.showErrorMessage("Draw.AI: the MCP server needs the desktop version of VS Code.");
 			return;
 		}
+		this.sessionToken = randomHex(24);
 		const listener = createMcpListener({
-			token: () => this.token,
+			token: () => [this.token, this.sessionToken],
 			port: () => this.actualPort,
 			deps: {
 				serverVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
@@ -113,6 +120,13 @@ export class McpService {
 				// this window by its discovery entry, so any free port will do.
 				if (e?.code !== "EADDRINUSE" || !this.config.discovery || port === 0) throw e;
 				await listen(0);
+				const byDrawAi = readInstances(drawioAiHome()).some((i) => i.port === port && i.pid !== process.pid);
+				if (!byDrawAi) {
+					const actual = (server.address() as { port: number } | null)?.port;
+					void vscode.window.showWarningMessage(
+						`Draw.AI MCP server: port ${port} is used by another program, so this window took port ${actual} instead. Agents connected with "Connect Claude Code / Codex…" are not affected; clients you configured by hand for port ${port} would send your token to that program, so update or remove them.`
+					);
+				}
 			}
 		} catch (e: any) {
 			this.updateStatus();
@@ -163,10 +177,24 @@ export class McpService {
 	}
 
 	private async regenerateToken(): Promise<void> {
-		const bytes = crypto.getRandomValues(new Uint8Array(24));
-		this.token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+		this.token = randomHex(24);
 		await this.context.secrets.store(TOKEN_KEY, this.token);
-		this.announce();
+	}
+
+	/** Agents connected through the bridge find windows by their discovery entries; makes sure those are written. */
+	public async ensureDiscovery(ask: boolean): Promise<boolean> {
+		if (this.config.discovery) return true;
+		if (ask) {
+			const turnOn = await vscode.window.showInformationMessage(
+				"Connected agents find VS Code through Draw.AI's discovery files (drawio-ai.mcp.discovery), which you turned off. Turn them on?",
+				{ modal: true },
+				"Turn On"
+			);
+			if (turnOn !== "Turn On") return false;
+		}
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("discovery", true, vscode.ConfigurationTarget.Global);
+		await this.sync();
+		return true;
 	}
 
 	/** The agent bridge's launcher, for agent plugins (Claude Code, Codex). Undefined if the bridge was not built. */
@@ -184,7 +212,7 @@ export class McpService {
 
 	/**
 	 * Writes this window's discovery entry (~/.drawio-ai/instances/<pid>.json, user-only):
-	 * its port, token, folders and open diagrams. The agent bridge reads it to forward
+	 * its port, session token (not the long-lived one), folders and open diagrams. The agent bridge reads it to forward
 	 * tool calls here, so agents need no copied token and every window can serve.
 	 */
 	private announce(): void {
@@ -200,7 +228,7 @@ export class McpService {
 			version: 1,
 			pid: process.pid,
 			port: this.actualPort,
-			token: this.token,
+			token: this.sessionToken,
 			app: vscode.env.appName,
 			extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
 			workspaceFolders: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file").map((f) => f.uri.fsPath),
@@ -291,4 +319,8 @@ const AGENT_NAMES: Record<string, string> = { "claude-code": "Claude Code", code
 
 function agentName(client: string): string {
 	return AGENT_NAMES[client.toLowerCase()] ?? client;
+}
+
+function randomHex(bytes: number): string {
+	return Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
 }

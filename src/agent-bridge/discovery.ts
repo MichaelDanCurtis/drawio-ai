@@ -110,37 +110,53 @@ export interface RouteHint {
 export interface Route {
 	instance: AgentInstance;
 	reason: "open" | "workspace" | "root" | "focus";
+	/** The `file` resolved to an absolute path, when routing resolved it. Forward this, not the agent's relative path. */
+	file?: string;
 }
 
 /**
- * Picks the VS Code window for a tool call: the one that has the diagram open,
- * else one whose workspace holds it (or the agent's folder), else the window
- * focused most recently.
+ * Picks the VS Code window for a tool call, and resolves a relative `file` the
+ * way the agent means it: against the agent's own folders first. Order: the
+ * window that has the diagram open, then one whose workspace holds the file,
+ * then one whose workspace holds the agent's folder, then the window focused
+ * most recently. With `requireFolder` (creating a file) there is no fallback:
+ * an unrelated window must not receive a new file.
  */
-export function pickInstance(instances: AgentInstance[], hint: RouteHint): Route | undefined {
+export function pickInstance(instances: AgentInstance[], hint: RouteHint & { requireFolder?: boolean }): Route | undefined {
 	if (instances.length === 0) return undefined;
 	const exists = hint.exists ?? ((p: string) => fs.existsSync(p));
 	const recent = (list: AgentInstance[]) =>
 		[...list].sort((a, b) => Number(b.focused) - Number(a.focused) || b.lastFocusedAt - a.lastFocusedAt)[0];
+	const holding = (p: string) => instances.filter((i) => i.workspaceFolders.some((f) => isWithin(f, p)));
 
 	const file = hint.file?.trim();
 	if (file) {
-		const candidates = path.isAbsolute(file)
-			? [file]
-			: [...new Set([...instances.flatMap((i) => i.workspaceFolders), ...hint.roots])].map((f) => path.join(f, file));
-		const open = instances.filter((i) => i.openDiagrams.some((d) => candidates.some((c) => normalizeFsPath(c) === normalizeFsPath(d))));
-		if (open.length) return { instance: recent(open), reason: "open" };
-		const holding = instances.filter((i) =>
-			i.workspaceFolders.some((f) =>
-				path.isAbsolute(file) ? isWithin(f, file) : exists(path.join(f, file))
-			)
-		);
-		if (holding.length) return { instance: recent(holding), reason: "workspace" };
+		const absolute = path.isAbsolute(file);
+		// The agent's folders come first: "docs/a.drawio" means the one in the project the agent works in.
+		const fromRoots = absolute ? [path.resolve(file)] : hint.roots.map((r) => path.join(r, file));
+		const fromFolders = absolute ? [] : instances.flatMap((i) => i.workspaceFolders.map((f) => path.join(f, file)));
+		const candidates = [...new Set([...fromRoots, ...fromFolders])];
+		for (const c of candidates) {
+			const open = instances.filter((i) => i.openDiagrams.some((d) => normalizeFsPath(d) === normalizeFsPath(c)));
+			if (open.length) return { instance: recent(open), reason: "open", file: c };
+		}
+		for (const c of candidates) {
+			if (!exists(c)) continue;
+			const h = holding(c);
+			if (h.length) return { instance: recent(h), reason: "workspace", file: c };
+		}
+		// A file that does not exist yet (drawio_create): only where the agent works, or an absolute path.
+		for (const c of fromRoots) {
+			const h = holding(c);
+			if (h.length) return { instance: recent(h), reason: "workspace", file: c };
+		}
+		if (hint.requireFolder) return undefined;
 	}
 	const byRoot = instances.filter((i) =>
 		i.workspaceFolders.some((f) => hint.roots.some((r) => isWithin(f, r) || isWithin(r, f)))
 	);
 	if (byRoot.length) return { instance: recent(byRoot), reason: "root" };
+	if (hint.requireFolder) return undefined;
 	return { instance: recent(instances), reason: "focus" };
 }
 
@@ -154,12 +170,15 @@ export function launcherPath(home: string, platform: NodeJS.Platform = process.p
  * (Electron as Node), so agents need no Node installation. Rewritten on every
  * start, so it follows VS Code and extension updates.
  */
-export function writeLauncher(home: string, options: { execPath: string; bridgePath: string; platform?: NodeJS.Platform }): string {
+export function writeLauncher(
+	home: string,
+	options: { execPath: string; bridgePath: string; platform?: NodeJS.Platform; env?: NodeJS.ProcessEnv }
+): string {
 	const platform = options.platform ?? process.platform;
 	const file = launcherPath(home, platform);
 	let text: string;
 	if (platform === "win32") {
-		const q = (s: string) => `"${s.replace(/"/g, "")}"`;
+		const q = (s: string) => `"${batchPath(s, options.env ?? process.env)}"`;
 		text = ["@echo off", "set ELECTRON_RUN_AS_NODE=1", `${q(options.execPath)} ${q(options.bridgePath)} %*`, ""].join("\r\n");
 	} else {
 		const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -167,4 +186,21 @@ export function writeLauncher(home: string, options: { execPath: string; bridgeP
 	}
 	writePrivate(file, text, 0o700);
 	return file;
+}
+
+
+/**
+ * A path for a .cmd file. cmd.exe reads batch files in the OEM code page, so the
+ * user's profile folder (which may contain non-ASCII letters, as in C:\Users\José)
+ * is written as %LOCALAPPDATA% / %USERPROFILE%; other percent signs are escaped.
+ */
+export function batchPath(p: string, env: NodeJS.ProcessEnv): string {
+	const clean = p.replace(/"/g, "");
+	for (const name of ["LOCALAPPDATA", "APPDATA", "USERPROFILE"]) {
+		const value = env[name];
+		if (value && clean.toLowerCase().startsWith(value.toLowerCase().replace(/[\\/]+$/, "") + "\\")) {
+			return `%${name}%` + clean.slice(value.replace(/[\\/]+$/, "").length).replace(/%/g, "%%");
+		}
+	}
+	return clean.replace(/%/g, "%%");
 }

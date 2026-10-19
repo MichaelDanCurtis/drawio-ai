@@ -551,6 +551,22 @@ Items 1–3 are implemented in this worktree. Nothing is committed.
 - Windows and Linux (the `.cmd` launchers and the `shell` path in `agentConnect.ts` are untested)
 - the `chatSkills` contribution in the current VS Code stable
 
+**After the independent review** (fixed in a follow-up commit):
+
+- The bridge never resends a call that may have reached a window.
+- A relative `file` is resolved against the agent's own folder and forwarded as an absolute path.
+- `drawio_create` never lands in an unrelated window.
+- Discovery entries carry a per-window session token instead of the long-lived one, and a
+  regenerated token reaches every window.
+- A port held by another program triggers a warning.
+- On Windows: the CLI lookup is fixed, `.cmd` launchers are code-page-safe, and the MCP files
+  point at the `.cmd` launcher.
+- List and search skip symbolic links that leave the workspace, and an agent's regex runs under a
+  time limit.
+- `drawio_create` creates the file exclusively.
+- Diagrams open beside the editor the user is in.
+- The chat panel and `@drawio` stay scoped to their own diagram.
+
 **Merge notes:**
 
 - The import session's `drawio_import` acts on the workspace, not one diagram. It needs

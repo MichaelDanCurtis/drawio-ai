@@ -29,6 +29,8 @@ export interface DiagramWorkspace {
 export interface InvokeOptions {
 	/** Called with the editor a tool acts on, before it runs. */
 	onTarget?(editor: DrawioEditor): void;
+	/** The caller's conversation belongs to the focused diagram (chat panel, @drawio): ignore `file`, no workspace tools. */
+	scoped?: boolean;
 }
 
 const MAX_XML_CHARS = 80_000;
@@ -49,12 +51,16 @@ export class DiagramToolbox {
 		private readonly diagrams?: DiagramWorkspace
 	) {}
 
+	/**
+	 * Tools for the chat panel and @drawio, whose conversation belongs to one diagram:
+	 * without `file` or the workspace tools, so they cannot wander off to other files.
+	 * (Copilot agent mode and MCP agents get every tool.)
+	 */
 	public specs(options: { vision: boolean }): ToolSpec[] {
-		return TOOL_SCHEMAS.filter((t) => options.vision || !t.requiresVision).map((t) => ({
-			name: t.name,
-			description: t.description,
-			inputSchema: t.inputSchema,
-		}));
+		return TOOL_SCHEMAS.filter((t) => (options.vision || !t.requiresVision) && (!t.workspace || t.name === "drawio_style_reference")).map((t) => {
+			const { file, ...properties } = (t.inputSchema.properties ?? {}) as Record<string, unknown>;
+			return { name: t.name, description: t.description, inputSchema: { ...t.inputSchema, properties } };
+		});
 	}
 
 	public async invoke(name: string, rawInput: unknown, options: InvokeOptions = {}): Promise<ToolResult> {
@@ -64,12 +70,12 @@ export class DiagramToolbox {
 			input = normalizeInput(rawInput);
 			const schema = TOOL_SCHEMAS.find((t) => t.name === name);
 			if (schema?.workspace && name !== "drawio_style_reference") {
-				if (!this.diagrams) throw new ToolInputError(`${name} is not available here.`);
+				if (!this.diagrams || options.scoped) throw new ToolInputError(`${name} is not available here.`);
 				if (name === "drawio_list_diagrams") return await this.diagrams.list(input);
 				if (name === "drawio_search_diagrams") return await this.diagrams.search(input);
 				if (name === "drawio_create") return await this.diagrams.create(input);
 			}
-			const file = typeof input.file === "string" && input.file.trim() ? input.file.trim() : undefined;
+			const file = !options.scoped && typeof input.file === "string" && input.file.trim() ? input.file.trim() : undefined;
 			if (file) {
 				if (!this.diagrams) throw new ToolInputError("`file` is not supported here; omit it to use the open diagram.");
 				editor = await this.diagrams.open(file, { reveal: !!schema?.mutates });
