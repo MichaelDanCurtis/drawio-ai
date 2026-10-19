@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0]
+
+First release of Draw.io AI, based on hediet/vscode-drawio 1.17.0.
 
 ### Added
 
@@ -16,10 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Code → diagram: module dependencies, class diagrams, database ERDs (SQL, Prisma) and infrastructure (Terraform, docker-compose, Kubernetes), with shapes code-linked to their source
 - Diagram review/lint (`Draw.io AI: Review Diagram (Lint)`, `@drawio /review`, `drawio_lint`) with AI fixes as pending changes
 - Repository design templates (`.drawio-ai/templates/`) built from example diagrams, shape libraries, style guides (Markdown, Word, PDF) and images; the AI follows them and lint flags violations (`drawio-ai.template`)
+- Chat panel conversations are saved per diagram and restored after a restart (`drawio-ai.persistChat`)
+- Live code links: linked shapes are badged when their code moves, changes or disappears, with one-click fixes, `Draw.io AI: Check Code Links` and the `drawio_code_links` tool (`drawio-ai.checkCodeLinks`)
+- Local MCP server so Claude Code, Cursor and other agents can edit the open diagram (`Draw.io AI: Set Up MCP Server for External Agents…`, `drawio-ai.mcp.enabled`)
 
 ### Fixed
 
 - The custom draw.io plugins are bundled as ASCII so their UI glyphs render correctly regardless of how the webview decodes the script
+
+## Upstream history (hediet/vscode-drawio)
+
+The entries below are from the original Draw.io Integration extension; setting names there use the `hediet.vscode-drawio.` prefix.
 
 ## [1.17.0]
 

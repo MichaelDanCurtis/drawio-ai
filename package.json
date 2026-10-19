@@ -2,29 +2,39 @@
 	"name": "vscode-drawio-ai",
 	"private": true,
 	"displayName": "Draw.io AI",
-	"description": "Draw.io in VS Code with an AI that edits your diagrams live. Fork of hediet/vscode-drawio.",
+	"description": "Chat with AI to edit draw.io diagrams live in VS Code: lasso and mark up shapes, review changes before keeping them, turn sketches and code into diagrams, enforce team design templates. Unofficial; based on hediet/vscode-drawio.",
 	"version": "0.1.0",
-	"preRelease": false,
 	"license": "GPL-3.0",
+	"preview": true,
+	"pricing": "Free",
+	"qna": "https://github.com/MichaelDanCurtis/drawio-ai/discussions",
+	"galleryBanner": {
+		"color": "#1f1f23",
+		"theme": "dark"
+	},
 	"publisher": "drawio-ai",
 	"keywords": [
 		"drawio",
+		"draw.io",
 		"diagram",
 		"diagrams.net",
-		"visio",
+		"ai",
+		"copilot",
+		"chat",
+		"mcp",
 		"architecture",
+		"flowchart",
 		"uml",
+		"erd",
+		"visio",
 		"code link",
-		"diagram as code",
-		"git",
-		"ai"
+		"diagram as code"
 	],
 	"author": {
-		"email": "henning.dieterichs@live.de",
-		"name": "Henning Dieterichs"
+		"name": "Michael Curtis"
 	},
 	"readme": "./README.md",
-	"icon": "docs/logo.drawio.png",
+	"icon": "media/marketplace/icon.png",
 	"extensionKind": [
 		"ui",
 		"workspace"
@@ -33,7 +43,9 @@
 		"vscode": "^1.105.0"
 	},
 	"categories": [
-		"Visualization"
+		"Visualization",
+		"AI",
+		"Chat"
 	],
 	"activationEvents": [
 		"onLanguage:markdown",
@@ -1475,12 +1487,14 @@
 		"build-extension": "webpack --mode production",
 		"build-plugins": "webpack --mode production --config ./drawio-custom-plugins/webpack.config.ts",
 		"package-extension": "yarn package-extension-preRelease",
-		"package-extension-stable": "vsce package --yarn --out ./dist/extension.vsix",
-		"package-extension-preRelease": "vsce package --yarn --out ./dist/extension.vsix --pre-release",
+		"package-extension-stable": "vsce package --yarn --allow-unused-files-pattern --out ./dist/extension.vsix",
+		"package-extension-preRelease": "vsce package --yarn --allow-unused-files-pattern --out ./dist/extension.vsix --pre-release",
 		"dev": "webpack --mode development --watch",
 		"dev-drawio-plugins": "webpack --mode development --watch --config ./drawio-custom-plugins/webpack.config.ts",
 		"dev-drawio-plugins-web": "webpack-dev-server --hot --config ./drawio-custom-plugins/webpack.config.ts",
 		"sync-lm-tools": "node scripts/sync-lm-tools.js",
+		"release:check": "node scripts/release-check.js",
+		"set-publisher": "node scripts/set-publisher.js",
 		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js"
@@ -1492,7 +1506,6 @@
 		"src/inline-editor/**/*",
 		"media/**/*",
 		"package.json",
-		"docs/**/*",
 		"drawio/LICENSE",
 		"drawio/VERSION",
 		"drawio/src/main/webapp/js/**/*",
@@ -1506,7 +1519,8 @@
 		"drawio/src/main/webapp/styles/**/*",
 		"drawio/src/main/webapp/templates/**/*",
 		"drawio/src/main/webapp/index.html",
-		"LICENSE.md"
+		"LICENSE.md",
+		"CHANGELOG.md"
 	],
 	"devDependencies": {
 		"@actions/exec": "^1.0.4",

@@ -74,6 +74,6 @@ jobs:
           git add drawio
           git commit -m "Update Draw.io to $TAG"
           git push -f -u origin "$BRANCH"
-          gh pr create --base main --head "$BRANCH" \
+          gh pr create --base drawio-ai --head "$BRANCH" \
             --title "Update Draw.io to $TAG" \
-            --body "Automated update of the drawio submodule to [jgraph/drawio $TAG](https://github.com/jgraph/drawio/releases/tag/$TAG). The extension was linted and built successfully with the updated submodule in the workflow run that opened this PR. Lint & Build does not run on PRs opened with the default GITHUB_TOKEN; it runs on main after merging."
+            --body "Automated update of the drawio submodule to [jgraph/drawio $TAG](https://github.com/jgraph/drawio/releases/tag/$TAG). The extension was linted and built successfully with the updated submodule in the workflow run that opened this PR. Lint & Build does not run on PRs opened with the default GITHUB_TOKEN; it runs on drawio-ai after merging."

@@ -1,15 +1,49 @@
-name: Lint & Build
+name: CI
 on:
   push:
     branches:
-      - main
+      - drawio-ai
   pull_request:
+  workflow_dispatch:
 
 jobs:
+  test:
+    name: Build and test (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Install Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn lint
+      - run: yarn build-extension
+      - run: yarn build-plugins
+      - name: Unit tests
+        run: yarn test:ai
+      - name: Browser end-to-end tests (real draw.io in Chrome)
+        run: yarn test:ai-e2e
+      - name: Release check
+        run: node scripts/release-check.js --built
+      - name: Package
+        run: yarn package-extension
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v7
+        with:
+          name: drawio-ai-vsix
+          path: dist/extension.vsix
+
   build:
+    name: Build (${{ matrix.os }})
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -20,6 +54,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: "22"
+          cache: yarn
       - run: yarn install --frozen-lockfile
-      - run: yarn lint
-      - run: yarn build
+      - run: yarn build-extension
+      - run: yarn build-plugins
+      - run: yarn test:ai

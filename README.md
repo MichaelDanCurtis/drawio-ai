@@ -1,11 +1,62 @@
-# Draw.io VS Code Integration
+# Draw.io AI
 
-[![](https://img.shields.io/twitter/follow/hediet_dev.svg?style=social)](https://twitter.com/intent/follow?screen_name=hediet_dev)
+**Chat with AI and watch your draw.io diagrams change live in VS Code.** Select or lasso shapes and say what to change, scribble on the canvas, paste a whiteboard photo, or point it at your code. Every AI edit stays pending until you keep it.
 
-This unofficial extension integrates [Draw.io](https://app.diagrams.net/) (also known as [diagrams.net](https://www.diagrams.net/)) into VS Code.  
-Mentioned in the official diagrams.net [blog](https://www.diagrams.net/blog/embed-diagrams-vscode).
+> **Unofficial.** Draw.io AI is an independent fork of [hediet/vscode-drawio](https://github.com/hediet/vscode-drawio) (GPL-3.0). It is not affiliated with or endorsed by JGraph Ltd, the makers of draw.io / diagrams.net.
 
-## Features
+## Getting Started
+
+1. Open or create a diagram: any `.drawio`, `.drawio.svg` or `.drawio.png` file, or **Draw.io: New Draw.io Diagram**.
+2. Open the **Draw.io AI** chat: the ✦ button in the editor title bar, or **Draw.io AI: Open AI Chat**.
+3. Pick a model. GitHub Copilot models work as soon as you are signed in to Copilot. For Anthropic or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, OpenRouter, a local server), run **Draw.io AI: Set API Key**.
+4. Describe a change. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
+
+In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts the lasso, `Alt+M` starts markup.
+
+## Where You Can Use It
+
+| Surface | How |
+| --- | --- |
+| Chat panel | The **Draw.io AI** view; works with Copilot, Anthropic and OpenAI-compatible models |
+| Copilot Chat | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch` |
+| Copilot agent mode | The `drawio_*` tools (reference them with `#drawio-…`) |
+| Other agents | Claude Code, Cursor and other MCP clients through **Draw.io AI: Set Up MCP Server for External Agents…** |
+
+## AI Features
+
+-   **Scope edits to part of the diagram**: select cells, or use the lasso (`Draw.io AI: Lasso Select for AI`) to circle a region, then ask about just that.
+-   **Review before apply**: AI edits appear immediately but are held as pending changes: added cells are outlined green, changed ones amber, and removed ones are shown as red ghosts. Keep or revert them all from the review bar in the editor, the strip in the chat panel, the `@drawio` response buttons, or the `Draw.io AI: Accept AI Changes` / `Reject AI Changes` commands. You can also keep or revert a single cell from its context menu. A whole review is one undo step. Turn this off with `drawio-ai.reviewChanges`.
+-   **Mark up the diagram** (`Alt+M`, **✎ Markup** in the chat panel, or the context menu): draw arrows (connect / flow / move), scribble strike-throughs (remove), and pin notes to shapes or empty spots, then **Send to AI**. All marks become one request; they are overlays and never touch the diagram itself.
+-   **Sketch or screenshot → diagram**: paste, drop or attach (🖼) images in the chat panel, attach them to `@drawio /sketch` in Copilot Chat, right-click an image file → **Diagram from Sketch or Screenshot…**, or right-click an image inside a diagram → **✦ Convert image to diagram**. The AI rebuilds it with real, editable shapes (needs a model with vision).
+-   **Code → diagram**: right-click a folder or source file → **Draw.io AI: Diagram from Code…** and pick module dependencies, a class diagram, a database ERD or an infrastructure diagram. Supports TypeScript/JavaScript, Python, Java, C#, Kotlin, Go, SQL DDL, Prisma, Terraform, docker-compose and Kubernetes YAML. Generated shapes are code-linked: with Code Link enabled, double-click one to jump to its source.
+-   **Review / lint** (`Draw.io AI: Review Diagram (Lint)`, **✓ Review** in the chat panel, or `@drawio /review`): finds dangling or duplicate connectors, overlaps, almost-aligned shapes, unlabeled or disconnected shapes, tiny text and design-template violations. Moving through the list highlights the shapes; pick the issues to fix and the AI fixes them as pending changes.
+-   **Design templates**: `Draw.io AI: Create Design Template…` turns example diagrams (`.drawio`, `.drawio.svg`), shape libraries (`.xml`), style guides (Markdown, text, Word `.docx`, PDF) and reference images into a template. Its palette, fonts, shape per role and connector style are extracted, and you choose what lint enforces. The template lives in the repository (`.drawio-ai/templates/<id>/template.json`, an editable `rules.md`, and copies of the sources), so it is shared through git. The AI follows the active template and flags anything that breaks it. Switch templates with `Draw.io AI: Select Design Template…` or the ◆ chip in the chat panel (setting `drawio-ai.template`; a repository with a single template uses it automatically).
+-   **Saved chats**: each diagram keeps its chat panel conversation across VS Code restarts. **New AI Chat** starts over.
+-   **Live code links**: shapes linked to code (by **Diagram from Code…** or **Link Code with Selected Node**) remember what the code looked like. When it moves, changes or disappears, the shape gets a badge; click it to re-point the link, let the AI update the shape, open the code or remove the link. **Draw.io AI: Check Code Links** lists every stale link, and the AI can refresh code-derived diagrams with the `drawio_code_links` tool.
+-   **External agents (MCP)**: turn on the local MCP server and Claude Code, Cursor and other MCP clients can read and edit the open diagram with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
+
+## Privacy
+
+-   Nothing is sent anywhere until you ask the AI something. Then the relevant diagram content, plus any images or code analysis you attach, goes to the model provider you picked.
+-   API keys are kept in VS Code's secret storage.
+-   Saved chats stay on your machine in VS Code's extension storage (`drawio-ai.persistChat`). Design templates are plain files in your repository.
+-   The MCP server is off by default (`drawio-ai.mcp.enabled`).
+
+## Main Settings
+
+| Setting | Default | |
+| --- | --- | --- |
+| `drawio-ai.provider` | `vscode-lm` | Default provider for the chat panel |
+| `drawio-ai.reviewChanges` | `true` | Hold AI edits as pending changes |
+| `drawio-ai.template` | (auto) | Active design template id, or `none` |
+| `drawio-ai.persistChat` | `true` | Restore chat panel conversations per diagram |
+| `drawio-ai.checkCodeLinks` | `true` | Badge shapes whose linked code changed |
+| `drawio-ai.mcp.enabled` / `.port` | `false` / `47821` | Local MCP server for external agents |
+| `drawio-ai.maxToolRounds` | `16` | Tool calls per request before the AI pauses |
+
+## Draw.io Editor Features
+
+These come from [hediet/vscode-drawio](https://github.com/hediet/vscode-drawio):
 
 -   Edit `.drawio`, `.dio`, `.drawio.svg` or `.drawio.png` files in the Draw.io editor.
     -   To create a new diagram, simply create an empty `*.drawio`, `*.drawio.svg` or `*.drawio.png` file and open it.
@@ -17,32 +68,14 @@ Mentioned in the official diagrams.net [blog](https://www.diagrams.net/blog/embe
 -   Multiple Draw.io themes are available.
 -   Use Liveshare to collaboratively edit a diagram with others.
 -   Nodes/edges can be linked with code spans.
--   Chat with AI to edit the open diagram live (see below).
-
-## AI Diagram Editing
-
-Describe changes in the **Draw.io AI** chat panel, with `@drawio` in Copilot Chat, or via the `drawio_*` language model tools in agent mode. Providers: GitHub Copilot, Anthropic, or any OpenAI-compatible endpoint (`Draw.io AI: Set API Key`).
-
--   **Scope edits to part of the diagram**: select cells, or use the lasso (`Draw.io AI: Lasso Select for AI`) to circle a region, then ask about just that.
--   **Review before apply**: AI edits appear immediately but are held as pending changes: added cells are outlined green, changed ones amber, and removed ones are shown as red ghosts. Keep or revert them all from the review bar in the editor, the strip in the chat panel, the `@drawio` response buttons, or the `Draw.io AI: Accept AI Changes` / `Reject AI Changes` commands. You can also keep or revert a single cell from its context menu. A whole review is one undo step. Turn this off with `drawio-ai.reviewChanges`.
--   **Mark up the diagram** (`Alt+M`, **✎ Markup** in the chat panel, or the context menu): draw arrows (connect / flow / move), scribble strike-throughs (remove), and pin notes to shapes or empty spots, then **Send to AI**. All marks become one request; they are overlays and never touch the diagram itself.
--   **Sketch or screenshot → diagram**: paste, drop or attach (🖼) images in the chat panel, attach them to `@drawio /sketch` in Copilot Chat, right-click an image file → **Diagram from Sketch or Screenshot…**, or right-click an image inside a diagram → **✦ Convert image to diagram**. The AI rebuilds it with real, editable shapes (needs a model with vision).
--   **Code → diagram**: right-click a folder or source file → **Draw.io AI: Diagram from Code…** and pick module dependencies, a class diagram, a database ERD or an infrastructure diagram. Supports TypeScript/JavaScript, Python, Java, C#, Kotlin, Go, SQL DDL, Prisma, Terraform, docker-compose and Kubernetes YAML. Generated shapes are code-linked: with Code Link enabled, double-click one to jump to its source.
--   **Review / lint** (`Draw.io AI: Review Diagram (Lint)`, **✓ Review** in the chat panel, or `@drawio /review`): finds dangling or duplicate connectors, overlaps, almost-aligned shapes, unlabeled or disconnected shapes, tiny text and design-template violations. Moving through the list highlights the shapes; pick the issues to fix and the AI fixes them as pending changes.
--   **Design templates**: `Draw.io AI: Create Design Template…` turns example diagrams (`.drawio`, `.drawio.svg`), shape libraries (`.xml`), style guides (Markdown, text, Word `.docx`, PDF) and reference images into a template. Its palette, fonts, shape per role and connector style are extracted, and you choose what lint enforces. The template lives in the repository (`.drawio-ai/templates/<id>/template.json`, an editable `rules.md`, and copies of the sources), so it is shared through git. The AI follows the active template and flags anything that breaks it. Switch templates with `Draw.io AI: Select Design Template…` or the ◆ chip in the chat panel (setting `drawio-ai.template`; a repository with a single template uses it automatically).
-
-## Demo
 
 ![](./docs/demo.gif)
-
 
 ## Editing .drawio.svg/.drawio.png Files
 
 You can directly edit and save `.drawio.svg` and `.drawio.png` files.
 These files are perfectly valid svg/png-images that contain an embedded Draw.io diagram.
 Whenever you edit such a file, the svg/png part of that file is kept up to date.
-
-The logo of this extension is such a `.drawio.png` file that has been created with the extension itself!
 
 ![](./docs/drawio-png.gif)
 
@@ -69,8 +102,6 @@ If you have a node labeled `#MyClass` and a class of name `MyClass`, you will ju
 **Please note that you have to open at least one file of the project that contains the symbol.**
 Otherwise, VS Code will not consider this project when searching for symbols.
 This file itself does not have to contain the symbol though.
-
-Thanks to my latest github sponsors, this feature is open source and freely available now.
 
 _TIP_: If you open the draw.io editor to the right side (i.e. the second editor column) and navigate to a symbol,
 the diagram will stay visible.
@@ -146,7 +177,8 @@ When an agent edits the XML, the change shows up in the open diagram right away,
 
 ## Contributors
 
--   Henning Dieterichs, [hediet](https://github.com/hediet) on Github (Main Contributor / Author)
+-   Michael Curtis, [MichaelDanCurtis](https://github.com/MichaelDanCurtis) on Github (Draw.io AI)
+-   Henning Dieterichs, [hediet](https://github.com/hediet) on Github (author of the original Draw.io Integration extension)
 -   Vincent Rouillé, [Speedy37](https://github.com/Speedy37) on Github
 
 ## See Also / Similar Extensions
