@@ -105,7 +105,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	public async pickProviderAndModel(): Promise<void> {
 		const provider = await vscode.window.showQuickPick(
 			this.registry.providers.map((p) => ({ label: p.label, id: p.id })),
-			{ title: "Draw.io AI provider" }
+			{ title: "Draw.AI provider" }
 		);
 		if (!provider) return;
 		await this.setSelected({ providerId: provider.id });

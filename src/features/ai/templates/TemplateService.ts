@@ -118,7 +118,7 @@ export class TemplateService {
 			{ label: "None", description: "Don't apply a template", id: "none" },
 			{ label: "$(add) Create Template…", create: true },
 		];
-		const pick = await vscode.window.showQuickPick(items, { title: "Draw.io AI design template" });
+		const pick = await vscode.window.showQuickPick(items, { title: "Draw.AI design template" });
 		if (!pick) return;
 		if (pick.create) {
 			await vscode.commands.executeCommand("drawio-ai.createTemplate");

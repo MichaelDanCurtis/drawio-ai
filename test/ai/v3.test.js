@@ -301,7 +301,7 @@ test("MCP: initialize negotiates the version, lists tools with annotations and c
 		assert.equal(r.headers.get("content-type"), "application/json");
 		let body = await r.json();
 		assert.equal(body.result.protocolVersion, "2025-06-18");
-		assert.deepEqual(body.result.serverInfo, { name: "drawio-ai", title: "Draw.io AI", version: "9.9.9" });
+		assert.deepEqual(body.result.serverInfo, { name: "draw-ai", title: "Draw.AI", version: "9.9.9" });
 		assert.equal(body.result.instructions, "Edit the open diagram.");
 		assert.deepEqual(body.result.capabilities, { tools: { listChanged: false } });
 

@@ -34,7 +34,7 @@ export async function readImage(uri: vscode.Uri, maxBase64 = MAX_IMAGE_BASE64): 
 	const base64 = Buffer.from(data).toString("base64");
 	if (base64.length > maxBase64) {
 		throw new Error(
-			`${uri.path.split("/").pop()} is too large (${(data.byteLength / 1048576).toFixed(1)} MB). Paste or attach it in the Draw.io AI chat panel, which shrinks large images automatically.`
+			`${uri.path.split("/").pop()} is too large (${(data.byteLength / 1048576).toFixed(1)} MB). Paste or attach it in the Draw.AI chat panel, which shrinks large images automatically.`
 		);
 	}
 	return { mimeType, base64 };

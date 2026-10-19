@@ -51,7 +51,7 @@ async function runSteps() {
 	fs.writeFileSync(file.fsPath, EMPTY);
 
 	await step("contributes tools, participant commands and chat view", async () => {
-		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === "vscode-drawio-ai");
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === "draw-ai");
 		assert.ok(ext, "extension not found");
 		await ext.activate();
 		const names = vscode.lm.tools.map((t) => t.name);

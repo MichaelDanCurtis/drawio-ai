@@ -128,7 +128,7 @@ export class ChatStore {
 	private enqueue(uri: string, work: (file: vscode.Uri) => Promise<void>): Promise<void> {
 		const file = this.file(uri);
 		if (!file) return Promise.resolve();
-		const next = (this.queue.get(uri) ?? Promise.resolve()).then(() => work(file)).catch((e) => console.error("Draw.io AI: saving chat failed", e));
+		const next = (this.queue.get(uri) ?? Promise.resolve()).then(() => work(file)).catch((e) => console.error("Draw.AI: saving chat failed", e));
 		this.queue.set(uri, next);
 		return next;
 	}

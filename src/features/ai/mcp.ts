@@ -46,7 +46,7 @@ export async function handleMcpMessage(msg: any, deps: McpHandlerDeps): Promise<
 			return ok({
 				protocolVersion: SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : SUPPORTED_PROTOCOL_VERSIONS[0],
 				capabilities: { tools: { listChanged: false } },
-				serverInfo: { name: "drawio-ai", title: "Draw.io AI", version: deps.serverVersion },
+				serverInfo: { name: "draw-ai", title: "Draw.AI", version: deps.serverVersion },
 				instructions: await deps.instructions(),
 			});
 		}

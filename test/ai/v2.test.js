@@ -366,7 +366,7 @@ test("agent sends images, attachments and the template section; older ones are c
 		systemExtra: "## Active design template", images: [image], attachments: [{ name: "code", text: "x".repeat(5000) }],
 	});
 	const req = client.requests[0];
-	assert.match(req.system, /You are Draw\.io AI[\s\S]*## Active design template$/);
+	assert.match(req.system, /You are Draw\.AI[\s\S]*## Active design template$/);
 	const parts = req.messages[0].parts;
 	assert.deepEqual(parts.map((p) => p.type), ["text", "text", "image"]);
 	assert.match(parts[1].text, /^<attachment name="code">\n/);

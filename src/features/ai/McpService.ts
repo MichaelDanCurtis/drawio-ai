@@ -70,7 +70,7 @@ export class McpService {
 		try {
 			http = require("http");
 		} catch {
-			void vscode.window.showErrorMessage("Draw.io AI: the MCP server needs the desktop version of VS Code.");
+			void vscode.window.showErrorMessage("Draw.AI: the MCP server needs the desktop version of VS Code.");
 			return;
 		}
 		const listener = createMcpListener({
@@ -104,8 +104,8 @@ export class McpService {
 			this.updateStatus();
 			void vscode.window.showErrorMessage(
 				e?.code === "EADDRINUSE"
-					? `Draw.io AI MCP server: port ${port} is already in use (another VS Code window may be serving it). Change "drawio-ai.mcp.port".`
-					: `Draw.io AI MCP server could not start: ${e?.message ?? e}`
+					? `Draw.AI MCP server: port ${port} is already in use (another VS Code window may be serving it). Change "drawio-ai.mcp.port".`
+					: `Draw.AI MCP server could not start: ${e?.message ?? e}`
 			);
 			return;
 		}
@@ -126,8 +126,8 @@ export class McpService {
 
 	private updateStatus(): void {
 		if (this.server) {
-			this.status.text = "$(plug) Draw.io MCP";
-			this.status.tooltip = `Draw.io AI MCP server on http://127.0.0.1:${this.actualPort}/mcp. Click for client setup.`;
+			this.status.text = "$(plug) Draw.AI MCP";
+			this.status.tooltip = `Draw.AI MCP server on http://127.0.0.1:${this.actualPort}/mcp. Click for client setup.`;
 			this.status.show();
 		} else {
 			this.status.hide();
@@ -164,7 +164,7 @@ export class McpService {
 		};
 	}
 
-	/** `Draw.io AI: Set Up MCP Server for External Agents` */
+	/** `Draw.AI: Set Up MCP Server for External Agents` */
 	public async setupCommand(args?: { show?: boolean; enable?: boolean }): Promise<McpConnectionInfo> {
 		if (!this.config.enabled) {
 			const enable =
@@ -201,7 +201,7 @@ export class McpService {
 			{ label: "$(debug-disconnect) Turn the MCP server off", run: async () => vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global) },
 		];
 		const pick = await vscode.window.showQuickPick(items, {
-			title: info.running ? `Draw.io AI MCP server: ${info.url}` : "Draw.io AI MCP server is not running",
+			title: info.running ? `Draw.AI MCP server: ${info.url}` : "Draw.AI MCP server is not running",
 		});
 		await pick?.run();
 		return this.info();

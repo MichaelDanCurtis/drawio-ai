@@ -351,7 +351,7 @@ export class AiFeature {
 			if (!targets?.length) return;
 		}
 		const { files, root } = await vscode.window.withProgress(
-			{ location: vscode.ProgressLocation.Window, title: "Draw.io AI: reading source files…" },
+			{ location: vscode.ProgressLocation.Window, title: "Draw.AI: reading source files…" },
 			() => collectSources(targets!)
 		);
 		if (files.length === 0) {
@@ -399,7 +399,7 @@ export class AiFeature {
 			{ cellIds: [] },
 			{ editor, attachments: [{ name: `code analysis of ${label} (${files.length} files, ${analysis.entities.length} entities)`, text }] }
 		);
-		await this.linkShapesToCode(editor, codeRefs(analysis), root, files).catch((e) => console.error("Draw.io AI: linking shapes failed", e));
+		await this.linkShapesToCode(editor, codeRefs(analysis), root, files).catch((e) => console.error("Draw.AI: linking shapes failed", e));
 	}
 
 	/** Turns `codeRef` attributes (and exact name matches) into code links (double-click → source). */

@@ -1,13 +1,12 @@
 {
-	"name": "vscode-drawio-ai",
+	"name": "draw-ai",
 	"private": true,
-	"displayName": "Draw.io AI",
+	"displayName": "Draw.AI",
 	"description": "Chat with AI to edit draw.io diagrams live in VS Code: lasso and mark up shapes, review changes before keeping them, turn sketches and code into diagrams, enforce team design templates. Unofficial; based on hediet/vscode-drawio.",
 	"version": "0.1.0",
 	"license": "GPL-3.0",
 	"preview": true,
 	"pricing": "Free",
-	"qna": "https://github.com/MichaelDanCurtis/drawio-ai/discussions",
 	"galleryBanner": {
 		"color": "#1f1f23",
 		"theme": "dark"
@@ -97,7 +96,7 @@
 		"customEditors": [
 			{
 				"viewType": "drawio-ai",
-				"displayName": "Draw.io AI (Binary)",
+				"displayName": "Draw.AI (Binary)",
 				"selector": [
 					{
 						"filenamePattern": "*.drawio.png"
@@ -110,7 +109,7 @@
 			},
 			{
 				"viewType": "drawio-ai-text",
-				"displayName": "Draw.io AI",
+				"displayName": "Draw.AI",
 				"selector": [
 					{
 						"filenamePattern": "*.drawio"
@@ -129,7 +128,7 @@
 			},
 			{
 				"viewType": "drawio-ai.inline.drawioEditor",
-				"displayName": "Draw.io AI Inline Editor",
+				"displayName": "Draw.AI Inline Editor",
 				"selector": [
 					{
 						"filenamePattern": "*.drawio"
@@ -155,7 +154,7 @@
 			"activitybar": [
 				{
 					"id": "drawio-ai",
-					"title": "Draw.io AI",
+					"title": "Draw.AI",
 					"icon": "media/drawio-ai.svg"
 				}
 			]
@@ -173,7 +172,7 @@
 			{
 				"id": "drawio-ai.participant",
 				"name": "drawio",
-				"fullName": "Draw.io AI",
+				"fullName": "Draw.AI",
 				"description": "Edit the open draw.io diagram live",
 				"isSticky": true,
 				"commands": [
@@ -722,85 +721,85 @@
 			{
 				"command": "drawio-ai.openChat",
 				"title": "Open AI Chat",
-				"category": "Draw.io AI",
+				"category": "Draw.AI",
 				"icon": "$(sparkle)"
 			},
 			{
 				"command": "drawio-ai.askAboutSelection",
 				"title": "Ask AI About Selection",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.lassoSelect",
 				"title": "Lasso Select for AI",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.acceptChanges",
 				"title": "Accept AI Changes",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.rejectChanges",
 				"title": "Reject AI Changes",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.markup",
 				"title": "Mark Up Diagram for AI",
-				"category": "Draw.io AI",
+				"category": "Draw.AI",
 				"icon": "$(edit)"
 			},
 			{
 				"command": "drawio-ai.reviewDiagram",
 				"title": "Review Diagram (Lint)",
-				"category": "Draw.io AI",
+				"category": "Draw.AI",
 				"icon": "$(checklist)"
 			},
 			{
 				"command": "drawio-ai.checkCodeLinks",
 				"title": "Check Code Links",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.mcpSetup",
 				"title": "Set Up MCP Server for External Agents…",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.createTemplate",
 				"title": "Create Design Template…",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.selectTemplate",
 				"title": "Select Design Template…",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.diagramFromImage",
 				"title": "Diagram from Sketch or Screenshot…",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.diagramFromCode",
 				"title": "Diagram from Code…",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.newChat",
 				"title": "New AI Chat",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.selectModel",
 				"title": "Select AI Provider and Model",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.setApiKey",
 				"title": "Set API Key",
-				"category": "Draw.io AI"
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.convert",
@@ -954,7 +953,7 @@
 							"Any OpenAI-compatible Chat Completions API (OpenAI, Azure OpenAI, OpenRouter, Ollama, ...)."
 						],
 						"default": "vscode-lm",
-						"description": "Default AI provider for the Draw.io AI chat panel. (The @drawio chat participant always uses the model selected in Copilot Chat.)"
+						"description": "Default AI provider for the Draw.AI chat panel. (The @drawio chat participant always uses the model selected in Copilot Chat.)"
 					},
 					"drawio-ai.maxToolRounds": {
 						"type": "number",
@@ -966,13 +965,13 @@
 						"type": "string",
 						"default": "",
 						"scope": "resource",
-						"markdownDescription": "Design template the AI follows, by id (folder name in `.drawio-ai/templates/`). Empty: use the repository's template if it has exactly one. `none`: no template. Use **Draw.io AI: Create Design Template…** to make one."
+						"markdownDescription": "Design template the AI follows, by id (folder name in `.drawio-ai/templates/`). Empty: use the repository's template if it has exactly one. `none`: no template. Use **Draw.AI: Create Design Template…** to make one."
 					},
 					"drawio-ai.mcp.enabled": {
 						"type": "boolean",
 						"default": false,
 						"scope": "application",
-						"markdownDescription": "Serve the diagram tools over MCP (Streamable HTTP on `127.0.0.1`, bearer token) so external agents such as Claude Code or Cursor can read and edit the open diagram. Run **Draw.io AI: Set Up MCP Server for External Agents…** for the client configuration. Copilot in VS Code does not need this; it uses the tools directly."
+						"markdownDescription": "Serve the diagram tools over MCP (Streamable HTTP on `127.0.0.1`, bearer token) so external agents such as Claude Code or Cursor can read and edit the open diagram. Run **Draw.AI: Set Up MCP Server for External Agents…** for the client configuration. Copilot in VS Code does not need this; it uses the tools directly."
 					},
 					"drawio-ai.mcp.port": {
 						"type": "number",
@@ -980,7 +979,7 @@
 						"minimum": 0,
 						"maximum": 65535,
 						"scope": "application",
-						"markdownDescription": "Port of the Draw.io AI MCP server (`0` picks a free port on every start, which means reconfiguring clients each time)."
+						"markdownDescription": "Port of the Draw.AI MCP server (`0` picks a free port on every start, which means reconfiguring clients each time)."
 					},
 					"drawio-ai.checkCodeLinks": {
 						"type": "boolean",
@@ -990,7 +989,7 @@
 					"drawio-ai.persistChat": {
 						"type": "boolean",
 						"default": true,
-						"markdownDescription": "Remember the Draw.io AI chat panel conversation for each diagram and restore it when you reopen the diagram. Conversations are stored in VS Code's extension storage for this workspace (never in the repository); images and large tool results are left out."
+						"markdownDescription": "Remember the Draw.AI chat panel conversation for each diagram and restore it when you reopen the diagram. Conversations are stored in VS Code's extension storage for this workspace (never in the repository); images and large tool results are left out."
 					},
 					"drawio-ai.reviewChanges": {
 						"type": "boolean",
@@ -1455,12 +1454,12 @@
 				{
 					"when": "explorerResourceIsFolder || resourceExtname =~ /^\\.(ts|tsx|js|jsx|mjs|cjs|py|java|cs|kt|go|sql|prisma|tf|ya?ml)$/",
 					"command": "drawio-ai.diagramFromCode",
-					"group": "Draw.io AI"
+					"group": "Draw.AI"
 				},
 				{
 					"when": "resourceExtname =~ /^\\.(png|jpe?g|gif|webp)$/i",
 					"command": "drawio-ai.diagramFromImage",
-					"group": "Draw.io AI"
+					"group": "Draw.AI"
 				}
 			],
 			"commandPalette": [
@@ -1495,6 +1494,8 @@
 		"sync-lm-tools": "node scripts/sync-lm-tools.js",
 		"release:check": "node scripts/release-check.js",
 		"set-publisher": "node scripts/set-publisher.js",
+		"release": "node scripts/release.js",
+		"update-drawio": "node scripts/update-drawio.js",
 		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js"

@@ -39,7 +39,7 @@ export async function throwForStatus(response: Response, provider: string): Prom
 	detail = String(detail).slice(0, 300);
 	const hint =
 		response.status === 401 || response.status === 403
-			? " Check the API key (Draw.io AI: Set API Key)."
+			? " Check the API key (Draw.AI: Set API Key)."
 			: response.status === 404
 			? " Check the base URL and model name in settings."
 			: "";

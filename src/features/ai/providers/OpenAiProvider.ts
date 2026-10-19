@@ -23,7 +23,7 @@ export class OpenAiProvider implements AiProvider {
 		const key = await this.secrets.get(SECRET_KEYS.openai);
 		const isLocal = /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(s.baseUrl);
 		if (!key && !isLocal) {
-			throw new ProviderError('No OpenAI-compatible API key. Run "Draw.io AI: Set API Key".');
+			throw new ProviderError('No OpenAI-compatible API key. Run "Draw.AI: Set API Key".');
 		}
 		const headers: Record<string, string> = { "content-type": "application/json" };
 		if (key) {
@@ -63,7 +63,7 @@ export class OpenAiProvider implements AiProvider {
 		const id = modelId || s.model;
 		if (!id) {
 			throw new ProviderError(
-				"No model selected for the OpenAI-compatible provider. Pick one in the Draw.io AI chat or set drawio-ai.openai.model."
+				"No model selected for the OpenAI-compatible provider. Pick one in the Draw.AI chat or set drawio-ai.openai.model."
 			);
 		}
 		return new OpenAiClient({ id, name: id, vision: s.supportsImages }, await this.headers());

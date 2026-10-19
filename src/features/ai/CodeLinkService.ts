@@ -260,7 +260,7 @@ export class CodeLinkService {
 		await pick?.run();
 	}
 
-	/** `Draw.io AI: Check Code Links` */
+	/** `Draw.AI: Check Code Links` */
 	public async checkCommand(editor: DrawioEditor | undefined): Promise<LinkedCell[] | undefined> {
 		if (!editor) {
 			void vscode.window.showInformationMessage("Open a draw.io diagram to check its code links.");

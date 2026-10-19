@@ -24,7 +24,7 @@ export class AnthropicProvider implements AiProvider {
 		const key = await this.secrets.get(SECRET_KEYS.anthropic);
 		if (!key) {
 			throw new ProviderError(
-				'No Anthropic API key. Run "Draw.io AI: Set API Key".'
+				'No Anthropic API key. Run "Draw.AI: Set API Key".'
 			);
 		}
 		return key;

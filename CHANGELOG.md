@@ -7,20 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0]
 
-First release of Draw.io AI, based on hediet/vscode-drawio 1.17.0.
+First release of Draw.AI, based on hediet/vscode-drawio 1.17.0.
 
 ### Added
 
-- Draw.io AI: chat with AI to edit the open diagram live (chat panel, `@drawio` in Copilot Chat, `drawio_*` language model tools), scoped to the selection or a lasso
+- Draw.AI: chat with AI to edit the open diagram live (chat panel, `@drawio` in Copilot Chat, `drawio_*` language model tools), scoped to the selection or a lasso
 - Review before apply: AI edits are held as pending changes (green/amber/red) that you keep or revert, all at once or per shape (`drawio-ai.reviewChanges`)
 - Markup mode (`Alt+M`): arrows, strike-throughs and pinned notes on the canvas, sent to the AI as one request
 - Sketch/screenshot → diagram: paste, drop or attach images in the chat panel, `@drawio /sketch`, or **Convert image to diagram** on an image in the diagram
 - Code → diagram: module dependencies, class diagrams, database ERDs (SQL, Prisma) and infrastructure (Terraform, docker-compose, Kubernetes), with shapes code-linked to their source
-- Diagram review/lint (`Draw.io AI: Review Diagram (Lint)`, `@drawio /review`, `drawio_lint`) with AI fixes as pending changes
+- Diagram review/lint (`Draw.AI: Review Diagram (Lint)`, `@drawio /review`, `drawio_lint`) with AI fixes as pending changes
 - Repository design templates (`.drawio-ai/templates/`) built from example diagrams, shape libraries, style guides (Markdown, Word, PDF) and images; the AI follows them and lint flags violations (`drawio-ai.template`)
 - Chat panel conversations are saved per diagram and restored after a restart (`drawio-ai.persistChat`)
-- Live code links: linked shapes are badged when their code moves, changes or disappears, with one-click fixes, `Draw.io AI: Check Code Links` and the `drawio_code_links` tool (`drawio-ai.checkCodeLinks`)
-- Local MCP server so Claude Code, Cursor and other agents can edit the open diagram (`Draw.io AI: Set Up MCP Server for External Agents…`, `drawio-ai.mcp.enabled`)
+- Live code links: linked shapes are badged when their code moves, changes or disappears, with one-click fixes, `Draw.AI: Check Code Links` and the `drawio_code_links` tool (`drawio-ai.checkCodeLinks`)
+- Local MCP server so Claude Code, Cursor and other agents can edit the open diagram (`Draw.AI: Set Up MCP Server for External Agents…`, `drawio-ai.mcp.enabled`)
 
 ### Fixed
 

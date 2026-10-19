@@ -165,7 +165,7 @@ export class LinkCodeWithSelectedNodeService {
 			editor.document.uri,
 			editor.selection
 		);
-		// A fingerprint lets Draw.io AI notice when the linked code changes or moves.
+		// A fingerprint lets Draw.AI notice when the linked code changes or moves.
 		const lines = splitLines(editor.document.getText());
 		const { start, end } = editor.selection;
 		lastActiveDrawioEditor.drawioClient.linkSelectedNodeWithData({

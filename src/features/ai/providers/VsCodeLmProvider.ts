@@ -64,7 +64,7 @@ export class VsCodeLmClient implements AiModelClient {
 			response = await this.chat.sendRequest(
 				messages,
 				{
-					justification: "Draw.io AI edits your diagram.",
+					justification: "Draw.AI edits your diagram.",
 					tools: request.tools.map((t) => ({
 						name: t.name,
 						description: t.description,
