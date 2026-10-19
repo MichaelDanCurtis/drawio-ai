@@ -25,6 +25,14 @@ const MAX_XML_CHARS = 80_000;
  * (or was last active), so tools keep working while the chat has focus.
  */
 export class DiagramToolbox {
+	private readonly applyListeners = new Set<(editor: DrawioEditor) => void>();
+
+	/** Called after every drawio_apply_operations batch that changed the diagram. */
+	public onDidApplyOperations(listener: (editor: DrawioEditor) => void): { dispose(): void } {
+		this.applyListeners.add(listener);
+		return { dispose: () => void this.applyListeners.delete(listener) };
+	}
+
 	constructor(
 		private readonly getEditor: () => DrawioEditor | undefined,
 		private readonly getTemplate: (editor: DrawioEditor) => Promise<LoadedTemplate | undefined> = async () => undefined,
@@ -33,7 +41,8 @@ export class DiagramToolbox {
 			refresh(editor: DrawioEditor, ids: string[]): Promise<{ updated: string[]; skipped: string[] }>;
 		},
 		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>,
-		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>
+		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>,
+		private readonly attachments?: (id: string) => Promise<ToolResult>
 	) {}
 
 	public specs(options: { vision: boolean }): ToolSpec[] {
@@ -48,6 +57,17 @@ export class DiagramToolbox {
 		if (name === "drawio_import") {
 			// Needs no open diagram: it creates one.
 			return this.importFile(rawInput);
+		}
+		if (name === "drawio_get_attachment") {
+			// Works without an open diagram: it only reads what the request stored.
+			if (!this.attachments) {
+				return { isError: true, summary: "No attachments", text: "Attachments are not available." };
+			}
+			try {
+				return await this.attachments(String(normalizeInput(rawInput).id ?? ""));
+			} catch (e: any) {
+				return { isError: true, summary: "Failed", text: `Error: ${e?.message ?? e}` };
+			}
 		}
 		const editor = this.getEditor();
 		if (!editor) {
@@ -200,6 +220,15 @@ export class DiagramToolbox {
 
 		const failed = result.results.filter((r) => !r.ok);
 		const okCount = result.results.length - failed.length;
+		if (!result.rolledBack && okCount > 0) {
+			for (const listener of [...this.applyListeners]) {
+				try {
+					listener(editor);
+				} catch (e) {
+					console.error("Draw.AI: apply listener failed", e);
+				}
+			}
+		}
 		const createdOrChanged = [...new Set(result.results.flatMap((r) => r.ids ?? []))];
 		const payload = {
 			ok: failed.length === 0,

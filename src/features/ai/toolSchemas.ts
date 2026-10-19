@@ -330,6 +330,17 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		},
 	},
 	{
+		name: "drawio_get_attachment",
+		displayName: "Get Draw.io Request Attachment",
+		description:
+			"Return an image or text the user attached to a request sent from the diagram in VS Code's chat (a markup snapshot, an image to convert, a sketch, a code analysis). Such requests list the attachment ids; read each one before working on the request.",
+		inputSchema: {
+			type: "object",
+			properties: { id: { type: "string", description: "An attachment id from the request." } },
+			required: ["id"],
+		},
+	},
+	{
 		name: "drawio_get_template",
 		displayName: "Get Draw.io Design Template",
 		description:

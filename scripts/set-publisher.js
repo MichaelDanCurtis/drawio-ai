@@ -16,4 +16,6 @@ if (updated === text && !text.includes(`"publisher": "${id}"`)) {
 	process.exit(1);
 }
 fs.writeFileSync(file, updated);
+// The Draw.AI chat agent names its tools by extension id.
+require("child_process").execFileSync(process.execPath, [path.join(__dirname, "sync-lm-tools.js")], { stdio: "inherit" });
 console.log(`publisher set to "${id}". The extension id is now ${id}.${JSON.parse(updated).name}.`);
