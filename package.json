@@ -3,7 +3,7 @@
 	"private": true,
 	"displayName": "Draw.AI",
 	"description": "Chat with AI to edit draw.io diagrams live in VS Code, in its own panel, as a Copilot chat agent, or from Claude Code and Codex: lasso and mark up shapes, review changes before keeping them, turn sketches and code into diagrams, enforce team design templates, export to and import from Visio. Unofficial; based on hediet/vscode-drawio.",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"license": "GPL-3.0",
 	"preview": true,
 	"pricing": "Free",
