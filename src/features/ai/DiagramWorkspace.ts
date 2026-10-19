@@ -145,8 +145,9 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 	public async create(input: Record<string, any>): Promise<ToolResult> {
 		const p = typeof input.path === "string" ? input.path.trim().replace(/\\/g, "/") : "";
 		if (!p) throw new Error("`path` is required.");
-		if (!isDiagramFile(p) || /\.xml$/i.test(p)) {
-			throw new Error("path must end in .drawio (recommended), .drawio.svg or .drawio.png.");
+		// An empty file is a valid new .drawio or .drawio.svg diagram, but not a valid .drawio.png.
+		if (!isDiagramFile(p) || /\.(xml|png)$/i.test(p)) {
+			throw new Error("path must end in .drawio (recommended) or .drawio.svg. For a PNG, create a .drawio and export it with drawio_export.");
 		}
 		const folders = vscode.workspace.workspaceFolders ?? [];
 		if (folders.length === 0) throw new Error("No folder is open in VS Code, so there is nowhere to create the diagram.");

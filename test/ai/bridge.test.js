@@ -65,6 +65,14 @@ test("routing: a relative file is the one in the agent's folder, resolved to an 
 	assert.equal(pickInstance([proj, other], { file: "docs/new.drawio", roots: [], exists }).reason, "focus", "other tools still fall back to focus");
 });
 
+test("routing: multi-root paths start with the folder's name, as drawio_list_diagrams shows them", () => {
+	const multi = instance({ pid: 1, workspaceFolders: ["/repo/api", "/repo/web"], workspaceFolderNames: ["api", "web"], openDiagrams: ["/repo/api/docs/arch.drawio"] });
+	const other = instance({ pid: 2, workspaceFolders: ["/elsewhere"], focused: true, lastFocusedAt: 9 });
+	const exists = (p) => p === "/repo/web/flow.drawio";
+	assert.deepEqual(pickInstance([other, multi], { file: "api/docs/arch.drawio", roots: ["/repo/api"], exists }), { instance: multi, reason: "open", file: "/repo/api/docs/arch.drawio" });
+	assert.deepEqual(pickInstance([other, multi], { file: "web/flow.drawio", roots: [], exists }), { instance: multi, reason: "workspace", file: "/repo/web/flow.drawio" });
+});
+
 test("Windows launcher paths: the profile folder becomes a variable and percent signs are escaped", () => {
 	const env = { LOCALAPPDATA: "C:\\Users\\José\\AppData\\Local", USERPROFILE: "C:\\Users\\José" };
 	assert.equal(batchPath("C:\\Users\\José\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", env), "%LOCALAPPDATA%\\Programs\\Microsoft VS Code\\Code.exe");

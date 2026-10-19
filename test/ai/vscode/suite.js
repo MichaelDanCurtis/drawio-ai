@@ -392,6 +392,11 @@ async function agentSteps(firstFile, outsideDir) {
 		const added = JSON.parse(await invoke("drawio_apply_operations", { file: "docs/new/flow.drawio", ops: [{ op: "addShape", label: "Start" }] }));
 		assert.equal(added.ok, true, JSON.stringify(added));
 		assert.match(await invoke("drawio_create", { path: "docs/second.drawio" }), /already exists/);
+		assert.match(await invoke("drawio_create", { path: "docs/pic.drawio.png" }), /must end in \.drawio \(recommended\) or \.drawio\.svg/);
+		const svg = JSON.parse(await invoke("drawio_create", { path: "docs/pic.drawio.svg" }));
+		assert.equal(svg.created, "docs/pic.drawio.svg");
+		const drawn = JSON.parse(await invoke("drawio_apply_operations", { file: "docs/pic.drawio.svg", ops: [{ op: "addShape", label: "In SVG" }] }));
+		assert.equal(drawn.ok, true, JSON.stringify(drawn));
 		assert.match(await invoke("drawio_create", { path: "../escape.drawio" }), /inside the workspace/);
 	});
 

@@ -16,6 +16,8 @@ export interface AgentInstance {
 	extensionVersion: string;
 	/** Absolute paths. */
 	workspaceFolders: string[];
+	/** The folders' names, in the same order: multi-root paths start with them ("api/docs/a.drawio"). */
+	workspaceFolderNames?: string[];
 	/** Absolute paths of the diagrams open in Draw.AI editors. */
 	openDiagrams: string[];
 	activeDiagram?: string;
@@ -134,8 +136,13 @@ export function pickInstance(instances: AgentInstance[], hint: RouteHint & { req
 		const absolute = path.isAbsolute(file);
 		// The agent's folders come first: "docs/a.drawio" means the one in the project the agent works in.
 		const fromRoots = absolute ? [path.resolve(file)] : hint.roots.map((r) => path.join(r, file));
+		// "<folder name>/rest", as drawio_list_diagrams shows paths in a multi-root workspace.
+		const [first, ...rest] = file.replace(/\\/g, "/").split("/");
+		const fromNames = absolute || !rest.length
+			? []
+			: instances.flatMap((i) => i.workspaceFolders.filter((_, k) => i.workspaceFolderNames?.[k] === first).map((f) => path.join(f, ...rest)));
 		const fromFolders = absolute ? [] : instances.flatMap((i) => i.workspaceFolders.map((f) => path.join(f, file)));
-		const candidates = [...new Set([...fromRoots, ...fromFolders])];
+		const candidates = [...new Set([...fromRoots, ...fromNames, ...fromFolders])];
 		for (const c of candidates) {
 			const open = instances.filter((i) => i.openDiagrams.some((d) => normalizeFsPath(d) === normalizeFsPath(c)));
 			if (open.length) return { instance: recent(open), reason: "open", file: c };

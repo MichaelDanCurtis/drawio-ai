@@ -361,7 +361,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		workspace: true,
 		writesFiles: true,
 		description:
-			"Create a new, empty draw.io diagram file in the workspace and open it in VS Code; then build it with drawio_apply_operations, passing the same path as `file`. Prefer .drawio (plain XML that diffs cleanly); .drawio.svg and .drawio.png are images with the diagram embedded. Never replaces an existing file.",
+			"Create a new, empty draw.io diagram file in the workspace and open it in VS Code; then build it with drawio_apply_operations, passing the same path as `file`. Prefer .drawio (plain XML that diffs cleanly); .drawio.svg is an SVG image with the diagram embedded. For a PNG, create a .drawio and export it with drawio_export. Never replaces an existing file.",
 		inputSchema: {
 			type: "object",
 			properties: {

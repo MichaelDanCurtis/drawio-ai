@@ -224,6 +224,7 @@ export class McpService {
 			.filter((i): i is vscode.TabInputCustom => i instanceof vscode.TabInputCustom && viewTypes.has(i.viewType) && i.uri.scheme === "file")
 			.map((i) => i.uri.fsPath);
 		const target = this.targetEditor();
+		const folders = (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file");
 		const instance: AgentInstance = {
 			version: 1,
 			pid: process.pid,
@@ -231,7 +232,8 @@ export class McpService {
 			token: this.sessionToken,
 			app: vscode.env.appName,
 			extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
-			workspaceFolders: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file").map((f) => f.uri.fsPath),
+			workspaceFolders: folders.map((f) => f.uri.fsPath),
+			workspaceFolderNames: folders.map((f) => f.name),
 			openDiagrams: [...new Set(openDiagrams)],
 			activeDiagram: target?.uri.scheme === "file" ? target.uri.fsPath : undefined,
 			focused: vscode.window.state.focused,
