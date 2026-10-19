@@ -1,6 +1,6 @@
 {
 	"name": "draw-ai",
-	"version": "0.2.0",
+	"version": "0.2.1",
 	"description": "Edit draw.io diagrams live in VS Code from Claude Code and Codex: the Draw.AI extension's diagram tools (read, edit, lint, shape search, Visio export) and skills. Needs the Draw.AI extension for VS Code. Unofficial; not affiliated with draw.io or JGraph.",
 	"author": {
 		"name": "Michael Curtis"
