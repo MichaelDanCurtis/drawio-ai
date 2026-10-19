@@ -33,7 +33,8 @@ export class DiagramToolbox {
 			refresh(editor: DrawioEditor, ids: string[]): Promise<{ updated: string[]; skipped: string[] }>;
 		},
 		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>,
-		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>
+		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>,
+		private readonly attachments?: (id: string) => Promise<ToolResult>
 	) {}
 
 	public specs(options: { vision: boolean }): ToolSpec[] {
@@ -48,6 +49,17 @@ export class DiagramToolbox {
 		if (name === "drawio_import") {
 			// Needs no open diagram: it creates one.
 			return this.importFile(rawInput);
+		}
+		if (name === "drawio_get_attachment") {
+			// Works without an open diagram: it only reads what the request stored.
+			if (!this.attachments) {
+				return { isError: true, summary: "No attachments", text: "Attachments are not available." };
+			}
+			try {
+				return await this.attachments(String(normalizeInput(rawInput).id ?? ""));
+			} catch (e: any) {
+				return { isError: true, summary: "Failed", text: `Error: ${e?.message ?? e}` };
+			}
 		}
 		const editor = this.getEditor();
 		if (!editor) {

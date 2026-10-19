@@ -67,6 +67,7 @@ async function runSteps() {
 			"drawio_get_xml",
 			"drawio_export",
 			"drawio_import",
+			"drawio_get_attachment",
 		]) {
 			assert.ok(names.includes(n), `tool ${n} not registered`);
 		}
@@ -255,6 +256,39 @@ async function runSteps() {
 		assert.match(await invoke("drawio_get_xml", {}), /Orders DB/);
 		const commands = await vscode.commands.getCommands(true);
 		assert.ok(commands.includes("drawio-ai.openVisio") && commands.includes("drawio-ai.importDiagram"));
+	});
+
+	await step("VS Code's chat gets the Draw.AI agent (with resolvable tool names) and the diagram instructions", async () => {
+		const listed = JSON.stringify(await vscode.commands.executeCommand("_listExtensionPromptFiles"));
+		assert.ok(listed.includes("draw-ai.agent.md"), `agent not registered: ${listed.slice(0, 400)}`);
+		assert.ok(listed.includes("drawio.instructions.md"), "instructions not registered");
+
+		// VS Code validates agent files; a broken copy proves the check runs, then ours must pass it.
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === "draw-ai");
+		const agentUri = vscode.Uri.joinPath(ext.extensionUri, "media/chat/draw-ai.agent.md");
+		const bad = vscode.Uri.file(path.join(dir, "broken.agent.md"));
+		const ours = fs.readFileSync(agentUri.fsPath, "utf8");
+		fs.writeFileSync(bad.fsPath, ours.replace("/drawio-lint", "/drawio-no-such-tool"));
+		const problems = async (uri) => {
+			await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
+			await sleep(3000);
+			return vscode.languages.getDiagnostics(uri).map((d) => d.message);
+		};
+		const badProblems = await waitFor(async () => {
+			const p = await problems(bad);
+			return p.some((m) => m.includes("drawio-no-such-tool")) ? p : undefined;
+		}, "VS Code to flag an unknown tool in an agent file", 20000);
+		assert.ok(badProblems.length > 0);
+		const ourProblems = (await problems(agentUri)).filter((m) => /drawio/i.test(m));
+		assert.deepEqual(ourProblems, [], "the Draw.AI agent names tools VS Code does not know");
+		// Close only what this step opened: the diagram has unsaved edits later steps need.
+		const opened = new Set([bad.toString(), agentUri.toString()]);
+		const tabs = vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t.input?.uri && opened.has(t.input.uri.toString()));
+		await vscode.window.tabGroups.close(tabs);
+		await vscode.commands.executeCommand("vscode.openWith", file, "drawio-ai-text");
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes("drawio-ai.openChatPanel"));
+		assert.match(await invoke("drawio_get_attachment", { id: "../../secrets" }), /not an attachment id/);
 	});
 
 	await step("v2 commands and tools are registered", async () => {

@@ -95,6 +95,7 @@ function progressLabel(tool: string): string {
 		case "drawio_code_links": return "Checking code links…";
 		case "drawio_export": return "Exporting the diagram…";
 		case "drawio_import": return "Converting the file to draw.io…";
+		case "drawio_get_attachment": return "Reading the attachment…";
 		default: return "Working…";
 	}
 }
