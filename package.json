@@ -751,6 +751,11 @@
 				"category": "Draw.io AI"
 			},
 			{
+				"command": "drawio-ai.mcpSetup",
+				"title": "Set Up MCP Server for External Agents…",
+				"category": "Draw.io AI"
+			},
+			{
 				"command": "drawio-ai.createTemplate",
 				"title": "Create Design Template…",
 				"category": "Draw.io AI"
@@ -950,6 +955,20 @@
 						"default": "",
 						"scope": "resource",
 						"markdownDescription": "Design template the AI follows, by id (folder name in `.drawio-ai/templates/`). Empty: use the repository's template if it has exactly one. `none`: no template. Use **Draw.io AI: Create Design Template…** to make one."
+					},
+					"drawio-ai.mcp.enabled": {
+						"type": "boolean",
+						"default": false,
+						"scope": "application",
+						"markdownDescription": "Serve the diagram tools over MCP (Streamable HTTP on `127.0.0.1`, bearer token) so external agents such as Claude Code or Cursor can read and edit the open diagram. Run **Draw.io AI: Set Up MCP Server for External Agents…** for the client configuration. Copilot in VS Code does not need this; it uses the tools directly."
+					},
+					"drawio-ai.mcp.port": {
+						"type": "number",
+						"default": 47821,
+						"minimum": 0,
+						"maximum": 65535,
+						"scope": "application",
+						"markdownDescription": "Port of the Draw.io AI MCP server (`0` picks a free port on every start, which means reconfiguring clients each time)."
 					},
 					"drawio-ai.checkCodeLinks": {
 						"type": "boolean",

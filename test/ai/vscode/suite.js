@@ -287,6 +287,37 @@ async function runSteps() {
 		assert.deepEqual(r.links.map((l) => l.status), ["missing-file", "missing-file"]);
 	});
 
+	await step("MCP server: an external agent reads and edits the open diagram", async () => {
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("port", 0, vscode.ConfigurationTarget.Global);
+		const info = await vscode.commands.executeCommand("drawio-ai.mcpSetup", { enable: true, show: false });
+		assert.equal(info.running, true);
+		assert.match(info.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+		assert.match(info.claudeCommand, /^claude mcp add --transport http drawio http:\/\/127\.0\.0\.1:\d+\/mcp --header "Authorization: Bearer [0-9a-f]{48}"$/);
+		const rpc = async (id, method, params) => {
+			const r = await fetch(info.url, {
+				method: "POST",
+				headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${info.token}` },
+				body: JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+			});
+			assert.equal(r.status, 200);
+			return (await r.json()).result;
+		};
+		const init = await rpc(1, "initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "it", version: "1" } });
+		assert.match(init.instructions, /draw\.io diagram that is open/);
+		assert.match(init.instructions, /Active design template: "Team Style"/);
+		const tools = (await rpc(2, "tools/list")).tools.map((t) => t.name);
+		assert.ok(tools.includes("drawio_apply_operations") && tools.includes("drawio_code_links"));
+
+		const edit = await rpc(3, "tools/call", { name: "drawio_apply_operations", arguments: { ops: [{ op: "addShape", label: "From MCP", x: 40, y: 800 }] } });
+		assert.equal(edit.isError, false, JSON.stringify(edit));
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		const read = await rpc(4, "tools/call", { name: "drawio_find_cells", arguments: { query: "From MCP" } });
+		assert.equal(JSON.parse(read.content[0].text).total, 1);
+
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global);
+		await waitFor(async () => fetch(info.url, { method: "POST" }).then(() => false, () => true), "server to stop");
+	});
+
 	await step("saving writes the AI edits to disk", async () => {
 		const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === file.fsPath);
 		await doc.save();

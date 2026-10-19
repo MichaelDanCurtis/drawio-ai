@@ -254,3 +254,124 @@ test("code links: legacy links without fingerprints, symbol links, and path reso
 	assert.equal(resolveLinkPath(Uri.file("/repo/arch.drawio"), "../schema.sql").path, "/repo/schema.sql");
 	assert.equal(resolveLinkPath(Uri.file("/repo/docs/arch.drawio"), "../../src/a.ts").path, "/repo/src/a.ts");
 });
+
+// ---------------------------------------------------------------------------
+// MCP server
+// ---------------------------------------------------------------------------
+
+const http = require("http");
+const { createMcpListener, handleMcpMessage } = require(src("mcp.ts"));
+
+async function withMcpServer(fn) {
+	const calls = [];
+	const deps = {
+		serverVersion: "9.9.9",
+		tools: () => [
+			{ name: "drawio_get_diagram", title: "Get", description: "read", inputSchema: { type: "object", properties: {} }, readOnly: true },
+			{ name: "drawio_apply_operations", title: "Edit", description: "edit", inputSchema: { type: "object", properties: {} }, readOnly: false },
+		],
+		callTool: async (name, args) => {
+			calls.push([name, args]);
+			if (args.boom) throw new Error("kaboom");
+			return name === "drawio_get_diagram" ? { text: '{"cells":[]}', image: { mimeType: "image/png", base64: "AAA=" } } : { text: "failed", isError: true };
+		},
+		instructions: async () => "Edit the open diagram.",
+	};
+	let port = 0;
+	const server = http.createServer(createMcpListener({ token: () => "secret", port: () => port, deps }));
+	await new Promise((r) => server.listen(0, "127.0.0.1", r));
+	port = server.address().port;
+	const post = (body, headers = {}) =>
+		fetch(`http://127.0.0.1:${port}/mcp`, {
+			method: "POST",
+			headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: "Bearer secret", ...headers },
+			body: typeof body === "string" ? body : JSON.stringify(body),
+		});
+	try {
+		await fn({ post, port, calls });
+	} finally {
+		server.close();
+	}
+}
+
+test("MCP: initialize negotiates the version, lists tools with annotations and calls them", () =>
+	withMcpServer(async ({ post, calls }) => {
+		let r = await post({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+		assert.equal(r.status, 200);
+		assert.equal(r.headers.get("content-type"), "application/json");
+		let body = await r.json();
+		assert.equal(body.result.protocolVersion, "2025-06-18");
+		assert.deepEqual(body.result.serverInfo, { name: "drawio-ai", title: "Draw.io AI", version: "9.9.9" });
+		assert.equal(body.result.instructions, "Edit the open diagram.");
+		assert.deepEqual(body.result.capabilities, { tools: { listChanged: false } });
+
+		body = await (await post({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "1999-01-01" } })).json();
+		assert.equal(body.result.protocolVersion, "2025-11-25", "unknown versions get the latest supported one");
+
+		r = await post({ jsonrpc: "2.0", method: "notifications/initialized" });
+		assert.equal(r.status, 202);
+		assert.equal(await r.text(), "");
+
+		body = await (await post({ jsonrpc: "2.0", id: 3, method: "tools/list" })).json();
+		assert.deepEqual(body.result.tools.map((t) => [t.name, t.annotations.readOnlyHint, t.annotations.destructiveHint]), [
+			["drawio_get_diagram", true, false],
+			["drawio_apply_operations", false, true],
+		]);
+
+		body = await (await post({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "drawio_get_diagram", arguments: { scope: "page" } } })).json();
+		assert.deepEqual(body.result, { content: [{ type: "text", text: '{"cells":[]}' }, { type: "image", data: "AAA=", mimeType: "image/png" }], isError: false });
+		assert.deepEqual(calls[0], ["drawio_get_diagram", { scope: "page" }]);
+
+		body = await (await post({ jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "drawio_apply_operations", arguments: { boom: true } } })).json();
+		assert.equal(body.result.isError, true);
+		assert.match(body.result.content[0].text, /kaboom/);
+
+		body = await (await post({ jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "rm_rf" } })).json();
+		assert.equal(body.error.code, -32602);
+		body = await (await post({ jsonrpc: "2.0", id: 7, method: "resources/list" })).json();
+		assert.equal(body.error.code, -32601);
+		body = await (await post({ jsonrpc: "2.0", id: "p", method: "ping" })).json();
+		assert.deepEqual(body, { jsonrpc: "2.0", id: "p", result: {} });
+		assert.equal((await post("{oops")).status, 400);
+	}));
+
+test("MCP: rejects missing tokens, foreign origins/hosts, GET and huge bodies", () =>
+	withMcpServer(async ({ post, port, calls }) => {
+		const ping = { jsonrpc: "2.0", id: 1, method: "ping" };
+		let r = await post(ping, { authorization: "Bearer wrong" });
+		assert.equal(r.status, 401);
+		assert.match(r.headers.get("www-authenticate"), /Bearer/);
+		r = await post(ping, { authorization: "" });
+		assert.equal(r.status, 401);
+
+		r = await post(ping, { origin: "https://evil.example" });
+		assert.equal(r.status, 403, "browsers on other sites cannot reach the server");
+		r = await post(ping, { origin: `http://localhost:${port}` });
+		assert.equal(r.status, 200);
+
+		// DNS rebinding: a request whose Host is not loopback is rejected even with the right token.
+		const status = await new Promise((resolve) => {
+			const req = http.request({ host: "127.0.0.1", port, path: "/mcp", method: "POST", headers: { host: "attacker.example", authorization: "Bearer secret", "content-type": "application/json" } }, (res) => {
+				res.resume();
+				resolve(res.statusCode);
+			});
+			req.end(JSON.stringify(ping));
+		});
+		assert.equal(status, 403);
+
+		r = await fetch(`http://127.0.0.1:${port}/mcp`, { headers: { authorization: "Bearer secret" } });
+		assert.equal(r.status, 405);
+		r = await fetch(`http://127.0.0.1:${port}/other`, { method: "POST", headers: { authorization: "Bearer secret" }, body: "{}" });
+		assert.equal(r.status, 404);
+
+		r = await post('{"jsonrpc":"2.0","id":1,"method":"ping","x":"' + "a".repeat(11 * 1024 * 1024) + '"}').catch(() => ({ status: 413 }));
+		assert.equal(r.status, 413);
+		assert.equal(calls.length, 0, "no tool ran for any rejected request");
+	}));
+
+test("MCP: notifications and client responses produce no reply", async () => {
+	const deps = { serverVersion: "1", tools: () => [], callTool: async () => ({ text: "" }), instructions: async () => "" };
+	assert.equal(await handleMcpMessage({ jsonrpc: "2.0", method: "notifications/cancelled", params: {} }, deps), undefined);
+	assert.equal(await handleMcpMessage({ jsonrpc: "2.0", id: 9, result: {} }, deps), undefined);
+	assert.equal((await handleMcpMessage({ id: 1, method: "ping" }, deps)).error.code, -32600);
+});

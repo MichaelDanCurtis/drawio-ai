@@ -17,6 +17,7 @@ import { CreateTemplateArgs, TemplateService } from "./templates/TemplateService
 import { path } from "../../utils/path";
 import { linkData, splitLines } from "./codeLinks";
 import { CodeLinkService } from "./CodeLinkService";
+import { McpService } from "./McpService";
 
 const CODE_GLOB = /\.(tsx?|jsx?|mjs|cjs|py|java|cs|kt|go|sql|prisma|tf|ya?ml)$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "out", "build", ".venv", "venv", "__pycache__", "target", "bin", "obj", ".next", ".terraform", "coverage", ".drawio-ai"]);
@@ -100,6 +101,14 @@ export class AiFeature {
 		track(registerLanguageModelTools(this.toolbox));
 		track(this.templates);
 		track(this.codeLinks);
+		const mcp = new McpService(
+			this.context,
+			this.toolbox,
+			() => this.targetEditor(),
+			() => this.templates.promptSection(this.targetEditor()?.uri)
+		);
+		track(mcp);
+		track(vscode.commands.registerCommand("drawio-ai.mcpSetup", (args?: { show?: boolean; enable?: boolean }) => mcp.setupCommand(args)));
 		track(this.templates.onDidChange(() => void this.chatView.refreshTemplate()));
 		track(
 			vscode.workspace.onDidChangeConfiguration((e) => {
