@@ -248,6 +248,15 @@ test("drawio_import: converts workspace files only, opens the result unless aske
 	await assert.rejects(fail("linked/net.vsdx"), /linked is a symbolic link; files are not read through links/);
 	await assert.rejects(fail("docs/link.vsdx"), /docs\/link\.vsdx is a symbolic link/);
 
+	// The opened diagram becomes the one the tools work on; the result says when it did not.
+	commands.length = 0;
+	const waited = [];
+	const notTarget = JSON.parse((await importForAgent({ path: "docs/flow.gliffy" }, drawio.run, () => undefined, async (u) => (waited.push(u.path), false))).text);
+	assert.deepEqual(waited, ["/ws/docs/flow-3.drawio"]);
+	assert.equal(notTarget.opened, true);
+	assert.match(notTarget.openError, /did not become the active, loaded one/);
+	assert.equal(commands[0][3].preserveFocus, undefined, "the new diagram takes focus");
+
 	// Several workspace folders: the first one that has the file.
 	workspaceFolders = [{ uri: new Uri("/ws") }, { uri: new Uri("/other") }];
 	files.set("/other/b.graphml", fixture("import.graphml"));

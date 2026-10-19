@@ -249,11 +249,14 @@ export interface ImportRequest {
 /**
  * Lets the agent convert a file. Only files inside the workspace (or, without a
  * workspace, the open diagram's folder) are read, and not through symbolic links.
+ * An opened diagram takes focus so that the agent's next tool calls work on it;
+ * whenTarget waits until they do.
  */
 export async function importForAgent(
 	request: ImportRequest,
 	runInDrawio: RunInDrawio,
-	diagramFolder: () => vscode.Uri | undefined
+	diagramFolder: () => vscode.Uri | undefined,
+	whenTarget: (diagram: vscode.Uri) => Promise<boolean> = async () => true
 ): Promise<{ text: string; summary: string }> {
 	const source = await resolveSource(String(request.path ?? ""), diagramFolder());
 	const r = await importDiagramFile(source, runInDrawio);
@@ -261,8 +264,11 @@ export async function importForAgent(
 	let openError: string | undefined;
 	if (request.open !== false) {
 		try {
-			await vscode.commands.executeCommand("vscode.openWith", r.target, "drawio-ai-text", { preview: false, preserveFocus: true });
+			await vscode.commands.executeCommand("vscode.openWith", r.target, "drawio-ai-text", { preview: false });
 			opened = true;
+			if (!(await whenTarget(r.target))) {
+				openError = "The diagram opened but did not become the active, loaded one in time, so the other tools may still work on the previous diagram.";
+			}
 		} catch (e: any) {
 			// The file is written either way; report that instead of failing the call.
 			openError = String(e?.message ?? e);

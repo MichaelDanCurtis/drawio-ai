@@ -27,6 +27,7 @@ async function invoke(name, input) {
 
 const steps = [];
 async function step(name, fn) {
+	console.log(`▶ ${name}`); // shows which step is running if the suite hangs
 	const start = Date.now();
 	try {
 		await fn();
@@ -404,5 +405,14 @@ async function runSteps() {
 		const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === file.fsPath);
 		await doc.save();
 		assert.match(fs.readFileSync(file.fsPath, "utf8"), /Orders DB/);
+	});
+
+	await step("drawio_import opens the new diagram, and the next tool calls work on it", async () => {
+		const r = JSON.parse(await invoke("drawio_import", { path: "services.graphml" }));
+		assert.deepEqual([r.opened, r.openError], [true, undefined]);
+		assert.equal(path.basename(r.path), "services-2.drawio");
+		const xml = await invoke("drawio_get_xml", {});
+		assert.match(xml, /Order Service/);
+		assert.doesNotMatch(xml, /Orders DB/);
 	});
 }

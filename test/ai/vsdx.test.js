@@ -37,8 +37,17 @@ const files = new Map();
 const symlinks = new Set();
 let dialogAnswer;
 const dialogs = [];
+class WorkspaceEdit {
+	constructor() {
+		this.ops = [];
+	}
+	createFile(uri, options) {
+		this.ops.push({ uri, options });
+	}
+}
 const vscodeStub = {
 	Uri,
+	WorkspaceEdit,
 	FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
 	window: {
 		showWarningMessage: async (message, options, ...items) => {
@@ -60,6 +69,13 @@ const vscodeStub = {
 			},
 			writeFile: async (u, data) => void files.set(u.path, Buffer.from(data)),
 			createDirectory: async () => {},
+		},
+		applyEdit: async (edit) => {
+			for (const { uri, options } of edit.ops) {
+				if (files.has(uri.path) && !options.overwrite) return false;
+				files.set(uri.path, Buffer.from(options.contents));
+			}
+			return true;
 		},
 	},
 };
@@ -212,6 +228,37 @@ test("drawio_export: writes the Visio file, reports what was exported, never ove
 	await exportDiagramToWorkspace(editor, { format: "png", path: "img/arch" });
 	assert.equal(files.get("/ws/img/arch.png").toString(), "image .png");
 	await assert.rejects(exportDiagramToWorkspace(editor, { format: "pdf" }), /format must be one of: vsdx, svg, png, drawio/);
+});
+
+test("drawio_export: a file or link that appears while exporting is not written over or through", async () => {
+	workspaceFolder = { uri: new Uri("/ws") };
+	files.clear();
+	symlinks.clear();
+	let during = () => {};
+	const editor = {
+		uri: new Uri("/ws/docs/arch.drawio"),
+		getUriWithExtension: (ext) => new Uri("/ws/docs/arch" + ext),
+		drawioClient: {
+			exportVsdx: async () => {
+				during();
+				return { data: Buffer.from("PK-new"), pages: 1, shapes: 1, connectors: 0, images: 0, warnings: [] };
+			},
+		},
+	};
+	// Another process creates the target while the diagram is being exported.
+	during = () => files.set("/ws/docs/arch.vsdx", Buffer.from("someone else's"));
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "vsdx" }), /docs\/arch\.vsdx was created by something else while the diagram was being exported/);
+	assert.equal(files.get("/ws/docs/arch.vsdx").toString(), "someone else's");
+
+	// A replacement the user agreed to is still refused if the path became a link meanwhile.
+	dialogAnswer = "Replace";
+	during = () => symlinks.add("/ws/docs/arch.vsdx");
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "vsdx", overwrite: true }), /docs\/arch\.vsdx is a symbolic link/);
+	assert.equal(files.get("/ws/docs/arch.vsdx").toString(), "someone else's");
+	symlinks.clear();
+	during = () => {};
+	await exportDiagramToWorkspace(editor, { format: "vsdx", overwrite: true });
+	assert.equal(files.get("/ws/docs/arch.vsdx").toString(), "PK-new");
 });
 
 test("drawio_export: never writes through a symbolic link inside the workspace", async () => {

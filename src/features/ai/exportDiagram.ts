@@ -40,7 +40,8 @@ export async function exportDiagramToWorkspace(
 		throw new Error("That path is the open diagram itself. Choose another path.");
 	}
 	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
-	if (await exists(target)) {
+	const existed = await exists(target);
+	if (existed) {
 		if (isDiagramFile(target.path)) {
 			throw new Error(`${shown} is an existing draw.io diagram; exports never replace diagrams. Choose another path.`);
 		}
@@ -66,8 +67,24 @@ export async function exportDiagramToWorkspace(
 		// The page shown in the editor, with the diagram embedded so it stays editable.
 		data = await editor.drawioClient.export(`.${format}`, true);
 	}
+	// Exporting can take a while: check the path again right before writing.
+	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
 	await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-	await vscode.workspace.fs.writeFile(target, data);
+	if (existed) {
+		// The user agreed to replace this file.
+		await vscode.workspace.fs.writeFile(target, data);
+	} else {
+		// Only creates the file, so one that appeared there meanwhile is not replaced.
+		const edit = new vscode.WorkspaceEdit();
+		edit.createFile(target, { overwrite: false, ignoreIfExists: false, contents: data });
+		if (!(await vscode.workspace.applyEdit(edit))) {
+			throw new Error(
+				(await exists(target))
+					? `${shown} was created by something else while the diagram was being exported, and was not replaced. Export again to decide what to do.`
+					: `${shown} could not be created.`
+			);
+		}
+	}
 	return {
 		text: JSON.stringify({ path: shown, format, bytes: data.length, ...details }),
 		summary: `Exported ${shown}`,

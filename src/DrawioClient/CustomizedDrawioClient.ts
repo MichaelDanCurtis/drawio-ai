@@ -114,6 +114,11 @@ export class CustomizedDrawioClient extends DrawioClient<
 		return new Promise((resolve) => this.aiPluginWaiters.push(resolve));
 	}
 
+	/** Resolves true once draw.io and the AI plugin have loaded, false after the timeout. */
+	public whenLoaded(timeoutMs: number): Promise<boolean> {
+		return withTimeout(this.whenAiPluginLoaded().then(() => true), timeoutMs, "").catch(() => false);
+	}
+
 	/** A lost message (e.g. the webview reloaded) must fail the tool call instead of hanging the agent. */
 	private async aiRequest(
 		action: CustomDrawioAction,
