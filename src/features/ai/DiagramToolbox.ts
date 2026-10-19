@@ -17,6 +17,20 @@ export interface ToolResult {
 
 class ToolInputError extends Error {}
 
+/** Diagrams beyond the focused one: what external agents (MCP) and `file` arguments need. */
+export interface DiagramWorkspace {
+	/** Resolves a `file` argument to an open editor, opening it (and, when `reveal`, showing it) as needed. */
+	open(file: string, options: { reveal: boolean }): Promise<DrawioEditor>;
+	list(input: Record<string, any>): Promise<ToolResult>;
+	search(input: Record<string, any>): Promise<ToolResult>;
+	create(input: Record<string, any>): Promise<ToolResult>;
+}
+
+export interface InvokeOptions {
+	/** Called with the editor a tool acts on, before it runs. */
+	onTarget?(editor: DrawioEditor): void;
+}
+
 const MAX_XML_CHARS = 80_000;
 
 /**
@@ -31,7 +45,8 @@ export class DiagramToolbox {
 			report(editor: DrawioEditor, ids?: string[]): Promise<{ text: string; summary: string }>;
 			refresh(editor: DrawioEditor, ids: string[]): Promise<{ updated: string[]; skipped: string[] }>;
 		},
-		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>
+		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>,
+		private readonly diagrams?: DiagramWorkspace
 	) {}
 
 	public specs(options: { vision: boolean }): ToolSpec[] {
@@ -42,17 +57,39 @@ export class DiagramToolbox {
 		}));
 	}
 
-	public async invoke(name: string, rawInput: unknown): Promise<ToolResult> {
-		const editor = this.getEditor();
+	public async invoke(name: string, rawInput: unknown, options: InvokeOptions = {}): Promise<ToolResult> {
+		let input: Record<string, any>;
+		let editor: DrawioEditor | undefined;
+		try {
+			input = normalizeInput(rawInput);
+			const schema = TOOL_SCHEMAS.find((t) => t.name === name);
+			if (schema?.workspace && name !== "drawio_style_reference") {
+				if (!this.diagrams) throw new ToolInputError(`${name} is not available here.`);
+				if (name === "drawio_list_diagrams") return await this.diagrams.list(input);
+				if (name === "drawio_search_diagrams") return await this.diagrams.search(input);
+				if (name === "drawio_create") return await this.diagrams.create(input);
+			}
+			const file = typeof input.file === "string" && input.file.trim() ? input.file.trim() : undefined;
+			if (file) {
+				if (!this.diagrams) throw new ToolInputError("`file` is not supported here; omit it to use the open diagram.");
+				editor = await this.diagrams.open(file, { reveal: !!schema?.mutates });
+			} else {
+				editor = this.getEditor();
+			}
+		} catch (e: any) {
+			return { isError: true, summary: `Failed: ${String(e?.message ?? e).slice(0, 80)}`, text: `Error: ${e?.message ?? e}` };
+		}
 		if (!editor) {
 			return {
 				isError: true,
 				summary: "No diagram open",
-				text: "No draw.io diagram is open in VS Code. Ask the user to open or create a .drawio file.",
+				text: this.diagrams
+					? "No draw.io diagram is open in VS Code. Pass `file` with a diagram's path (drawio_list_diagrams lists them), create one with drawio_create, or ask the user to open one."
+					: "No draw.io diagram is open in VS Code. Ask the user to open or create a .drawio file.",
 			};
 		}
+		options.onTarget?.(editor);
 		try {
-			const input = normalizeInput(rawInput);
 			switch (name) {
 				case "drawio_get_diagram":
 					return await this.getDiagram(editor, input);

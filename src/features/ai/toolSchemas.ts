@@ -6,6 +6,8 @@
  * Schemas avoid oneOf/anyOf: several providers reject or mishandle them.
  */
 
+import type { McpTool } from "./mcp";
+
 export interface ToolSchema {
 	name: string;
 	displayName: string;
@@ -17,6 +19,8 @@ export interface ToolSchema {
 	mutates?: boolean;
 	/** Writes files in the workspace. */
 	writesFiles?: boolean;
+	/** Acts on the workspace rather than one diagram, so it takes no `file`. */
+	workspace?: boolean;
 }
 
 const OP_KINDS = [
@@ -249,6 +253,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 	{
 		name: "drawio_style_reference",
 		displayName: "Draw.io Style Reference",
+		workspace: true,
 		description:
 			"Concise reference for common draw.io style strings: basic shapes, edge styles and arrowheads, the default colour palette, containers/swimlanes, and text. For vendor icons use drawio_search_shapes.",
 		inputSchema: {
@@ -321,7 +326,73 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 			"Return the repository's active design template in full: its rules, extracted style profile (palette, fonts, shape style per role, connector style) and every library shape with its exact style. Follow it when creating or restyling shapes.",
 		inputSchema: { type: "object", properties: {} },
 	},
+	{
+		name: "drawio_list_diagrams",
+		displayName: "List Draw.io Diagrams",
+		workspace: true,
+		description:
+			"List the draw.io diagrams open in the user's VS Code (which one is focused, how many cells are selected, whether AI changes await review) and the diagram files in the workspace. Use it to find the diagram the user means, then pass its path as `file` to the other tools.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				filter: { type: "string", description: "Only files whose path contains this text (case-insensitive)." },
+				limit: { type: "number", description: "Most files to list. Default 200." },
+			},
+		},
+	},
+	{
+		name: "drawio_search_diagrams",
+		displayName: "Search Draw.io Diagrams",
+		workspace: true,
+		description:
+			"Search the labels of every draw.io diagram in the workspace for text (case-insensitive) or a /regex/, including compressed diagrams that plain text search cannot read. Returns the matching files, pages and cells. Use it to find which diagram shows something.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: { type: "string" },
+				limit: { type: "number", description: "Most matches to return. Default 50." },
+			},
+			required: ["query"],
+		},
+	},
+	{
+		name: "drawio_create",
+		displayName: "Create Draw.io Diagram",
+		workspace: true,
+		writesFiles: true,
+		description:
+			"Create a new, empty draw.io diagram file in the workspace and open it in VS Code; then build it with drawio_apply_operations, passing the same path as `file`. Prefer .drawio (plain XML that diffs cleanly); .drawio.svg and .drawio.png are images with the diagram embedded. Never replaces an existing file.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: 'Workspace-relative path, e.g. "docs/architecture.drawio".' },
+			},
+			required: ["path"],
+		},
+	},
 ];
+
+const FILE_PROPERTY = {
+	type: "string",
+	description:
+		'Diagram to act on: a path relative to the workspace folder (e.g. "docs/architecture.drawio") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last).',
+};
+
+// Every tool that acts on one diagram can name it.
+for (const t of TOOL_SCHEMAS) {
+	if (!t.workspace) (t.inputSchema.properties as Record<string, unknown>).file = FILE_PROPERTY;
+}
+
+/** The tools as MCP lists them, for the extension's server and the agent bridge. */
+export function toMcpTools(): McpTool[] {
+	return TOOL_SCHEMAS.map((t) => ({
+		name: t.name,
+		title: t.displayName,
+		description: t.description,
+		inputSchema: t.inputSchema,
+		readOnly: !t.mutates && !t.writesFiles && t.name !== "drawio_code_links",
+	}));
+}
 
 export function getToolSchema(name: string): ToolSchema {
 	const s = TOOL_SCHEMAS.find((t) => t.name === name);

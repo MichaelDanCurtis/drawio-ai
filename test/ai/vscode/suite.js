@@ -65,11 +65,14 @@ async function runSteps() {
 			"drawio_style_reference",
 			"drawio_get_xml",
 			"drawio_export",
+			"drawio_list_diagrams",
+			"drawio_search_diagrams",
+			"drawio_create",
 		]) {
 			assert.ok(names.includes(n), `tool ${n} not registered`);
 		}
 		const commands = await vscode.commands.getCommands(true);
-		for (const c of ["drawio-ai.openChat", "drawio-ai.askAboutSelection", "drawio-ai.lassoSelect", "drawio-ai.setApiKey"]) {
+		for (const c of ["drawio-ai.openChat", "drawio-ai.askAboutSelection", "drawio-ai.lassoSelect", "drawio-ai.setApiKey", "drawio-ai.connectAgents", "drawio-ai.disconnectAgents"]) {
 			assert.ok(commands.includes(c), `command ${c} missing`);
 		}
 		await vscode.commands.executeCommand("drawio-ai.openChat");
@@ -317,7 +320,7 @@ async function runSteps() {
 			return (await r.json()).result;
 		};
 		const init = await rpc(1, "initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "it", version: "1" } });
-		assert.match(init.instructions, /draw\.io diagram that is open/);
+		assert.match(init.instructions, /the diagram the user has open/);
 		assert.match(init.instructions, /Active design template: "Team Style"/);
 		const tools = (await rpc(2, "tools/list")).tools.map((t) => t.name);
 		assert.ok(tools.includes("drawio_apply_operations") && tools.includes("drawio_code_links"));
@@ -332,9 +335,174 @@ async function runSteps() {
 		await waitFor(async () => fetch(info.url, { method: "POST" }).then(() => false, () => true), "server to stop");
 	});
 
+	await agentSteps(file, dir);
+
 	await step("saving writes the AI edits to disk", async () => {
 		const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === file.fsPath);
 		await doc.save();
 		assert.match(fs.readFileSync(file.fsPath, "utf8"), /Orders DB/);
+	});
+}
+
+const tabPaths = () =>
+	vscode.window.tabGroups.all.flatMap((g) => g.tabs).map((t) => t.input && t.input.uri && t.input.uri.fsPath).filter(Boolean);
+
+/** External agents: the `file` argument, the workspace tools, discovery, the bridge, and Connect. */
+async function agentSteps(firstFile, outsideDir) {
+	const folder = vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0];
+	if (!folder) {
+		steps.push("- skipped agent steps: no workspace folder (run through runVsCodeTests.js)");
+		return;
+	}
+	const second = path.join(folder.uri.fsPath, "docs", "second.drawio");
+	fs.mkdirSync(path.dirname(second), { recursive: true });
+	fs.writeFileSync(
+		second,
+		'<mxfile><diagram id="s1" name="Services"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="bill" value="Billing Service" style="rounded=1;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>'
+	);
+
+	await step("agents: list and search find diagrams in the workspace", async () => {
+		const list = JSON.parse(await invoke("drawio_list_diagrams", {}));
+		assert.ok(list.files.includes("docs/second.drawio"), JSON.stringify(list));
+		assert.ok(list.open.some((o) => o.path === firstFile.fsPath), "the open diagram outside the workspace is listed by its full path");
+		const found = JSON.parse(await invoke("drawio_search_diagrams", { query: "/billing\\s+serv/" }));
+		assert.deepEqual(found.matches, [{ path: "docs/second.drawio", page: "Services", cellId: "bill", kind: "vertex", label: "Billing Service" }]);
+	});
+
+	await step("agents: `file` opens a workspace diagram beside the user's work and edits it there", async () => {
+		const edit = JSON.parse(await invoke("drawio_apply_operations", { file: "docs/second.drawio", ops: [{ op: "addShape", label: "Invoices", x: 220, y: 40 }] }));
+		assert.equal(edit.ok, true, JSON.stringify(edit));
+		assert.ok(tabPaths().includes(second), "second.drawio opened in an editor");
+		const cells = JSON.parse(await invoke("drawio_find_cells", { file: second, query: "Invoices" }));
+		assert.equal(cells.total, 1);
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		const first = JSON.parse(await invoke("drawio_get_diagram", { file: firstFile.fsPath }));
+		assert.ok(first.cells.some((c) => c.label === "Orders DB"), "an open diagram outside the workspace is still reachable");
+	});
+
+	await step("agents: `file` refuses diagrams outside the workspace, and drawio_create never replaces a file", async () => {
+		const outside = path.join(outsideDir, "outside.drawio");
+		fs.writeFileSync(outside, EMPTY);
+		assert.match(await invoke("drawio_get_diagram", { file: outside }), /outside the workspace/);
+		assert.match(await invoke("drawio_get_diagram", { file: "../escape.drawio" }), /No diagram at \.\.\/escape\.drawio/);
+		assert.match(await invoke("drawio_get_diagram", { file: "README.md" }), /is not a draw\.io diagram/);
+		const created = JSON.parse(await invoke("drawio_create", { path: "docs/new/flow.drawio" }));
+		assert.equal(created.created, "docs/new/flow.drawio");
+		await waitFor(() => tabPaths().includes(path.join(folder.uri.fsPath, "docs", "new", "flow.drawio")), "new diagram to open");
+		const added = JSON.parse(await invoke("drawio_apply_operations", { file: "docs/new/flow.drawio", ops: [{ op: "addShape", label: "Start" }] }));
+		assert.equal(added.ok, true, JSON.stringify(added));
+		assert.match(await invoke("drawio_create", { path: "docs/second.drawio" }), /already exists/);
+		assert.match(await invoke("drawio_create", { path: "../escape.drawio" }), /inside the workspace/);
+	});
+
+	const home = process.env.DRAWIO_AI_HOME;
+	if (!home) {
+		steps.push("- skipped bridge steps: DRAWIO_AI_HOME not set (run through runVsCodeTests.js)");
+		return;
+	}
+
+	await step("agents: this window announces itself, and the plugin's launcher reaches it through the bridge", async () => {
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("port", 0, vscode.ConfigurationTarget.Global);
+		const info = await vscode.commands.executeCommand("drawio-ai.mcpSetup", { enable: true, show: false });
+		assert.equal(info.running, true);
+		const entryFile = path.join(home, "instances", `${process.pid}.json`);
+		const entry = await waitFor(() => {
+			if (!fs.existsSync(entryFile)) return undefined;
+			const e = JSON.parse(fs.readFileSync(entryFile, "utf8"));
+			return e.openDiagrams.includes(second) ? e : undefined;
+		}, "discovery entry listing second.drawio");
+		assert.equal(`http://127.0.0.1:${entry.port}/mcp`, info.url);
+		assert.equal(entry.token, info.token);
+		assert.deepEqual(entry.workspaceFolders, [folder.uri.fsPath]);
+		if (process.platform !== "win32") assert.equal(fs.statSync(entryFile).mode & 0o777, 0o600);
+
+		const ext = vscode.extensions.all.find((e) => e.packageJSON.name === "draw-ai");
+		const launcher = path.join(ext.extensionPath, "agent-plugin", "bin", process.platform === "win32" ? "draw-ai-mcp.cmd" : "draw-ai-mcp");
+		const replies = await talkToBridge(launcher, home, [
+			{ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "claude-code", version: "it" } } },
+			{ jsonrpc: "2.0", method: "notifications/initialized" },
+			{ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "drawio_find_cells", arguments: { file: "docs/second.drawio", query: "Invoices" } } },
+			{ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "drawio_list_diagrams", arguments: { filter: "flow" } } },
+		]);
+		assert.equal(replies[1].result.serverInfo.name, "draw-ai");
+		assert.match(replies[1].result.instructions, /Draw\.AI extension/);
+		assert.equal(JSON.parse(replies[2].result.content[0].text).total, 1, JSON.stringify(replies[2]));
+		assert.deepEqual(JSON.parse(replies[3].result.content[0].text).files, ["docs/new/flow.drawio"]);
+
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global);
+		await waitFor(() => !fs.existsSync(entryFile), "discovery entry to be removed when the server stops");
+	});
+
+	const isolated = (v) => !!v && path.resolve(v).startsWith(path.resolve(os.tmpdir())) || (!!v && v.includes("drawio-ai-vscode-"));
+	if (!isolated(process.env.CLAUDE_CONFIG_DIR) || !isolated(process.env.CODEX_HOME)) {
+		steps.push("- skipped Connect steps: CLAUDE_CONFIG_DIR / CODEX_HOME are not throwaway folders");
+		return;
+	}
+	await step("agents: Connect installs the plugin into Claude Code and Codex; Disconnect removes it", async () => {
+		const connected = await vscode.commands.executeCommand("drawio-ai.connectAgents", { agents: ["claude-code", "codex"], confirm: false });
+		if (connected.done.length === 0 && connected.failed.length === 0) {
+			steps.push("- skipped: neither the claude nor the codex CLI is installed");
+			return;
+		}
+		assert.deepEqual(connected.failed, [], "see the Draw.AI Agents output");
+		const pluginCopy = path.join(home, "agent-plugin");
+		assert.ok(fs.existsSync(path.join(pluginCopy, "skills", "drawio-diagrams", "SKILL.md")));
+		if (connected.done.includes("claude-code")) {
+			const settings = fs.readFileSync(path.join(process.env.CLAUDE_CONFIG_DIR, "settings.json"), "utf8");
+			assert.match(settings, /draw-ai@draw-ai/);
+		}
+		if (connected.done.includes("codex")) {
+			const toml = fs.readFileSync(path.join(process.env.CODEX_HOME, "config.toml"), "utf8");
+			assert.match(toml, /\[plugins\."draw-ai@draw-ai"\]\s*enabled = true/);
+		}
+		const again = await vscode.commands.executeCommand("drawio-ai.connectAgents", { agents: connected.done, confirm: false });
+		assert.deepEqual(again.failed, [], "connecting twice is harmless");
+		const removed = await vscode.commands.executeCommand("drawio-ai.disconnectAgents", { agents: connected.done, confirm: false });
+		assert.deepEqual(removed.failed, []);
+		if (connected.done.includes("codex")) {
+			assert.doesNotMatch(fs.readFileSync(path.join(process.env.CODEX_HOME, "config.toml"), "utf8"), /draw-ai/);
+		}
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global);
+	});
+}
+
+/** Starts the agent plugin's launcher like an agent would and exchanges newline-delimited JSON-RPC with it. */
+function talkToBridge(launcher, home, messages) {
+	const { spawn } = require("child_process");
+	return new Promise((resolve, reject) => {
+		const env = { ...process.env, DRAWIO_AI_HOME: home };
+		delete env.ELECTRON_RUN_AS_NODE;
+		const child = spawn(launcher, [], { env, stdio: ["pipe", "pipe", "pipe"], shell: process.platform === "win32" });
+		const replies = {};
+		let out = "";
+		let err = "";
+		const want = messages.filter((m) => "id" in m).length;
+		const timer = setTimeout(() => {
+			child.kill();
+			reject(new Error(`bridge timed out; stderr: ${err}`));
+		}, 30000);
+		child.stderr.on("data", (d) => (err += d));
+		child.stdout.on("data", (d) => {
+			out += d;
+			let nl;
+			while ((nl = out.indexOf("\n")) >= 0) {
+				const msg = JSON.parse(out.slice(0, nl));
+				out = out.slice(nl + 1);
+				if ("id" in msg) replies[msg.id] = msg;
+			}
+			if (Object.keys(replies).length >= want) {
+				clearTimeout(timer);
+				child.stdin.end();
+				resolve(replies);
+			}
+		});
+		child.on("error", reject);
+		// One at a time, so initialize is answered before the calls arrive.
+		(async () => {
+			for (const m of messages) {
+				child.stdin.write(JSON.stringify(m) + "\n");
+				if ("id" in m) await waitFor(() => replies[m.id], `reply ${m.id}`, 30000);
+			}
+		})().catch(reject);
 	});
 }

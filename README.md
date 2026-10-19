@@ -20,7 +20,8 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 | Chat panel | The **Draw.AI** view; works with Copilot, Anthropic and OpenAI-compatible models |
 | Copilot Chat | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch` |
 | Copilot agent mode | The `drawio_*` tools (reference them with `#drawio-…`) |
-| Other agents | Claude Code, Cursor and other MCP clients through **Draw.AI: Set Up MCP Server for External Agents…** |
+| Claude Code and Codex | **Draw.AI: Connect Claude Code / Codex…** installs Draw.AI's plugin (skills and the `drawio_*` tools); see [below](#claude-code-and-codex) |
+| Other agents | Cursor and other MCP clients through **Draw.AI: Set Up MCP Server for External Agents…** |
 
 ## AI Features
 
@@ -34,14 +35,15 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 -   **Saved chats**: each diagram keeps its chat panel conversation across VS Code restarts. **New AI Chat** starts over.
 -   **Live code links**: shapes linked to code (by **Diagram from Code…** or **Link Code with Selected Node**) remember what the code looked like. When it moves, changes or disappears, the shape gets a badge; click it to re-point the link, let the AI update the shape, open the code or remove the link. **Draw.AI: Check Code Links** lists every stale link, and the AI can refresh code-derived diagrams with the `drawio_code_links` tool.
 -   **Export from chat**: ask for a Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace (never through symbolic links), asks you before replacing an earlier export, and never replaces a diagram.
--   **External agents (MCP)**: turn on the local MCP server and Claude Code, Cursor and other MCP clients can read and edit the open diagram with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
+-   **External agents (MCP)**: turn on the local MCP server and Claude Code, Codex, Cursor and other MCP clients can read and edit your diagrams with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
 
 ## Privacy
 
 -   Nothing is sent anywhere until you ask the AI something. Then the relevant diagram content, plus any images or code analysis you attach, goes to the model provider you picked.
 -   API keys are kept in VS Code's secret storage.
 -   Saved chats stay on your machine in VS Code's extension storage (`drawio-ai.persistChat`). Design templates are plain files in your repository.
--   The MCP server is off by default (`drawio-ai.mcp.enabled`).
+-   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, token, folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`).
+-   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
 -   Exports, including Visio files, are made inside VS Code. Nothing is uploaded.
 
 ## Main Settings
@@ -54,7 +56,27 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 | `drawio-ai.persistChat` | `true` | Restore chat panel conversations per diagram |
 | `drawio-ai.checkCodeLinks` | `true` | Badge shapes whose linked code changed |
 | `drawio-ai.mcp.enabled` / `.port` | `false` / `47821` | Local MCP server for external agents |
+| `drawio-ai.mcp.discovery` | `true` | Let connected Claude Code / Codex find each VS Code window without a copied token |
 | `drawio-ai.maxToolRounds` | `16` | Tool calls per request before the AI pauses |
+
+## Claude Code and Codex
+
+Draw.AI's diagram tools also work from Claude Code and Codex, whether you run them in VS Code's terminal, in their own VS Code panels, or elsewhere on the same computer. Edits appear live in the Draw.AI editor, held for review like any other AI edit.
+
+1. Run **Draw.AI: Connect Claude Code / Codex…** (also in the MCP status bar item's menu).
+2. Pick the agents. Draw.AI shows the exact commands it will run, turns on its MCP server if needed, and installs its plugin:
+    - Claude Code: `claude plugin marketplace add ~/.drawio-ai/agent-plugin` and `claude plugin install draw-ai@draw-ai`
+    - Codex: `codex plugin marketplace add ~/.drawio-ai/agent-plugin` and `codex plugin add draw-ai@draw-ai`
+3. Start a new Claude Code or Codex session and ask for a diagram, for example "draw our checkout flow in docs/checkout.drawio".
+
+The plugin adds:
+
+-   **Skills** that teach the agent how to build, review and code-link diagrams well. The same skills are offered to Copilot in VS Code.
+-   **The `drawio_*` tools**, through a small bridge that runs on VS Code's own runtime (no Node.js needed). It finds the VS Code window that has the diagram, so several windows work at once and no token has to be copied.
+
+Agents name a diagram with `file` (for example `docs/architecture.drawio`): it opens beside your work without taking keyboard focus, so you can watch. `drawio_list_diagrams`, `drawio_search_diagrams` and `drawio_create` find and make diagrams. Without `file`, the tools act on the diagram you have open.
+
+Run the Connect command again after updating Draw.AI to update the plugin, and **Draw.AI: Disconnect Claude Code / Codex…** to remove it. Everything stays on your machine: the bridge only talks to Draw.AI's MCP server on `127.0.0.1`.
 
 ## Export to Microsoft Visio
 

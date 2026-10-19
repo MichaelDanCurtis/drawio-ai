@@ -1,0 +1,10 @@
+#!/bin/sh
+# Draw.AI agent plugin: starts the agent bridge that the Draw.AI VS Code extension
+# set up (it runs on VS Code's own runtime, so no Node installation is needed).
+home="${DRAWIO_AI_HOME:-$HOME/.drawio-ai}"
+launcher="$home/bin/draw-ai-mcp"
+if [ -x "$launcher" ]; then
+	exec "$launcher" "$@"
+fi
+echo "Draw.AI: the agent bridge is not set up. Install the Draw.AI extension in VS Code, then run \"Draw.AI: Connect Claude Code / Codex...\" there." >&2
+exit 1

@@ -23,6 +23,17 @@ Answering:
 - After editing, reply with a brief summary of what changed (1-3 sentences). Do not dump XML or JSON to the user.
 - If a request is ambiguous and a wrong guess would be destructive (e.g. deleting many shapes), ask first; otherwise make a reasonable choice and mention it.`;
 
+/** Instructions for MCP clients (Claude Code, Codex, ...), from the extension's server and the agent bridge. */
+export function mcpInstructions(template?: string): string {
+	return [
+		"These tools edit draw.io diagrams in the user's VS Code, live, through the Draw.AI extension. Without `file` they act on the diagram the user has open (or focused last). Pass `file` (workspace-relative or absolute) to work on another diagram; it opens in VS Code so the user can watch. drawio_list_diagrams, drawio_search_diagrams and drawio_create find and make diagrams.",
+		SYSTEM_PROMPT.split("\n\nAnswering:")[0],
+		template,
+	]
+		.filter(Boolean)
+		.join("\n\n");
+}
+
 export interface SelectionContext {
 	cellIds: readonly string[];
 	region?: { x: number; y: number; width: number; height: number };

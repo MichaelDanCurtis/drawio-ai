@@ -1,0 +1,15 @@
+{
+	"name": "draw-ai",
+	"owner": {
+		"name": "Michael Curtis"
+	},
+	"description": "The Draw.AI agent plugin, as installed by the Draw.AI VS Code extension.",
+	"plugins": [
+		{
+			"name": "draw-ai",
+			"source": "./",
+			"description": "Edit draw.io diagrams live in VS Code from Claude Code and Codex: the Draw.AI extension's diagram tools (read, edit, lint, shape search, Visio export) and skills. Needs the Draw.AI extension for VS Code. Unofficial; not affiliated with draw.io or JGraph.",
+			"version": "0.1.0"
+		}
+	]
+}

@@ -233,6 +233,10 @@
 						"maxCells": {
 							"type": "number",
 							"description": "Default 400."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					}
 				}
@@ -465,6 +469,10 @@
 						"selectResult": {
 							"type": "boolean",
 							"description": "Select the changed cells afterwards. Default false."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					},
 					"required": [
@@ -505,6 +513,10 @@
 						"limit": {
 							"type": "number",
 							"description": "Default 50."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					}
 				}
@@ -533,6 +545,10 @@
 						"reveal": {
 							"type": "boolean",
 							"description": "Default true."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					},
 					"required": [
@@ -560,6 +576,10 @@
 							"items": {
 								"type": "string"
 							}
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					}
 				}
@@ -586,6 +606,10 @@
 						"limit": {
 							"type": "number",
 							"description": "Default 8, max 25."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					},
 					"required": [
@@ -639,7 +663,12 @@
 				"modelDescription": "Return the raw draw.io file XML (all pages). Only needed for exact copying of complex styles or multi-page questions; prefer drawio_get_diagram.",
 				"inputSchema": {
 					"type": "object",
-					"properties": {}
+					"properties": {
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
+						}
+					}
 				}
 			},
 			{
@@ -663,6 +692,10 @@
 								"type": "string"
 							},
 							"description": "Only report issues involving these cells."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					}
 				}
@@ -695,6 +728,10 @@
 								"type": "string"
 							},
 							"description": "Re-point these cells' links at where their code is now (after you updated the shapes)."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					}
 				}
@@ -734,6 +771,10 @@
 						"overwrite": {
 							"type": "boolean",
 							"description": "Replace an existing export; the user is asked to confirm. Default false."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
 						}
 					},
 					"required": [
@@ -755,7 +796,91 @@
 				"modelDescription": "Return the repository's active design template in full: its rules, extracted style profile (palette, fonts, shape style per role, connector style) and every library shape with its exact style. Follow it when creating or restyling shapes.",
 				"inputSchema": {
 					"type": "object",
-					"properties": {}
+					"properties": {
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
+						}
+					}
+				}
+			},
+			{
+				"name": "drawio_list_diagrams",
+				"displayName": "List Draw.io Diagrams",
+				"toolReferenceName": "drawio-list-diagrams",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "List Draw.io Diagrams",
+				"modelDescription": "List the draw.io diagrams open in the user's VS Code (which one is focused, how many cells are selected, whether AI changes await review) and the diagram files in the workspace. Use it to find the diagram the user means, then pass its path as `file` to the other tools.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"filter": {
+							"type": "string",
+							"description": "Only files whose path contains this text (case-insensitive)."
+						},
+						"limit": {
+							"type": "number",
+							"description": "Most files to list. Default 200."
+						}
+					}
+				}
+			},
+			{
+				"name": "drawio_search_diagrams",
+				"displayName": "Search Draw.io Diagrams",
+				"toolReferenceName": "drawio-search-diagrams",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Search Draw.io Diagrams",
+				"modelDescription": "Search the labels of every draw.io diagram in the workspace for text (case-insensitive) or a /regex/, including compressed diagrams that plain text search cannot read. Returns the matching files, pages and cells. Use it to find which diagram shows something.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string"
+						},
+						"limit": {
+							"type": "number",
+							"description": "Most matches to return. Default 50."
+						}
+					},
+					"required": [
+						"query"
+					]
+				}
+			},
+			{
+				"name": "drawio_create",
+				"displayName": "Create Draw.io Diagram",
+				"toolReferenceName": "drawio-create",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Create Draw.io Diagram",
+				"modelDescription": "Create a new, empty draw.io diagram file in the workspace and open it in VS Code; then build it with drawio_apply_operations, passing the same path as `file`. Prefer .drawio (plain XML that diffs cleanly); .drawio.svg and .drawio.png are images with the diagram embedded. Never replaces an existing file.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "Workspace-relative path, e.g. \"docs/architecture.drawio\"."
+						}
+					},
+					"required": [
+						"path"
+					]
 				}
 			}
 		],
@@ -806,6 +931,16 @@
 			{
 				"command": "drawio-ai.mcpSetup",
 				"title": "Set Up MCP Server for External Agents…",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.connectAgents",
+				"title": "Connect Claude Code / Codex…",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.disconnectAgents",
+				"title": "Disconnect Claude Code / Codex…",
 				"category": "Draw.AI"
 			},
 			{
@@ -1026,7 +1161,13 @@
 						"minimum": 0,
 						"maximum": 65535,
 						"scope": "application",
-						"markdownDescription": "Port of the Draw.AI MCP server (`0` picks a free port on every start, which means reconfiguring clients each time)."
+						"markdownDescription": "Port of the Draw.AI MCP server for clients configured by hand. When another VS Code window already uses it, this window takes a free port; agents connected with **Draw.AI: Connect Claude Code / Codex…** find every window anyway. (`0` always picks a free port.)"
+					},
+					"drawio-ai.mcp.discovery": {
+						"type": "boolean",
+						"default": true,
+						"scope": "application",
+						"markdownDescription": "While the MCP server runs, record this window's port, token, folders and open diagrams in a user-only file (`~/.drawio-ai/instances/`), so agents connected with **Draw.AI: Connect Claude Code / Codex…** reach the right window without a copied token. Turn off to allow only clients configured by hand."
 					},
 					"drawio-ai.checkCodeLinks": {
 						"type": "boolean",
@@ -1523,7 +1664,18 @@
 					"command": "drawio-ai.rejectChanges"
 				}
 			]
-		}
+		},
+		"chatSkills": [
+			{
+				"path": "./agent-plugin/skills/drawio-diagrams/SKILL.md"
+			},
+			{
+				"path": "./agent-plugin/skills/drawio-review/SKILL.md"
+			},
+			{
+				"path": "./agent-plugin/skills/drawio-from-code/SKILL.md"
+			}
+		]
 	},
 	"scripts": {
 		"run-script": "node ./scripts/run-script",
@@ -1543,13 +1695,16 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/bridge.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
-		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js"
+		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
+		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"
 	},
 	"files": [
 		"dist/custom-drawio-plugins/**/*",
 		"dist/extension/**/*",
+		"dist/agent-bridge/**/*",
+		"agent-plugin/**/*",
 		"dist/codeblock-editor/**/*",
 		"src/inline-editor/**/*",
 		"media/**/*",

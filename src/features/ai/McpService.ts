@@ -1,10 +1,12 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import type { Server } from "http";
 import type { DrawioEditor } from "../../DrawioEditorService";
+import { AgentInstance, drawioAiHome, readInstances, removeInstance, writeInstance, writeLauncher } from "../../agent-bridge/discovery";
 import type { DiagramToolbox } from "./DiagramToolbox";
-import { createMcpListener, McpTool } from "./mcp";
-import { SYSTEM_PROMPT } from "./systemPrompt";
-import { TOOL_SCHEMAS } from "./toolSchemas";
+import { createMcpListener } from "./mcp";
+import { mcpInstructions } from "./systemPrompt";
+import { toMcpTools } from "./toolSchemas";
 
 const TOKEN_KEY = "drawio-ai.mcp.token";
 
@@ -27,6 +29,8 @@ export class McpService {
 	private readonly disposables: vscode.Disposable[] = [this.status];
 	private busyTimer: ReturnType<typeof setTimeout> | undefined;
 	private busyEditor: DrawioEditor | undefined;
+	private discoveryTimer: ReturnType<typeof setTimeout> | undefined;
+	private lastFocusedAt = vscode.window.state.focused ? Date.now() : 0;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -38,19 +42,27 @@ export class McpService {
 		this.disposables.push(
 			vscode.workspace.onDidChangeConfiguration((e) => {
 				if (e.affectsConfiguration("drawio-ai.mcp")) void this.sync();
-			})
+			}),
+			// Keep this window's discovery entry current, so agents reach the window that has their diagram.
+			vscode.window.onDidChangeWindowState((state) => {
+				if (state.focused) this.lastFocusedAt = Date.now();
+				this.announceSoon();
+			}),
+			vscode.workspace.onDidChangeWorkspaceFolders(() => this.announceSoon()),
+			vscode.window.tabGroups.onDidChangeTabs(() => this.announceSoon())
 		);
 		void this.sync();
 	}
 
 	public dispose(): void {
 		this.disposables.forEach((d) => d.dispose());
+		clearTimeout(this.discoveryTimer);
 		void this.stop();
 	}
 
 	private get config() {
 		const c = vscode.workspace.getConfiguration("drawio-ai.mcp");
-		return { enabled: c.get<boolean>("enabled", false), port: c.get<number>("port", 47821) };
+		return { enabled: c.get<boolean>("enabled", false), port: c.get<number>("port", 47821), discovery: c.get<boolean>("discovery", true) };
 	}
 
 	private async sync(): Promise<void> {
@@ -76,30 +88,32 @@ export class McpService {
 		const listener = createMcpListener({
 			token: () => this.token,
 			port: () => this.actualPort,
-			onCall: (name) => this.markBusy(name),
 			deps: {
 				serverVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
-				tools: () => TOOL_SCHEMAS.map((t): McpTool => ({ name: t.name, title: t.displayName, description: t.description, inputSchema: t.inputSchema, readOnly: !t.mutates && !t.writesFiles && t.name !== "drawio_code_links" })),
-				callTool: (name, args) => this.toolbox.invoke(name, args),
-				instructions: async () => {
-					const template = await this.templatePrompt().catch(() => undefined);
-					return [
-						"These tools edit the draw.io diagram that is open (or was last focused) in the user's VS Code, live.",
-						SYSTEM_PROMPT.split("\n\nAnswering:")[0],
-						template,
-					]
-						.filter(Boolean)
-						.join("\n\n");
-				},
+				tools: toMcpTools,
+				callTool: (name, args, meta) => this.toolbox.invoke(name, args, { onTarget: (editor) => this.markBusy(editor, name, meta.client) }),
+				instructions: async () => mcpInstructions(await this.templatePrompt().catch(() => undefined)),
 			},
 		});
 		const server = http.createServer(listener);
 		server.keepAliveTimeout = 5000;
-		try {
-			await new Promise<void>((resolve, reject) => {
+		const listen = (p: number) =>
+			new Promise<void>((resolve, reject) => {
 				server.once("error", reject);
-				server.listen(port, "127.0.0.1", () => resolve());
+				server.listen(p, "127.0.0.1", () => {
+					server.off("error", reject);
+					resolve();
+				});
 			});
+		try {
+			try {
+				await listen(port);
+			} catch (e: any) {
+				// Another window has the port. Agents connected through the bridge find
+				// this window by its discovery entry, so any free port will do.
+				if (e?.code !== "EADDRINUSE" || !this.config.discovery || port === 0) throw e;
+				await listen(0);
+			}
 		} catch (e: any) {
 			this.updateStatus();
 			void vscode.window.showErrorMessage(
@@ -114,6 +128,7 @@ export class McpService {
 		const address = server.address();
 		this.actualPort = typeof address === "object" && address ? address.port : port;
 		this.updateStatus();
+		this.announce();
 	}
 
 	private async stop(): Promise<void> {
@@ -121,6 +136,7 @@ export class McpService {
 		this.server = undefined;
 		this.configuredPort = -1;
 		this.updateStatus();
+		this.withdraw();
 		if (server) await new Promise<void>((r) => server.close(() => r()));
 	}
 
@@ -134,12 +150,11 @@ export class McpService {
 		}
 	}
 
-	private markBusy(tool: string): void {
-		const editor = this.targetEditor();
-		if (!editor) return;
+	private markBusy(editor: DrawioEditor, tool: string, client: string | undefined): void {
 		if (this.busyEditor && this.busyEditor !== editor) this.busyEditor.drawioClient.aiSetStatus(false);
 		this.busyEditor = editor;
-		editor.drawioClient.aiSetStatus(true, tool === "drawio_apply_operations" ? "External agent (MCP) is editing…" : "External agent (MCP) is reading…");
+		const who = client ? agentName(client) : "External agent (MCP)";
+		editor.drawioClient.aiSetStatus(true, tool === "drawio_apply_operations" ? `${who} is editing…` : `${who} is reading…`);
 		clearTimeout(this.busyTimer);
 		this.busyTimer = setTimeout(() => {
 			this.busyEditor?.drawioClient.aiSetStatus(false);
@@ -151,6 +166,65 @@ export class McpService {
 		const bytes = crypto.getRandomValues(new Uint8Array(24));
 		this.token = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 		await this.context.secrets.store(TOKEN_KEY, this.token);
+		this.announce();
+	}
+
+	/** The agent bridge's launcher, for agent plugins (Claude Code, Codex). Undefined if the bridge was not built. */
+	public writeBridgeLauncher(): string | undefined {
+		const bridgePath = this.context.asAbsolutePath("dist/agent-bridge/index.js");
+		if (!fs.existsSync(bridgePath)) return undefined;
+		return writeLauncher(drawioAiHome(), { execPath: process.execPath, bridgePath });
+	}
+
+	private announceSoon(): void {
+		if (!this.server) return;
+		clearTimeout(this.discoveryTimer);
+		this.discoveryTimer = setTimeout(() => this.announce(), 250);
+	}
+
+	/**
+	 * Writes this window's discovery entry (~/.drawio-ai/instances/<pid>.json, user-only):
+	 * its port, token, folders and open diagrams. The agent bridge reads it to forward
+	 * tool calls here, so agents need no copied token and every window can serve.
+	 */
+	private announce(): void {
+		if (!this.server || !this.config.discovery) return this.withdraw();
+		const viewTypes = new Set(["drawio-ai", "drawio-ai-text"]);
+		const openDiagrams = vscode.window.tabGroups.all
+			.flatMap((g) => g.tabs)
+			.map((t) => t.input)
+			.filter((i): i is vscode.TabInputCustom => i instanceof vscode.TabInputCustom && viewTypes.has(i.viewType) && i.uri.scheme === "file")
+			.map((i) => i.uri.fsPath);
+		const target = this.targetEditor();
+		const instance: AgentInstance = {
+			version: 1,
+			pid: process.pid,
+			port: this.actualPort,
+			token: this.token,
+			app: vscode.env.appName,
+			extensionVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
+			workspaceFolders: (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === "file").map((f) => f.uri.fsPath),
+			openDiagrams: [...new Set(openDiagrams)],
+			activeDiagram: target?.uri.scheme === "file" ? target.uri.fsPath : undefined,
+			focused: vscode.window.state.focused,
+			lastFocusedAt: this.lastFocusedAt,
+		};
+		try {
+			const home = drawioAiHome();
+			readInstances(home); // removes entries of windows that are gone
+			writeInstance(home, instance);
+			this.writeBridgeLauncher();
+		} catch (e) {
+			console.error("Draw.AI: could not write the MCP discovery entry", e);
+		}
+	}
+
+	private withdraw(): void {
+		try {
+			removeInstance(drawioAiHome(), process.pid);
+		} catch {
+			// Nothing to remove.
+		}
 	}
 
 	public info(): McpConnectionInfo {
@@ -187,6 +261,11 @@ export class McpService {
 		};
 		const info = this.info();
 		const items: Item[] = [
+			{
+				label: "$(plug) Connect Claude Code / Codex…",
+				detail: "Installs Draw.AI's plugin (skills and a bridge to every VS Code window); no token to copy",
+				run: () => Promise.resolve(vscode.commands.executeCommand("drawio-ai.connectAgents")),
+			},
 			{ label: "$(copy) Copy Claude Code command", detail: "claude mcp add --transport http drawio …", run: copy(info.claudeCommand, "Claude Code command") },
 			{ label: "$(copy) Copy JSON config", detail: "For Cursor (.cursor/mcp.json), Windsurf, Claude Desktop and other clients with HTTP support", run: copy(info.json, "MCP JSON config") },
 			{ label: "$(copy) Copy URL", detail: info.url, run: copy(info.url, "URL") },
@@ -206,4 +285,10 @@ export class McpService {
 		await pick?.run();
 		return this.info();
 	}
+}
+
+const AGENT_NAMES: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex", "codex-mcp-client": "Codex", cursor: "Cursor" };
+
+function agentName(client: string): string {
+	return AGENT_NAMES[client.toLowerCase()] ?? client;
 }

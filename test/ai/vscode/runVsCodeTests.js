@@ -21,6 +21,15 @@ if (!executable || !fs.existsSync(executable)) {
 }
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-vscode-"));
+// A workspace folder for the `file` and agent tests, and throwaway homes for the agent
+// bridge, Claude Code and Codex, so the Connect test never touches the real configuration.
+const workspace = path.join(profile, "workspace");
+const isolated = {
+	DRAWIO_AI_HOME: path.join(profile, "drawio-ai-home"),
+	CLAUDE_CONFIG_DIR: path.join(profile, "claude"),
+	CODEX_HOME: path.join(profile, "codex"),
+};
+for (const dir of [workspace, ...Object.values(isolated)]) fs.mkdirSync(dir, { recursive: true });
 const child = spawn(
 	executable,
 	[
@@ -33,8 +42,9 @@ const child = spawn(
 		"--skip-welcome",
 		"--skip-release-notes",
 		"--new-window",
+		workspace,
 	],
-	{ stdio: "inherit", env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } }
+	{ stdio: "inherit", env: { ...process.env, ...isolated, ELECTRON_RUN_AS_NODE: undefined } }
 );
 child.on("exit", (code) => {
 	fs.rmSync(profile, { recursive: true, force: true });

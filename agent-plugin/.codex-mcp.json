@@ -1,0 +1,9 @@
+{
+	"mcpServers": {
+		"drawio": {
+			"command": "./bin/draw-ai-mcp",
+			"args": [],
+			"cwd": "."
+		}
+	}
+}

@@ -20,10 +20,16 @@ export interface McpToolResult {
 	isError?: boolean;
 }
 
+/** About the request a message arrived in. */
+export interface McpRequestMeta {
+	/** The agent's name, as the agent bridge reports it (e.g. "claude-code"). */
+	client?: string;
+}
+
 export interface McpHandlerDeps {
 	serverVersion: string;
 	tools(): McpTool[];
-	callTool(name: string, args: unknown): Promise<McpToolResult>;
+	callTool(name: string, args: unknown, meta: McpRequestMeta): Promise<McpToolResult>;
 	instructions(): Promise<string>;
 }
 
@@ -32,7 +38,7 @@ type JsonRpcId = string | number | null;
 const error = (id: JsonRpcId, code: number, message: string) => ({ jsonrpc: "2.0", id, error: { code, message } });
 
 /** Handles one JSON-RPC message; returns undefined for notifications. */
-export async function handleMcpMessage(msg: any, deps: McpHandlerDeps): Promise<object | undefined> {
+export async function handleMcpMessage(msg: any, deps: McpHandlerDeps, meta: McpRequestMeta = {}): Promise<object | undefined> {
 	if (!msg || typeof msg !== "object" || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
 		return msg && typeof msg === "object" && "result" in msg ? undefined : error(msg?.id ?? null, -32600, "Invalid JSON-RPC request");
 	}
@@ -68,7 +74,7 @@ export async function handleMcpMessage(msg: any, deps: McpHandlerDeps): Promise<
 				return error(id, -32602, `Unknown tool: ${String(name)}`);
 			}
 			try {
-				const r = await deps.callTool(name, msg.params?.arguments ?? {});
+				const r = await deps.callTool(name, msg.params?.arguments ?? {}, meta);
 				const content: object[] = [{ type: "text", text: r.text }];
 				if (r.image) content.push({ type: "image", data: r.image.base64, mimeType: r.image.mimeType });
 				return ok({ content, isError: !!r.isError });
@@ -86,6 +92,14 @@ function timingSafeEqual(a: string, b: string): boolean {
 	let diff = 0;
 	for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
 	return diff === 0;
+}
+
+/** Set by the agent bridge on every request it forwards. */
+export const CLIENT_HEADER = "x-drawio-ai-client";
+
+function clientName(value: string | string[] | undefined): string | undefined {
+	const v = (Array.isArray(value) ? value[0] : value)?.replace(/[^\w .\-()]/g, "").trim().slice(0, 40);
+	return v || undefined;
 }
 
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
@@ -114,7 +128,7 @@ export function createMcpListener(options: {
 	token: () => string;
 	port: () => number;
 	deps: McpHandlerDeps;
-	onCall?: (name: string) => void;
+	onCall?: (name: string, meta: McpRequestMeta) => void;
 }): (req: IncomingMessage, res: ServerResponse) => void {
 	const send = (res: ServerResponse, status: number, body?: object, headers: Record<string, string> = {}) => {
 		const text = body ? JSON.stringify(body) : "";
@@ -143,6 +157,7 @@ export function createMcpListener(options: {
 			return send(res, 405, error(null, -32000, "Only POST is supported (no server-initiated streams)"), { allow: "POST" });
 		}
 
+		const meta: McpRequestMeta = { client: clientName(req.headers[CLIENT_HEADER]) };
 		const chunks: Buffer[] = [];
 		let size = 0;
 		let aborted = false;
@@ -166,11 +181,11 @@ export function createMcpListener(options: {
 			}
 			try {
 				if (Array.isArray(msg)) {
-					const results = (await Promise.all(msg.map((m) => handleMcpMessage(m, options.deps)))).filter(Boolean) as object[];
+					const results = (await Promise.all(msg.map((m) => handleMcpMessage(m, options.deps, meta)))).filter(Boolean) as object[];
 					return results.length ? send(res, 200, results) : send(res, 202);
 				}
-				if (msg?.method === "tools/call" && typeof msg.params?.name === "string") options.onCall?.(msg.params.name);
-				const result = await handleMcpMessage(msg, options.deps);
+				if (msg?.method === "tools/call" && typeof msg.params?.name === "string") options.onCall?.(msg.params.name, meta);
+				const result = await handleMcpMessage(msg, options.deps, meta);
 				return result ? send(res, 200, result) : send(res, 202);
 			} catch (e: any) {
 				return send(res, 500, error(msg?.id ?? null, -32603, String(e?.message ?? e)));

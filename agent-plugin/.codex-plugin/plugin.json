@@ -1,0 +1,41 @@
+{
+	"name": "draw-ai",
+	"version": "0.1.0",
+	"description": "Edit draw.io diagrams live in VS Code from Claude Code and Codex: the Draw.AI extension's diagram tools (read, edit, lint, shape search, Visio export) and skills. Needs the Draw.AI extension for VS Code. Unofficial; not affiliated with draw.io or JGraph.",
+	"author": {
+		"name": "Michael Curtis"
+	},
+	"homepage": "https://github.com/MichaelDanCurtis/drawio-ai#readme",
+	"repository": "https://github.com/MichaelDanCurtis/drawio-ai",
+	"license": "GPL-3.0",
+	"keywords": [
+		"drawio",
+		"draw.io",
+		"diagram",
+		"vscode",
+		"architecture",
+		"visio",
+		"mcp"
+	],
+	"skills": "./skills/",
+	"mcpServers": "./.codex-mcp.json",
+	"interface": {
+		"displayName": "Draw.AI",
+		"shortDescription": "Edit draw.io diagrams live in VS Code",
+		"longDescription": "Draw.AI lets Codex read and edit the draw.io diagrams open in your VS Code: add and restyle shapes, wire connectors, run automatic layouts, search draw.io's shape libraries (AWS, Azure, GCP, Kubernetes, UML, ...), lint against your repository's design template, and export to Microsoft Visio, SVG or PNG. Every edit appears live in VS Code, held for your review. Needs the Draw.AI extension for VS Code; nothing leaves your machine. Unofficial; not affiliated with draw.io or JGraph.",
+		"developerName": "Michael Curtis",
+		"category": "Developer Tools",
+		"capabilities": [
+			"Interactive",
+			"Read",
+			"Write"
+		],
+		"websiteURL": "https://github.com/MichaelDanCurtis/drawio-ai#readme",
+		"defaultPrompt": [
+			"Draw our service architecture in docs/architecture.drawio",
+			"Review the open diagram and fix what lint finds",
+			"Export docs/architecture.drawio to Visio"
+		],
+		"brandColor": "#1f1f23"
+	}
+}
