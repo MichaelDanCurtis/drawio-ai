@@ -139,6 +139,7 @@ function exportRoot(diagram: vscode.Uri): vscode.Uri {
  * The containment check is on the path text, but writes follow symbolic links:
  * refuse targets that pass through a link below the root (a linked folder, or a
  * link in place of the file), since the file could land outside the workspace.
+ * Also used for diagrams that agents name with `file`.
  */
 export async function assertNoSymbolicLinks(
 	root: vscode.Uri,
@@ -176,7 +177,7 @@ function sameFile(a: vscode.Uri, b: vscode.Uri): boolean {
 	return a.scheme === b.scheme && normalizePath(a.path).toLowerCase() === normalizePath(b.path).toLowerCase();
 }
 
-function isDiagramFile(p: string): boolean {
+export function isDiagramFile(p: string): boolean {
 	return /\.(drawio|dio)(\.(svg|png|xml))?$/i.test(p);
 }
 

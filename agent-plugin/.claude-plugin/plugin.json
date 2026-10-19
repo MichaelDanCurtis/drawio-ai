@@ -1,0 +1,21 @@
+{
+	"name": "draw-ai",
+	"version": "0.1.0",
+	"description": "Edit draw.io diagrams live in VS Code from Claude Code and Codex: the Draw.AI extension's diagram tools (read, edit, lint, shape search, Visio export) and skills. Needs the Draw.AI extension for VS Code. Unofficial; not affiliated with draw.io or JGraph.",
+	"author": {
+		"name": "Michael Curtis"
+	},
+	"homepage": "https://github.com/MichaelDanCurtis/drawio-ai#readme",
+	"repository": "https://github.com/MichaelDanCurtis/drawio-ai",
+	"license": "GPL-3.0",
+	"keywords": [
+		"drawio",
+		"draw.io",
+		"diagram",
+		"vscode",
+		"architecture",
+		"visio",
+		"mcp"
+	],
+	"mcpServers": "./.mcp.json"
+}

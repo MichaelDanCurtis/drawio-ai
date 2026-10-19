@@ -102,4 +102,45 @@ const codeBlockEditorGuestConfig: webpack.Configuration = {
 	],
 };
 
-module.exports = [extensionConfig, codeBlockEditorGuestConfig];
+/**
+ * The agent bridge (src/agent-bridge): a stdio MCP server that Claude Code and
+ * Codex start through the agent plugin. It runs outside VS Code (on VS Code's
+ * Electron as Node), so it must not import vscode.
+ */
+const agentBridgeConfig: webpack.Configuration = {
+	entry: r("./src/agent-bridge/main.ts"),
+	output: {
+		path: r("./dist/agent-bridge"),
+		filename: "index.js",
+		libraryTarget: "commonjs2",
+		devtoolModuleFilenameTemplate: "../../[resource-path]",
+	},
+	devtool: "source-map",
+	target: "node",
+	resolve: {
+		extensions: [".ts", ".js"],
+	},
+	module: {
+		rules: [
+			{
+				test: /\.ts$/,
+				exclude: /node_modules/,
+				use: [
+					{
+						// Type errors are reported by the extension build, which compiles the same files.
+						loader: "ts-loader",
+						options: { instance: "agent-bridge", transpileOnly: true },
+					},
+				],
+			},
+		],
+	},
+	plugins: [
+		new CleanWebpackPlugin(),
+		new webpack.EnvironmentPlugin({
+			DRAWIO_AI_VERSION: require("./package.json").version,
+		}),
+	],
+};
+
+module.exports = [extensionConfig, codeBlockEditorGuestConfig, agentBridgeConfig];

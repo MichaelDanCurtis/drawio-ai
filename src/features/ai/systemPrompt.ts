@@ -23,13 +23,24 @@ Answering:
 - After editing, reply with a brief summary of what changed (1-3 sentences). Do not dump XML or JSON to the user.
 - If a request is ambiguous and a wrong guess would be destructive (e.g. deleting many shapes), ask first; otherwise make a reasonable choice and mention it.`;
 
+/** Instructions for MCP clients (Claude Code, Codex, ...), from the extension's server and the agent bridge. */
+export function mcpInstructions(template?: string): string {
+	return [
+		"These tools edit draw.io diagrams in the user's VS Code, live, through the Draw.AI extension. Without `file` they act on the diagram the user has open (or focused last). Pass `file` (workspace-relative or absolute) to work on another diagram; it opens in VS Code so the user can watch. drawio_list_diagrams, drawio_search_diagrams and drawio_create find and make diagrams.",
+		SYSTEM_PROMPT.split("\n\nAnswering:")[0],
+		template,
+	]
+		.filter(Boolean)
+		.join("\n\n");
+}
+
 /**
  * Added to SYSTEM_PROMPT for the "Draw.AI" custom agent in VS Code's own chat
  * (generated into media/chat/draw-ai.agent.md by scripts/sync-lm-tools.js).
  */
 export const NATIVE_AGENT_NOTES = `In VS Code's chat:
 - Change diagrams only through the drawio_* tools. Never edit .drawio, .dio, .drawio.svg or .drawio.png files as text: the open editor would not show the change live, the user's review of AI changes would be skipped, and the embedded XML is easy to break.
-- The tools work on the draw.io editor the user used last. If no diagram is open, ask the user to open one (or to create one with "Draw.io: New Draw.io Diagram").
+- The tools work on the draw.io editor the user used last. To work on another diagram in the workspace, pass its path as \`file\` (drawio_list_diagrams lists them; drawio_create makes a new one). If no diagram is open and none is named, ask the user which one to use.
 - A request sent from the diagram (Alt+K, lasso, markup, lint fixes) ends with a note saying what the user selected, circled or marked; treat it as the selection.
 - If drawio_get_diagram says a design template is active, call drawio_get_template once and follow it.`;
 

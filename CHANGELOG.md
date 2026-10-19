@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `drawio_export` tool for the chat panel, Copilot and MCP agents: writes a `.vsdx`, `.svg`, `.png` or `.drawio` export inside the workspace (never through symbolic links); it asks before replacing an earlier export and never replaces a diagram
 - Open diagrams from other tools: **Draw.io: Open Visio File as Draw.io…** (also on Visio files in the Explorer) and **Draw.io: Import Diagram from Another Tool…** (also **File → Open from Another Tool…** in the diagram) convert Microsoft Visio (`.vsdx`, `.vstx`, `.vssx` stencils, binary `.vsd`/`.vst`/`.vss`), Gliffy, yEd (GraphML), Lucidchart and Miro files, and draw.io's CSV format, with draw.io's own importers, inside VS Code, into a new `.drawio` file next to the original. Existing files are never replaced, and what did not carry over is reported
 - `drawio_import` tool: the chat panel, Copilot and MCP agents can convert such a file from the workspace (never through symbolic links) and open it
+- **Draw.AI: Connect Claude Code / Codex…** installs Draw.AI's agent plugin (skills and a stdio bridge to the `drawio_*` tools) into Claude Code and Codex after showing the commands it will run; **Disconnect** removes it. The bridge runs on VS Code's own runtime and finds the right VS Code window by itself, so no token is copied and every window can serve
+- Skills for building, reviewing and code-linking diagrams, shared by the agent plugin and Copilot (`chatSkills`)
+- `file` argument on every diagram tool: agents can work on any diagram in the workspace; it opens beside your work without taking focus. New tools `drawio_list_diagrams`, `drawio_search_diagrams` and `drawio_create`
+- `drawio-ai.mcp.discovery`: each window running the MCP server records how to reach it in a user-only file (`~/.drawio-ai/instances/`)
+
+### Changed
+
+- When another VS Code window already uses the MCP port, the server takes a free port instead of failing
+- The busy status in the diagram names the agent that is editing (Claude Code, Codex, …)
 
 ## [0.1.0]
 

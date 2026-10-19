@@ -8,6 +8,7 @@ import { analyze, codeRefs, DiagramKind, detectKind, Entity, formatAnalysis, Sou
 import { registerChatParticipant, registerLanguageModelTools } from "./copilotIntegration";
 import { DiagramAgent } from "./DiagramAgent";
 import { DiagramToolbox } from "./DiagramToolbox";
+import { DiagramWorkspace } from "./DiagramWorkspace";
 import { ProviderRegistry } from "./providers/ProviderRegistry";
 import { readImage } from "./images";
 import { formatIssues, LintIssue } from "./lint";
@@ -18,6 +19,7 @@ import { path } from "../../utils/path";
 import { linkData, splitLines } from "./codeLinks";
 import { CodeLinkService } from "./CodeLinkService";
 import { McpService } from "./McpService";
+import { AgentConnector, ConnectArgs } from "./agentConnect";
 import { exportDiagramToWorkspace } from "./exportDiagram";
 import { importForAgent } from "../importDiagram";
 import { configuredSurface, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat } from "./nativeChat";
@@ -69,7 +71,8 @@ export class AiFeature {
 				},
 				(diagram) => this.whenTarget(diagram)
 			),
-		(id) => readAttachment(this.context.globalStorageUri, id)
+		(id) => readAttachment(this.context.globalStorageUri, id),
+		new DiagramWorkspace(this.editorService, () => this.targetEditor())
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
 	private readonly chatView = new ChatViewProvider(
@@ -124,6 +127,10 @@ export class AiFeature {
 		track(mcp);
 		void pruneAttachments(this.context.globalStorageUri);
 		track(vscode.commands.registerCommand("drawio-ai.mcpSetup", (args?: { show?: boolean; enable?: boolean }) => mcp.setupCommand(args)));
+		const connector = new AgentConnector(this.context, mcp);
+		track(connector);
+		track(vscode.commands.registerCommand("drawio-ai.connectAgents", (args?: ConnectArgs) => connector.connect(args)));
+		track(vscode.commands.registerCommand("drawio-ai.disconnectAgents", (args?: ConnectArgs) => connector.disconnect(args)));
 		track(this.templates.onDidChange(() => void this.chatView.refreshTemplate()));
 		track(
 			vscode.workspace.onDidChangeConfiguration((e) => {

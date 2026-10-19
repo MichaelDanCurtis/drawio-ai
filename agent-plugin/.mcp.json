@@ -1,0 +1,8 @@
+{
+	"mcpServers": {
+		"drawio": {
+			"command": "${CLAUDE_PLUGIN_ROOT}/bin/draw-ai-mcp",
+			"args": []
+		}
+	}
+}

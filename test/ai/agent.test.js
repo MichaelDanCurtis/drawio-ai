@@ -218,3 +218,28 @@ test("HTTP errors become actionable messages without echoing whole bodies", asyn
 		for await (const _ of client.stream({ system: "", tools: [], messages: [] }, token()));
 	}, /Anthropic request failed \(401\): invalid x-api-key\. Check the API key/);
 });
+
+test("chat panel tools stay on the focused diagram; agents can name another one", async () => {
+	const { DiagramToolbox } = require(src("DiagramToolbox.ts"));
+	const workspace = {
+		open: async (file) => {
+			throw new Error(`would open ${file}`);
+		},
+		list: async () => ({ text: "listed", summary: "" }),
+		search: async () => ({ text: "searched", summary: "" }),
+		create: async () => ({ text: "created", summary: "" }),
+	};
+	const toolbox = new DiagramToolbox(() => undefined, undefined, undefined, undefined, undefined, undefined, workspace);
+	assert.ok(toolbox.specs({ vision: true }).some((t) => t.name === "drawio_import"), "the panel can still import files");
+	const specs = toolbox.specs({ vision: true });
+	assert.ok(specs.some((t) => t.name === "drawio_style_reference"));
+	assert.ok(!specs.some((t) => ["drawio_create", "drawio_list_diagrams", "drawio_search_diagrams"].includes(t.name)));
+	assert.ok(specs.every((t) => !("file" in (t.inputSchema.properties ?? {}))), "no `file` for the panel");
+
+	const scoped = await toolbox.invoke("drawio_get_diagram", { file: "docs/a.drawio" }, { scoped: true });
+	assert.match(scoped.text, /No draw.io diagram is open/, "`file` is ignored for the panel");
+	assert.match((await toolbox.invoke("drawio_create", { path: "a.drawio" }, { scoped: true })).text, /not available here/);
+
+	assert.match((await toolbox.invoke("drawio_get_diagram", { file: "docs/a.drawio" })).text, /would open docs\/a\.drawio/);
+	assert.equal((await toolbox.invoke("drawio_list_diagrams", {})).text, "listed");
+});
