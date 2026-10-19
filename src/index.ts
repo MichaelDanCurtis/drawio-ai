@@ -4,12 +4,18 @@ import * as mobx from "mobx";
 import { Extension } from "./Extension";
 import * as inlineEditor from "./inline-editor/extension";
 import { createMarkdownCodeBlockEditorsApi } from "./codeblock-editor/markdownCodeBlockEditor";
+import { registerUseForDiagramsCommand, warnAboutConflictingExtensions } from "./features/conflictingExtensions";
 
 if (process.env.DEV === "1") {
 	new MobxConsoleLogger(mobx);
 }
 
 export function activate(context: vscode.ExtensionContext) {
+	// First: an older Draw.AI build makes the registrations below fail, and
+	// Draw.io Integration takes over diagrams; both look like Draw.AI hanging.
+	warnAboutConflictingExtensions(context);
+	context.subscriptions.push(registerUseForDiagramsCommand());
+
 	const extension = new Extension(context);
 	context.subscriptions.push(extension);
 

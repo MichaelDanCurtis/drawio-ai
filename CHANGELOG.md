@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- With Draw.io Integration (hediet.vscode-drawio) also enabled, Draw.AI failed to start whenever Draw.io Integration started first (both registered the `drawio` file system scheme), so diagrams, the chat and the AI tools seemed to hang. Draw.AI now uses its own scheme.
+
+### Added
+
+- **Draw.AI: Use Draw.AI for Diagram Files** sets VS Code's editor associations for draw.io files to Draw.AI and reopens diagrams that are open in another draw.io editor. Draw.AI offers it when Draw.io Integration is also enabled, and reports older Draw.AI builds that would block it from starting
+- The AI tools say when a diagram is open in Draw.io Integration instead of reporting that no diagram is open
+
 ## [0.2.0]
 
 ### Added
