@@ -436,6 +436,7 @@ function toolLabel(name: string): string {
 		case "drawio_apply_operations": return "Editing diagram…";
 		case "drawio_find_cells": return "Searching cells…";
 		case "drawio_select_cells": return "Selecting…";
+		case "drawio_pages": return "Working on pages…";
 		case "drawio_render_image": return "Rendering preview…";
 		case "drawio_search_shapes": return "Searching shape libraries…";
 		case "drawio_style_reference": return "Looking up styles…";

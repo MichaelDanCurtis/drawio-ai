@@ -5,6 +5,8 @@ import { importDiagram } from "./import/importDiagram";
 const W = window as any;
 const ACCENT = "#a855f7";
 const SKIPPED = "skipped: an earlier operation in this atomic batch failed";
+const PAGE_SWITCHED =
+	"not applied: the page shown changed while this batch ran. Read the diagram again, select the page you meant with drawio_pages, and send the rest again.";
 
 Draw.loadPlugin((ui: any) => {
 	sendEvent({ event: "pluginLoaded", pluginId: "ai" });
@@ -20,15 +22,17 @@ Draw.loadPlugin((ui: any) => {
 	// Reading the diagram
 	// ---------------------------------------------------------------------
 
-	function isLayer(cell: any): boolean {
-		return cell != null && model.getParent(cell) === model.getRoot();
+	// The reading helpers take the root of the page to read; by default the one shown.
+
+	function isLayer(cell: any, root = model.getRoot()): boolean {
+		return cell != null && model.getParent(cell) === root;
 	}
 
-	function layers(): any[] {
-		return model.getChildren(model.getRoot()) || [];
+	function layers(root = model.getRoot()): any[] {
+		return model.getChildren(root) || [];
 	}
 
-	function allCells(): any[] {
+	function allCells(root = model.getRoot()): any[] {
 		const result: any[] = [];
 		const visit = (c: any) => {
 			for (const child of model.getChildren(c) || []) {
@@ -36,11 +40,13 @@ Draw.loadPlugin((ui: any) => {
 				visit(child);
 			}
 		};
-		for (const layer of layers()) {
+		for (const layer of layers(root)) {
 			visit(layer);
 		}
 		return result;
 	}
+
+	const isLocked = (cell: any) => /(^|;)locked=1(;|$)/.test(model.getStyle(cell) || "");
 
 	function htmlToText(html: string): string {
 		const doc = new DOMParser().parseFromString(
@@ -93,9 +99,9 @@ Draw.loadPlugin((ui: any) => {
 		return "vertex";
 	}
 
-	function layerOf(cell: any): any {
+	function layerOf(cell: any, root = model.getRoot()): any {
 		let c = cell;
-		while (c != null && !isLayer(c)) {
+		while (c != null && !isLayer(c, root)) {
 			c = model.getParent(c);
 		}
 		return c;
@@ -103,7 +109,7 @@ Draw.loadPlugin((ui: any) => {
 
 	const round = (n: number) => Math.round(n * 10) / 10;
 
-	function describe(cell: any, includeStyles: boolean): AiCell {
+	function describe(cell: any, includeStyles: boolean, root = model.getRoot()): AiCell {
 		const kind = kindOf(cell);
 		const parent = model.getParent(cell);
 		const geo = model.getGeometry(cell);
@@ -111,11 +117,11 @@ Draw.loadPlugin((ui: any) => {
 		if (includeStyles && model.getStyle(cell)) {
 			result.style = model.getStyle(cell);
 		}
-		if (parent && !isLayer(parent)) {
+		if (parent && !isLayer(parent, root)) {
 			result.parent = parent.id;
 		}
-		if (layers().length > 1) {
-			result.layer = layerOf(cell)?.id;
+		if (layers(root).length > 1) {
+			result.layer = layerOf(cell, root)?.id;
 		}
 		if (kind === "edge") {
 			const s = model.getTerminal(cell, true);
@@ -143,9 +149,9 @@ Draw.loadPlugin((ui: any) => {
 		return result;
 	}
 
-	function pageBounds(cells: any[]): AiRect {
+	function pageBounds(cells: any[], root = model.getRoot()): AiRect {
 		const bounds = graph.getBoundingBoxFromGeometry(
-			cells.filter((c) => model.isVertex(c) && isLayer(model.getParent(c))),
+			cells.filter((c) => model.isVertex(c) && isLayer(model.getParent(c), root)),
 			true
 		);
 		if (!bounds) {
@@ -159,9 +165,14 @@ Draw.loadPlugin((ui: any) => {
 		};
 	}
 
+	/** Reads the page shown in the editor, or another page without switching to it. */
 	function snapshot(action: AiGetModelAction): AiDiagramModel {
-		const cells = allCells();
-		const selection: any[] = graph.getSelectionCells();
+		const page = action.page ? findPage(action.page) : ui.currentPage;
+		const current = page == null || page === ui.currentPage;
+		const root = current ? model.getRoot() : pageRoot(page);
+		const cells = allCells(root);
+		// Only the page shown has a selection.
+		const selection: any[] = current ? graph.getSelectionCells() : [];
 		const selectedIds = new Set(selection.map((c) => c.id));
 
 		let included: { cell: any; context: boolean }[];
@@ -180,7 +191,7 @@ Draw.loadPlugin((ui: any) => {
 					}
 				}
 				const p = model.getParent(c);
-				if (p && !isLayer(p) && !core.has(p)) context.add(p);
+				if (p && !isLayer(p, root) && !core.has(p)) context.add(p);
 			}
 			included = [
 				...[...core].map((cell) => ({ cell, context: false })),
@@ -197,27 +208,75 @@ Draw.loadPlugin((ui: any) => {
 
 		const maxCells = Math.max(1, action.maxCells || 400);
 		const out = included.slice(0, maxCells).map(({ cell, context }) => {
-			const d = describe(cell, action.includeStyles);
+			const d = describe(cell, action.includeStyles, root);
 			if (selectedIds.has(cell.id)) d.selected = true;
 			if (context) d.context = true;
 			return d;
 		});
 
-		const pages: any[] = ui.pages || [];
-		const page = ui.currentPage;
+		const pages = allPages();
 		return {
 			page: {
 				id: page?.getId?.() ?? "",
 				name: page?.getName?.() ?? "",
 				index: Math.max(0, pages.indexOf(page)),
 				count: Math.max(1, pages.length),
+				current,
 			},
-			layers: layers().map((l) => ({ id: l.id, name: plainLabel(l) })),
-			bounds: pageBounds(cells),
+			layers: layers(root).map((l) => ({ id: l.id, name: plainLabel(l), visible: model.isVisible(l), locked: isLocked(l) })),
+			bounds: pageBounds(cells, root),
 			selection: [...selectedIds],
 			cells: out,
 			truncated: included.length > out.length,
 			totalCells: cells.length,
+		};
+	}
+
+	function emptyModel(): AiDiagramModel {
+		const page = { id: "", name: "", index: 0, count: 0, current: false };
+		return { page, layers: [], bounds: { x: 0, y: 0, width: 0, height: 0 }, selection: [], cells: [], truncated: false, totalCells: 0 };
+	}
+
+	// ---------------------------------------------------------------------
+	// Pages
+	// ---------------------------------------------------------------------
+
+	function allPages(): any[] {
+		return ui.pages || [];
+	}
+
+	const pageName = (page: any): string => page?.getName?.() ?? "";
+	const describePage = (page: any): string => `"${pageName(page)}" (${page.getId()})`;
+
+	/** The page an id or name (exact, else ignoring case) refers to. */
+	function findPage(ref: string): any {
+		const pages = allPages();
+		const wanted = String(ref).trim();
+		const byId = pages.find((p) => p.getId() === wanted);
+		if (byId) return byId;
+		let named = pages.filter((p) => pageName(p) === wanted);
+		if (named.length === 0) named = pages.filter((p) => pageName(p).toLowerCase() === wanted.toLowerCase());
+		if (named.length === 1) return named[0];
+		if (named.length > 1) {
+			throw new Error(`${named.length} pages are named "${wanted}": pass the page id instead (${named.map((p) => p.getId()).join(", ")}).`);
+		}
+		throw new Error(`No page "${wanted}". The pages are ${pages.map(describePage).join(", ") || "none"}.`);
+	}
+
+	/** The root cell of a page; pages never shown yet are decoded first, as draw.io does on switching to them. */
+	function pageRoot(page: any): any {
+		if (page === ui.currentPage) return model.getRoot();
+		ui.updatePageRoot(page);
+		return page.root;
+	}
+
+	function pageInfo(page: any): AiPageInfo {
+		return {
+			id: page.getId(),
+			name: pageName(page),
+			index: allPages().indexOf(page),
+			cells: allCells(pageRoot(page)).length,
+			current: page === ui.currentPage,
 		};
 	}
 
@@ -471,12 +530,18 @@ Draw.loadPlugin((ui: any) => {
 		});
 	}
 
-	function runLayoutStep(exec: () => void): Promise<void> {
+	function runStep(exec: () => void): Promise<void> {
 		return new Promise((resolve) => ui.executeLayout(exec, false, resolve));
 	}
 
 	/** draw.io >= 32 lays out with ELK, which computes asynchronously and then applies in one model update. */
 	async function layoutCells(op: Extract<AiOp, { op: "layout" }>, resolve: Resolver): Promise<string[]> {
+		// ELK computes asynchronously: never apply its result to a page the user switched to meanwhile.
+		const root = model.getRoot();
+		const runLayoutStep = (exec: () => void) => {
+			if (model.getRoot() !== root) throw new Error(PAGE_SWITCHED);
+			return runStep(exec);
+		};
 		const scoped = (op.ids || []).map((id) => resolve(id));
 		let parent = op.parent ? resolve(op.parent, "parent") : undefined;
 		if (!parent) {
@@ -557,12 +622,23 @@ Draw.loadPlugin((ui: any) => {
 	): string[] {
 		const cells = (ids: string[] | undefined) => {
 			if (!ids || ids.length === 0) throw new Error("ids must not be empty");
-			return ids.map((id) => resolve(id));
+			return ids.map((id) => {
+				const cell = resolve(id);
+				if (cell === model.getRoot()) throw new Error(`"${id}" is the page itself; use the ids of its layers or cells.`);
+				return cell;
+			});
 		};
 		const register = (cell: any, tempId?: string) => {
 			if (tempId) idMap[tempId] = cell.id;
 			touched.add(cell);
 			return cell.id as string;
+		};
+		const layer = (ref: string | undefined, what = "id") => {
+			const cell = resolve(ref, what);
+			if (!isLayer(cell)) {
+				throw new Error(`"${ref}" is not a layer. drawio_get_diagram lists the page's layers.`);
+			}
+			return cell;
 		};
 
 		switch (op.op) {
@@ -648,7 +724,13 @@ Draw.loadPlugin((ui: any) => {
 				return [register(cell)];
 			}
 			case "delete": {
-				const removed = graph.removeCells(cells(op.ids), op.includeEdges ?? true) || [];
+				const cs = cells(op.ids);
+				if (layers().every((l) => cs.includes(l))) {
+					throw new Error("A page needs at least one layer: keep one, or delete the cells on it instead.");
+				}
+				const removed = graph.removeCells(cs, op.includeEdges ?? true) || [];
+				// The layer the user draws on may have gone.
+				graph.checkDefaultParent?.();
 				return removed.map((c: any) => c.id);
 			}
 			case "move": {
@@ -736,6 +818,47 @@ Draw.loadPlugin((ui: any) => {
 				added.forEach((c) => touched.add(c));
 				return added.map((c) => c.id);
 			}
+			// Layers, as draw.io's Layers panel changes them. The default layer the user draws on stays the same.
+			case "addLayer": {
+				const cell = new W.mxCell(op.name?.trim() || `Layer ${layers().length + 1}`);
+				if (op.locked) cell.setStyle("locked=1;");
+				const drawingOn = graph.getDefaultParent();
+				model.add(model.getRoot(), cell, op.position === "back" ? 0 : layers().length);
+				// Without an explicit default layer, draw.io draws on the first one, which this may now be.
+				if (graph.defaultParent == null && graph.getDefaultParent() !== drawingOn) graph.setDefaultParent(drawingOn);
+				if (op.visible === false) model.setVisible(cell, false);
+				return [register(cell, op.tempId)];
+			}
+			case "renameLayer": {
+				const cell = layer(op.id);
+				if (!op.name?.trim()) throw new Error("renameLayer needs a name");
+				setLabel(cell, op.name.trim());
+				return [register(cell)];
+			}
+			case "setLayerVisible": {
+				const cell = layer(op.id);
+				if (typeof op.visible !== "boolean") throw new Error("setLayerVisible needs visible: true or false");
+				model.setVisible(cell, op.visible);
+				return [register(cell)];
+			}
+			case "setLayerLocked": {
+				const cell = layer(op.id);
+				if (typeof op.locked !== "boolean") throw new Error("setLayerLocked needs locked: true or false");
+				model.setStyle(cell, mx.utils.setStyle(model.getStyle(cell) || "", "locked", op.locked ? "1" : null));
+				return [register(cell)];
+			}
+			case "moveToLayer": {
+				const target = layer(op.layer, "layer");
+				if (isLocked(target)) {
+					throw new Error(`Layer "${plainLabel(target) || target.id}" is locked. Unlock it first with setLayerLocked.`);
+				}
+				const cs = cells(op.ids);
+				const nested = cs.find((c) => isLayer(c));
+				if (nested) throw new Error(`"${nested.id}" is a layer; move the cells on it instead.`);
+				graph.moveCells(cs, 0, 0, false, target);
+				cs.forEach((c) => touched.add(c));
+				return cs.map((c) => c.id);
+			}
 			default:
 				throw new Error(`Unknown operation "${(op as any)?.op}"`);
 		}
@@ -755,33 +878,41 @@ Draw.loadPlugin((ui: any) => {
 	}
 
 	let applyQueue: Promise<unknown> = Promise.resolve();
-	function applyOpsSerialized(action: AiApplyOpsAction): Promise<AiApplyOpsResultEvent> {
-		const run = applyQueue.then(() => applyOps(action));
-		applyQueue = run.catch(() => undefined);
-		return run;
+	/** AI edits (batches and page changes) run one at a time. */
+	function serialized<T>(run: () => T | Promise<T>): Promise<T> {
+		const result = applyQueue.then(run);
+		applyQueue = result.catch(() => undefined);
+		return result;
 	}
 
 	async function applyOps(action: AiApplyOpsAction): Promise<AiApplyOpsResultEvent> {
-		if (review && model.getRoot() !== review.root) refreshReview();
+		syncReviewPage();
+		const page = ui.currentPage;
+		const root = model.getRoot();
 		const reviewBefore = action.review && !review ? snapAll() : undefined;
 		aiEditing++;
 		try {
 			const result = await applyOpsInner(action);
 			if (action.review && !result.rolledBack && result.results.some((r) => r.ok)) {
-				if (reviewBefore) {
-					review = { root: model.getRoot(), before: reviewBefore, changes: [], edit: undefined, accepted: false, rejected: false };
+				const created = reviewBefore ? { page, root, before: reviewBefore, changes: [], edit: undefined } : undefined;
+				if (result.switched) {
+					// What was applied is on the page the batch started on, which now waits with it.
+					if (created) parked.push(created);
+				} else {
+					if (created) review = created;
+					absorbIntoReviewEdit(result.historyBefore);
 				}
-				absorbIntoReviewEdit(result.historyBefore);
+				if (created) reviewing = true;
 				refreshReview();
 			}
-			const { historyBefore: _, ...event } = result;
+			const { historyBefore: _, switched: __, ...event } = result;
 			return event;
 		} finally {
 			aiEditing--;
 		}
 	}
 
-	async function applyOpsInner(action: AiApplyOpsAction): Promise<AiApplyOpsResultEvent & { historyBefore: number }> {
+	async function applyOpsInner(action: AiApplyOpsAction): Promise<AiApplyOpsResultEvent & { historyBefore: number; switched: boolean }> {
 		const idMap: Record<string, string> = {};
 		const results: AiOpResult[] = [];
 		const touched = new Set<any>();
@@ -798,6 +929,8 @@ Draw.loadPlugin((ui: any) => {
 
 		const undoManager = ui.editor.undoManager;
 		const historyBefore = undoManager.indexOfNextAdd;
+		const root = model.getRoot();
+		let switched = false;
 		const ops: AiOp[] = action.ops || [];
 		let failed = false;
 		const fail = (index: number, op: any, e: any) => {
@@ -808,6 +941,12 @@ Draw.loadPlugin((ui: any) => {
 
 		let i = 0;
 		while (i < ops.length) {
+			// The user switched pages while a layout ran: the rest must not land on the other page.
+			if (model.getRoot() !== root) {
+				switched = failed = true;
+				for (; i < ops.length; i++) results.push({ index: i, op: ops[i]?.op, ok: false, error: PAGE_SWITCHED });
+				break;
+			}
 			const op = ops[i];
 			if (op?.op === "layout") {
 				if (skip()) {
@@ -819,6 +958,7 @@ Draw.loadPlugin((ui: any) => {
 						results.push({ index: i, op: op.op, ok: true, ids });
 					} catch (e) {
 						fail(i, op, e);
+						if (model.getRoot() !== root) switched = true;
 					}
 				}
 				i++;
@@ -842,15 +982,16 @@ Draw.loadPlugin((ui: any) => {
 			}
 		}
 
-		squashHistory(historyBefore);
+		// After a page switch, the history holds it between the batch's steps: leave both as they are.
+		if (!switched) squashHistory(historyBefore);
 		let rolledBack = false;
-		if (failed && action.atomic && undoManager.indexOfNextAdd > historyBefore) {
+		if (!switched && failed && action.atomic && undoManager.indexOfNextAdd > historyBefore) {
 			undoManager.undo();
 			rolledBack = true;
 		}
 
-		if (!rolledBack) {
-			const alive = [...touched].filter((c) => model.contains(c));
+		if (!rolledBack && !switched) {
+			const alive = [...touched].filter((c) => model.contains(c) && !isLayer(c));
 			if (action.flash) flash(alive);
 			if (action.selectResult && alive.length > 0) {
 				graph.setSelectionCells(alive.filter((c) => model.isVertex(c)));
@@ -858,7 +999,7 @@ Draw.loadPlugin((ui: any) => {
 			}
 		}
 
-		return { event: "aiApplyOpsResult", message: action, results, idMap, rolledBack, historyBefore };
+		return { event: "aiApplyOpsResult", message: action, results, idMap, rolledBack, historyBefore, switched };
 	}
 
 	function flash(cells: any[]) {
@@ -873,7 +1014,9 @@ Draw.loadPlugin((ui: any) => {
 	// ---------------------------------------------------------------------
 	// Review: AI edits are applied (so the AI can inspect its own result) but
 	// stay pending until the user keeps or reverts them. Reverting restores the
-	// state each cell had before the AI first touched it.
+	// state each cell had before the AI first touched it. Each page keeps its
+	// own pending changes while another page is shown; the AI's changes to the
+	// page list itself (drawio_pages) are part of the same review.
 	// ---------------------------------------------------------------------
 
 	const ADDED = "#16a34a";
@@ -885,12 +1028,14 @@ Draw.loadPlugin((ui: any) => {
 		cell: any;
 		parentId: string | undefined;
 		index: number;
+		/** -1 for layers. */
 		depth: number;
 		value: any;
 		valueKey: string;
 		style: string;
 		geo: any;
 		geoKey: string;
+		visible: boolean;
 		sourceId: string | undefined;
 		targetId: string | undefined;
 		/** Where the cell was drawn, in graph coordinates; used for ghosts of moved/removed cells. */
@@ -898,16 +1043,35 @@ Draw.loadPlugin((ui: any) => {
 		path?: { x: number; y: number }[];
 	}
 
+	/** The pending AI changes on one page. */
 	interface Review {
+		page: any;
+		/** The page's root cell when the changes were made. */
 		root: any;
 		before: Map<string, CellSnap>;
 		changes: AiChange[];
 		edit: any;
-		accepted: boolean;
-		rejected: boolean;
 	}
 
+	/** The AI's pending changes to the page list. */
+	interface PageReview {
+		added: Set<any>;
+		/** Added pages the user has drawn on: rejecting keeps them (reverting only the AI's changes on them). */
+		edited: Set<any>;
+		renamed: Map<any, { from: string; to: string }>;
+		moved: Set<any>;
+		/** The page order before the AI first moved a page. */
+		order?: any[];
+	}
+
+	/** Pending AI changes on the page shown in the editor. */
 	let review: Review | undefined;
+	/** Pending AI changes on other pages; they are shown again when their page is. */
+	let parked: Review[] = [];
+	let pageReview: PageReview | undefined;
+	/** A review is open (until nothing is pending), and how the user has resolved parts of it so far. */
+	let reviewing = false;
+	let verdict = { accepted: false, rejected: false };
 	/** > 0 while the AI (or a review action) is changing the model, so those edits are not mistaken for the user's. */
 	let aiEditing = 0;
 
@@ -923,8 +1087,11 @@ Draw.loadPlugin((ui: any) => {
 			  ])
 			: "";
 	const live = (id: string | undefined) => (id ? model.getCell(id) ?? null : null);
+	const kindOfChange = (cell: any, depth?: number): AiChange["cellKind"] =>
+		depth === -1 || isLayer(cell) ? "layer" : model.isEdge(cell) ? "edge" : "vertex";
 
 	function depthOf(cell: any): number {
+		if (isLayer(cell)) return -1;
 		let d = 0;
 		for (let p = model.getParent(cell); p && !isLayer(p) && p !== model.getRoot(); p = model.getParent(p)) d++;
 		return d;
@@ -944,10 +1111,11 @@ Draw.loadPlugin((ui: any) => {
 			style: model.getStyle(cell) ?? "",
 			geo: geo ? geo.clone() : null,
 			geoKey: geoKey(geo),
+			visible: model.isVisible(cell),
 			sourceId: model.getTerminal(cell, true)?.id,
 			targetId: model.getTerminal(cell, false)?.id,
 		};
-		const state = graph.view.getState(cell);
+		const state = depth >= 0 ? graph.view.getState(cell) : undefined;
 		if (state) {
 			const { scale, translate: t } = graph.view;
 			const toModel = (p: any) => ({ x: p.x / scale - t.x, y: p.y / scale - t.y });
@@ -960,6 +1128,7 @@ Draw.loadPlugin((ui: any) => {
 		return snap;
 	}
 
+	/** Every layer and cell of the page shown. */
 	function snapAll(): Map<string, CellSnap> {
 		const result = new Map<string, CellSnap>();
 		const visit = (cell: any, depth: number) => {
@@ -968,15 +1137,18 @@ Draw.loadPlugin((ui: any) => {
 				visit(child, depth + 1);
 			}
 		};
-		layers().forEach((layer) => visit(layer, 0));
+		for (const layer of layers()) {
+			result.set(layer.id, snapCell(layer, -1));
+			visit(layer, 0);
+		}
 		return result;
 	}
 
 	function computeChanges(before: Map<string, CellSnap>): AiChange[] {
 		const out: AiChange[] = [];
-		const now = new Map<string, any>(allCells().map((c) => [c.id, c]));
+		const now = new Map<string, any>([...layers(), ...allCells()].map((c) => [c.id, c]));
 		for (const [id, cell] of now) {
-			const cellKind = model.isEdge(cell) ? "edge" : "vertex";
+			const cellKind = kindOfChange(cell);
 			const b = before.get(id);
 			if (!b) {
 				out.push({ id, change: "added", cellKind, label: plainLabel(cell) });
@@ -990,17 +1162,18 @@ Draw.loadPlugin((ui: any) => {
 			if (b.sourceId !== model.getTerminal(cell, true)?.id || b.targetId !== model.getTerminal(cell, false)?.id) {
 				fields.push("connection");
 			}
+			if (b.visible !== model.isVisible(cell)) fields.push("visible");
 			if (fields.length > 0 || b.cell !== cell) {
 				out.push({ id, change: "changed", cellKind, label: plainLabel(cell), fields });
 			}
 		}
 		for (const [id, b] of before) {
-			// A removed group is reported once, not once per descendant.
+			// A removed group (or layer) is reported once, not once per descendant.
 			if (now.has(id) || (b.parentId && before.has(b.parentId) && !now.has(b.parentId))) continue;
 			out.push({
 				id,
 				change: "removed",
-				cellKind: model.isEdge(b.cell) ? "edge" : "vertex",
+				cellKind: kindOfChange(b.cell, b.depth),
 				label: plainLabel(b.cell),
 			});
 		}
@@ -1012,59 +1185,159 @@ Draw.loadPlugin((ui: any) => {
 		return { added: count("added"), changed: count("changed"), removed: count("removed") };
 	}
 
+	/** The AI's page-list changes that are still in effect (the user may have undone some). */
+	function pendingPageChanges(): AiPageChange[] {
+		return pageReview ? pendingPageChangesOf(pageReview) : [];
+	}
+
+	function pendingPageChangesOf(pr: PageReview): AiPageChange[] {
+		const pages = allPages();
+		const out: AiPageChange[] = [];
+		for (const p of pr.added) {
+			if (pages.includes(p)) out.push({ change: "added", page: p.getId(), name: pageName(p) });
+		}
+		for (const [p, r] of pr.renamed) {
+			if (pages.includes(p) && !pr.added.has(p) && pageName(p) === r.to) out.push({ change: "renamed", page: p.getId(), name: r.to, from: r.from });
+		}
+		if (pr.order) {
+			const before = pr.order.filter((p) => pages.includes(p));
+			const now = pages.filter((p) => before.includes(p));
+			if (now.some((p, i) => p !== before[i])) {
+				for (const p of pr.moved) {
+					if (pages.includes(p) && !pr.added.has(p)) out.push({ change: "moved", page: p.getId(), name: pageName(p) });
+				}
+			}
+		}
+		return out;
+	}
+
+	function anyPending(): boolean {
+		return !!review || parked.length > 0 || pendingPageChanges().length > 0;
+	}
+
+	/** Records a drawio_pages change made in review mode. */
+	function notePageChange(change: { added: any } | { renamed: any; from: string; to: string } | { moved: any; order: any[] }) {
+		const pr: PageReview = (pageReview = pageReview ?? { added: new Set(), edited: new Set(), renamed: new Map(), moved: new Set() });
+		reviewing = true;
+		if ("added" in change) {
+			pr.added.add(change.added);
+		} else if ("renamed" in change) {
+			const from = pr.renamed.get(change.renamed)?.from ?? change.from;
+			if (from === change.to) pr.renamed.delete(change.renamed);
+			else pr.renamed.set(change.renamed, { from, to: change.to });
+		} else {
+			pr.order = pr.order ?? change.order;
+			pr.moved.add(change.moved);
+		}
+	}
+
 	let lastReviewEvent = "";
 	function publishReview(resolved?: AiReviewEvent["resolved"]) {
-		const changes = review?.changes ?? [];
+		const changes = [
+			...(review?.changes ?? []),
+			...parked.flatMap((r) => r.changes.map((c) => ({ ...c, page: pageName(r.page) }))),
+		];
+		const pageChanges = pendingPageChanges();
+		const summary = summarize(changes);
+		if (pageChanges.length) summary.pages = pageChanges.length;
 		const evt: AiReviewEvent = {
 			event: "aiReview",
-			pending: !!review,
-			summary: summarize(changes),
+			pending: anyPending(),
+			summary,
 			changes: changes.slice(0, 300),
 			resolved,
 		};
+		if (pageChanges.length) evt.pageChanges = pageChanges;
 		const key = JSON.stringify(evt);
 		if (key === lastReviewEvent) return;
 		lastReviewEvent = key;
 		sendEvent(evt);
 	}
 
-	function endReview(resolved: AiReviewEvent["resolved"]) {
-		review = undefined;
+	/** Repaints and reports the review; ends it once nothing is pending. */
+	function settle() {
+		let resolved: AiReviewEvent["resolved"];
+		if (reviewing && !anyPending()) {
+			resolved = verdict.accepted && verdict.rejected ? "mixed" : verdict.accepted ? "accepted" : "rejected";
+			reviewing = false;
+			review = undefined;
+			parked = [];
+			pageReview = undefined;
+			verdict = { accepted: false, rejected: false };
+		}
 		paintReview();
 		publishReview(resolved);
 	}
 
+	/**
+	 * Keeps `review` on the page shown: a page switch parks it, coming back resumes it.
+	 * Changes on a page that was deleted went with it; those on a page whose content was
+	 * replaced (e.g. the file was reloaded) are kept.
+	 */
+	function syncReviewPage() {
+		const root = model.getRoot();
+		const pages = allPages();
+		if (review && review.root !== root) {
+			parked.push(review);
+			review = undefined;
+		}
+		parked = parked.filter((r) => {
+			const keep = r.root === root || (pages.includes(r.page) && r.page !== ui.currentPage && r.page.root === r.root);
+			if (!keep) verdict.accepted = true;
+			return keep;
+		});
+		if (!review) {
+			const i = parked.findIndex((r) => r.root === root);
+			if (i >= 0) review = parked.splice(i, 1)[0];
+		}
+	}
+
 	let refreshTimer: any;
 	function scheduleReviewRefresh() {
-		if (!review) return;
+		if (!reviewing) return;
 		clearTimeout(refreshTimer);
 		refreshTimer = setTimeout(refreshReview, 40);
 	}
 
 	function refreshReview() {
 		clearTimeout(refreshTimer);
+		if (!reviewing) return;
+		syncReviewPage();
+		recomputeReview();
+		settle();
+	}
+
+	/** Brings the changes on the page shown up to date; the page's review ends when none are left. */
+	function recomputeReview() {
 		if (!review) return;
-		if (model.getRoot() !== review.root) {
-			// Page switch or the file was reloaded: the snapshot no longer describes this model.
-			return endReview("accepted");
-		}
 		review.changes = computeChanges(review.before);
-		if (review.changes.length === 0) {
-			return endReview(review.accepted && review.rejected ? "mixed" : review.accepted ? "accepted" : "rejected");
-		}
-		paintReview();
-		publishReview();
+		if (review.changes.length === 0) review = undefined;
 	}
 
 	/** Folds the newest history entry into the review's entry, so the whole review is a single Ctrl+Z. */
-	function absorbIntoReviewEdit(historyBefore: number) {
-		if (!review) return;
+	function absorbIntoReviewEdit(historyBefore: number, r = review) {
+		if (!r) return;
 		const um = ui.editor.undoManager;
 		if (um.indexOfNextAdd !== historyBefore + 1) return;
-		if (review.edit && historyBefore > 0 && um.history[historyBefore - 1] === review.edit) {
+		if (r.edit && historyBefore > 0 && um.history[historyBefore - 1] === r.edit) {
 			squashHistory(historyBefore - 1);
 		}
-		review.edit = um.history[um.indexOfNextAdd - 1];
+		r.edit = um.history[um.indexOfNextAdd - 1];
+	}
+
+	/** Forgets a cell and, transitively, the cells that were inside it. */
+	function forgetSubtree(before: Map<string, CellSnap>, id: string) {
+		const gone = new Set([id]);
+		for (let grew = true; grew; ) {
+			grew = false;
+			for (const [bid, b] of before) {
+				if (!gone.has(bid) && b.parentId && gone.has(b.parentId)) {
+					gone.add(bid);
+					grew = true;
+				}
+			}
+		}
+		gone.forEach((g) => before.delete(g));
 	}
 
 	function pendingIds(): Set<string> {
@@ -1083,14 +1356,10 @@ Draw.loadPlugin((ui: any) => {
 				};
 				keep(cell);
 			} else {
-				const gone = new Set([id]);
-				for (const [bid, b] of before) {
-					if (b.parentId && gone.has(b.parentId)) gone.add(bid);
-				}
-				gone.forEach((g) => before.delete(g));
+				forgetSubtree(before, id);
 			}
 		}
-		review.accepted = true;
+		verdict.accepted = true;
 	}
 
 	function revertCells(ids: string[]) {
@@ -1100,7 +1369,8 @@ Draw.loadPlugin((ui: any) => {
 		const set = new Set(ids);
 
 		// Reverting one thing must not leave the diagram half-connected: pull in
-		// removed ancestors/descendants and pending edges attached to it.
+		// removed ancestors/descendants, pending edges attached to it, and
+		// existing cells the AI moved into it.
 		for (let changed = true; changed; ) {
 			changed = false;
 			const add = (id: string | undefined) => {
@@ -1123,6 +1393,9 @@ Draw.loadPlugin((ui: any) => {
 					for (const edge of cell ? model.getEdges(cell) || [] : []) {
 						if (byId.get(edge.id)?.change === "changed") add(edge.id);
 					}
+					for (const d of cell ? model.getDescendants(cell) : []) {
+						if (d !== cell && byId.get(d.id)?.change === "changed") add(d.id);
+					}
 				}
 			}
 		}
@@ -1131,7 +1404,11 @@ Draw.loadPlugin((ui: any) => {
 			.map((id) => before.get(id))
 			.filter((b): b is CellSnap => !!b)
 			.sort((a, b) => Number(model.isEdge(a.cell)) - Number(model.isEdge(b.cell)) || a.depth - b.depth);
-		const toRemove = [...set].filter((id) => !before.has(id)).map((id) => model.getCell(id)).filter(Boolean);
+		const added = [...set].filter((id) => !before.has(id)).map((id) => model.getCell(id)).filter(Boolean);
+		// An added layer or container that now holds the user's own shapes stays, so they do not go with it.
+		const holdsUserCells = (c: any) => model.getDescendants(c).some((d: any) => d !== c && before.has(d.id) && !set.has(d.id));
+		const kept = added.filter(holdsUserCells);
+		const toRemove = added.filter((c) => !kept.includes(c));
 
 		const um = ui.editor.undoManager;
 		const historyBefore = um.indexOfNextAdd;
@@ -1141,7 +1418,7 @@ Draw.loadPlugin((ui: any) => {
 			for (const b of toRestore) {
 				const current = model.getCell(b.cell.id);
 				if (current && current !== b.cell) model.remove(current);
-				const parent = live(b.parentId) ?? graph.getDefaultParent();
+				const parent = live(b.parentId) ?? (b.depth === -1 ? model.getRoot() : graph.getDefaultParent());
 				if (model.getParent(b.cell) !== parent || !model.contains(b.cell)) {
 					model.add(parent, b.cell, Math.min(b.index, model.getChildCount(parent)));
 				}
@@ -1151,33 +1428,129 @@ Draw.loadPlugin((ui: any) => {
 				if (valueKey(model.getValue(c)) !== b.valueKey) model.setValue(c, cloneValue(b.value));
 				if ((model.getStyle(c) ?? "") !== b.style) model.setStyle(c, b.style);
 				if (geoKey(model.getGeometry(c)) !== b.geoKey) model.setGeometry(c, b.geo ? b.geo.clone() : null);
+				if (model.isVisible(c) !== b.visible) model.setVisible(c, b.visible);
 				if (model.getTerminal(c, true)?.id !== b.sourceId) model.setTerminal(c, live(b.sourceId), true);
 				if (model.getTerminal(c, false)?.id !== b.targetId) model.setTerminal(c, live(b.targetId), false);
 			}
 			if (toRemove.length > 0) graph.removeCells(toRemove, true);
+			graph.checkDefaultParent?.();
 		} finally {
 			model.endUpdate();
 			aiEditing--;
 		}
+		for (const c of kept) before.set(c.id, snapCell(c));
 		absorbIntoReviewEdit(historyBefore);
-		review.rejected = true;
+		verdict.rejected = true;
+	}
+
+	/** Reverts every pending change on the page shown. */
+	function revertPage() {
+		recomputeReview();
+		if (!review) return;
+		revertCells(review.changes.map((c) => c.id));
+		recomputeReview();
+	}
+
+	/**
+	 * Reverts everything the review holds: the page shown, the other pages with pending
+	 * changes (visiting each), and the AI's page-list changes; then shows the page the
+	 * user was on, if it is still there. All of it is one undo step.
+	 */
+	function rejectAll() {
+		const home = ui.currentPage;
+		const homeReview = review;
+		const pr = pageReview;
+		// Pages the AI added go entirely, with what is on them, unless the user drew on them.
+		const removed = new Set<any>([...(pr?.added ?? [])].filter((p) => !pr?.edited.has(p)));
+		verdict.rejected = true;
+		parked = parked.filter((r) => !removed.has(r.page));
+		if (review && removed.has(review.page)) review = undefined;
+		if (graph.isEditing()) graph.stopEditing(false);
+		const historyBefore = ui.editor.undoManager.indexOfNextAdd;
+		let otherPages = false;
+		aiEditing++;
+		model.beginUpdate();
+		try {
+			revertPage();
+			for (const r of [...parked]) {
+				if (!allPages().includes(r.page)) continue;
+				// Switching inside the edit puts the switches in its undo, in order.
+				model.execute(new W.SelectPage(ui, r.page));
+				otherPages = true;
+				syncReviewPage();
+				if (review === r) revertPage();
+			}
+			otherPages = revertPageChanges(home) || otherPages;
+			if (allPages().includes(home) && ui.currentPage !== home) model.execute(new W.SelectPage(ui, home));
+		} finally {
+			model.endUpdate();
+			aiEditing--;
+		}
+		// On a single page, the rejection folds into the AI's own undo step, as reverting part of it does.
+		if (!otherPages) absorbIntoReviewEdit(historyBefore, homeReview);
+		syncReviewPage();
+	}
+
+	/** Undoes the AI's page-list changes; says whether there were any. */
+	function revertPageChanges(home: any): boolean {
+		const pr = pageReview;
+		pageReview = undefined;
+		if (!pr || pendingPageChangesOf(pr).length === 0) return false;
+		aiEditing++;
+		model.beginUpdate();
+		try {
+			const doomed = [...pr.added].filter((p) => allPages().includes(p) && !pr.edited.has(p));
+			for (const p of doomed) {
+				const pages = allPages();
+				if (pages.length <= 1) break;
+				if (p === ui.currentPage) {
+					const staying = pages.filter((x) => !doomed.includes(x));
+					const i = pages.indexOf(p);
+					const next = staying.includes(home) ? home : staying[0] ?? pages[i === pages.length - 1 ? i - 1 : i + 1];
+					model.execute(new W.ChangePage(ui, p, next));
+				} else {
+					model.execute(new W.ChangePage(ui, p, null));
+				}
+			}
+			for (const [p, r] of pr.renamed) {
+				if (allPages().includes(p) && pageName(p) === r.to) model.execute(new W.RenamePage(ui, p, r.from));
+			}
+			if (pr.order) {
+				// The pages that were there before go back to their old order, in the places they hold now.
+				const pages = allPages();
+				const before = pr.order.filter((p) => pages.includes(p));
+				const slots = pages.map((p, i) => (before.includes(p) ? i : -1)).filter((i) => i >= 0);
+				const wanted = pages.slice();
+				slots.forEach((slot, k) => (wanted[slot] = before[k]));
+				for (let i = 0; i < wanted.length; i++) {
+					const from = allPages().indexOf(wanted[i]);
+					if (from !== i) model.execute(new W.MovePage(ui, from, i));
+				}
+			}
+		} finally {
+			model.endUpdate();
+			aiEditing--;
+		}
+		return true;
 	}
 
 	function resolveReview(decision: "accept" | "reject", cellIds?: string[]) {
-		if (!review) return;
 		refreshReview();
-		if (!review) return;
-		const pending = pendingIds();
-		const targets = (cellIds ?? [...pending]).filter((id) => pending.has(id));
-		if (targets.length === 0) return;
-		if (decision === "accept") {
-			if (targets.length === pending.size) {
-				review.accepted = true;
-				return endReview(review.rejected ? "mixed" : "accepted");
-			}
-			acceptCells(targets);
+		if (!reviewing) return;
+		if (cellIds) {
+			// Cells on the page shown.
+			const pending = pendingIds();
+			const targets = cellIds.filter((id) => pending.has(id));
+			if (targets.length === 0) return;
+			if (decision === "accept") acceptCells(targets);
+			else revertCells(targets);
+		} else if (decision === "accept") {
+			verdict.accepted = true;
+			review = undefined;
+			parked = [];
+			pageReview = undefined;
 		} else {
-			revertCells(targets);
+			rejectAll();
 		}
 		refreshReview();
 	}
@@ -1188,12 +1561,12 @@ Draw.loadPlugin((ui: any) => {
 		const pending = pendingIds();
 		const touched = new Set<any>();
 		for (const ch of edit.changes) {
-			for (const c of [ch.cell, ch.child]) if (c && c !== model.getRoot() && !isLayer(c)) touched.add(c);
+			for (const c of [ch.cell, ch.child]) if (c && c !== model.getRoot()) touched.add(c);
 		}
 		for (const cell of touched) {
 			if (pending.has(cell.id)) continue;
 			if (model.contains(cell)) review.before.set(cell.id, snapCell(cell));
-			else review.before.delete(cell.id);
+			else forgetSubtree(review.before, cell.id);
 		}
 		scheduleReviewRefresh();
 	}
@@ -1248,7 +1621,7 @@ Draw.loadPlugin((ui: any) => {
 		highlights = [];
 		if (review) {
 			for (const ch of review.changes.slice(0, 300)) {
-				if (ch.change === "removed") continue;
+				if (ch.change === "removed" || ch.cellKind === "layer") continue;
 				const state = graph.view.getState(model.getCell(ch.id));
 				if (!state) continue;
 				const h = new W.mxCellHighlight(graph, ch.change === "added" ? ADDED : CHANGED, 2, true);
@@ -1260,13 +1633,19 @@ Draw.loadPlugin((ui: any) => {
 		renderReviewBar();
 	}
 
+	/** Waits for an AI batch in progress: rejecting everything may switch pages. */
+	function userResolves(decision: "accept" | "reject", cellIds?: string[]) {
+		void serialized(() => resolveReview(decision, cellIds));
+	}
+
 	function selectedPending(): string[] {
+		if (!review) return [];
 		const pending = pendingIds();
 		return graph.getSelectionCells().map((c: any) => c.id).filter((id: string) => pending.has(id));
 	}
 
 	function renderReviewBar() {
-		if (!review) {
+		if (!reviewing || !anyPending()) {
 			reviewBar?.remove();
 			reviewBar = undefined;
 			return;
@@ -1290,19 +1669,35 @@ Draw.loadPlugin((ui: any) => {
 		bar.style.borderColor = ACCENT;
 		bar.replaceChildren();
 
-		const s = summarize(review.changes);
+		const s = summarize(review?.changes ?? []);
 		const title = document.createElement("span");
 		title.style.fontWeight = "600";
 		title.textContent = "✦ AI changes";
 		bar.appendChild(title);
+		const part = (text: string, color?: string) => {
+			const el = document.createElement("span");
+			if (color) el.style.color = color;
+			el.textContent = text;
+			bar.appendChild(el);
+			return el;
+		};
 		for (const [n, label, color] of [
 			[s.added, "added", ADDED], [s.changed, "changed", CHANGED], [s.removed, "removed", REMOVED],
 		] as const) {
-			if (!n) continue;
-			const part = document.createElement("span");
-			part.style.color = color;
-			part.textContent = `${n} ${label}`;
-			bar.appendChild(part);
+			if (n) part(`${n} ${label}`, color);
+		}
+		const elsewhere = parked.reduce((n, r) => n + r.changes.length, 0);
+		if (elsewhere) {
+			const where = parked.length === 1 ? `page "${pageName(parked[0].page)}"` : `${parked.length} other pages`;
+			part(`${review ? "+ " : ""}${elsewhere} on ${where}`).setAttribute("data-ai-review-elsewhere", "");
+		}
+		const pc = pendingPageChanges();
+		if (pc.length) {
+			const count = (k: AiPageChange["change"]) => pc.filter((c) => c.change === k).length;
+			const words = ([["added", "new"], ["renamed", "renamed"], ["moved", "moved"]] as const)
+				.filter(([k]) => count(k))
+				.map(([k, w]) => `${count(k)} ${w}`);
+			part(`pages: ${words.join(", ")}`, ACCENT).setAttribute("data-ai-review-pages", "");
 		}
 
 		const button = (text: string, title: string, onClick: () => void, primary = false) => {
@@ -1324,16 +1719,21 @@ Draw.loadPlugin((ui: any) => {
 		const sel = selectedPending();
 		if (sel.length > 0) {
 			button(`Revert ${sel.length} selected`, "Restore the selected items to how they were before the AI changed them", () =>
-				resolveReview("reject", sel)
+				userResolves("reject", sel)
 			);
-			button(`Keep ${sel.length} selected`, "Accept the AI's change for the selected items", () => resolveReview("accept", sel));
+			button(`Keep ${sel.length} selected`, "Accept the AI's change for the selected items", () => userResolves("accept", sel));
 		}
-		button("Reject all", "Undo every pending AI change", () => resolveReview("reject"));
-		button("Accept all", "Keep every pending AI change", () => resolveReview("accept"), true);
+		button("Reject all", "Undo every pending AI change, on every page", () => userResolves("reject"));
+		button("Accept all", "Keep every pending AI change, on every page", () => userResolves("accept"), true);
 	}
 
 	ui.editor.undoManager.addListener(W.mxEvent.ADD, (_sender: any, evt: any) => {
-		if (review && aiEditing === 0) absorbUserEdit(evt.getProperty("edit"));
+		if (aiEditing > 0) return;
+		const edit = evt.getProperty("edit");
+		if (pageReview?.added.has(ui.currentPage) && edit?.changes?.some((ch: any) => ch.cell || ch.child)) {
+			pageReview.edited.add(ui.currentPage);
+		}
+		if (review) absorbUserEdit(edit);
 	});
 	for (const name of [W.mxEvent.UNDO, W.mxEvent.REDO]) {
 		ui.editor.undoManager.addListener(name, (_sender: any, evt: any) => {
@@ -1344,7 +1744,13 @@ Draw.loadPlugin((ui: any) => {
 		});
 	}
 	model.addListener(W.mxEvent.CHANGE, () => scheduleReviewRefresh());
-	graph.getSelectionModel().addListener(W.mxEvent.CHANGE, () => review && renderReviewBar());
+	// Switching pages parks the pending changes of the page left and shows those of the page shown.
+	ui.editor.addListener("pageSelected", () => {
+		if (!reviewing) return;
+		syncReviewPage();
+		scheduleReviewRefresh();
+	});
+	graph.getSelectionModel().addListener(W.mxEvent.CHANGE, () => reviewing && renderReviewBar());
 	for (const name of [W.mxEvent.SCALE, W.mxEvent.TRANSLATE, W.mxEvent.SCALE_AND_TRANSLATE]) {
 		graph.view.addListener(name, () => review && paintGhosts());
 	}
@@ -1380,6 +1786,141 @@ Draw.loadPlugin((ui: any) => {
 				done("", String(e?.message ?? e));
 			}
 		});
+	}
+
+	// ---------------------------------------------------------------------
+	// Page operations (drawio_pages), with draw.io's own undoable page changes
+	// ---------------------------------------------------------------------
+
+	function pagesOp(action: AiPagesAction): AiPagesEvent {
+		const reply = (page?: any, extra: Partial<AiPagesEvent> = {}): AiPagesEvent => ({
+			event: "aiPages",
+			message: action,
+			pages: allPages().map(pageInfo),
+			...(page ? { page: pageInfo(page) } : {}),
+			...extra,
+		});
+		aiEditing++;
+		try {
+			const pages = allPages();
+			if (action.op === "list") return reply();
+			if (pages.length === 0) throw new Error("This diagram has no pages.");
+			if (!graph.isEnabled()) throw new Error("The diagram is read-only.");
+			if (graph.isEditing() && !action.dryRun) graph.stopEditing(false);
+			const position = (max: number) =>
+				typeof action.index === "number" && Number.isFinite(action.index)
+					? Math.max(0, Math.min(max, Math.round(action.index)))
+					: undefined;
+			const target = () => {
+				if (!action.page) throw new Error(`${action.op} needs the page's id or name.`);
+				return findPage(action.page);
+			};
+
+			switch (action.op) {
+				case "add": {
+					const page = ui.createPage(action.name?.trim() || null, ui.createPageId());
+					insertPage(page, position(pages.length) ?? pages.length, action.select !== false);
+					if (action.review) notePageChange({ added: page });
+					return reply(page);
+				}
+				case "duplicate": {
+					const source = target();
+					const name = action.name?.trim() || W.mxResources.get("copyOf", [pageName(source)]) || `Copy of ${pageName(source)}`;
+					const copy = clonePage(source, name);
+					insertPage(copy, position(pages.length) ?? pages.indexOf(source) + 1, action.select !== false);
+					if (action.review) notePageChange({ added: copy });
+					return reply(copy);
+				}
+				case "rename": {
+					const page = target();
+					const name = action.name?.trim();
+					if (!name) throw new Error("rename needs the new name.");
+					const from = pageName(page);
+					if (name !== from) {
+						model.execute(new W.RenamePage(ui, page, name));
+						if (action.review) notePageChange({ renamed: page, from, to: name });
+					}
+					return reply(page);
+				}
+				case "move": {
+					const page = target();
+					const to = position(pages.length - 1);
+					if (to === undefined) throw new Error("move needs the new 0-based index.");
+					const from = pages.indexOf(page);
+					if (to !== from) {
+						const order = pages.slice();
+						ui.movePage(from, to);
+						if (action.review) notePageChange({ moved: page, order });
+					}
+					return reply(page);
+				}
+				case "select": {
+					const page = target();
+					if (page !== ui.currentPage) ui.selectPage(page);
+					return reply(page);
+				}
+				case "delete": {
+					const page = target();
+					const info = pageInfo(page);
+					// Deleting a page the AI added needs no confirmation, unless the user has drawn on it.
+					const aiAdded = !!pageReview?.added.has(page) && !pageReview.edited.has(page);
+					if (pages.length <= 1) {
+						throw new Error(`"${info.name}" is the only page, and a diagram needs one. To empty it, delete its cells instead.`);
+					}
+					if (action.dryRun) return reply(page, { aiAdded });
+					// Shows the next page when it was the one shown, like draw.io's Delete Page.
+					ui.removePage(page);
+					if (allPages().includes(page)) throw new Error(`Could not delete page "${info.name}".`);
+					return { ...reply(), page: info, aiAdded };
+				}
+				default:
+					throw new Error(`Unknown page action "${(action as any).op}".`);
+			}
+		} catch (e: any) {
+			let pages: AiPageInfo[] = [];
+			try {
+				pages = allPages().map(pageInfo);
+			} catch {
+				// a page that cannot be read
+			}
+			return { event: "aiPages", message: action, pages, error: String(e?.message ?? e) };
+		} finally {
+			aiEditing--;
+			if (action.review) refreshReview();
+		}
+	}
+
+	/** Inserts a page as one undoable step; shows it when `select`. */
+	function insertPage(page: any, index: number, select: boolean) {
+		if (select) ui.insertPage(page, index);
+		else model.execute(new W.ChangePage(ui, page, null, index));
+	}
+
+	/** A copy of any page (draw.io's own Duplicate only copies the page shown), with new cell ids. */
+	function clonePage(source: any, name: string): any {
+		const root = pageRoot(source);
+		const node = source.node.cloneNode(false);
+		node.removeAttribute("id");
+		const copy = new W.DiagramPage(node, ui.createPageId());
+		const cloneMap: Record<string, any> = {};
+		const lookup = graph.createCellLookup([root]);
+		copy.root = model.cloneCells([root], true, cloneMap)[0];
+		// Gives the copies new ids, as draw.io's Duplicate does.
+		const ids = new W.mxGraphModel();
+		ids.prefix = W.Editor.guid() + "-";
+		ids.setRoot(copy.root);
+		graph.updateCustomLinks(graph.createCellMapping(cloneMap, lookup), [copy.root]);
+		// A deep copy: draw.io changes parts of a page's view state (e.g. its translate) in place.
+		const view = source === ui.currentPage ? graph.getViewState() : source.viewState;
+		copy.viewState = view ? mx.utils.clone(view, W.EditorUi.transientViewStateProperties) : graph.getViewState();
+		ui.initDiagramNode(copy);
+		copy.viewState.scale = 1;
+		delete copy.viewState.scrollLeft;
+		delete copy.viewState.scrollTop;
+		delete copy.viewState.currentRoot;
+		delete copy.viewState.defaultParent;
+		copy.setName(name);
+		return copy;
 	}
 
 	// ---------------------------------------------------------------------
@@ -2154,8 +2695,8 @@ Draw.loadPlugin((ui: any) => {
 		}
 		const sel = selectedPending();
 		if (sel.length > 0) {
-			menu.addItem(`✦ Keep AI change${sel.length > 1 ? "s" : ""}`, null, () => resolveReview("accept", sel));
-			menu.addItem(`✦ Revert AI change${sel.length > 1 ? "s" : ""}`, null, () => resolveReview("reject", sel));
+			menu.addItem(`✦ Keep AI change${sel.length > 1 ? "s" : ""}`, null, () => userResolves("accept", sel));
+			menu.addItem(`✦ Revert AI change${sel.length > 1 ? "s" : ""}`, null, () => userResolves("reject", sel));
 		}
 	};
 
@@ -2245,11 +2786,18 @@ Draw.loadPlugin((ui: any) => {
 		evt.stopImmediatePropagation();
 
 		switch (data.action) {
-			case "aiGetModel":
-				sendEvent({ event: "aiModel", message: data, model: snapshot(data) });
+			case "aiGetModel": {
+				let evt: AiModelEvent;
+				try {
+					evt = { event: "aiModel", message: data, model: snapshot(data) };
+				} catch (e: any) {
+					evt = { event: "aiModel", message: data, model: emptyModel(), error: String(e?.message ?? e) };
+				}
+				sendEvent(evt);
 				break;
+			}
 			case "aiApplyOps":
-				sendEvent(await applyOpsSerialized(data));
+				sendEvent(await serialized(() => applyOps(data)));
 				break;
 			case "aiSetSelection": {
 				const cells = data.cellIds.map((id) => model.getCell(id)).filter(Boolean);
@@ -2290,8 +2838,10 @@ Draw.loadPlugin((ui: any) => {
 				setMarkup(data.enabled);
 				break;
 			case "aiResolveReview":
-				await applyQueue;
-				resolveReview(data.decision, data.cellIds);
+				await serialized(() => resolveReview(data.decision, data.cellIds));
+				break;
+			case "aiPages":
+				sendEvent(await serialized(() => pagesOp(data)));
 				break;
 		}
 	});

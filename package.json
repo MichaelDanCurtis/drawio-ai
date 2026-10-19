@@ -225,7 +225,7 @@
 					"diagram"
 				],
 				"userDescription": "Get Draw.io Diagram",
-				"modelDescription": "Read the open draw.io diagram (current page) as structured JSON: cells with ids, kind, label, style, geometry, parent, edge source/target, plus the user's current selection. Call this before editing. Use scope='selection' to focus on what the user selected (adjacent cells are included and marked context=true).",
+				"modelDescription": "Read the open draw.io diagram as structured JSON: the page shown in the editor (or another page with `page`), its layers, and cells with ids, kind, label, style, geometry, parent, layer, edge source/target, plus the user's current selection. Call this before editing. Use scope='selection' to focus on what the user selected (adjacent cells are included and marked context=true).",
 				"inputSchema": {
 					"type": "object",
 					"properties": {
@@ -243,6 +243,10 @@
 						"maxCells": {
 							"type": "number",
 							"description": "Default 400."
+						},
+						"page": {
+							"type": "string",
+							"description": "Id or name of another page to read (drawio_pages lists them). The editor stays on the page it shows. Default: the page shown."
 						},
 						"file": {
 							"type": "string",
@@ -262,7 +266,7 @@
 					"diagram"
 				],
 				"userDescription": "Edit Draw.io Diagram",
-				"modelDescription": "Apply a batch of edits to the open draw.io diagram in ONE undoable step; the user sees them live. Batch everything for one request into a single call. New cells get a tempId you can reference later in the same batch (e.g. add two shapes then an edge between them). Atomic by default: if any op fails, nothing is applied and per-op errors are returned so you can fix and retry. Returns new ids for every tempId.",
+				"modelDescription": "Apply a batch of edits to the page shown in the open draw.io diagram in ONE undoable step; the user sees them live. Batch everything for one request into a single call. New cells get a tempId you can reference later in the same batch (e.g. add two shapes then an edge between them). Layers: addLayer, renameLayer, setLayerVisible, setLayerLocked, moveToLayer (put new shapes on a layer with `parent`). Atomic by default: if any op fails, nothing is applied and per-op errors are returned so you can fix and retry. Returns new ids for every tempId.",
 				"inputSchema": {
 					"type": "object",
 					"properties": {
@@ -288,23 +292,28 @@
 											"zOrder",
 											"layout",
 											"insertXml",
-											"replaceAll"
+											"replaceAll",
+											"addLayer",
+											"renameLayer",
+											"setLayerVisible",
+											"setLayerLocked",
+											"moveToLayer"
 										]
 									},
 									"tempId": {
 										"type": "string",
-										"description": "[addShape, addEdge, group] Your own handle (e.g. \"$db\") for the new cell. Later operations in the SAME batch can use it anywhere an id is expected."
+										"description": "[addShape, addEdge, group, addLayer] Your own handle (e.g. \"$db\") for the new cell or layer. Later operations in the SAME batch can use it anywhere an id is expected."
 									},
 									"id": {
 										"type": "string",
-										"description": "[update] Id of the cell to change."
+										"description": "[update] Id of the cell to change. [renameLayer, setLayerVisible, setLayerLocked] Id of the layer."
 									},
 									"ids": {
 										"type": "array",
 										"items": {
 											"type": "string"
 										},
-										"description": "[delete, move, resize, group, ungroup, align, distribute, zOrder, layout] Target cell ids."
+										"description": "[delete, move, resize, group, ungroup, align, distribute, zOrder, layout, moveToLayer] Target cell ids. delete also takes layer ids (a layer goes with its content)."
 									},
 									"label": {
 										"type": "string",
@@ -348,7 +357,7 @@
 									},
 									"parent": {
 										"type": "string",
-										"description": "[addShape, addEdge, update, layout, insertXml] Container/group id. Omit for the default layer."
+										"description": "[addShape, addEdge, update, layout, insertXml] Container, group or layer id. Omit for the default layer."
 									},
 									"placement": {
 										"type": "object",
@@ -441,7 +450,7 @@
 											"front",
 											"back"
 										],
-										"description": "[zOrder]"
+										"description": "[zOrder] [addLayer] Default front (on top)."
 									},
 									"type": {
 										"type": "string",
@@ -464,6 +473,22 @@
 									"xml": {
 										"type": "string",
 										"description": "[insertXml, replaceAll] mxGraphModel XML or bare <mxCell> elements. Ids you choose are kept unless they collide (the result maps them). parent/source/target may reference existing cells."
+									},
+									"name": {
+										"type": "string",
+										"description": "[addLayer, renameLayer] Layer name."
+									},
+									"visible": {
+										"type": "boolean",
+										"description": "[setLayerVisible] [addLayer] Default true. Hidden layers stay in the file."
+									},
+									"locked": {
+										"type": "boolean",
+										"description": "[setLayerLocked] [addLayer] Default false. The user cannot select or move what is on a locked layer."
+									},
+									"layer": {
+										"type": "string",
+										"description": "[moveToLayer] Id of the layer to move the cells to (drawio_get_diagram lists layers). Edges move only when listed."
 									}
 								},
 								"required": [
@@ -501,7 +526,7 @@
 					"diagram"
 				],
 				"userDescription": "Find Draw.io Cells",
-				"modelDescription": "Search the current page for cells by label text (case-insensitive substring or /regex/), kind, or style fragment. Returns compact matches with ids.",
+				"modelDescription": "Search the page shown (or another page with `page`) for cells by label text (case-insensitive substring or /regex/), kind, or style fragment. Returns compact matches with ids.",
 				"inputSchema": {
 					"type": "object",
 					"properties": {
@@ -523,6 +548,10 @@
 						"limit": {
 							"type": "number",
 							"description": "Default 50."
+						},
+						"page": {
+							"type": "string",
+							"description": "Id or name of another page to read (drawio_pages lists them). The editor stays on the page it shows. Default: the page shown."
 						},
 						"file": {
 							"type": "string",
@@ -563,6 +592,59 @@
 					},
 					"required": [
 						"ids"
+					]
+				}
+			},
+			{
+				"name": "drawio_pages",
+				"displayName": "Draw.io Pages",
+				"toolReferenceName": "drawio-pages",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Draw.io Pages",
+				"modelDescription": "List and change the diagram's pages (the tabs below the canvas). list: every page with id, name, index, cell count and which one is shown. add and duplicate make a page and show it (select: false keeps the page shown); rename; move to `index`; select shows a page. drawio_apply_operations and the other editing tools work on the page shown, so select a page before editing it. delete asks the user first when the page has content they made. Each change is one undo step and, while the user reviews AI changes, stays pending with them (Reject removes added pages and undoes renames and moves). Returns the pages afterwards.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"action": {
+							"type": "string",
+							"enum": [
+								"list",
+								"add",
+								"rename",
+								"duplicate",
+								"move",
+								"select",
+								"delete"
+							]
+						},
+						"page": {
+							"type": "string",
+							"description": "[rename, duplicate, move, select, delete] Page id or name."
+						},
+						"name": {
+							"type": "string",
+							"description": "[add, rename, duplicate] Page name. Default for add: the next \"Page-N\"; for duplicate: \"Copy of <name>\"."
+						},
+						"index": {
+							"type": "number",
+							"description": "[move] New 0-based position. [add, duplicate] Default: the end (add), right after the original (duplicate)."
+						},
+						"select": {
+							"type": "boolean",
+							"description": "[add, duplicate] Show the new page. Default true."
+						},
+						"file": {
+							"type": "string",
+							"description": "Diagram to act on: a path relative to the workspace folder (e.g. \"docs/architecture.drawio\") or absolute. It opens in VS Code if needed, so the user can watch. Omit it to use the diagram the user has open (or focused last)."
+						}
+					},
+					"required": [
+						"action"
 					]
 				}
 			},
@@ -692,7 +774,7 @@
 					"diagram"
 				],
 				"userDescription": "Lint Draw.io Diagram",
-				"modelDescription": "Check the current page for problems: dangling or duplicate connectors, overlapping or almost-aligned shapes, unlabeled shapes, disconnected shapes, tiny text, and violations of the repository's active design template (palette, fonts, connector style, required title/legend). Returns issues with cell ids. Use it after larger edits and when asked to review a diagram.",
+				"modelDescription": "Check the page shown (or another page with `page`) for problems: dangling or duplicate connectors, overlapping or almost-aligned shapes, unlabeled shapes, disconnected shapes, tiny text, and violations of the repository's active design template (palette, fonts, connector style, required title/legend). Returns issues with cell ids. Use it after larger edits and when asked to review a diagram.",
 				"inputSchema": {
 					"type": "object",
 					"properties": {
@@ -702,6 +784,10 @@
 								"type": "string"
 							},
 							"description": "Only report issues involving these cells."
+						},
+						"page": {
+							"type": "string",
+							"description": "Id or name of another page to read (drawio_pages lists them). The editor stays on the page it shows. Default: the page shown."
 						},
 						"file": {
 							"type": "string",
@@ -1809,7 +1895,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"

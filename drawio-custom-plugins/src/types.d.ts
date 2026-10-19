@@ -3,11 +3,12 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
-    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction;
+    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
+    | AiPagesAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent;
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -36,8 +37,9 @@ declare interface AiCell {
 }
 
 declare interface AiDiagramModel {
-    page: { id: string; name: string; index: number; count: number };
-    layers: { id: string; name: string }[];
+    /** The page that was read; `current` when it is the one shown in the editor. */
+    page: { id: string; name: string; index: number; count: number; current: boolean };
+    layers: { id: string; name: string; visible: boolean; locked: boolean }[];
     bounds: AiRect;
     selection: string[];
     cells: AiCell[];
@@ -73,7 +75,12 @@ declare type AiOp =
         type: "hierarchical" | "horizontalHierarchical" | "tree" | "horizontalTree" | "radialTree" | "organic" | "circle" | "grid";
         spacing?: number }
     | { op: "insertXml"; xml: string; dx?: number; dy?: number; parent?: string }
-    | { op: "replaceAll"; xml: string };
+    | { op: "replaceAll"; xml: string }
+    | { op: "addLayer"; tempId?: string; name?: string; visible?: boolean; locked?: boolean; position?: "front" | "back" }
+    | { op: "renameLayer"; id: string; name: string }
+    | { op: "setLayerVisible"; id: string; visible: boolean }
+    | { op: "setLayerLocked"; id: string; locked: boolean }
+    | { op: "moveToLayer"; ids: string[]; layer: string };
 
 declare interface AiOpResult {
     index: number;
@@ -88,6 +95,8 @@ declare interface AiGetModelAction {
     scope: "page" | "selection";
     includeStyles: boolean;
     maxCells: number;
+    /** Id or name of the page to read; default the one shown in the editor, which stays shown. */
+    page?: string;
 }
 
 declare interface AiApplyOpsAction {
@@ -133,6 +142,51 @@ declare interface AiModelEvent {
     event: "aiModel";
     message: AiGetModelAction;
     model: AiDiagramModel;
+    /** E.g. no such page; `model` is then empty. */
+    error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Pages
+// ---------------------------------------------------------------------------
+
+declare interface AiPageInfo {
+    id: string;
+    name: string;
+    index: number;
+    /** Shapes and connectors on the page. */
+    cells: number;
+    /** Shown in the editor. */
+    current: boolean;
+}
+
+declare interface AiPagesAction {
+    action: "aiPages";
+    op: "list" | "add" | "rename" | "duplicate" | "move" | "select" | "delete";
+    /** Id or name of the page to act on (all but list and add). */
+    page?: string;
+    /** add, rename, duplicate: the page's name. */
+    name?: string;
+    /** add, duplicate, move: 0-based position. */
+    index?: number;
+    /** add, duplicate: show the new page. Default true. */
+    select?: boolean;
+    /** Keep the change pending, like other AI changes, until the user accepts or rejects it. */
+    review?: boolean;
+    /** delete: only resolve the page and report it; nothing is deleted. */
+    dryRun?: boolean;
+}
+
+declare interface AiPagesEvent {
+    event: "aiPages";
+    message: AiPagesAction;
+    /** Every page, after the operation. */
+    pages: AiPageInfo[];
+    /** The page the operation acted on (the new page for add and duplicate; as it was, for delete). */
+    page?: AiPageInfo;
+    /** The page is one the AI added in the pending review. */
+    aiAdded?: boolean;
+    error?: string;
 }
 
 declare interface AiApplyOpsResultEvent {
@@ -390,16 +444,30 @@ declare interface ParticipantSelectedRectangleInfo {
 declare interface AiChange {
     id: string;
     change: "added" | "removed" | "changed";
-    cellKind: "vertex" | "edge";
+    cellKind: "vertex" | "edge" | "layer";
     label: string;
     /** For changed cells: which aspects differ from before the AI touched them. */
-    fields?: ("label" | "style" | "geometry" | "parent" | "connection")[];
+    fields?: ("label" | "style" | "geometry" | "parent" | "connection" | "visible")[];
+    /** Name of the page the change is on, when that is not the page shown in the editor. */
+    page?: string;
+}
+
+/** A change the AI made to the page list (drawio_pages). */
+declare interface AiPageChange {
+    change: "added" | "renamed" | "moved";
+    /** Page id. */
+    page: string;
+    name: string;
+    /** renamed: the name before. */
+    from?: string;
 }
 
 declare interface AiReviewSummary {
     added: number;
     changed: number;
     removed: number;
+    /** Pending page changes (added, renamed or moved pages); omitted when there are none. */
+    pages?: number;
 }
 
 /** Sent whenever the set of pending AI changes changes; empty when nothing is pending. */
@@ -407,12 +475,14 @@ declare interface AiReviewEvent {
     event: "aiReview";
     pending: boolean;
     summary: AiReviewSummary;
+    /** Changes on every page; those on other pages than the one shown name their page. */
     changes: AiChange[];
+    pageChanges?: AiPageChange[];
     /** How the last review ended, if it just ended. */
     resolved?: "accepted" | "rejected" | "mixed";
 }
 
-/** Accept (keep) or reject (revert) pending AI changes; all of them when cellIds is omitted. */
+/** Accept (keep) or reject (revert) pending AI changes: these cells on the page shown, or every change on every page (and the AI's page changes) when cellIds is omitted. */
 declare interface AiResolveReviewAction {
     action: "aiResolveReview";
     decision: "accept" | "reject";

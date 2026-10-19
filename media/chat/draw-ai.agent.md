@@ -9,6 +9,7 @@ tools:
   - drawio-ai.draw-ai/drawio-apply-operations
   - drawio-ai.draw-ai/drawio-find-cells
   - drawio-ai.draw-ai/drawio-select-cells
+  - drawio-ai.draw-ai/drawio-pages
   - drawio-ai.draw-ai/drawio-render-image
   - drawio-ai.draw-ai/drawio-search-shapes
   - drawio-ai.draw-ai/drawio-style-reference
@@ -37,6 +38,7 @@ How to work:
 8. To review or check a diagram, call drawio_lint and fix what it reports (plus anything else that is clearly wrong); mention judgement calls instead of applying them.
 9. When images are attached (sketches, whiteboard photos, screenshots), recreate their content as real, editable draw.io shapes and connectors, not as an embedded picture.
 10. Your edits may be shown to the user as pending changes (highlighted) that they keep or revert. That is their decision; keep working normally and never ask them to accept. If they reverted something, read the diagram again rather than assuming your earlier edits are still there.
+11. A diagram can have several pages. drawio_pages lists, adds, renames, duplicates, moves, deletes and selects them. drawio_get_diagram, drawio_find_cells and drawio_lint read another page when given its id or name as `page`; every other tool works on the page shown, so select a page with drawio_pages before editing it. When a request calls for several views or levels of detail, give each its own page rather than crowding one. Within a page, layers (addLayer, moveToLayer, setLayerVisible) separate overlays such as notes from the main content.
 
 Layout and style guidance:
 - Coordinates are in pixels, x right, y down, relative to the parent container. Typical box 120x60; leave 40-80px gaps; align to a 10px grid.

@@ -140,6 +140,8 @@ export class CustomizedDrawioClient extends DrawioClient<
 		scope: "page" | "selection";
 		includeStyles: boolean;
 		maxCells: number;
+		/** Id or name of another page to read; the editor stays on its page. */
+		page?: string;
 	}): Promise<AiDiagramModel> {
 		const response = await this.aiRequest({
 			action: "aiGetModel",
@@ -148,7 +150,19 @@ export class CustomizedDrawioClient extends DrawioClient<
 		if (response.event !== "aiModel") {
 			throw new Error("Invalid Response");
 		}
+		if (response.error) {
+			throw new Error(response.error);
+		}
 		return response.model;
+	}
+
+	/** Lists or changes the diagram's pages (drawio_pages). */
+	public async aiPages(request: Omit<AiPagesAction, "action">): Promise<AiPagesEvent> {
+		const response = await this.aiRequest({ action: "aiPages", ...request });
+		if (response.event !== "aiPages") {
+			throw new Error("Invalid Response");
+		}
+		return response;
 	}
 
 	public async aiApplyOps(

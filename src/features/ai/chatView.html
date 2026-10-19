@@ -57,6 +57,7 @@
 	#review .added { color: var(--vscode-gitDecoration-addedResourceForeground, #16a34a); }
 	#review .changed { color: var(--vscode-gitDecoration-modifiedResourceForeground, #d97706); }
 	#review .removed { color: var(--vscode-gitDecoration-deletedResourceForeground, #dc2626); }
+	#review .pages { color: var(--accent); }
 	#attachments { display: flex; gap: 8px; flex-wrap: wrap; }
 	#attachments:empty { display: none; }
 	.att { position: relative; }
@@ -268,6 +269,12 @@
 			const s = document.createElement("span");
 			s.className = k;
 			s.textContent = summary[k] + " " + k;
+			counts.appendChild(s);
+		}
+		if (summary.pages) {
+			const s = document.createElement("span");
+			s.className = "pages";
+			s.textContent = summary.pages + (summary.pages === 1 ? " page change" : " page changes");
 			counts.appendChild(s);
 		}
 	}

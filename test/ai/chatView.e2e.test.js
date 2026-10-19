@@ -154,6 +154,9 @@ test("pending AI changes show a review strip whose buttons resolve the review", 
 		{ type: "review", decision: "reject" },
 		{ type: "review", decision: "accept" },
 	]);
+	// The AI's changes to the page list (drawio_pages) are counted too.
+	await post({ type: "state", state: state({ transcriptVersion: 2, review: { added: 0, changed: 1, removed: 0, pages: 2 } }) });
+	assert.equal(await text("#reviewCounts"), "1 changed2 page changes");
 	await post({ type: "state", state: state({ transcriptVersion: 2 }) });
 	assert.equal(await page.locator("#review").isVisible(), false);
 });
