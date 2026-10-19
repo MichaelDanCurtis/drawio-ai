@@ -31,7 +31,9 @@ A publisher is the account extensions are published under. Its ID becomes part o
 3. Publish:
     - **VS Code Marketplace**: on <https://marketplace.visualstudio.com/manage>, choose **New extension → Visual Studio Code** the first time, or **… → Update** on the extension later, and upload the `.vsix`. Microsoft runs a short verification scan; the listing appears within minutes.
     - **Open VSX** (optional): `OVSX_PAT=<token> node scripts/release.js --quick --publish-openvsx`
-4. Tag it: `git tag v<x.y.z> && git push origin v<x.y.z>`
+4. Tag it: `git tag -a draw-ai-v<x.y.z> -m "Draw.AI <x.y.z>" && git push origin draw-ai-v<x.y.z>`
+
+    Release tags carry the `draw-ai-v` prefix (the first one is `draw-ai-v0.2.0`). The repository keeps hediet/vscode-drawio's history, and clones that fetch the `upstream` remote have its tags `v0.1.3` to `v1.17.0`, the same version numbers Draw.AI goes through. A plain `v<x.y.z>` tag would clash with them.
 
 Add `--pre-release` to `scripts/release.js` to ship a pre-release version.
 
