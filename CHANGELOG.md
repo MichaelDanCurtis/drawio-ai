@@ -21,8 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skills for building, reviewing and code-linking diagrams, shared by the agent plugin and Copilot (`chatSkills`)
 - `file` argument on every diagram tool: agents can work on any diagram in the workspace; it opens beside your work without taking focus. New tools `drawio_list_diagrams`, `drawio_search_diagrams` and `drawio_create`
 - `drawio-ai.mcp.discovery`: each window running the MCP server records how to reach it in a user-only file (`~/.drawio-ai/instances/`)
+- `drawio_pages` tool: the AI lists the diagram's pages (id, name, position, cell count, which one is shown) and adds, renames, duplicates (any page, not only the one shown), moves, deletes and switches them with draw.io's own page changes, one undo step each. In review mode the changes stay pending: rejecting removes the pages the AI added (unless you have drawn on them) and undoes its renames and moves. Deleting a page that has content the AI did not just add asks you first
+- `page` argument on `drawio_get_diagram`, `drawio_find_cells` and `drawio_lint`: read, search or lint another page by id or name without leaving the page shown
+- Layer operations in `drawio_apply_operations`: `addLayer`, `renameLayer`, `setLayerVisible`, `setLayerLocked` and `moveToLayer`; `drawio_get_diagram` reports whether each layer is visible and locked. Layer changes are reviewed like cell changes
 
 ### Changed
+
+- Pending AI changes stay pending when you or the AI switch pages: each page keeps its own, the review bar counts those on other pages, and Accept/Reject all (bar, chat panel, `@drawio` buttons, commands) cover every page. Before, switching pages kept them without asking
+- Reverting a shape or container the AI added also restores the existing shapes the AI had moved into it, instead of removing them with it
 
 - When another VS Code window already uses the MCP port, the server takes a free port instead of failing
 - The busy status in the diagram names the agent that is editing (Claude Code, Codex, …)

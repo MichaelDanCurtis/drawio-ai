@@ -63,6 +63,7 @@ async function runSteps() {
 			"drawio_apply_operations",
 			"drawio_find_cells",
 			"drawio_select_cells",
+			"drawio_pages",
 			"drawio_render_image",
 			"drawio_search_shapes",
 			"drawio_style_reference",
@@ -438,6 +439,53 @@ async function runSteps() {
 
 		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global);
 		await waitFor(async () => fetch(info.url, { method: "POST" }).then(() => false, () => true), "server to stop");
+	});
+
+	await step("drawio_pages: the AI adds a page, reads the other one without switching, uses layers; Reject removes its page", async () => {
+		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+		const pages = async (input) => {
+			const text = await invoke("drawio_pages", input);
+			assert.ok(text.startsWith("{"), text);
+			return JSON.parse(text);
+		};
+		let r = await pages({ action: "list" });
+		assert.deepEqual(r.pages.map((p) => [p.name, p.current]), [["Page-1", true]]);
+		const first = r.pages[0].id;
+
+		r = await pages({ action: "add", name: "Details" });
+		assert.deepEqual([r.page.name, r.page.current], ["Details", true]);
+		const edit = JSON.parse(
+			await invoke("drawio_apply_operations", {
+				ops: [
+					{ op: "addLayer", tempId: "$notes", name: "Notes" },
+					{ op: "addShape", label: "Queue", x: 40, y: 40, parent: "$notes" },
+				],
+			})
+		);
+		assert.equal(edit.ok, true, JSON.stringify(edit));
+		const shown = JSON.parse(await invoke("drawio_get_diagram", {}));
+		assert.deepEqual([shown.page.name, shown.layers.map((l) => l.name)], ["Details", ["", "Notes"]]);
+
+		const other = JSON.parse(await invoke("drawio_get_diagram", { page: first }));
+		assert.equal(other.page.current, false);
+		assert.ok(other.cells.some((c) => c.label === "Orders DB"));
+		assert.equal(JSON.parse(await invoke("drawio_find_cells", { query: "orders", page: "Page-1" })).total, 1);
+		assert.equal(typeof JSON.parse(await invoke("drawio_lint", { page: "Page-1" })).issueCount, "number");
+		assert.equal((await pages({ action: "list" })).pages.find((p) => p.current).name, "Details", "reading another page does not switch");
+
+		// A page the AI added in this review is deleted without asking the user.
+		r = await pages({ action: "duplicate", page: "Details", select: false });
+		assert.deepEqual([r.page.name, r.page.cells], ["Copy of Details", 1]);
+		r = await pages({ action: "delete", page: "Copy of Details" });
+		assert.equal(r.pages.length, 2);
+
+		await vscode.commands.executeCommand("drawio-ai.rejectChanges");
+		r = await waitFor(async () => {
+			const list = await pages({ action: "list" });
+			return list.pages.length === 1 ? list : undefined;
+		}, "Reject to remove the AI's page");
+		assert.deepEqual(r.pages.map((p) => [p.id, p.current]), [[first, true]]);
+		assert.match(await invoke("drawio_get_xml", {}), /Orders DB/);
 	});
 
 	await step("saving writes the AI edits to disk", async () => {

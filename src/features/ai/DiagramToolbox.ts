@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
 import type { ExportRequest } from "./exportDiagram";
@@ -6,7 +7,7 @@ import { lintDiagram } from "./lint";
 import type { LoadedTemplate } from "./templates/profile";
 import type { ImageData, ToolSpec } from "./providers/types";
 import { getStyleReference } from "./styleReference";
-import { TOOL_SCHEMAS } from "./toolSchemas";
+import { PAGE_ACTIONS, TOOL_SCHEMAS } from "./toolSchemas";
 
 export interface ToolResult {
 	text: string;
@@ -36,6 +37,14 @@ export interface InvokeOptions {
 
 const MAX_XML_CHARS = 80_000;
 
+/** Asks the user to allow something drastic (a modal in VS Code, whichever surface called the tool). */
+export type Confirm = (message: string, action: string) => Promise<boolean>;
+
+const confirmWithDialog: Confirm = async (message, action) =>
+	(await vscode.window.showWarningMessage(message, { modal: true }, action)) === action;
+
+const REVIEW_NOTE = "Applied and shown to the user as pending changes they can keep or revert. Keep working normally; do not ask them to accept.";
+
 /**
  * Implements the diagram tools against whichever draw.io editor is active
  * (or was last active), so tools keep working while the chat has focus.
@@ -59,7 +68,8 @@ export class DiagramToolbox {
 		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>,
 		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>,
 		private readonly attachments?: (id: string) => Promise<ToolResult>,
-		private readonly diagrams?: DiagramWorkspace
+		private readonly diagrams?: DiagramWorkspace,
+		private readonly confirm: Confirm = confirmWithDialog
 	) {}
 
 	/**
@@ -132,6 +142,8 @@ export class DiagramToolbox {
 					return await this.findCells(editor, input);
 				case "drawio_select_cells":
 					return await this.selectCells(editor, input);
+				case "drawio_pages":
+					return await this.pages(editor, input);
 				case "drawio_render_image":
 					return await this.renderImage(editor, input);
 				case "drawio_search_shapes":
@@ -217,10 +229,16 @@ export class DiagramToolbox {
 			scope,
 			includeStyles: input.includeStyles !== false,
 			maxCells: clampNumber(input.maxCells, 1, 5000) ?? getAiSettings().maxCellsInContext,
+			page: pageArg(input),
 		});
 		const template = await this.getTemplate(editor);
 		const notes = [
 			"Geometry x/y are relative to the cell's parent container.",
+			!model.page.current
+				? `This is page "${model.page.name}", which the editor does not show; drawio_apply_operations edits the page shown. To edit this one, drawio_pages select it first.`
+				: model.page.count > 1
+				? `The diagram has ${model.page.count} pages; this is "${model.page.name}", the one shown. drawio_pages lists them.`
+				: undefined,
 			template
 				? `The repository's design template "${template.manifest.name}" is active: follow it (drawio_get_template has the rules and styles).`
 				: undefined,
@@ -236,7 +254,79 @@ export class DiagramToolbox {
 			summary:
 				scope === "selection" && model.selection.length > 0
 					? `Read ${model.selection.length} selected item(s)`
+					: !model.page.current
+					? `Read page "${model.page.name}" (${model.totalCells} cells)`
 					: `Read diagram (${model.totalCells} cells)`,
+		};
+	}
+
+	private async pages(editor: DrawioEditor, input: Record<string, any>): Promise<ToolResult> {
+		const action = String(input.action ?? "").trim() as (typeof PAGE_ACTIONS)[number];
+		if (!PAGE_ACTIONS.includes(action)) {
+			throw new ToolInputError(`\`action\` must be one of: ${PAGE_ACTIONS.join(", ")}.`);
+		}
+		const index = typeof input.index === "number" ? input.index : typeof input.index === "string" && input.index.trim() ? Number(input.index) : undefined;
+		const review = getAiSettings().reviewChanges;
+		let request: Omit<AiPagesAction, "action"> = {
+			op: action,
+			page: pageArg(input),
+			name: typeof input.name === "string" ? input.name : undefined,
+			index: index !== undefined && Number.isFinite(index) ? index : undefined,
+			select: input.select !== false,
+			review,
+		};
+		const client = editor.drawioClient;
+		if (action === "delete") {
+			// Resolve the page first: the user decides about deleting anything they made.
+			const probe = await client.aiPages({ ...request, dryRun: true });
+			if (probe.error || !probe.page) throw new ToolInputError(probe.error ?? "No such page.");
+			const target = probe.page;
+			if (target.cells > 0 && !probe.aiAdded) {
+				const what = target.cells === 1 ? "1 shape or connector" : `${target.cells} shapes and connectors`;
+				const ok = await this.confirm(
+					`The AI wants to delete the page "${target.name}" with ${what} on it. Undo in the diagram brings it back.`,
+					"Delete Page"
+				);
+				if (!ok) throw new ToolInputError(`The user chose not to delete page "${target.name}". Leave it as it is.`);
+			}
+			request = { ...request, page: target.id };
+		}
+		const result = await client.aiPages(request);
+		if (result.error) throw new ToolInputError(result.error);
+
+		const page = result.page;
+		const shown = result.pages.find((p) => p.current);
+		const showing = (p: AiPageInfo) => `"${p.name}" is shown now, so drawio_apply_operations edits it.`;
+		const notes = [
+			(action === "add" || action === "duplicate") && page
+				? page.current
+					? showing(page)
+					: `The editor still shows "${shown?.name}". Select "${page.name}" before editing it.`
+				: undefined,
+			action === "select" && page ? showing(page) : undefined,
+			action === "delete" && page
+				? `Deleted "${page.name}" (${page.cells} cells)${shown ? `; the editor shows "${shown.name}"` : ""}. The user can bring it back with Undo.`
+				: undefined,
+			review && ["add", "duplicate", "rename", "move"].includes(action) ? REVIEW_NOTE : undefined,
+		].filter(Boolean);
+		const name = page ? `"${page.name}"` : "";
+		const summary =
+			action === "list"
+				? `${result.pages.length} page${result.pages.length === 1 ? "" : "s"}`
+				: action === "add"
+				? `Added page ${name}`
+				: action === "duplicate"
+				? `Duplicated page as ${name}`
+				: action === "rename"
+				? `Renamed page to ${name}`
+				: action === "move"
+				? `Moved page ${name} to position ${(page?.index ?? 0) + 1}`
+				: action === "select"
+				? `Showing page ${name}`
+				: `Deleted page ${name}`;
+		return {
+			text: JSON.stringify({ pages: result.pages, ...(action !== "list" && page ? { page } : {}), ...(notes.length ? { notes } : {}) }),
+			summary,
 		};
 	}
 
@@ -281,11 +371,7 @@ export class DiagramToolbox {
 			failed: failed.map((f) => ({ index: f.index, op: f.op, error: f.error })),
 			idMap: result.idMap,
 			affectedIds: createdOrChanged.slice(0, 200),
-			...(settings.reviewChanges && !result.rolledBack && okCount > 0
-				? {
-						note: "Applied and shown to the user as pending changes they can keep or revert. Keep working normally; do not ask them to accept.",
-				  }
-				: {}),
+			...(settings.reviewChanges && !result.rolledBack && okCount > 0 ? { note: REVIEW_NOTE } : {}),
 		};
 		const summary =
 			failed.length === 0
@@ -296,22 +382,23 @@ export class DiagramToolbox {
 		return { text: JSON.stringify(payload), summary, isError: failed.length > 0 };
 	}
 
-	/** Lint the whole page (with the active template); used by the tool and the review command. */
-	public async lintEditor(editor: DrawioEditor) {
+	/** Lint a whole page (by default the one shown, with the active template); used by the tool and the review command. */
+	public async lintEditor(editor: DrawioEditor, page?: string) {
 		const [model, template] = await Promise.all([
-			editor.drawioClient.aiGetModel({ scope: "page", includeStyles: true, maxCells: 20000 }),
+			editor.drawioClient.aiGetModel({ scope: "page", includeStyles: true, maxCells: 20000, page }),
 			this.getTemplate(editor),
 		]);
-		return { issues: lintDiagram(model, template), template };
+		return { issues: lintDiagram(model, template), template, page: model.page };
 	}
 
 	private async lint(editor: DrawioEditor, input: Record<string, any>): Promise<ToolResult> {
-		const { issues, template } = await this.lintEditor(editor);
+		const { issues, template, page } = await this.lintEditor(editor, pageArg(input));
 		const ids: string[] = Array.isArray(input.ids) ? input.ids.map(String) : [];
 		const shown = ids.length ? issues.filter((i) => i.cellIds.length === 0 || i.cellIds.some((id) => ids.includes(id))) : issues;
 		return {
 			text: JSON.stringify({
 				template: template?.manifest.name ?? null,
+				...(page.current ? {} : { page: page.name }),
 				issueCount: shown.length,
 				issues: shown,
 				hint: shown.length
@@ -323,7 +410,7 @@ export class DiagramToolbox {
 	}
 
 	private async findCells(editor: DrawioEditor, input: Record<string, any>): Promise<ToolResult> {
-		const model = await editor.drawioClient.aiGetModel({ scope: "page", includeStyles: true, maxCells: 20000 });
+		const model = await editor.drawioClient.aiGetModel({ scope: "page", includeStyles: true, maxCells: 20000, page: pageArg(input) });
 		const limit = clampNumber(input.limit, 1, 500) ?? 50;
 		const query = typeof input.query === "string" ? input.query.trim() : "";
 		let matcher: (s: string) => boolean = () => true;
@@ -353,8 +440,8 @@ export class DiagramToolbox {
 			target: c.target,
 		}));
 		return {
-			text: JSON.stringify({ total: matches.length, matches: shown }),
-			summary: `Found ${matches.length} cell${matches.length === 1 ? "" : "s"}`,
+			text: JSON.stringify({ ...(model.page.current ? {} : { page: model.page.name }), total: matches.length, matches: shown }),
+			summary: `Found ${matches.length} cell${matches.length === 1 ? "" : "s"}${model.page.current ? "" : ` on "${model.page.name}"`}`,
 		};
 	}
 
@@ -410,6 +497,11 @@ function normalizeInput(raw: unknown): Record<string, any> {
 		throw new ToolInputError("Tool input was not valid JSON. Resend the call with valid JSON arguments.");
 	}
 	return (raw ?? {}) as Record<string, any>;
+}
+
+/** The optional `page` argument (an id or name). */
+function pageArg(input: Record<string, any>): string | undefined {
+	return typeof input.page === "string" && input.page.trim() ? input.page.trim() : undefined;
 }
 
 function clampNumber(v: unknown, min: number, max: number): number | undefined {

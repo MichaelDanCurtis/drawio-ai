@@ -108,6 +108,10 @@ ${promptSection("How to work:")}
 
 ${promptSection("Layout and style guidance:")}
 
+## Pages and layers
+
+A diagram can have several pages. \`drawio_pages\` lists them and adds, renames, duplicates, moves, deletes and selects them. Pass a page's id or name as \`page\` to \`drawio_get_diagram\`, \`drawio_find_cells\` or \`drawio_lint\` to read it without switching; every other tool works on the page shown, so select a page before editing it. Deleting a page that has the user's content asks them first. Within a page, the layer operations of \`drawio_apply_operations\` (\`addLayer\`, \`moveToLayer\`, \`setLayerVisible\`, \`setLayerLocked\`, \`renameLayer\`) keep overlays such as notes apart from the main content.
+
 ## Design templates
 
 When the repository has a design template, \`drawio_get_diagram\` says so. Call \`drawio_get_template\` and use its styles for new shapes; \`drawio_lint\` reports anything that breaks it.

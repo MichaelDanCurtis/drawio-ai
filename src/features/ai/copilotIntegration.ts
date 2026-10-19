@@ -88,6 +88,7 @@ function progressLabel(tool: string): string {
 	switch (tool) {
 		case "drawio_get_diagram": return "Reading the diagram…";
 		case "drawio_apply_operations": return "Editing the diagram…";
+		case "drawio_pages": return "Working on the diagram's pages…";
 		case "drawio_search_shapes": return "Searching shape libraries…";
 		case "drawio_render_image": return "Checking the rendered result…";
 		case "drawio_lint": return "Checking the diagram for problems…";

@@ -28,6 +28,7 @@ The `drawio_*` tools edit draw.io diagrams in the user's VS Code through the Dra
 8. To review or check a diagram, call drawio_lint and fix what it reports (plus anything else that is clearly wrong); mention judgement calls instead of applying them.
 9. When images are attached (sketches, whiteboard photos, screenshots), recreate their content as real, editable draw.io shapes and connectors, not as an embedded picture.
 10. Your edits may be shown to the user as pending changes (highlighted) that they keep or revert. That is their decision; keep working normally and never ask them to accept. If they reverted something, read the diagram again rather than assuming your earlier edits are still there.
+11. A diagram can have several pages. drawio_pages lists, adds, renames, duplicates, moves, deletes and selects them. drawio_get_diagram, drawio_find_cells and drawio_lint read another page when given its id or name as `page`; every other tool works on the page shown, so select a page with drawio_pages before editing it. When a request calls for several views or levels of detail, give each its own page rather than crowding one. Within a page, layers (addLayer, moveToLayer, setLayerVisible) separate overlays such as notes from the main content.
 
 ## Layout and style
 
@@ -35,6 +36,10 @@ The `drawio_*` tools edit draw.io diagrams in the user's VS Code through the Dra
 - Flows read left-to-right or top-to-bottom. Put related shapes in containers/groups. Label every edge whose meaning is not obvious.
 - Use consistent colours per concept (draw.io palette from drawio_style_reference "colors"). Keep text short.
 - Edges default to orthogonal routing; connect to shapes, not to coordinates.
+
+## Pages and layers
+
+A diagram can have several pages. `drawio_pages` lists them and adds, renames, duplicates, moves, deletes and selects them. Pass a page's id or name as `page` to `drawio_get_diagram`, `drawio_find_cells` or `drawio_lint` to read it without switching; every other tool works on the page shown, so select a page before editing it. Deleting a page that has the user's content asks them first. Within a page, the layer operations of `drawio_apply_operations` (`addLayer`, `moveToLayer`, `setLayerVisible`, `setLayerLocked`, `renameLayer`) keep overlays such as notes apart from the main content.
 
 ## Design templates
 
@@ -50,6 +55,7 @@ When the user asks for a file, use `drawio_export`: `vsdx` (Microsoft Visio: eve
 - `drawio_apply_operations`: Edit Draw.io Diagram (edits the diagram)
 - `drawio_find_cells`: Find Draw.io Cells
 - `drawio_select_cells`: Select Draw.io Cells
+- `drawio_pages`: Draw.io Pages (edits the diagram)
 - `drawio_render_image`: Render Draw.io Diagram
 - `drawio_search_shapes`: Search Draw.io Shape Library
 - `drawio_style_reference`: Draw.io Style Reference

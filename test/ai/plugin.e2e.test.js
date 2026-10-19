@@ -1146,3 +1146,366 @@ test("import: nothing is uploaded, and the converters load from the bundled draw
 	assert.ok(fetched.some((r) => r.url.endsWith("/webapp/js/gliffy/drawio-gliffy.min.js")));
 	assert.ok(fetched.some((r) => r.url.endsWith("/webapp/js/vsd/drawio-vsd.min.js")));
 });
+
+// ---------------------------------------------------------------------------
+// Pages and layers
+// ---------------------------------------------------------------------------
+
+const pagesOp = (op, extra = {}) => request({ action: "aiPages", op, ...extra });
+const readPage = (pageRef) =>
+	request({ action: "aiGetModel", scope: "page", includeStyles: true, maxCells: 1000, page: pageRef });
+const editorState = () =>
+	page.evaluate(() => ({
+		pages: editorUi.pages.map((p) => [p.getId(), p.getName()]),
+		current: editorUi.currentPage.getId(),
+		undo: editorUi.editor.undoManager.indexOfNextAdd,
+	}));
+const settled = () => new Promise((r) => setTimeout(r, 150));
+
+const cellXml = (id, value, x, extra = "") =>
+	`<mxCell id="${id}" value="${value}" style="rounded=1;html=1;" vertex="1" parent="1"${extra}><mxGeometry x="${x}" y="40" width="120" height="60" as="geometry"/></mxCell>`;
+const pageXml = (id, name, cells = "") =>
+	`<diagram id="${id}" name="${name}"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>${cells}</root></mxGraphModel></diagram>`;
+const PAGES = `<mxfile>${pageXml(
+	"p1",
+	"Overview",
+	cellXml("a1", "API", 40) + cellXml("a2", "DB", 300) + `<mxCell id="ae" edge="1" parent="1" source="a1" target="a2"><mxGeometry relative="1" as="geometry"/></mxCell>`
+)}${pageXml("p2", "Details", cellXml("d1", "Worker", 40) + cellXml("d2", "Queue", 240))}${pageXml("p3", "Details")}</mxfile>`;
+
+async function loadPages(xml = PAGES) {
+	inbox.length = 0;
+	await send({ action: "load", xml, autosave: 1 });
+	await page.waitForFunction(
+		(n) => (editorUi.pages || []).length === n && editorUi.currentPage === editorUi.pages[0] && editorUi.editor.graph.model.getRoot() === editorUi.pages[0].root,
+		(xml.match(/<diagram /g) || []).length
+	);
+	await settled();
+}
+
+test("pages: list them, and read another page by id or name without leaving the one shown", async () => {
+	await loadPages();
+	await request({ action: "aiSetSelection", cellIds: ["a1"], reveal: false });
+	const before = await editorState();
+
+	const list = await pagesOp("list");
+	assert.equal(list.error, undefined);
+	assert.deepEqual(
+		list.pages.map((p) => [p.id, p.name, p.index, p.cells, p.current]),
+		[["p1", "Overview", 0, 3, true], ["p2", "Details", 1, 2, false], ["p3", "Details", 2, 0, false]]
+	);
+
+	const other = await readPage("p2");
+	assert.equal(other.error, undefined);
+	assert.deepEqual(other.model.page, { id: "p2", name: "Details", index: 1, count: 3, current: false });
+	assert.deepEqual(other.model.cells.map((c) => c.label), ["Worker", "Queue"]);
+	assert.deepEqual(other.model.selection, [], "only the page shown has a selection");
+	assert.deepEqual(other.model.layers, [{ id: "1", name: "", visible: true, locked: false }]);
+
+	const byName = await readPage("overview");
+	assert.equal(byName.model.page.current, true);
+	assert.deepEqual(byName.model.selection, ["a1"]);
+	assert.match((await readPage("Details")).error, /2 pages are named "Details": pass the page id instead \(p2, p3\)/);
+	assert.match((await readPage("Nope")).error, /No page "Nope"\. The pages are "Overview" \(p1\)/);
+	assert.match((await pagesOp("rename", { name: "x" })).error, /rename needs the page's id or name/);
+
+	assert.deepEqual(await editorState(), before, "reading pages must not switch pages or add history");
+	assert.deepEqual(await page.evaluate(() => editorUi.editor.graph.getSelectionCells().map((c) => c.id)), ["a1"]);
+});
+
+test("pages: add, rename, move, duplicate, select and delete are one undo step each", async () => {
+	await loadPages();
+	const start = await editorState();
+	const step = async (op, extra) => {
+		const undo = (await editorState()).undo;
+		const r = await pagesOp(op, extra);
+		assert.equal(r.error, undefined, `${op}: ${r.error}`);
+		assert.equal((await editorState()).undo, undo + 1, `${op} should be one undo step`);
+		return r;
+	};
+
+	let r = await step("add", { name: "Deploy", select: false });
+	assert.deepEqual([r.page.name, r.page.index, r.page.cells, r.page.current], ["Deploy", 3, 0, false]);
+	assert.equal((await editorState()).current, "p1", "select: false keeps the page shown");
+
+	r = await step("rename", { page: "Deploy", name: "Deployment" });
+	r = await step("move", { page: "Deployment", index: 0 });
+	assert.deepEqual(r.pages.map((p) => p.name), ["Deployment", "Overview", "Details", "Details"]);
+
+	// draw.io's own Duplicate only copies the page shown; this works for any page.
+	r = await step("duplicate", { page: "p2" });
+	assert.deepEqual([r.page.name, r.page.index, r.page.cells, r.page.current], ["Copy of Details", 3, 2, true]);
+	const copy = (await getModel()).cells;
+	assert.deepEqual(copy.map((c) => c.label), ["Worker", "Queue"]);
+	assert.ok(copy.every((c) => !["d1", "d2"].includes(c.id)), "the copy gets new cell ids");
+	assert.deepEqual((await readPage("p2")).model.cells.map((c) => c.id), ["d1", "d2"], "the original is untouched");
+
+	r = await step("select", { page: "Overview" });
+	assert.equal(r.page.current, true);
+	assert.deepEqual((await getModel()).cells.map((c) => c.id), ["a1", "a2", "ae"]);
+
+	const deployment = r.pages.find((p) => p.name === "Deployment").id;
+	r = await step("delete", { page: deployment });
+	assert.deepEqual([r.page.name, r.pages.length], ["Deployment", 4]);
+
+	for (let i = 0; i < 6; i++) await page.evaluate(() => editorUi.editor.undoManager.undo());
+	const end = await editorState();
+	assert.deepEqual([end.pages, end.current], [start.pages, start.current], "undo restores the page list");
+});
+
+test("pages: deleting the page shown shows the next one; the only page stays", async () => {
+	await loadPages();
+	await pagesOp("select", { page: "p2" });
+	const probe = await pagesOp("delete", { page: "p2", dryRun: true });
+	assert.deepEqual([probe.page.id, probe.page.cells, probe.aiAdded, probe.pages.length], ["p2", 2, false, 3]);
+
+	let r = await pagesOp("delete", { page: "p2" });
+	assert.deepEqual(r.pages.map((p) => [p.id, p.current]), [["p1", false], ["p3", true]]);
+	r = await pagesOp("delete", { page: "p3" });
+	assert.equal(r.error, undefined);
+	r = await pagesOp("delete", { page: "p1" });
+	assert.match(r.error, /"Overview" is the only page/);
+	assert.equal((await editorState()).pages.length, 1);
+});
+
+test("review: AI changes on several pages wait while other pages are shown; Reject all undoes them and the page changes", async () => {
+	await loadPages();
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "a1", label: "Gateway" }]);
+	const added = await pagesOp("add", { name: "New", review: true });
+	assert.equal(added.page.current, true);
+	let evt = lastReview();
+	assert.ok(evt.pending);
+	assert.deepEqual(evt.changes.map((c) => [c.id, c.page]), [["a1", "Overview"]], "the other page's change waits there");
+	await applyReview([{ op: "addShape", label: "On the new page", x: 40, y: 40 }]);
+	await pagesOp("select", { page: "p2" });
+	await applyReview([{ op: "delete", ids: ["d2"] }]);
+	await pagesOp("rename", { page: "p3", name: "Notes", review: true });
+	await pagesOp("move", { page: "p3", index: 0, review: true });
+	await settled();
+
+	evt = lastReview();
+	assert.deepEqual(evt.summary, { added: 1, changed: 1, removed: 1, pages: 3 }, JSON.stringify(evt));
+	assert.deepEqual(evt.pageChanges.map((c) => [c.change, c.name, c.from]), [["added", "New", undefined], ["renamed", "Notes", "Details"], ["moved", "Notes", undefined]]);
+	const bar = await page.evaluate(() => ({
+		elsewhere: document.querySelector("[data-ai-review-elsewhere]")?.textContent,
+		pages: document.querySelector("[data-ai-review-pages]")?.textContent,
+	}));
+	assert.deepEqual(bar, { elsewhere: "+ 2 on 2 other pages", pages: "pages: 1 new, 1 renamed, 1 moved" });
+
+	// Back on the first page, its own change is highlighted again.
+	await pagesOp("select", { page: "p1" });
+	await settled();
+	evt = lastReview();
+	assert.deepEqual(evt.changes.filter((c) => !c.page).map((c) => c.id), ["a1"]);
+
+	const undoBefore = (await editorState()).undo;
+	const done = await resolve("reject");
+	assert.deepEqual([done.pending, done.resolved], [false, "rejected"]);
+	const state = await editorState();
+	assert.deepEqual(state.pages, [["p1", "Overview"], ["p2", "Details"], ["p3", "Details"]]);
+	assert.equal(state.current, "p1", "Reject all comes back to the page the user was on");
+	assert.equal(byId(await getModel(), "a1").label, "API");
+	assert.deepEqual((await readPage("p2")).model.cells.map((c) => c.id), ["d1", "d2"]);
+	assert.equal(await page.evaluate(() => !!document.querySelector("[data-ai-review-bar]")), false);
+
+	// Rejecting everything is one undo step, and undoing it brings all of it back.
+	assert.equal(state.undo, undoBefore + 1);
+	await page.evaluate(() => editorUi.undo());
+	const back = await editorState();
+	assert.deepEqual(back.pages.map((p) => p[1]), ["Notes", "Overview", "Details", "New"]);
+	assert.equal(back.current, "p1");
+	assert.equal(byId(await getModel(), "a1").label, "Gateway");
+	assert.deepEqual((await readPage("p2")).model.cells.map((c) => c.id), ["d1"]);
+});
+
+test("review: Accept all keeps the changes on every page; deleting a page the AI added needs no confirmation", async () => {
+	await loadPages();
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "a1", label: "Gateway" }]);
+	const scratch = await pagesOp("add", { name: "Scratch", review: true });
+	await applyReview([{ op: "addShape", label: "Draft", x: 40, y: 40 }]);
+	const probe = await pagesOp("delete", { page: scratch.page.id, dryRun: true, review: true });
+	assert.deepEqual([probe.page.cells, probe.aiAdded], [1, true]);
+	await pagesOp("delete", { page: scratch.page.id, review: true });
+	await pagesOp("add", { name: "Keep", review: true, select: false });
+	await settled();
+	assert.deepEqual(lastReview().summary, { added: 0, changed: 1, removed: 0, pages: 1 });
+
+	const done = await resolve("accept");
+	assert.deepEqual([done.pending, done.resolved], [false, "accepted"]);
+	const state = await editorState();
+	assert.deepEqual(state.pages.map((p) => p[1]), ["Overview", "Details", "Details", "Keep"]);
+	assert.equal(state.current, "p3", "deleting the page shown showed its neighbour");
+	assert.equal(byId((await readPage("p1")).model, "a1").label, "Gateway");
+});
+
+test("layers: add, rename, hide, lock and move cells to a layer in one undo step", async () => {
+	await loadPages(`<mxfile>${pageXml("l1", "Layers", cellXml("api", "API", 40) + cellXml("db", "DB", 300))}</mxfile>`);
+	const undo = (await editorState()).undo;
+	const r = await apply([
+		{ op: "addLayer", tempId: "$notes", name: "Notes" },
+		{ op: "addShape", tempId: "$n", label: "Remember", parent: "$notes", x: 40, y: 200 },
+		{ op: "moveToLayer", ids: ["db"], layer: "$notes" },
+		{ op: "addLayer", tempId: "$bg", name: "Background", position: "back", locked: true },
+		{ op: "renameLayer", id: "$notes", name: "Annotations" },
+		{ op: "setLayerVisible", id: "$notes", visible: false },
+	]);
+	assert.deepEqual(r.results.filter((x) => !x.ok), []);
+	assert.equal((await editorState()).undo, undo + 1);
+	const { $notes, $bg, $n } = r.idMap;
+	const model = await getModel();
+	assert.deepEqual(model.layers, [
+		{ id: $bg, name: "Background", visible: true, locked: true },
+		{ id: "1", name: "", visible: true, locked: false },
+		{ id: $notes, name: "Annotations", visible: false, locked: false },
+	]);
+	assert.deepEqual([byId(model, "db").layer, byId(model, $n).layer, byId(model, "api").layer], [$notes, $notes, "1"]);
+	assert.deepEqual(byId(model, "db").geometry, { x: 300, y: 40, width: 120, height: 60 }, "moving to a layer keeps the position");
+
+	const errors = async (ops) => (await apply(ops)).results.find((x) => !x.ok)?.error;
+	assert.match(await errors([{ op: "moveToLayer", ids: ["api"], layer: $bg }]), /Layer "Background" is locked/);
+	assert.match(await errors([{ op: "renameLayer", id: "api", name: "x" }]), /"api" is not a layer/);
+	assert.match(await errors([{ op: "delete", ids: [$bg, "1", $notes] }]), /at least one layer/);
+	const unlocked = await apply([
+		{ op: "setLayerLocked", id: $bg, locked: false },
+		{ op: "moveToLayer", ids: ["api"], layer: $bg },
+	]);
+	assert.deepEqual(unlocked.results.filter((x) => !x.ok), []);
+	assert.equal(byId(await getModel(), "api").layer, $bg);
+
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+	assert.deepEqual((await getModel()).layers.map((l) => l.id), ["1"]);
+});
+
+test("review: layer changes are pending like cell changes, and Reject all reverts them", async () => {
+	await loadPages(`<mxfile>${pageXml("l1", "Layers", cellXml("api", "API", 40) + cellXml("db", "DB", 300))}</mxfile>`);
+	inbox.length = 0;
+	const r = await applyReview([
+		{ op: "addLayer", tempId: "$notes", name: "Notes" },
+		{ op: "moveToLayer", ids: ["db"], layer: "$notes" },
+		{ op: "renameLayer", id: "1", name: "Main" },
+		{ op: "setLayerLocked", id: "1", locked: true },
+	]);
+	assert.equal(r.rolledBack, false);
+	const evt = lastReview();
+	assert.deepEqual(
+		evt.changes.map((c) => [c.id, c.change, c.cellKind, (c.fields ?? []).join()]).sort(),
+		[["1", "changed", "layer", "label,style"], [r.idMap.$notes, "added", "layer", ""], ["db", "changed", "vertex", "parent"]].sort()
+	);
+	const done = await resolve("reject");
+	assert.equal(done.pending, false);
+	const model = await getModel();
+	assert.deepEqual(model.layers, [{ id: "1", name: "", visible: true, locked: false }]);
+	assert.deepEqual(model.cells.map((c) => c.id).sort(), ["api", "db"], "the moved shape comes back instead of going with the layer");
+});
+
+test("review: Reject all keeps a page the AI added once the user has drawn on it, removing only the AI's shapes", async () => {
+	await loadPages();
+	inbox.length = 0;
+	const added = await pagesOp("add", { name: "Shared", review: true });
+	await applyReview([{ op: "addShape", label: "AI shape", x: 40, y: 40 }]);
+	await page.evaluate(() => {
+		const g = editorUi.editor.graph;
+		g.insertVertex(g.getDefaultParent(), "users", "User shape", 300, 40, 120, 60);
+	});
+	const probe = await pagesOp("delete", { page: added.page.id, dryRun: true, review: true });
+	assert.equal(probe.aiAdded, false, "deleting it now asks the user");
+	await pagesOp("select", { page: "p1" });
+	await settled();
+	const done = await resolve("reject");
+	assert.equal(done.pending, false, JSON.stringify(done));
+	const state = await editorState();
+	assert.deepEqual(state.pages.map((p) => p[1]), ["Overview", "Details", "Details", "Shared"]);
+	assert.equal(state.current, "p1");
+	assert.deepEqual((await readPage(added.page.id)).model.cells.map((c) => c.label), ["User shape"]);
+});
+
+test("layers: deleting the layer the user draws on moves drawing to another layer", async () => {
+	await loadPages(`<mxfile>${pageXml("l1", "Layers", cellXml("api", "API", 40))}</mxfile>`);
+	const r = await apply([
+		{ op: "addLayer", tempId: "$main", name: "Main" },
+		{ op: "moveToLayer", ids: ["api"], layer: "$main" },
+		{ op: "delete", ids: ["1"] },
+		{ op: "addShape", tempId: "$x", label: "After", x: 300, y: 40 },
+	]);
+	assert.deepEqual(r.results.filter((x) => !x.ok), []);
+	const model = await getModel();
+	assert.deepEqual(model.layers.map((l) => l.id), [r.idMap.$main]);
+	assert.equal(byId(model, r.idMap.$x).label, "After", "the new shape is on the page, not in the deleted layer");
+	assert.equal(await page.evaluate(() => editorUi.editor.graph.getDefaultParent().id), r.idMap.$main);
+	assert.match((await apply([{ op: "moveToLayer", ids: ["0"], layer: r.idMap.$main }])).results[0].error, /"0" is the page itself/);
+});
+
+test("review: the user's own shapes on a layer the AI added survive Reject all, and so does the layer", async () => {
+	await loadPages(`<mxfile>${pageXml("l1", "Layers", cellXml("api", "API", 40) + cellXml("db", "DB", 300))}</mxfile>`);
+	inbox.length = 0;
+	const r = await applyReview([
+		{ op: "addLayer", tempId: "$notes", name: "Notes" },
+		{ op: "moveToLayer", ids: ["db"], layer: "$notes" },
+	]);
+	await page.evaluate((layerId) => {
+		const g = editorUi.editor.graph;
+		g.insertVertex(g.model.getCell(layerId), "mine", "My note", 40, 300, 120, 60);
+	}, r.idMap.$notes);
+	await settled();
+	const done = await resolve("reject");
+	assert.equal(done.pending, false, JSON.stringify(done));
+	const model = await getModel();
+	assert.deepEqual(model.layers.map((l) => [l.id, l.name]), [["1", ""], [r.idMap.$notes, "Notes"]]);
+	assert.deepEqual([byId(model, "mine").layer, byId(model, "db").layer], [r.idMap.$notes, "1"]);
+});
+
+test("review: a layer the user deletes during a review is not blamed on the AI", async () => {
+	const layered = `<mxfile><diagram id="l1" name="Layers"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>${cellXml("api", "API", 40)}<mxCell id="L2" value="Extra" parent="0"/><mxCell id="x" value="X" vertex="1" parent="L2"><mxGeometry x="40" y="300" width="80" height="40" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>`;
+	await loadPages(layered);
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "api", label: "Gateway" }]);
+	await page.evaluate(() => {
+		const g = editorUi.editor.graph;
+		g.removeCells([g.model.getCell("L2")], true);
+	});
+	await settled();
+	assert.deepEqual(lastReview().changes.map((c) => c.id), ["api"]);
+	await resolve("reject");
+	const model = await getModel();
+	assert.deepEqual([model.layers.map((l) => l.id), model.cells.map((c) => c.id)], [["1"], ["api"]]);
+	assert.equal(byId(model, "api").label, "API");
+});
+
+test("a batch stops when the user switches pages during its layout; what it did waits on its own page", async () => {
+	await loadPages();
+	inbox.length = 0;
+	await page.evaluate(() => {
+		const graph = editorUi.editor.graph;
+		const original = graph.createLayouts;
+		window.__restoreLayouts = () => (graph.createLayouts = original);
+		graph.createLayouts = function (...args) {
+			return original.apply(this, args).map((layout) => ({
+				prepare: (parent, done) =>
+					layout.prepare(parent, (err, applyLayout) => {
+						editorUi.selectPage(editorUi.pages[1]);
+						done(err, applyLayout);
+					}),
+			}));
+		};
+	});
+	let r;
+	try {
+		r = await applyReview([
+			{ op: "addShape", tempId: "$a", label: "Before layout", x: 40, y: 300 },
+			{ op: "layout", type: "hierarchical" },
+			{ op: "addShape", label: "After layout", x: 300, y: 300 },
+		]);
+	} finally {
+		await page.evaluate(() => window.__restoreLayouts());
+	}
+	assert.equal(r.rolledBack, false);
+	assert.deepEqual(r.results.map((x) => x.ok), [true, false, false]);
+	assert.match(r.results[2].error, /the page shown changed while this batch ran/);
+	assert.deepEqual((await getModel()).cells.map((c) => c.id), ["d1", "d2"], "nothing lands on the page switched to");
+	await pagesOp("select", { page: "p1" });
+	await settled();
+	assert.deepEqual(lastReview().changes.map((c) => [c.id, c.change]), [[r.idMap.$a, "added"]]);
+	await resolve("accept");
+});

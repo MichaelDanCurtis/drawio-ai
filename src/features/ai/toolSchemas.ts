@@ -38,7 +38,14 @@ const OP_KINDS = [
 	"layout",
 	"insertXml",
 	"replaceAll",
+	"addLayer",
+	"renameLayer",
+	"setLayerVisible",
+	"setLayerLocked",
+	"moveToLayer",
 ];
+
+export const PAGE_ACTIONS = ["list", "add", "rename", "duplicate", "move", "select", "delete"] as const;
 
 const styleProps = {
 	type: "object",
@@ -61,14 +68,17 @@ const operation = {
 		tempId: {
 			type: "string",
 			description:
-				'[addShape, addEdge, group] Your own handle (e.g. "$db") for the new cell. Later operations in the SAME batch can use it anywhere an id is expected.',
+				'[addShape, addEdge, group, addLayer] Your own handle (e.g. "$db") for the new cell or layer. Later operations in the SAME batch can use it anywhere an id is expected.',
 		},
-		id: { type: "string", description: "[update] Id of the cell to change." },
+		id: {
+			type: "string",
+			description: "[update] Id of the cell to change. [renameLayer, setLayerVisible, setLayerLocked] Id of the layer.",
+		},
 		ids: {
 			type: "array",
 			items: { type: "string" },
 			description:
-				"[delete, move, resize, group, ungroup, align, distribute, zOrder, layout] Target cell ids.",
+				"[delete, move, resize, group, ungroup, align, distribute, zOrder, layout, moveToLayer] Target cell ids. delete also takes layer ids (a layer goes with its content).",
 		},
 		label: {
 			type: "string",
@@ -91,7 +101,7 @@ const operation = {
 		parent: {
 			type: "string",
 			description:
-				"[addShape, addEdge, update, layout, insertXml] Container/group id. Omit for the default layer.",
+				"[addShape, addEdge, update, layout, insertXml] Container, group or layer id. Omit for the default layer.",
 		},
 		placement: {
 			type: "object",
@@ -131,7 +141,7 @@ const operation = {
 			enum: ["horizontal", "vertical"],
 			description: "[distribute]",
 		},
-		position: { type: "string", enum: ["front", "back"], description: "[zOrder]" },
+		position: { type: "string", enum: ["front", "back"], description: "[zOrder] [addLayer] Default front (on top)." },
 		type: {
 			type: "string",
 			enum: [
@@ -153,8 +163,24 @@ const operation = {
 			description:
 				'[insertXml, replaceAll] mxGraphModel XML or bare <mxCell> elements. Ids you choose are kept unless they collide (the result maps them). parent/source/target may reference existing cells.',
 		},
+		name: { type: "string", description: "[addLayer, renameLayer] Layer name." },
+		visible: { type: "boolean", description: "[setLayerVisible] [addLayer] Default true. Hidden layers stay in the file." },
+		locked: {
+			type: "boolean",
+			description: "[setLayerLocked] [addLayer] Default false. The user cannot select or move what is on a locked layer.",
+		},
+		layer: {
+			type: "string",
+			description: "[moveToLayer] Id of the layer to move the cells to (drawio_get_diagram lists layers). Edges move only when listed.",
+		},
 	},
 	required: ["op"],
+};
+
+const PAGE_PROPERTY = {
+	type: "string",
+	description:
+		"Id or name of another page to read (drawio_pages lists them). The editor stays on the page it shows. Default: the page shown.",
 };
 
 export const TOOL_SCHEMAS: ToolSchema[] = [
@@ -162,13 +188,14 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		name: "drawio_get_diagram",
 		displayName: "Get Draw.io Diagram",
 		description:
-			"Read the open draw.io diagram (current page) as structured JSON: cells with ids, kind, label, style, geometry, parent, edge source/target, plus the user's current selection. Call this before editing. Use scope='selection' to focus on what the user selected (adjacent cells are included and marked context=true).",
+			"Read the open draw.io diagram as structured JSON: the page shown in the editor (or another page with `page`), its layers, and cells with ids, kind, label, style, geometry, parent, layer, edge source/target, plus the user's current selection. Call this before editing. Use scope='selection' to focus on what the user selected (adjacent cells are included and marked context=true).",
 		inputSchema: {
 			type: "object",
 			properties: {
 				scope: { type: "string", enum: ["page", "selection"] },
 				includeStyles: { type: "boolean", description: "Default true." },
 				maxCells: { type: "number", description: "Default 400." },
+				page: PAGE_PROPERTY,
 			},
 		},
 	},
@@ -177,7 +204,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		displayName: "Edit Draw.io Diagram",
 		mutates: true,
 		description:
-			"Apply a batch of edits to the open draw.io diagram in ONE undoable step; the user sees them live. Batch everything for one request into a single call. New cells get a tempId you can reference later in the same batch (e.g. add two shapes then an edge between them). Atomic by default: if any op fails, nothing is applied and per-op errors are returned so you can fix and retry. Returns new ids for every tempId.",
+			"Apply a batch of edits to the page shown in the open draw.io diagram in ONE undoable step; the user sees them live. Batch everything for one request into a single call. New cells get a tempId you can reference later in the same batch (e.g. add two shapes then an edge between them). Layers: addLayer, renameLayer, setLayerVisible, setLayerLocked, moveToLayer (put new shapes on a layer with `parent`). Atomic by default: if any op fails, nothing is applied and per-op errors are returned so you can fix and retry. Returns new ids for every tempId.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -195,7 +222,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		name: "drawio_find_cells",
 		displayName: "Find Draw.io Cells",
 		description:
-			"Search the current page for cells by label text (case-insensitive substring or /regex/), kind, or style fragment. Returns compact matches with ids.",
+			"Search the page shown (or another page with `page`) for cells by label text (case-insensitive substring or /regex/), kind, or style fragment. Returns compact matches with ids.",
 		inputSchema: {
 			type: "object",
 			properties: {
@@ -203,6 +230,7 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 				kind: { type: "string", enum: ["vertex", "edge", "container", "group"] },
 				styleContains: { type: "string" },
 				limit: { type: "number", description: "Default 50." },
+				page: PAGE_PROPERTY,
 			},
 		},
 	},
@@ -218,6 +246,30 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 				reveal: { type: "boolean", description: "Default true." },
 			},
 			required: ["ids"],
+		},
+	},
+	{
+		name: "drawio_pages",
+		displayName: "Draw.io Pages",
+		mutates: true,
+		description:
+			"List and change the diagram's pages (the tabs below the canvas). list: every page with id, name, index, cell count and which one is shown. add and duplicate make a page and show it (select: false keeps the page shown); rename; move to `index`; select shows a page. drawio_apply_operations and the other editing tools work on the page shown, so select a page before editing it. delete asks the user first when the page has content they made. Each change is one undo step and, while the user reviews AI changes, stays pending with them (Reject removes added pages and undoes renames and moves). Returns the pages afterwards.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				action: { type: "string", enum: [...PAGE_ACTIONS] },
+				page: { type: "string", description: "[rename, duplicate, move, select, delete] Page id or name." },
+				name: {
+					type: "string",
+					description: '[add, rename, duplicate] Page name. Default for add: the next "Page-N"; for duplicate: "Copy of <name>".',
+				},
+				index: {
+					type: "number",
+					description: "[move] New 0-based position. [add, duplicate] Default: the end (add), right after the original (duplicate).",
+				},
+				select: { type: "boolean", description: "[add, duplicate] Show the new page. Default true." },
+			},
+			required: ["action"],
 		},
 	},
 	{
@@ -278,11 +330,12 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		name: "drawio_lint",
 		displayName: "Lint Draw.io Diagram",
 		description:
-			"Check the current page for problems: dangling or duplicate connectors, overlapping or almost-aligned shapes, unlabeled shapes, disconnected shapes, tiny text, and violations of the repository's active design template (palette, fonts, connector style, required title/legend). Returns issues with cell ids. Use it after larger edits and when asked to review a diagram.",
+			"Check the page shown (or another page with `page`) for problems: dangling or duplicate connectors, overlapping or almost-aligned shapes, unlabeled shapes, disconnected shapes, tiny text, and violations of the repository's active design template (palette, fonts, connector style, required title/legend). Returns issues with cell ids. Use it after larger edits and when asked to review a diagram.",
 		inputSchema: {
 			type: "object",
 			properties: {
 				ids: { type: "array", items: { type: "string" }, description: "Only report issues involving these cells." },
+				page: PAGE_PROPERTY,
 			},
 		},
 	},
