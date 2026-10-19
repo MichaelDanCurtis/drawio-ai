@@ -15,7 +15,9 @@ require("ts-node").register({
 const root = path.resolve(__dirname, "../..");
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 
+// Settings per scope; object values merge like VS Code's (workspace keys win).
 let settings = {};
+let workspaceSettings = {};
 const installed = new Set();
 const shown = [];
 const commands = [];
@@ -29,12 +31,19 @@ class Uri {
 }
 const vscodeStub = {
 	Uri,
-	ConfigurationTarget: { Global: 1 },
+	ConfigurationTarget: { Global: 1, Workspace: 2 },
 	extensions: { getExtension: (id) => (installed.has(id) ? { id } : undefined) },
 	workspace: {
 		getConfiguration: (section) => ({
-			get: (key) => settings[`${section}.${key}`],
-			update: async (key, value) => void (settings[`${section}.${key}`] = value),
+			get: (key) => {
+				const k = `${section}.${key}`;
+				const user = settings[k];
+				const ws = workspaceSettings[k];
+				if (ws && typeof ws === "object" && !Array.isArray(ws) && user && typeof user === "object" && !Array.isArray(user)) return { ...user, ...ws };
+				return ws ?? user;
+			},
+			inspect: (key) => ({ globalValue: settings[`${section}.${key}`], workspaceValue: workspaceSettings[`${section}.${key}`] }),
+			update: async (key, value, target) => void ((target === 2 ? workspaceSettings : settings)[`${section}.${key}`] = value),
 		}),
 		registerFileSystemProvider: (scheme) => (registeredSchemes.push(scheme), { dispose() {} }),
 	},
@@ -80,6 +89,7 @@ const context = (id = "AiLuxis.draw-ai") => {
 };
 const reset = () => {
 	settings = {};
+	workspaceSettings = {};
 	installed.clear();
 	shown.length = 0;
 	commands.length = 0;
@@ -112,7 +122,7 @@ test("Use Draw.AI for Diagram Files: sets the associations, keeps others, reopen
 	tabGroups = [{ viewColumn: 1, tabs: [clean, dirty, other] }, { viewColumn: 2, tabs: [png] }];
 
 	assert.equal(conflicts.diagramOpenInOtherEditor().path, "/ws/a.drawio");
-	assert.deepEqual(await conflicts.useDrawAiForDiagrams(), { reopened: 2, skippedDirty: 1 });
+	assert.deepEqual(await conflicts.useDrawAiForDiagrams(), { reopened: 2, skippedDirty: 1, workspaceUpdated: false, effective: true });
 	assert.equal(settings["workbench.editorAssociations"]["*.md"], "vscode.markdown.preview.editor");
 	assert.equal(conflicts.drawAiOpensDiagrams(), true);
 	assert.deepEqual(
@@ -123,6 +133,38 @@ test("Use Draw.AI for Diagram Files: sets the associations, keeps others, reopen
 		]
 	);
 	assert.deepEqual(tabGroups[0].tabs, [dirty, other], "the dirty diagram stays open");
+});
+
+test("workspace settings that send draw.io files elsewhere are overridden too (they win over user settings)", async () => {
+	reset();
+	workspaceSettings["workbench.editorAssociations"] = {
+		"*.drawio": "hediet.vscode-drawio-text",
+		"docs/**/*.drawio.png": "hediet.vscode-drawio",
+		"*.csv": "someone.csv-editor",
+	};
+	assert.equal(conflicts.drawAiOpensDiagrams(), false);
+	const result = await conflicts.useDrawAiForDiagrams();
+	assert.deepEqual(result, { reopened: 0, skippedDirty: 0, workspaceUpdated: true, effective: true });
+	assert.deepEqual(workspaceSettings["workbench.editorAssociations"], {
+		"*.drawio": "drawio-ai-text",
+		"docs/**/*.drawio.png": "drawio-ai",
+		"*.csv": "someone.csv-editor",
+	});
+	assert.deepEqual(settings["workbench.editorAssociations"], { ...conflicts.DRAWIO_EDITOR_ASSOCIATIONS });
+
+	// Workspace entries that already point at Draw.AI, or at unrelated editors, are left alone.
+	reset();
+	workspaceSettings["workbench.editorAssociations"] = { "*.drawio": "drawio-ai-text", "*.csv": "someone.csv-editor" };
+	const untouched = await conflicts.useDrawAiForDiagrams();
+	assert.equal(untouched.workspaceUpdated, false);
+	assert.deepEqual(workspaceSettings["workbench.editorAssociations"], { "*.drawio": "drawio-ai-text", "*.csv": "someone.csv-editor" });
+
+	// A user-level custom pattern for the other editor is redirected as well.
+	reset();
+	settings["workbench.editorAssociations"] = { "diagrams/*.drawio": "hediet.vscode-drawio-text" };
+	await conflicts.useDrawAiForDiagrams();
+	assert.equal(settings["workbench.editorAssociations"]["diagrams/*.drawio"], "drawio-ai-text");
+	assert.equal(conflicts.drawAiOpensDiagrams(), true);
 });
 
 test("the older array form of editorAssociations is understood", () => {
