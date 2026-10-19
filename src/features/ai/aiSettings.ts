@@ -15,6 +15,8 @@ export function getAiSettings() {
 		maxToolRounds: Math.max(1, c.get<number>("maxToolRounds", 16)),
 		flashChanges: c.get<boolean>("flashChanges", true),
 		reviewChanges: c.get<boolean>("reviewChanges", true),
+		persistChat: c.get<boolean>("persistChat", true),
+		checkCodeLinks: c.get<boolean>("checkCodeLinks", true),
 		selectChangedCells: c.get<boolean>("selectChangedCells", false),
 		maxCellsInContext: Math.max(20, c.get<number>("maxCellsInContext", 400)),
 		anthropic: {

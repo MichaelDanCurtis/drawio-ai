@@ -92,6 +92,7 @@ function progressLabel(tool: string): string {
 		case "drawio_render_image": return "Checking the rendered result…";
 		case "drawio_lint": return "Checking the diagram for problems…";
 		case "drawio_get_template": return "Reading the design template…";
+		case "drawio_code_links": return "Checking code links…";
 		default: return "Working…";
 	}
 }

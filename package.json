@@ -657,6 +657,38 @@
 				}
 			},
 			{
+				"name": "drawio_code_links",
+				"displayName": "Check Draw.io Code Links",
+				"toolReferenceName": "drawio-code-links",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Check Draw.io Code Links",
+				"modelDescription": "List the shapes on the current page that are linked to source code and whether the code they point to is unchanged, moved, changed, or gone; changed links include the current code. Use it to bring a code-derived diagram up to date. After updating shapes to match the code, pass their ids in `refresh` to re-point the links at the current code.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"ids": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							},
+							"description": "Only report these cells."
+						},
+						"refresh": {
+							"type": "array",
+							"items": {
+								"type": "string"
+							},
+							"description": "Re-point these cells' links at where their code is now (after you updated the shapes)."
+						}
+					}
+				}
+			},
+			{
 				"name": "drawio_get_template",
 				"displayName": "Get Draw.io Design Template",
 				"toolReferenceName": "drawio-get-template",
@@ -712,6 +744,11 @@
 				"title": "Review Diagram (Lint)",
 				"category": "Draw.io AI",
 				"icon": "$(checklist)"
+			},
+			{
+				"command": "drawio-ai.checkCodeLinks",
+				"title": "Check Code Links",
+				"category": "Draw.io AI"
 			},
 			{
 				"command": "drawio-ai.createTemplate",
@@ -913,6 +950,16 @@
 						"default": "",
 						"scope": "resource",
 						"markdownDescription": "Design template the AI follows, by id (folder name in `.drawio-ai/templates/`). Empty: use the repository's template if it has exactly one. `none`: no template. Use **Draw.io AI: Create Design Template…** to make one."
+					},
+					"drawio-ai.checkCodeLinks": {
+						"type": "boolean",
+						"default": true,
+						"markdownDescription": "Watch code-linked shapes and badge the ones whose code moved, changed or disappeared (click a badge for fixes). Links made by **Diagram from Code…** and **Link Code with Selected Node** remember a fingerprint of the code; older links are only checked for missing files and lines."
+					},
+					"drawio-ai.persistChat": {
+						"type": "boolean",
+						"default": true,
+						"markdownDescription": "Remember the Draw.io AI chat panel conversation for each diagram and restore it when you reopen the diagram. Conversations are stored in VS Code's extension storage for this workspace (never in the repository); images and large tool results are left out."
 					},
 					"drawio-ai.reviewChanges": {
 						"type": "boolean",
@@ -1415,7 +1462,7 @@
 		"dev-drawio-plugins": "webpack --mode development --watch --config ./drawio-custom-plugins/webpack.config.ts",
 		"dev-drawio-plugins-web": "webpack-dev-server --hot --config ./drawio-custom-plugins/webpack.config.ts",
 		"sync-lm-tools": "node scripts/sync-lm-tools.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js"
 	},

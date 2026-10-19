@@ -55,6 +55,9 @@ export class CustomizedDrawioClient extends DrawioClient<
 	private readonly onAiLassoEmitter = new EventEmitter<AiLassoEvent>();
 	public readonly onAiLasso = this.onAiLassoEmitter.asEvent();
 
+	private readonly onAiBadgeClickEmitter = new EventEmitter<AiBadgeClickEvent>();
+	public readonly onAiBadgeClick = this.onAiBadgeClickEmitter.asEvent();
+
 	private readonly onAiMarkupEmitter = new EventEmitter<AiMarkupEvent>();
 	public readonly onAiMarkup = this.onAiMarkupEmitter.asEvent();
 
@@ -146,6 +149,14 @@ export class CustomizedDrawioClient extends DrawioClient<
 
 	public aiSetLassoMode(enabled: boolean): void {
 		this.sendCustomAction({ action: "aiSetLassoMode", enabled });
+	}
+
+	public aiSetBadges(group: string, badges: AiBadge[]): void {
+		this.sendCustomAction({ action: "aiSetBadges", group, badges });
+	}
+
+	public get isAiPluginLoaded(): boolean {
+		return this.aiPluginLoaded;
 	}
 
 	public aiSetMarkupMode(enabled: boolean): void {
@@ -267,6 +278,8 @@ export class CustomizedDrawioClient extends DrawioClient<
 			this.onAiAskEmitter.emit(evt);
 		} else if (evt.event === "aiLasso") {
 			this.onAiLassoEmitter.emit(evt);
+		} else if (evt.event === "aiBadgeClick") {
+			this.onAiBadgeClickEmitter.emit(evt);
 		} else if (evt.event === "aiMarkup") {
 			this.onAiMarkupEmitter.emit(evt);
 		} else if (evt.event === "aiReview") {

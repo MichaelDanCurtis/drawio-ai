@@ -176,11 +176,11 @@ async function runSteps() {
 
 	await step("v2 commands and tools are registered", async () => {
 		const commands = await vscode.commands.getCommands(true);
-		for (const c of ["drawio-ai.markup", "drawio-ai.reviewDiagram", "drawio-ai.createTemplate", "drawio-ai.selectTemplate", "drawio-ai.diagramFromImage", "drawio-ai.diagramFromCode"]) {
+		for (const c of ["drawio-ai.markup", "drawio-ai.reviewDiagram", "drawio-ai.createTemplate", "drawio-ai.selectTemplate", "drawio-ai.diagramFromImage", "drawio-ai.diagramFromCode", "drawio-ai.checkCodeLinks"]) {
 			assert.ok(commands.includes(c), `command ${c} missing`);
 		}
 		const names = vscode.lm.tools.map((t) => t.name);
-		assert.ok(names.includes("drawio_lint") && names.includes("drawio_get_template"));
+		assert.ok(names.includes("drawio_lint") && names.includes("drawio_get_template") && names.includes("drawio_code_links"));
 		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
 		const lint = JSON.parse(await invoke("drawio_lint", {}));
 		assert.equal(lint.template, null);
@@ -254,6 +254,37 @@ async function runSteps() {
 		const orgs = model.cells.find((c) => c.id === r.idMap.$o);
 		assert.equal(orgs.data["hedietLinkedDataV1_start_line_x-num"], "5", "unreferenced shapes are linked by exact name");
 		await vscode.commands.executeCommand("drawio-ai.acceptChanges");
+	});
+
+	await step("live code links: moved and changed code is detected, refresh re-points links", async () => {
+		const sql = path.join(dir, "schema.sql");
+		const report = async (input = {}) => JSON.parse(await invoke("drawio_code_links", input));
+		let r = await report();
+		assert.equal(r.linked, 2);
+		assert.equal(r.problems, 0, JSON.stringify(r));
+
+		fs.writeFileSync(sql, "-- v2\n-- moved down\n" + fs.readFileSync(sql, "utf8"));
+		r = await report();
+		assert.deepEqual(r.links.map((l) => l.status), ["moved", "moved"], JSON.stringify(r));
+		const users = r.links.find((l) => l.label === "users");
+
+		r = await report({ refresh: r.links.map((l) => l.id) });
+		assert.equal(r.refreshed.updated.length, 2);
+		assert.equal(r.problems, 0);
+		const model = JSON.parse(await invoke("drawio_get_diagram", {}));
+		assert.equal(model.cells.find((c) => c.id === users.id).data["hedietLinkedDataV1_start_line_x-num"], "2");
+
+		fs.writeFileSync(sql, fs.readFileSync(sql, "utf8").replace("org_id int references orgs(id)", "org_id int references orgs(id),\n  email text"));
+		r = await report({ ids: [users.id] });
+		assert.equal(r.links[0].status, "changed");
+		assert.match(r.links[0].currentCode, /email text/);
+
+		fs.writeFileSync(sql, "CREATE TABLE orgs (id int primary key);\n");
+		r = await report();
+		assert.equal(r.links.find((l) => l.id === users.id).status, "missing-code");
+		fs.unlinkSync(sql);
+		r = await report();
+		assert.deepEqual(r.links.map((l) => l.status), ["missing-file", "missing-file"]);
 	});
 
 	await step("saving writes the AI edits to disk", async () => {

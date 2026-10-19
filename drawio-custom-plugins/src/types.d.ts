@@ -3,11 +3,11 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
-    | AiResolveReviewAction | AiSetMarkupModeAction;
+    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent;
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -192,6 +192,25 @@ declare interface AiAskEvent {
     /** Number of marks, for source=markup. */
     markCount?: number;
     images?: { mimeType: "image/png"; base64: string }[];
+}
+
+declare interface AiBadge {
+    cellId: string;
+    kind: "error" | "warning" | "info";
+    tooltip: string;
+}
+
+/** Replaces all badges of `group` (small clickable icons on cells; not saved in the file). */
+declare interface AiSetBadgesAction {
+    action: "aiSetBadges";
+    group: string;
+    badges: AiBadge[];
+}
+
+declare interface AiBadgeClickEvent {
+    event: "aiBadgeClick";
+    group: string;
+    cellId: string;
 }
 
 declare interface AiSetMarkupModeAction {

@@ -15,6 +15,8 @@ import type { ImageData } from "./providers/types";
 import { describeTemplate } from "./templates/profile";
 import { CreateTemplateArgs, TemplateService } from "./templates/TemplateService";
 import { path } from "../../utils/path";
+import { linkData, splitLines } from "./codeLinks";
+import { CodeLinkService } from "./CodeLinkService";
 
 const CODE_GLOB = /\.(tsx?|jsx?|mjs|cjs|py|java|cs|kt|go|sql|prisma|tf|ya?ml)$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "out", "build", ".venv", "venv", "__pycache__", "target", "bin", "obj", ".next", ".terraform", "coverage", ".drawio-ai"]);
@@ -42,9 +44,17 @@ export class AiFeature {
 
 	private readonly registry = new ProviderRegistry(this.context.secrets);
 	private readonly templates = new TemplateService();
+	private readonly codeLinks: CodeLinkService = new CodeLinkService(
+		() => this.editorService.openedEditors,
+		async (editor, prompt, attachments) => {
+			await this.chatView.reveal();
+			await this.chatView.send(prompt, { cellIds: [] }, { editor, attachments });
+		}
+	);
 	private readonly toolbox = new DiagramToolbox(
 		() => this.targetEditor(),
-		(editor) => this.templates.active(editor.uri)
+		(editor) => this.templates.active(editor.uri),
+		this.codeLinks
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
 	private readonly chatView = new ChatViewProvider(
@@ -89,6 +99,7 @@ export class AiFeature {
 		);
 		track(registerLanguageModelTools(this.toolbox));
 		track(this.templates);
+		track(this.codeLinks);
 		track(this.templates.onDidChange(() => void this.chatView.refreshTemplate()));
 		track(
 			vscode.workspace.onDidChangeConfiguration((e) => {
@@ -159,6 +170,7 @@ export class AiFeature {
 			vscode.commands.registerCommand("drawio-ai.createTemplate", (args?: CreateTemplateArgs) =>
 				this.templates.create(this.targetEditor()?.uri, args ?? {}, (prompt, images) => this.draftRules(prompt, images))
 			),
+			vscode.commands.registerCommand("drawio-ai.checkCodeLinks", () => this.codeLinks.checkCommand(this.targetEditor())),
 			vscode.commands.registerCommand("drawio-ai.selectTemplate", () => this.templates.select(this.targetEditor()?.uri)),
 			vscode.commands.registerCommand("drawio-ai.reviewDiagram", (args?: { fix?: "all" | "none" }) => this.reviewDiagram(args)),
 			vscode.commands.registerCommand("drawio-ai.diagramFromImage", (uri?: vscode.Uri, args?: FromImageArgs) =>
@@ -378,23 +390,18 @@ export class AiFeature {
 			{ cellIds: [] },
 			{ editor, attachments: [{ name: `code analysis of ${label} (${files.length} files, ${analysis.entities.length} entities)`, text }] }
 		);
-		await this.linkShapesToCode(editor, codeRefs(analysis), root).catch((e) => console.error("Draw.io AI: linking shapes failed", e));
+		await this.linkShapesToCode(editor, codeRefs(analysis), root, files).catch((e) => console.error("Draw.io AI: linking shapes failed", e));
 	}
 
 	/** Turns `codeRef` attributes (and exact name matches) into code links (double-click → source). */
-	private async linkShapesToCode(editor: DrawioEditor, refs: Map<string, Entity>, root: vscode.Uri): Promise<number> {
+	private async linkShapesToCode(editor: DrawioEditor, refs: Map<string, Entity>, root: vscode.Uri, files: SourceFile[]): Promise<number> {
 		const model = await editor.drawioClient.aiGetModel({ scope: "page", includeStyles: false, maxCells: 20000 });
 		const ops: AiOp[] = [];
 		const linked = new Set<string>();
+		const lines = new Map(files.map((f) => [f.path, splitLines(f.text)]));
 		const link = (e: Entity): Record<string, string> => {
 			const rel = path.relative(editor.uri.fsPath, path.join(root.fsPath, e.file)).replace(/\\/g, "/");
-			return {
-				hedietLinkedDataV1_path: rel,
-				"hedietLinkedDataV1_start_line_x-num": String(e.line - 1),
-				"hedietLinkedDataV1_start_col_x-num": "0",
-				"hedietLinkedDataV1_end_line_x-num": String((e.endLine ?? e.line) - 1),
-				"hedietLinkedDataV1_end_col_x-num": "0",
-			};
+			return linkData(rel, lines.get(e.file) ?? [], e.line - 1, (e.endLine ?? e.line) - 1);
 		};
 		for (const c of model.cells) {
 			const ref = c.data?.codeRef;
@@ -414,6 +421,7 @@ export class AiFeature {
 		if (ops.length === 0) return 0;
 		const settings = getAiSettings();
 		await editor.drawioClient.aiApplyOps(ops, { atomic: false, selectResult: false, flash: false, review: settings.reviewChanges });
+		this.codeLinks.schedule(editor, 100);
 		return ops.length;
 	}
 
@@ -503,6 +511,7 @@ export class AiFeature {
 				);
 			}),
 		];
+		subs.push(this.codeLinks.hook(editor));
 		editor.webviewPanel.onDidDispose(() => subs.forEach((s) => s.dispose()));
 	}
 

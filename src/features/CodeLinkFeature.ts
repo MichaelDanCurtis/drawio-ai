@@ -23,6 +23,7 @@ import { autorun, action } from "mobx";
 import { Config } from "../Config";
 import { path } from "../utils/path";
 import { registerFailableCommand } from "../utils/registerFailableCommand";
+import { anchorOf, fingerprint, splitLines } from "./ai/codeLinks";
 
 const toggleCodeLinkActivationCommandName =
 	"drawio-ai.toggleCodeLinkActivation";
@@ -164,9 +165,14 @@ export class LinkCodeWithSelectedNodeService {
 			editor.document.uri,
 			editor.selection
 		);
-		lastActiveDrawioEditor.drawioClient.linkSelectedNodeWithData(
-			pos.serialize(lastActiveDrawioEditor.uri)
-		);
+		// A fingerprint lets Draw.io AI notice when the linked code changes or moves.
+		const lines = splitLines(editor.document.getText());
+		const { start, end } = editor.selection;
+		lastActiveDrawioEditor.drawioClient.linkSelectedNodeWithData({
+			...pos.serialize(lastActiveDrawioEditor.uri),
+			hash: fingerprint(lines.slice(start.line, end.line + 1)),
+			anchor: anchorOf(lines[start.line] ?? ""),
+		});
 		this.revealSelection(pos);
 	}
 

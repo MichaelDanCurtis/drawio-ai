@@ -280,6 +280,19 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		},
 	},
 	{
+		name: "drawio_code_links",
+		displayName: "Check Draw.io Code Links",
+		description:
+			"List the shapes on the current page that are linked to source code and whether the code they point to is unchanged, moved, changed, or gone; changed links include the current code. Use it to bring a code-derived diagram up to date. After updating shapes to match the code, pass their ids in `refresh` to re-point the links at the current code.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				ids: { type: "array", items: { type: "string" }, description: "Only report these cells." },
+				refresh: { type: "array", items: { type: "string" }, description: "Re-point these cells' links at where their code is now (after you updated the shapes)." },
+			},
+		},
+	},
+	{
 		name: "drawio_get_template",
 		displayName: "Get Draw.io Design Template",
 		description:

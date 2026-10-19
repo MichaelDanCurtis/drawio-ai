@@ -25,7 +25,11 @@ const MAX_XML_CHARS = 80_000;
 export class DiagramToolbox {
 	constructor(
 		private readonly getEditor: () => DrawioEditor | undefined,
-		private readonly getTemplate: (editor: DrawioEditor) => Promise<LoadedTemplate | undefined> = async () => undefined
+		private readonly getTemplate: (editor: DrawioEditor) => Promise<LoadedTemplate | undefined> = async () => undefined,
+		private readonly codeLinks?: {
+			report(editor: DrawioEditor, ids?: string[]): Promise<{ text: string; summary: string }>;
+			refresh(editor: DrawioEditor, ids: string[]): Promise<{ updated: string[]; skipped: string[] }>;
+		}
 	) {}
 
 	public specs(options: { vision: boolean }): ToolSpec[] {
@@ -74,6 +78,16 @@ export class DiagramToolbox {
 				}
 				case "drawio_lint":
 					return await this.lint(editor, input);
+				case "drawio_code_links": {
+					if (!this.codeLinks) throw new ToolInputError("Code links are not available.");
+					const ids = (v: unknown) => (Array.isArray(v) ? v.map(String) : []);
+					const refresh = ids(input.refresh);
+					const refreshed = refresh.length ? await this.codeLinks.refresh(editor, refresh) : undefined;
+					const report = await this.codeLinks.report(editor, ids(input.ids));
+					return refreshed
+						? { text: JSON.stringify({ refreshed, ...JSON.parse(report.text) }), summary: `Re-linked ${refreshed.updated.length} shape${refreshed.updated.length === 1 ? "" : "s"}` }
+						: report;
+				}
 				case "drawio_get_template": {
 					const t = await this.getTemplate(editor);
 					if (!t) {

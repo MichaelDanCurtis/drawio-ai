@@ -601,3 +601,37 @@ test("image cells offer 'Convert image to diagram', which sends the rendered ima
 	assert.ok(ask.images[0].base64.length > 200);
 	assert.match(ask.prompt, new RegExp(`delete the image cell ${id}`));
 });
+
+test("badges: shown on cells, replaced per group, clickable, never saved", async () => {
+	await freshBaseline();
+	await send({ action: "aiSetBadges", group: "codeLinks", badges: [
+		{ cellId: "api", kind: "warning", tooltip: "Code link: changed" },
+		{ cellId: "db", kind: "error", tooltip: "Code link: gone" },
+		{ cellId: "missing", kind: "info", tooltip: "ignored" },
+	] });
+	const overlays = () =>
+		page.evaluate(() => {
+			const g = editorUi.editor.graph;
+			return ["api", "db"].map((id) => (g.getCellOverlays(g.model.getCell(id)) || []).map((o) => [o.aiBadge.kind, o.tooltip]));
+		});
+	await page.waitForFunction(() => (editorUi.editor.graph.getCellOverlays(editorUi.editor.graph.model.getCell("db")) || []).length === 1);
+	assert.deepEqual(await overlays(), [[["warning", "Code link: changed"]], [["error", "Code link: gone"]]]);
+
+	inbox.length = 0;
+	await page.evaluate(() => {
+		const g = editorUi.editor.graph;
+		const o = g.getCellOverlays(g.model.getCell("db"))[0];
+		o.fireEvent(new mxEventObject(mxEvent.CLICK, "event", null, "cell", g.model.getCell("db")));
+	});
+	assert.deepEqual(await waitFor((m) => m.event === "aiBadgeClick"), { event: "aiBadgeClick", group: "codeLinks", cellId: "db" });
+
+	await send({ action: "aiSetBadges", group: "codeLinks", badges: [{ cellId: "db", kind: "info", tooltip: "moved" }] });
+	await page.waitForFunction(() => !(editorUi.editor.graph.getCellOverlays(editorUi.editor.graph.model.getCell("api")) || []).length);
+	assert.deepEqual(await overlays(), [[], [["info", "moved"]]]);
+
+	inbox.length = 0;
+	await apply([{ op: "update", id: "api", label: "API v2" }]);
+	const saved = await waitFor((m) => m.event === "autosave");
+	assert.doesNotMatch(saved.xml, /moved|aiBadge|Code link/);
+	await send({ action: "aiSetBadges", group: "codeLinks", badges: [] });
+});

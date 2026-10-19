@@ -2041,6 +2041,41 @@ Draw.loadPlugin((ui: any) => {
 		graph.view.addListener(name, () => markup && paintMarkup());
 	}
 
+	// ---------------------------------------------------------------------
+	// Badges: small clickable status icons on cells (e.g. stale code links).
+	// Cell overlays live in the view only and are never written to the file.
+	// ---------------------------------------------------------------------
+
+	const BADGE_COLORS = { error: REMOVED, warning: CHANGED, info: "#2563eb" };
+	const badgeImages = new Map<string, any>();
+	const badgeOverlays = new Map<string, { cell: any; overlay: any }[]>();
+
+	function badgeImage(kind: AiBadge["kind"]) {
+		let img = badgeImages.get(kind);
+		if (!img) {
+			const glyph = kind === "info" ? "i" : "!";
+			const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18"><circle cx="9" cy="9" r="8" fill="${BADGE_COLORS[kind]}" stroke="white" stroke-width="1.5"/><text x="9" y="13" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="white">${glyph}</text></svg>`;
+			img = new W.mxImage(`data:image/svg+xml;base64,${btoa(svg)}`, 18, 18);
+			badgeImages.set(kind, img);
+		}
+		return img;
+	}
+
+	function setBadges(group: string, badges: AiBadge[]) {
+		for (const { cell, overlay } of badgeOverlays.get(group) ?? []) graph.removeCellOverlay(cell, overlay);
+		const added: { cell: any; overlay: any }[] = [];
+		for (const b of badges) {
+			const cell = model.getCell(b.cellId);
+			if (!cell) continue;
+			const overlay = new W.mxCellOverlay(badgeImage(b.kind), b.tooltip, mx.constants.ALIGN_RIGHT, mx.constants.ALIGN_TOP, new W.mxPoint(-2, 2), "pointer");
+			overlay.aiBadge = { group, kind: b.kind };
+			overlay.addListener(W.mxEvent.CLICK, () => sendEvent({ event: "aiBadgeClick", group, cellId: b.cellId }));
+			graph.addCellOverlay(cell, overlay);
+			added.push({ cell, overlay });
+		}
+		badgeOverlays.set(group, added);
+	}
+
 	// Turn the selected image (or any shape) into an editable diagram.
 	async function convertToDiagram(cell: any) {
 		const result = await exportImage({ action: "aiExportImage", cellIds: [cell.id], maxSize: 1600 });
@@ -2196,6 +2231,9 @@ Draw.loadPlugin((ui: any) => {
 				break;
 			case "aiSearchShapes":
 				sendEvent(await searchShapes(data));
+				break;
+			case "aiSetBadges":
+				setBadges(data.group, data.badges);
 				break;
 			case "aiSetMarkupMode":
 				setMarkup(data.enabled);

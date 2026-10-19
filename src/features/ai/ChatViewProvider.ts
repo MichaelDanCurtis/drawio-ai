@@ -7,18 +7,17 @@ import type { AiModelClient, ChatMessage, ImageData, ModelInfo, ProviderId } fro
 import { describeContext, SelectionContext } from "./systemPrompt";
 import html from "./chatView.html";
 import { MAX_IMAGES, MAX_PICKED_IMAGE_BASE64, readImage, sanitizeImages } from "./images";
-
-type TranscriptItem =
-	| { kind: "user"; text: string; scope?: string; attachments?: string[] }
-	| { kind: "assistant"; text: string }
-	| { kind: "tool"; id: string; summary: string; status: "running" | "ok" | "error" }
-	| { kind: "error"; text: string; action?: { title: string; command: string } };
+import { ChatStore, TranscriptItem } from "./chatStore";
 
 interface Conversation {
 	messages: ChatMessage[];
 	transcript: TranscriptItem[];
 	version: number;
 	running?: vscode.CancellationTokenSource;
+	/** Diagram URI, for conversations that belong to a diagram (and are persisted). */
+	key?: string;
+	/** Resolves once the saved chat for this diagram has been restored. */
+	loading?: Promise<void>;
 }
 
 const MODEL_STATE_KEY = "drawio-ai.selectedModel";
@@ -49,6 +48,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	private lassoActive = false;
 	private templateName: string | undefined;
 	private templateRequest = 0;
+	private readonly store: ChatStore;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -56,7 +56,10 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		private readonly agent: DiagramAgent,
 		private readonly getEditor: () => DrawioEditor | undefined,
 		private readonly getTemplate: (editor: DrawioEditor | undefined) => Promise<TemplateInfo | undefined> = async () => undefined
-	) {}
+	) {
+		const base = context.storageUri ?? context.globalStorageUri;
+		this.store = new ChatStore(base && vscode.Uri.joinPath(base, "chats"));
+	}
 
 	/** The client for the provider/model picked in this panel. */
 	public async currentClient(): Promise<AiModelClient> {
@@ -124,10 +127,32 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		const key = editor.uri.toString();
 		let c = this.conversations.get(key);
 		if (!c) {
-			c = newConversation();
+			c = { ...newConversation(), key };
+			c.loading = this.restore(c);
 			this.conversations.set(key, c);
 		}
 		return c;
+	}
+
+	private async restore(c: Conversation): Promise<void> {
+		if (!c.key || !getAiSettings().persistChat) return;
+		const version = c.version;
+		const stored = await this.store.load(c.key);
+		// "New chat" while loading wins over the restored conversation.
+		if (c.version !== version || !stored || (stored.messages.length === 0 && stored.transcript.length === 0)) return;
+		const when = new Date(stored.savedAt);
+		c.messages = [...stored.messages, ...c.messages];
+		c.transcript = [
+			...stored.transcript,
+			{ kind: "note", text: `Restored conversation from ${isNaN(when.getTime()) ? "an earlier session" : when.toLocaleString()}` },
+			...c.transcript,
+		];
+		c.version = ++versionCounter;
+		if (c === this.conversation()) this.postState();
+	}
+
+	private persist(c: Conversation): void {
+		if (c.key && getAiSettings().persistChat) void this.store.save(c.key, c.messages, c.transcript);
 	}
 
 	public onActiveDiagramChanged(): void {
@@ -154,6 +179,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		c.messages = [];
 		c.transcript = [];
 		c.version = ++versionCounter;
+		if (c.key) void this.store.delete(c.key);
 		this.postState();
 	}
 
@@ -282,6 +308,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	public async send(text: string, origin?: SelectionContext, extras: SendExtras = {}): Promise<void> {
 		const editor = extras.editor ?? this.getEditor();
 		const c = this.conversation(editor);
+		await c.loading;
 		if (c.running) {
 			this.push(c, { kind: "error", text: "Still working on the previous request — press Stop first." });
 			return;
@@ -384,6 +411,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		} finally {
 			c.running = undefined;
 			cts.dispose();
+			this.persist(c);
 			editor.drawioClient.aiSetStatus(false);
 			if (isCurrent()) this.view?.webview.postMessage({ type: "busy", busy: false });
 		}
@@ -408,6 +436,7 @@ function toolLabel(name: string): string {
 		case "drawio_style_reference": return "Looking up styles…";
 		case "drawio_lint": return "Checking the diagram…";
 		case "drawio_get_template": return "Reading the design template…";
+		case "drawio_code_links": return "Checking code links…";
 		default: return `${name}…`;
 	}
 }
