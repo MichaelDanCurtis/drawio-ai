@@ -65,4 +65,6 @@ if (!args.has("--publish-marketplace")) {
 			`"New extension" → "Visual Studio Code" (first release) or "…" → "Update" (later releases), and upload ${vsix}.`
 	);
 }
-console.log(`Tag the release: git tag v${pkg.version} && git push origin v${pkg.version}`);
+// Prefixed: clones with the upstream remote have hediet's v0.1.3 to v1.17.0 tags (see RELEASING.md).
+const tag = `draw-ai-v${pkg.version}`;
+console.log(`Tag the release: git tag -a ${tag} -m "Draw.AI ${pkg.version}" && git push origin ${tag}`);
