@@ -58,6 +58,7 @@ When the user asks for a file, use `drawio_export`: `vsdx` (Microsoft Visio: eve
 - `drawio_code_links`: Check Draw.io Code Links
 - `drawio_export`: Export Draw.io Diagram (writes a file)
 - `drawio_import`: Import Diagram File (writes a file)
+- `drawio_get_attachment`: Get Draw.io Request Attachment
 - `drawio_get_template`: Get Draw.io Design Template
 - `drawio_list_diagrams`: List Draw.io Diagrams
 - `drawio_search_diagrams`: Search Draw.io Diagrams

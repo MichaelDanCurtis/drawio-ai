@@ -69,6 +69,11 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 
 	// ----- selection of provider / model -----
 
+	/** Whether the panel uses VS Code's models (Copilot, ...) rather than the user's own API keys. */
+	public usesVsCodeModels(): boolean {
+		return this.selected.providerId === "vscode-lm";
+	}
+
 	private get selected(): { providerId: ProviderId; modelId?: string } {
 		return (
 			this.context.globalState.get(MODEL_STATE_KEY) ?? {
@@ -439,6 +444,7 @@ function toolLabel(name: string): string {
 		case "drawio_code_links": return "Checking code links…";
 		case "drawio_export": return "Exporting…";
 		case "drawio_import": return "Importing…";
+		case "drawio_get_attachment": return "Reading the attachment…";
 		default: return `${name}…`;
 	}
 }

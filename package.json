@@ -203,6 +203,16 @@
 				]
 			}
 		],
+		"chatAgents": [
+			{
+				"path": "./media/chat/draw-ai.agent.md"
+			}
+		],
+		"chatInstructions": [
+			{
+				"path": "./media/chat/drawio.instructions.md"
+			}
+		],
 		"languageModelTools": [
 			{
 				"name": "drawio_get_diagram",
@@ -812,6 +822,31 @@
 				}
 			},
 			{
+				"name": "drawio_get_attachment",
+				"displayName": "Get Draw.io Request Attachment",
+				"toolReferenceName": "drawio-get-attachment",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Get Draw.io Request Attachment",
+				"modelDescription": "Return an image or text the user attached to a request sent from the diagram in VS Code's chat (a markup snapshot, an image to convert, a sketch, a code analysis). Such requests list the attachment ids; read each one before working on the request.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"id": {
+							"type": "string",
+							"description": "An attachment id from the request."
+						}
+					},
+					"required": [
+						"id"
+					]
+				}
+			},
+			{
 				"name": "drawio_get_template",
 				"displayName": "Get Draw.io Design Template",
 				"toolReferenceName": "drawio-get-template",
@@ -919,6 +954,11 @@
 				"title": "Open AI Chat",
 				"category": "Draw.AI",
 				"icon": "$(sparkle)"
+			},
+			{
+				"command": "drawio-ai.openChatPanel",
+				"title": "Open Draw.AI Chat Panel",
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.askAboutSelection",
@@ -1161,6 +1201,21 @@
 				"title": "AI",
 				"order": 5,
 				"properties": {
+					"drawio-ai.chatSurface": {
+						"type": "string",
+						"enum": [
+							"auto",
+							"native",
+							"panel"
+						],
+						"enumDescriptions": [
+							"VS Code's chat when it can run the Draw.AI agent and the Draw.AI panel uses VS Code's models (Copilot, ...); otherwise the panel, so your own API keys keep being used.",
+							"VS Code's chat on the Draw.AI agent whenever it can run it (needs a chat model and agent mode, VS Code 1.142 or later); otherwise the panel.",
+							"Always the Draw.AI chat panel, with its own providers (Copilot, Anthropic or OpenAI-compatible keys), saved chats per diagram and review strip."
+						],
+						"default": "auto",
+						"markdownDescription": "Where requests from the diagram go: Ask AI (`Alt+K`), the lasso, markup, Convert image to diagram, lint fixes, Diagram from Code/Image and code link fixes. The diagram's buttons and menus work the same either way."
+					},
 					"drawio-ai.provider": {
 						"type": "string",
 						"enum": [
@@ -1670,6 +1725,16 @@
 					"command": "drawio-ai.openChat",
 					"when": "drawio-ai.active",
 					"group": "navigation"
+				},
+				{
+					"command": "drawio-ai.selectTemplate",
+					"when": "drawio-ai.active",
+					"group": "drawio-ai@1"
+				},
+				{
+					"command": "drawio-ai.openChatPanel",
+					"when": "drawio-ai.active",
+					"group": "drawio-ai@2"
 				}
 			],
 			"explorer/context": [
@@ -1744,7 +1809,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/bridge.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"

@@ -34,6 +34,16 @@ export function mcpInstructions(template?: string): string {
 		.join("\n\n");
 }
 
+/**
+ * Added to SYSTEM_PROMPT for the "Draw.AI" custom agent in VS Code's own chat
+ * (generated into media/chat/draw-ai.agent.md by scripts/sync-lm-tools.js).
+ */
+export const NATIVE_AGENT_NOTES = `In VS Code's chat:
+- Change diagrams only through the drawio_* tools. Never edit .drawio, .dio, .drawio.svg or .drawio.png files as text: the open editor would not show the change live, the user's review of AI changes would be skipped, and the embedded XML is easy to break.
+- The tools work on the draw.io editor the user used last. To work on another diagram in the workspace, pass its path as \`file\` (drawio_list_diagrams lists them; drawio_create makes a new one). If no diagram is open and none is named, ask the user which one to use.
+- A request sent from the diagram (Alt+K, lasso, markup, lint fixes) ends with a note saying what the user selected, circled or marked; treat it as the selection.
+- If drawio_get_diagram says a design template is active, call drawio_get_template once and follow it.`;
+
 export interface SelectionContext {
 	cellIds: readonly string[];
 	region?: { x: number; y: number; width: number; height: number };

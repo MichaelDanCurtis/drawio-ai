@@ -7,8 +7,8 @@
 ## Getting Started
 
 1. Open or create a diagram: any `.drawio`, `.drawio.svg` or `.drawio.png` file, or **Draw.io: New Draw.io Diagram**.
-2. Open the **Draw.AI** chat: the ✦ button in the editor title bar, or **Draw.AI: Open AI Chat**.
-3. Pick a model. GitHub Copilot models work as soon as you are signed in to Copilot. For Anthropic or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, OpenRouter, a local server), run **Draw.AI: Set API Key**.
+2. Open the chat: the ✦ button in the editor title bar, or **Draw.AI: Open AI Chat**. With GitHub Copilot (or another chat model provider) this is VS Code's own chat, switched to the **Draw.AI** agent; with your own API keys, or without a chat model, it is the Draw.AI chat panel.
+3. Pick a model. GitHub Copilot models work as soon as you are signed in to Copilot. For Anthropic or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, OpenRouter, a local server), run **Draw.AI: Set API Key** and use the Draw.AI chat panel (**Draw.AI: Open Draw.AI Chat Panel**, or `drawio-ai.chatSurface` set to `panel`).
 4. Describe a change. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
 
 In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts the lasso, `Alt+M` starts markup.
@@ -17,11 +17,14 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 
 | Surface | How |
 | --- | --- |
-| Chat panel | The **Draw.AI** view; works with Copilot, Anthropic and OpenAI-compatible models |
-| Copilot Chat | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch` |
-| Copilot agent mode | The `drawio_*` tools (reference them with `#drawio-…`) |
+| VS Code chat, **Draw.AI** agent | Pick **Draw.AI** in the chat's agent picker (VS Code 1.142 or later). It has the diagram tools and Draw.AI's instructions. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here when the panel uses Copilot; images and code analyses travel with the request |
+| VS Code chat, Agent mode | The `drawio_*` tools appear under Draw.AI in **Configure Tools** (reference one with `#drawio-…`). Instructions shipped with the extension tell the agent to change `.drawio` files with these tools, not by rewriting their XML |
+| VS Code chat, Ask mode | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch` |
+| Draw.AI chat panel | The **Draw.AI** view; works with Copilot, Anthropic and OpenAI-compatible models, keeps a chat per diagram |
 | Claude Code and Codex | **Draw.AI: Connect Claude Code / Codex…** installs Draw.AI's plugin (skills and the `drawio_*` tools); see [below](#claude-code-and-codex) |
 | Other agents | Cursor and other MCP clients through **Draw.AI: Set Up MCP Server for External Agents…** |
+
+The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the review bar, design templates) work the same whichever chat you use; `drawio-ai.chatSurface` only decides where their requests go. Pick a design template with **Draw.AI: Select Design Template…** (also in the diagram's `…` menu) or the ◆ chip in the panel; the Draw.AI agent reads it with `drawio_get_template`.
 
 ## AI Features
 
@@ -51,6 +54,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 
 | Setting | Default | |
 | --- | --- | --- |
+| `drawio-ai.chatSurface` | `auto` | Where requests from the diagram go: VS Code's chat (Draw.AI agent) when the panel uses Copilot, otherwise the panel; or always `native` / `panel` |
 | `drawio-ai.provider` | `vscode-lm` | Default provider for the chat panel |
 | `drawio-ai.reviewChanges` | `true` | Hold AI edits as pending changes |
 | `drawio-ai.template` | (auto) | Active design template id, or `none` |

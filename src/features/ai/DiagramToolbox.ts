@@ -41,6 +41,14 @@ const MAX_XML_CHARS = 80_000;
  * (or was last active), so tools keep working while the chat has focus.
  */
 export class DiagramToolbox {
+	private readonly applyListeners = new Set<(editor: DrawioEditor) => void>();
+
+	/** Called after every drawio_apply_operations batch that changed the diagram. */
+	public onDidApplyOperations(listener: (editor: DrawioEditor) => void): { dispose(): void } {
+		this.applyListeners.add(listener);
+		return { dispose: () => void this.applyListeners.delete(listener) };
+	}
+
 	constructor(
 		private readonly getEditor: () => DrawioEditor | undefined,
 		private readonly getTemplate: (editor: DrawioEditor) => Promise<LoadedTemplate | undefined> = async () => undefined,
@@ -50,6 +58,7 @@ export class DiagramToolbox {
 		},
 		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>,
 		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>,
+		private readonly attachments?: (id: string) => Promise<ToolResult>,
 		private readonly diagrams?: DiagramWorkspace
 	) {}
 
@@ -59,7 +68,7 @@ export class DiagramToolbox {
 	 * (Copilot agent mode and MCP agents get every tool.)
 	 */
 	public specs(options: { vision: boolean }): ToolSpec[] {
-		const forPanel = new Set(["drawio_style_reference", "drawio_import"]);
+		const forPanel = new Set(["drawio_style_reference", "drawio_import", "drawio_get_attachment"]);
 		return TOOL_SCHEMAS.filter((t) => (options.vision || !t.requiresVision) && (!t.workspace || forPanel.has(t.name))).map((t) => {
 			const { file, ...properties } = (t.inputSchema.properties ?? {}) as Record<string, unknown>;
 			return { name: t.name, description: t.description, inputSchema: { ...t.inputSchema, properties } };
@@ -70,6 +79,17 @@ export class DiagramToolbox {
 		if (name === "drawio_import") {
 			// Needs no open diagram: it creates one.
 			return this.importFile(rawInput);
+		}
+		if (name === "drawio_get_attachment") {
+			// Works without an open diagram: it only reads what the request stored.
+			if (!this.attachments) {
+				return { isError: true, summary: "No attachments", text: "Attachments are not available." };
+			}
+			try {
+				return await this.attachments(String(normalizeInput(rawInput).id ?? ""));
+			} catch (e: any) {
+				return { isError: true, summary: "Failed", text: `Error: ${e?.message ?? e}` };
+			}
 		}
 		let input: Record<string, any>;
 		let editor: DrawioEditor | undefined;
@@ -244,6 +264,15 @@ export class DiagramToolbox {
 
 		const failed = result.results.filter((r) => !r.ok);
 		const okCount = result.results.length - failed.length;
+		if (!result.rolledBack && okCount > 0) {
+			for (const listener of [...this.applyListeners]) {
+				try {
+					listener(editor);
+				} catch (e) {
+					console.error("Draw.AI: apply listener failed", e);
+				}
+			}
+		}
 		const createdOrChanged = [...new Set(result.results.flatMap((r) => r.ids ?? []))];
 		const payload = {
 			ok: failed.length === 0,
