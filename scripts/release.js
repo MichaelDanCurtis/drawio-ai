@@ -33,14 +33,18 @@ const node = process.execPath;
 step("Release check (metadata)", node, ["scripts/release-check.js"]);
 step("Build extension", npx, ["webpack", "--mode", "production"]);
 step("Build draw.io plugins", npx, ["webpack", "--mode", "production", "--config", "./drawio-custom-plugins/webpack.config.ts"]);
-step("Unit tests", node, ["--test", "test/ai/agent.test.js", "test/ai/v2.test.js", "test/ai/v3.test.js"]);
+// The same files as `yarn test:ai`, so new test files are never left out of a release.
+const unitTests = (pkg.scripts["test:ai"].match(/test\/ai\/[\w.-]+\.test\.js/g) || []);
+step("Unit tests", node, ["--test", ...unitTests]);
 step("Browser tests (real draw.io in Chrome)", node, ["--test", "--test-timeout=180000", "test/ai/plugin.e2e.test.js", "test/ai/chatView.e2e.test.js"]);
 if (!args.has("--quick")) step("VS Code integration tests", node, ["test/ai/vscode/runVsCodeTests.js"]);
 step("Release check (build output)", node, ["scripts/release-check.js", "--built"]);
 step(
 	`Package ${vsix}`,
 	npx,
-	["vsce", "package", "--no-yarn", "--allow-unused-files-pattern", "--out", vsix, ...(args.has("--pre-release") ? ["--pre-release"] : [])]
+	// The extension is bundled by webpack (it only loads Node built-ins at runtime), so vsce
+	// must not resolve node_modules: npm rejects the yarn-installed tree as extraneous.
+	["vsce", "package", "--no-dependencies", "--allow-unused-files-pattern", "--out", vsix, ...(args.has("--pre-release") ? ["--pre-release"] : [])]
 );
 
 if (args.has("--publish-marketplace")) {
