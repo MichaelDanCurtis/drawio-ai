@@ -1,5 +1,6 @@
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
+import type { ExportRequest } from "./exportDiagram";
 import { lintDiagram } from "./lint";
 import type { LoadedTemplate } from "./templates/profile";
 import type { ImageData, ToolSpec } from "./providers/types";
@@ -29,7 +30,8 @@ export class DiagramToolbox {
 		private readonly codeLinks?: {
 			report(editor: DrawioEditor, ids?: string[]): Promise<{ text: string; summary: string }>;
 			refresh(editor: DrawioEditor, ids: string[]): Promise<{ updated: string[]; skipped: string[] }>;
-		}
+		},
+		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>
 	) {}
 
 	public specs(options: { vision: boolean }): ToolSpec[] {
@@ -87,6 +89,15 @@ export class DiagramToolbox {
 					return refreshed
 						? { text: JSON.stringify({ refreshed, ...JSON.parse(report.text) }), summary: `Re-linked ${refreshed.updated.length} shape${refreshed.updated.length === 1 ? "" : "s"}` }
 						: report;
+				}
+				case "drawio_export": {
+					if (!this.exporter) throw new ToolInputError("Export is not available.");
+					return await this.exporter(editor, {
+						format: String(input.format ?? ""),
+						path: typeof input.path === "string" ? input.path : undefined,
+						currentPageOnly: input.currentPageOnly === true,
+						overwrite: input.overwrite === true,
+					});
 				}
 				case "drawio_get_template": {
 					const t = await this.getTemplate(editor);

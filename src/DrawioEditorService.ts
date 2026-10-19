@@ -4,6 +4,7 @@ import { autorun, computed, observable, ObservableSet } from "mobx";
 import { extname } from "path";
 import {
 	commands,
+	ProgressLocation,
 	QuickPickItem, QuickPickItemKind, StatusBarAlignment,
 	TextDocument,
 	Uri,
@@ -21,6 +22,8 @@ import { DrawioBinaryDocument } from "./DrawioEditorProviderBinary";
 import { registerFailableCommand } from "./utils/registerFailableCommand";
 
 const drawioChangeThemeCommand = "drawio-ai.changeTheme";
+
+const showError = (e: any) => window.showErrorMessage(String(e?.message ?? e));
 
 export class DrawioEditorService {
 	public readonly dispose = Disposable.fn();
@@ -99,7 +102,18 @@ export class DrawioEditorService {
 				if (!activeDrawioEditor) {
 					return;
 				}
-				activeDrawioEditor.handleExportCommand();
+				return activeDrawioEditor.handleExportCommand();
+			})
+		);
+
+		this.dispose.track(
+			registerFailableCommand("drawio-ai.exportVisio", () => {
+				const editor = this.activeDrawioEditor ?? this.lastActiveDrawioEditor;
+				if (!editor) {
+					window.showInformationMessage("Open a draw.io diagram to export it to Visio.");
+					return;
+				}
+				return editor.exportToVisio();
 			})
 		);
 
@@ -216,7 +230,9 @@ export class DrawioEditor {
 			if (command === "convert") {
 				this.handleConvertCommand();
 			} else if (command === "export") {
-				this.handleExportCommand();
+				this.handleExportCommand().catch(showError);
+			} else if (command === "exportVisio") {
+				this.exportToVisio().catch(showError);
 			} else if (command === "save") {
 				this.drawioClient.triggerOnSave();
 			}
@@ -275,6 +291,9 @@ export class DrawioEditor {
 	}
 
 	public async exportTo(targetExtension: string): Promise<void> {
+		if (targetExtension === ".vsdx") {
+			return this.exportToVisio();
+		}
 		// Exports the page that is visible in the editor
 		const buffer = await this.drawioClient.export(targetExtension, true);
 		const targetUri = await window.showSaveDialog({
@@ -285,6 +304,29 @@ export class DrawioEditor {
 			return;
 		}
 		await workspace.fs.writeFile(targetUri, buffer);
+	}
+
+	/** Exports every page to a Microsoft Visio file chosen by the user. */
+	public async exportToVisio(): Promise<void> {
+		const targetUri = await window.showSaveDialog({
+			defaultUri: this.getUriWithExtension(".vsdx"),
+			filters: { "Microsoft Visio": ["vsdx"] },
+		});
+		if (!targetUri) {
+			return;
+		}
+		const result = await window.withProgress(
+			{ location: ProgressLocation.Notification, title: "Exporting to Visio…" },
+			() => this.drawioClient.exportVsdx()
+		);
+		await workspace.fs.writeFile(targetUri, result.data);
+		const name = targetUri.path.split("/").pop();
+		const pages = `${result.pages} page${result.pages === 1 ? "" : "s"}`;
+		if (result.warnings.length > 0) {
+			window.showWarningMessage(`Exported ${pages} to ${name}. ${result.warnings.join(" ")}`);
+		} else {
+			window.showInformationMessage(`Exported ${pages} to ${name}.`);
+		}
 	}
 
 	public async handleConvertCommand(): Promise<void> {
@@ -325,6 +367,10 @@ export class DrawioEditor {
 			{
 				label: ".drawio",
 				description: "Exports the diagram to a drawio file",
+			},
+			{
+				label: ".vsdx",
+				description: "Exports all pages to a Microsoft Visio file",
 			},
 		]);
 

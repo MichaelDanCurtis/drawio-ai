@@ -3,11 +3,11 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
-    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction;
+    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent;
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -157,6 +157,25 @@ declare interface AiExportImageEvent {
     error?: string;
 }
 
+declare interface AiExportVsdxAction {
+    action: "aiExportVsdx";
+    /** Only the page that is visible in the editor; otherwise every page. */
+    currentPageOnly: boolean;
+}
+
+declare interface AiExportVsdxEvent {
+    event: "aiExportVsdx";
+    message: AiExportVsdxAction;
+    /** Base64 of the .vsdx package; empty when the export failed. */
+    data: string;
+    pages: number;
+    shapes: number;
+    connectors: number;
+    images: number;
+    warnings: string[];
+    error?: string;
+}
+
 declare interface AiSearchShapesAction {
     action: "aiSearchShapes";
     query: string;
@@ -234,7 +253,7 @@ declare interface AiLassoEvent {
 
 declare interface InvokeCommandEvent {
     event: "invokeCommand";
-    command: "export" | "save" | "convert";
+    command: "export" | "exportVisio" | "save" | "convert";
 }
 
 declare interface FocusChangedEvent {

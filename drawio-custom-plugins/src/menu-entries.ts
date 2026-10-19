@@ -14,6 +14,12 @@ Draw.loadPlugin((ui) => {
 		sendEvent({ event: "invokeCommand", command: "export" });
 	});
 
+	const exportVisioActionName = "vscode.exportVisio";
+	mxResources.parse(`${exportVisioActionName}=Export as Visio (.vsdx)...`);
+	ui.actions.addAction(exportVisioActionName, () => {
+		sendEvent({ event: "invokeCommand", command: "exportVisio" });
+	});
+
 	const convertActionName = "vscode.convert";
 	mxResources.parse(`${convertActionName}=Convert...`);
 	ui.actions.addAction(convertActionName, () => {
@@ -41,6 +47,7 @@ Draw.loadPlugin((ui) => {
 				"-",
 				importActionName,
 				exportActionName,
+				exportVisioActionName,
 				convertActionName,
 			],
 			parent

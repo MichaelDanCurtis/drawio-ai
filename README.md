@@ -33,6 +33,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 -   **Design templates**: `Draw.AI: Create Design Template…` turns example diagrams (`.drawio`, `.drawio.svg`), shape libraries (`.xml`), style guides (Markdown, text, Word `.docx`, PDF) and reference images into a template. Its palette, fonts, shape per role and connector style are extracted, and you choose what lint enforces. The template lives in the repository (`.drawio-ai/templates/<id>/template.json`, an editable `rules.md`, and copies of the sources), so it is shared through git. The AI follows the active template and flags anything that breaks it. Switch templates with `Draw.AI: Select Design Template…` or the ◆ chip in the chat panel (setting `drawio-ai.template`; a repository with a single template uses it automatically).
 -   **Saved chats**: each diagram keeps its chat panel conversation across VS Code restarts. **New AI Chat** starts over.
 -   **Live code links**: shapes linked to code (by **Diagram from Code…** or **Link Code with Selected Node**) remember what the code looked like. When it moves, changes or disappears, the shape gets a badge; click it to re-point the link, let the AI update the shape, open the code or remove the link. **Draw.AI: Check Code Links** lists every stale link, and the AI can refresh code-derived diagrams with the `drawio_code_links` tool.
+-   **Export from chat**: ask for a Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace, replaces an earlier export only when you agree, and never replaces a diagram.
 -   **External agents (MCP)**: turn on the local MCP server and Claude Code, Cursor and other MCP clients can read and edit the open diagram with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
 
 ## Privacy
@@ -41,6 +42,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 -   API keys are kept in VS Code's secret storage.
 -   Saved chats stay on your machine in VS Code's extension storage (`drawio-ai.persistChat`). Design templates are plain files in your repository.
 -   The MCP server is off by default (`drawio-ai.mcp.enabled`).
+-   Exports, including Visio files, are made inside VS Code. Nothing is uploaded.
 
 ## Main Settings
 
@@ -53,6 +55,24 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 | `drawio-ai.checkCodeLinks` | `true` | Badge shapes whose linked code changed |
 | `drawio-ai.mcp.enabled` / `.port` | `false` / `47821` | Local MCP server for external agents |
 | `drawio-ai.maxToolRounds` | `16` | Tool calls per request before the AI pauses |
+
+## Export to Microsoft Visio
+
+**Draw.io: Export to Visio (.vsdx)…**, **File → Export as Visio (.vsdx)…** in the diagram, or `.vsdx` in **Draw.io: Export To...** saves every page as a Visio file. The AI can do the same with `drawio_export`, optionally for the current page only.
+
+What carries over:
+
+-   Every page, with its name and size. Visible layers, including locked ones.
+-   Shapes as editable Visio shapes, drawn from draw.io's own rendering, so built-in shapes, stencils and vendor icons (AWS, Cisco, ...) keep their outlines. Icons painted in several colors become small groups, one shape per color.
+-   Text with its font, size, color, bold/italic/underline, alignment and bullet lists.
+-   Connectors as Visio dynamic connectors glued to their shapes, with arrowheads, dashes and labels.
+-   Containers, groups and tables as Visio groups.
+-   Images, embedded in the file (SVG images are converted to PNG).
+-   Custom properties as Shape Data, links as hyperlinks and tooltips as ScreenTips.
+
+Not exported: hidden layers (you are told which), LaTeX math, and curved connector routing (connectors keep their waypoints as straight segments; Visio may re-route them when you move shapes). Gradients and opacity are approximated.
+
+The exporter is based on the VSDX exporter that draw.io shipped until v24.7.17 (Copyright JGraph Ltd, Apache License 2.0), updated for current draw.io.
 
 ## Draw.io Editor Features
 

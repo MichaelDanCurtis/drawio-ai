@@ -93,6 +93,7 @@ function progressLabel(tool: string): string {
 		case "drawio_lint": return "Checking the diagram for problems…";
 		case "drawio_get_template": return "Reading the design template…";
 		case "drawio_code_links": return "Checking code links…";
+		case "drawio_export": return "Exporting the diagram…";
 		default: return "Working…";
 	}
 }
@@ -140,8 +141,16 @@ export function registerLanguageModelTools(toolbox: DiagramToolbox): vscode.Disp
 	const DataPart: any = (vscode as any).LanguageModelDataPart;
 	return TOOL_SCHEMAS.map((schema) =>
 		vscode.lm.registerTool<Record<string, unknown>>(schema.name, {
-			prepareInvocation: () => ({
+			prepareInvocation: (options) => ({
 				invocationMessage: progressLabel(schema.name),
+				...(schema.writesFiles && (options.input as any)?.overwrite === true
+					? {
+							confirmationMessages: {
+								title: "Replace file?",
+								message: `Replace ${String((options.input as any).path ?? "the existing export")} with a new export of the diagram?`,
+							},
+					  }
+					: {}),
 			}),
 			invoke: async (options) => {
 				const result = await toolbox.invoke(schema.name, options.input);

@@ -15,6 +15,8 @@ export interface ToolSchema {
 	requiresVision?: boolean;
 	/** Mutates the diagram. */
 	mutates?: boolean;
+	/** Writes files in the workspace. */
+	writesFiles?: boolean;
 }
 
 const OP_KINDS = [
@@ -290,6 +292,26 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 				ids: { type: "array", items: { type: "string" }, description: "Only report these cells." },
 				refresh: { type: "array", items: { type: "string" }, description: "Re-point these cells' links at where their code is now (after you updated the shapes)." },
 			},
+		},
+	},
+	{
+		name: "drawio_export",
+		displayName: "Export Draw.io Diagram",
+		writesFiles: true,
+		description:
+			"Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				format: { type: "string", enum: ["vsdx", "svg", "png", "drawio"] },
+				path: {
+					type: "string",
+					description: "Workspace-relative output path, e.g. \"docs/architecture.vsdx\". Default: next to the diagram, same name with the format's extension.",
+				},
+				currentPageOnly: { type: "boolean", description: "[vsdx] Only the page shown in the editor. Default false (all pages)." },
+				overwrite: { type: "boolean", description: "Replace an existing file. Only after the user agreed. Default false." },
+			},
+			required: ["format"],
 		},
 	},
 	{

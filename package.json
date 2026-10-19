@@ -700,6 +700,48 @@
 				}
 			},
 			{
+				"name": "drawio_export",
+				"displayName": "Export Draw.io Diagram",
+				"toolReferenceName": "drawio-export",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Export Draw.io Diagram",
+				"modelDescription": "Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"format": {
+							"type": "string",
+							"enum": [
+								"vsdx",
+								"svg",
+								"png",
+								"drawio"
+							]
+						},
+						"path": {
+							"type": "string",
+							"description": "Workspace-relative output path, e.g. \"docs/architecture.vsdx\". Default: next to the diagram, same name with the format's extension."
+						},
+						"currentPageOnly": {
+							"type": "boolean",
+							"description": "[vsdx] Only the page shown in the editor. Default false (all pages)."
+						},
+						"overwrite": {
+							"type": "boolean",
+							"description": "Replace an existing file. Only after the user agreed. Default false."
+						}
+					},
+					"required": [
+						"format"
+					]
+				}
+			},
+			{
 				"name": "drawio_get_template",
 				"displayName": "Get Draw.io Design Template",
 				"toolReferenceName": "drawio-get-template",
@@ -809,6 +851,11 @@
 			{
 				"command": "drawio-ai.export",
 				"title": "Export To...",
+				"category": "Draw.io"
+			},
+			{
+				"command": "drawio-ai.exportVisio",
+				"title": "Export to Visio (.vsdx)...",
 				"category": "Draw.io"
 			},
 			{
@@ -1496,7 +1543,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js"
 	},

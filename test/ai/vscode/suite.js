@@ -64,6 +64,7 @@ async function runSteps() {
 			"drawio_search_shapes",
 			"drawio_style_reference",
 			"drawio_get_xml",
+			"drawio_export",
 		]) {
 			assert.ok(names.includes(n), `tool ${n} not registered`);
 		}
@@ -172,6 +173,19 @@ async function runSteps() {
 		const result = await vscode.lm.invokeTool("drawio_render_image", { input: {}, toolInvocationToken: undefined });
 		const text = result.content.map((p) => p.value ?? "").join("");
 		assert.match(text, /Rendered PNG attached/);
+	});
+
+	await step("drawio_export writes a Visio file next to the diagram and never overwrites unasked", async () => {
+		const result = JSON.parse(await invoke("drawio_export", { format: "vsdx" }));
+		assert.equal(result.path.split(/[\\/]/).pop(), "test.vsdx");
+		assert.equal(result.pages, 1);
+		assert.ok(result.shapes >= 2 && result.connectors >= 1, JSON.stringify(result));
+		const bytes = fs.readFileSync(path.join(dir, "test.vsdx"));
+		assert.equal(bytes.readUInt32LE(0), 0x04034b50, "not a ZIP package");
+		assert.ok(bytes.includes(Buffer.from("visio/pages/page1.xml")));
+		assert.match(await invoke("drawio_export", { format: "vsdx" }), /already exists/);
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes("drawio-ai.exportVisio"));
 	});
 
 	await step("v2 commands and tools are registered", async () => {
