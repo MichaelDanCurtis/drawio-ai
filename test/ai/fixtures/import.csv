@@ -1,0 +1,19 @@
+## Team structure, in draw.io's CSV format (Arrange > Insert > Advanced > CSV)
+# label: %name%<br><i style="color:gray;">%role%</i>
+# style: rounded=1;whiteSpace=wrap;html=1;fillColor=%fill%;strokeColor=#666666;
+# namespace: csvimport-
+# connect: {"from": "manager", "to": "name", "invert": true, "label": "reports to", "style": "curved=1;endArrow=blockThin;endFill=1;fontSize=11;"}
+# width: auto
+# height: auto
+# padding: 15
+# ignore: fill
+# nodespacing: 40
+# levelspacing: 60
+# edgespacing: 40
+# layout: verticaltree
+## CSV starts under this line
+name,role,manager,fill
+Ada,CTO,,#dae8fc
+Grace,Platform lead,Ada,#d5e8d4
+Linus,Kernel lead,Ada,#d5e8d4
+Margaret,Engineer,Grace,#fff2cc

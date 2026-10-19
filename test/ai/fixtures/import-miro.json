@@ -1,0 +1,6 @@
+{"isProtected":false,"boardId":"uXjVExample=","version":2,"data":{"objects":[
+{"widgetId":"3458764512000000001","type":14,"widgetData":{"type":"shape","json":{"text":"<p>Idea</p>","shape":7,"position":{"x":100,"y":100},"size":{"width":160,"height":80},"scale":{"scale":1},"style":"{\"bc\":16772608,\"brc\":1710618,\"brw\":2,\"fs\":14,\"ta\":\"c\",\"tav\":\"m\"}"}}},
+{"widgetId":"3458764512000000002","type":14,"widgetData":{"type":"sticker","json":{"text":"<p>Research</p>","position":{"x":400,"y":100},"size":{"width":160,"height":160},"scale":{"scale":0.5},"style":"{\"sbc\":16773494,\"fs\":24}"}}},
+{"widgetId":"3458764512000000003","type":14,"widgetData":{"type":"line","json":{"primary":{"widgetIndex":0,"point":{"x":1,"y":0.5}},"secondary":{"widgetIndex":1,"point":{"x":0,"y":0.5}},"line":{"captions":[{"text":"next","position":{"x":0.5,"y":0},"fontSize":12,"color":0}]},"style":"{\"lc\":0,\"t\":2,\"a_end\":1}"}}},
+{"widgetId":"3458764512000000004","type":14,"widgetData":{"type":"mindmap","json":{"text":"Plan","position":{"x":100,"y":300},"size":{"width":120,"height":40},"scale":{"scale":1},"style":"{}"}}}
+]}}

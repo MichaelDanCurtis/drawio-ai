@@ -1,0 +1,9 @@
+{"Properties":{},"Pages":{"page1":{"Properties":{"Order":0,"Title":"Signup flow","Size":{"w":1000,"h":600}},
+"Blocks":{
+"b1":{"Class":"ProcessBlock","Properties":{"ZOrder":1,"BoundingBox":{"x":40,"y":40,"w":160,"h":80},"FillColor":"#ffffff","LineColor":"#333333","LineWidth":2,"Text":{"t":"Sign up","m":[]}}},
+"b2":{"Class":"DecisionBlock","Properties":{"ZOrder":2,"BoundingBox":{"x":320,"y":30,"w":120,"h":100},"FillColor":"#fff2cc","LineColor":"#333333","LineWidth":2,"Text":{"t":"Valid?","m":[]}}},
+"b3":{"Class":"QuantumFluxCapacitorBlock","Properties":{"ZOrder":3,"BoundingBox":{"x":40,"y":200,"w":100,"h":60},"FillColor":"#ffffff","LineColor":"#333333","LineWidth":1}}
+},
+"Lines":{
+"l1":{"ZOrder":4,"StrokeStyle":"solid","LineWidth":2,"LineColor":"#000000","Shape":"diagonal","Endpoint1":{"Block":"b1","Style":"None","LinkX":1,"LinkY":0.5},"Endpoint2":{"Block":"b2","Style":"Arrow","LinkX":0,"LinkY":0.5},"Text":[]}
+}}}}

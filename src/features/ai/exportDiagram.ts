@@ -98,15 +98,19 @@ export function resolveExportTarget(
 	const joined = absolute ? vscode.Uri.file(withExt).path : `${root.path}/${withExt}`;
 	// Resolve "." and ".." before checking where the file goes.
 	const target = root.with({ path: normalizePath(joined) });
-	const base = root.path.endsWith("/") ? root.path : root.path + "/";
-	const caseInsensitive = /^\/[a-z]:/i.test(base);
-	const inside = caseInsensitive
-		? target.path.toLowerCase().startsWith(base.toLowerCase())
-		: target.path.startsWith(base);
-	if (!inside) {
+	if (!isInsideFolder(root, target)) {
 		throw new Error(`path must be inside ${folder ? "the workspace folder" : "the diagram's folder"}.`);
 	}
 	return target;
+}
+
+/** Whether a normalized path lies below the folder (drive letters compare without case). */
+export function isInsideFolder(root: vscode.Uri, target: vscode.Uri): boolean {
+	const base = root.path.endsWith("/") ? root.path : root.path + "/";
+	const caseInsensitive = /^\/[a-z]:/i.test(base);
+	return caseInsensitive
+		? target.path.toLowerCase().startsWith(base.toLowerCase())
+		: target.path.startsWith(base);
 }
 
 /** Exports stay inside the diagram's workspace folder, or its own folder outside a workspace. */
@@ -119,7 +123,11 @@ function exportRoot(diagram: vscode.Uri): vscode.Uri {
  * refuse targets that pass through a link below the root (a linked folder, or a
  * link in place of the file), since the file could land outside the workspace.
  */
-async function assertNoSymbolicLinks(root: vscode.Uri, target: vscode.Uri): Promise<void> {
+export async function assertNoSymbolicLinks(
+	root: vscode.Uri,
+	target: vscode.Uri,
+	reason = "exports are not written through links"
+): Promise<void> {
 	const base = root.path.endsWith("/") ? root.path : root.path + "/";
 	let at = root;
 	for (const segment of target.path.slice(base.length).split("/").filter(Boolean)) {
@@ -131,12 +139,12 @@ async function assertNoSymbolicLinks(root: vscode.Uri, target: vscode.Uri): Prom
 			return; // Nothing below a missing folder exists yet.
 		}
 		if (stat.type & vscode.FileType.SymbolicLink) {
-			throw new Error(`${vscode.workspace.asRelativePath(at, false)} is a symbolic link; exports are not written through links.`);
+			throw new Error(`${vscode.workspace.asRelativePath(at, false)} is a symbolic link; ${reason}.`);
 		}
 	}
 }
 
-function normalizePath(p: string): string {
+export function normalizePath(p: string): string {
 	const out: string[] = [];
 	for (const segment of p.split("/")) {
 		if (segment === "" || segment === ".") continue;

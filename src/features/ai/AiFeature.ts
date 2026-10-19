@@ -19,6 +19,7 @@ import { linkData, splitLines } from "./codeLinks";
 import { CodeLinkService } from "./CodeLinkService";
 import { McpService } from "./McpService";
 import { exportDiagramToWorkspace } from "./exportDiagram";
+import { importForAgent } from "../importDiagram";
 
 const CODE_GLOB = /\.(tsx?|jsx?|mjs|cjs|py|java|cs|kt|go|sql|prisma|tf|ya?ml)$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "out", "build", ".venv", "venv", "__pycache__", "target", "bin", "obj", ".next", ".terraform", "coverage", ".drawio-ai"]);
@@ -57,7 +58,16 @@ export class AiFeature {
 		() => this.targetEditor(),
 		(editor) => this.templates.active(editor.uri),
 		this.codeLinks,
-		exportDiagramToWorkspace
+		exportDiagramToWorkspace,
+		(request) =>
+			importForAgent(
+				request,
+				(uri, task) => this.editorService.withDrawioWebview(uri, task),
+				() => {
+					const editor = this.targetEditor();
+					return editor ? vscode.Uri.joinPath(editor.uri, "..") : undefined;
+				}
+			)
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
 	private readonly chatView = new ChatViewProvider(

@@ -315,6 +315,21 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		},
 	},
 	{
+		name: "drawio_import",
+		displayName: "Import Diagram File",
+		writesFiles: true,
+		description:
+			"Convert a diagram made in another tool into a new .drawio file next to it, and open it, when the user asks to open, import or convert such a file: Microsoft Visio (.vsdx, .vsd, .vssx stencils, .vstx/.vst templates), Gliffy (.gliffy), yEd/GraphML (.graphml), Lucidchart (.json export), Miro board data (.json copied from a board) or draw.io's CSV format (.csv rows with '# label:'/'# connect:' configuration lines; without them each row becomes one shape). Uses draw.io's own converters inside VS Code; nothing is uploaded. Needs no open diagram. Never replaces a file: when name.drawio exists, name-2.drawio (and so on) is created instead. Returns the new path, page/shape/connector counts and the warnings (unmapped shapes, unreadable parts, linked web images): tell the user about them. Once opened, the new diagram is the one the other tools work on.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: "Workspace-relative path of the file to convert, e.g. \"docs/network.vsdx\"." },
+				open: { type: "boolean", description: "Open the new diagram in the editor. Default true." },
+			},
+			required: ["path"],
+		},
+	},
+	{
 		name: "drawio_get_template",
 		displayName: "Get Draw.io Design Template",
 		description:

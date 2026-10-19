@@ -438,6 +438,7 @@ function toolLabel(name: string): string {
 		case "drawio_get_template": return "Reading the design template…";
 		case "drawio_code_links": return "Checking code links…";
 		case "drawio_export": return "Exporting…";
+		case "drawio_import": return "Importing…";
 		default: return `${name}…`;
 	}
 }
