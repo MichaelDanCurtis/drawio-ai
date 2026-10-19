@@ -10,6 +10,7 @@ import { LiveshareFeature } from "./features/LiveshareFeature";
 import { AiFeature } from "./features/ai/AiFeature";
 import { DrawioClientFactory } from "./DrawioClient";
 import { registerFailableCommand } from "./utils/registerFailableCommand";
+import { registerImportCommands } from "./features/importDiagram";
 
 export class Extension {
 	public readonly dispose = Disposable.fn();
@@ -41,6 +42,17 @@ export class Extension {
 	);
 
 	constructor(private readonly context: vscode.ExtensionContext) {
+		for (const d of registerImportCommands(
+			(uri, task) => this.editorService.withDrawioWebview(uri, task),
+			() => {
+				const editor = this.editorService.activeDrawioEditor ?? this.editorService.lastActiveDrawioEditor;
+				return editor ? vscode.Uri.joinPath(editor.uri, "..") : vscode.workspace.workspaceFolders?.[0]?.uri;
+			},
+			(folder) => this.editorService.assertBundledDrawio(folder)
+		)) {
+			this.dispose.track(d);
+		}
+
 		this.dispose.track(
 			vscode.window.registerCustomEditorProvider(
 				"drawio-ai-text",

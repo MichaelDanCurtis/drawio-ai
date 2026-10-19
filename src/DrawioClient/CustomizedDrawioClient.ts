@@ -1,5 +1,30 @@
 import { EventEmitter } from "@hediet/std/events";
+import { BufferImpl } from "../utils/buffer";
 import { DrawioClient } from "./DrawioClient";
+
+export interface VsdxExport {
+	data: BufferImpl;
+	pages: number;
+	shapes: number;
+	connectors: number;
+	images: number;
+	/** Things that did not carry over (hidden layers, images that could not be loaded). */
+	warnings: string[];
+}
+
+export type DiagramImportFormat = AiImportDiagramAction["format"];
+
+export interface DiagramImport {
+	/** An uncompressed <mxfile>. */
+	xml: string;
+	/** "stencil" when a Visio stencil's shapes were laid out on a page. */
+	kind: "diagram" | "stencil";
+	pages: number;
+	shapes: number;
+	connectors: number;
+	/** What did not carry over (unmapped shapes, unreadable parts, linked images). */
+	warnings: string[];
+}
 
 /**
  * Enhances the drawio client with custom events and methods.
@@ -87,6 +112,11 @@ export class CustomizedDrawioClient extends DrawioClient<
 			return Promise.resolve();
 		}
 		return new Promise((resolve) => this.aiPluginWaiters.push(resolve));
+	}
+
+	/** Resolves true once draw.io and the AI plugin have loaded, false after the timeout. */
+	public whenLoaded(timeoutMs: number): Promise<boolean> {
+		return withTimeout(this.whenAiPluginLoaded().then(() => true), timeoutMs, "").catch(() => false);
 	}
 
 	/** A lost message (e.g. the webview reloaded) must fail the tool call instead of hanging the agent. */
@@ -185,6 +215,41 @@ export class CustomizedDrawioClient extends DrawioClient<
 			throw new Error("Invalid Response");
 		}
 		return response.dataUrl || undefined;
+	}
+
+	/** Exports the diagram as a Microsoft Visio (.vsdx) file. */
+	public async exportVsdx(options: { currentPageOnly?: boolean } = {}): Promise<VsdxExport> {
+		const response = await this.aiRequest(
+			{ action: "aiExportVsdx", currentPageOnly: !!options.currentPageOnly },
+			120_000
+		);
+		if (response.event !== "aiExportVsdx") {
+			throw new Error("Invalid Response");
+		}
+		if (response.error || !response.data) {
+			throw new Error(`Visio export failed: ${response.error ?? "no data"}`);
+		}
+		const { pages, shapes, connectors, images, warnings } = response;
+		return { data: BufferImpl.from(response.data, "base64"), pages, shapes, connectors, images, warnings };
+	}
+
+	/**
+	 * Converts a file from another tool (Visio, Gliffy, GraphML, Lucidchart) with
+	 * draw.io's own importers, inside this webview. The open diagram is not touched.
+	 */
+	public async importDiagram(format: DiagramImportFormat, fileName: string, data: Uint8Array): Promise<DiagramImport> {
+		const response = await this.aiRequest(
+			{ action: "aiImportDiagram", format, fileName, data: BufferImpl.from(data).toString("base64") },
+			120_000
+		);
+		if (response.event !== "aiImportDiagram") {
+			throw new Error("Invalid Response");
+		}
+		if (response.error || !response.xml) {
+			throw new Error(response.error ?? "draw.io returned no diagram.");
+		}
+		const { xml, kind, pages, shapes, connectors, warnings } = response;
+		return { xml, kind, pages, shapes, connectors, warnings };
 	}
 
 	public async aiSearchShapes(

@@ -1,4 +1,6 @@
 import { sendEvent } from "./vscode";
+import { exportVsdx } from "./vsdx/VsdxExport";
+import { importDiagram } from "./import/importDiagram";
 
 const W = window as any;
 const ACCENT = "#a855f7";
@@ -1381,6 +1383,49 @@ Draw.loadPlugin((ui: any) => {
 	}
 
 	// ---------------------------------------------------------------------
+	// Visio export
+	// ---------------------------------------------------------------------
+
+	async function exportVisio(action: AiExportVsdxAction): Promise<AiExportVsdxEvent> {
+		const empty = { data: "", pages: 0, shapes: 0, connectors: 0, images: 0, warnings: [] as string[] };
+		try {
+			const result = await exportVsdx(ui, { currentPageOnly: action.currentPageOnly });
+			return { event: "aiExportVsdx", message: action, ...result, data: toBase64(result.data) };
+		} catch (e: any) {
+			return { event: "aiExportVsdx", message: action, ...empty, error: String(e?.message ?? e) };
+		}
+	}
+
+	// ---------------------------------------------------------------------
+	// Importing files from other tools (Visio, Gliffy, GraphML, Lucidchart)
+	// ---------------------------------------------------------------------
+
+	/** Converts a file with draw.io's own importers; the open diagram is not touched. */
+	async function importFile(action: AiImportDiagramAction): Promise<AiImportDiagramEvent> {
+		const message = { ...action, data: "" };
+		try {
+			const binary = atob(action.data);
+			const bytes = new Uint8Array(binary.length);
+			for (let i = 0; i < binary.length; i++) {
+				bytes[i] = binary.charCodeAt(i);
+			}
+			const result = await importDiagram(ui, action.format, bytes, action.fileName, { timeoutMs: action.timeoutMs });
+			return { event: "aiImportDiagram", message, ...result };
+		} catch (e: any) {
+			const error = String(e?.message ?? e);
+			return { event: "aiImportDiagram", message, xml: "", kind: "diagram", pages: 0, shapes: 0, connectors: 0, warnings: [], error };
+		}
+	}
+
+	function toBase64(bytes: Uint8Array): string {
+		let s = "";
+		for (let i = 0; i < bytes.length; i += 0x8000) {
+			s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000) as unknown as number[]);
+		}
+		return btoa(s);
+	}
+
+	// ---------------------------------------------------------------------
 	// Shape library search (draw.io's own sidebar index)
 	// ---------------------------------------------------------------------
 
@@ -2231,6 +2276,12 @@ Draw.loadPlugin((ui: any) => {
 				break;
 			case "aiSearchShapes":
 				sendEvent(await searchShapes(data));
+				break;
+			case "aiExportVsdx":
+				sendEvent(await exportVisio(data));
+				break;
+			case "aiImportDiagram":
+				sendEvent(await importFile(data));
 				break;
 			case "aiSetBadges":
 				setBadges(data.group, data.badges);

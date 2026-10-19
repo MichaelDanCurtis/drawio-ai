@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Export to Microsoft Visio (`.vsdx`): **Draw.io: Export to Visio (.vsdx)…**, **File → Export as Visio (.vsdx)…** in the diagram, and `.vsdx` in **Draw.io: Export To...**. Exports every page with editable shapes (including stencils and vendor icons), formatted text, glued connectors, groups, layers, images, Shape Data, hyperlinks and ScreenTips
+- `drawio_export` tool for the chat panel, Copilot and MCP agents: writes a `.vsdx`, `.svg`, `.png` or `.drawio` export inside the workspace (never through symbolic links); it asks before replacing an earlier export and never replaces a diagram
+- Open diagrams from other tools: **Draw.io: Open Visio File as Draw.io…** (also on Visio files in the Explorer) and **Draw.io: Import Diagram from Another Tool…** (also **File → Open from Another Tool…** in the diagram) convert Microsoft Visio (`.vsdx`, `.vstx`, `.vssx` stencils, binary `.vsd`/`.vst`/`.vss`), Gliffy, yEd (GraphML), Lucidchart and Miro files, and draw.io's CSV format, with draw.io's own importers, inside VS Code, into a new `.drawio` file next to the original. Existing files are never replaced, and what did not carry over is reported
+- `drawio_import` tool: the chat panel, Copilot and MCP agents can convert such a file from the workspace (never through symbolic links) and open it
+
 ## [0.1.0]
 
 First release of Draw.AI, based on hediet/vscode-drawio 1.17.0.

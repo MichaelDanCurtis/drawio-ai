@@ -635,3 +635,514 @@ test("badges: shown on cells, replaced per group, clickable, never saved", async
 	assert.doesNotMatch(saved.xml, /moved|aiBadge|Code link/);
 	await send({ action: "aiSetBadges", group: "codeLinks", badges: [] });
 });
+
+// ---------------------------------------------------------------------------
+// Visio export
+// ---------------------------------------------------------------------------
+
+const { unzip } = require("./unzip");
+const visioFixture = fs.readFileSync(path.join(__dirname, "fixtures/visio-export.drawio"), "utf8");
+
+async function loadFixture(xml) {
+	inbox.length = 0;
+	await send({ action: "load", xml, autosave: 1 });
+	await page.waitForFunction((n) => (editorUi.pages || []).length === n, (xml.match(/<diagram /g) || []).length);
+	await page.waitForFunction(() => editorUi.editor.graph.model.getCell("a") != null);
+}
+
+async function exportVisio(currentPageOnly = false) {
+	const r = await request({ action: "aiExportVsdx", currentPageOnly }).catch((e) => assert.fail(e));
+	assert.equal(r.error, undefined);
+	return { ...r, files: unzip(Buffer.from(r.data, "base64")) };
+}
+
+/** Parses the page XML in the browser and returns its shapes as a tree. */
+function shapesOf(xml) {
+	return page.evaluate((xml) => {
+		const doc = new DOMParser().parseFromString(xml, "application/xml");
+		if (doc.getElementsByTagName("parsererror").length) return { error: doc.documentElement.textContent };
+		const kids = (el, name) => Array.from(el.children).filter((c) => c.localName === name);
+		const cells = (el) => Object.fromEntries(kids(el, "Cell").map((c) => [c.getAttribute("N"), c.getAttribute("V")]));
+		const shape = (s) => {
+			const text = kids(s, "Text")[0];
+			const sub = kids(s, "Shapes")[0];
+			return {
+				id: s.getAttribute("ID"),
+				type: s.getAttribute("Type"),
+				master: s.getAttribute("Master"),
+				cells: cells(s),
+				text: text ? text.textContent : null,
+				sections: kids(s, "Section").map((x) => x.getAttribute("N")),
+				data: kids(s, "Section")
+					.filter((x) => x.getAttribute("N") === "Property")
+					.flatMap((x) => kids(x, "Row").map((r) => [cells(r).Label, cells(r).Value])),
+				link: kids(s, "Section").filter((x) => x.getAttribute("N") === "Hyperlink").map((x) => cells(kids(x, "Row")[0]).Address)[0],
+				order: Array.from(s.children).map((c) => c.localName),
+				children: sub ? kids(sub, "Shape").map(shape) : [],
+			};
+		};
+		const root = doc.documentElement;
+		return {
+			shapes: kids(kids(root, "Shapes")[0], "Shape").map(shape),
+			connects: Array.from(root.getElementsByTagName("Connect")).map((c) => [c.getAttribute("FromSheet"), c.getAttribute("FromCell"), c.getAttribute("ToSheet")]),
+		};
+	}, xml);
+}
+
+const flat = (shapes) => shapes.flatMap((s) => [s, ...flat(s.children)]);
+const byText = (shapes, text) => flat(shapes).find((s) => s.text && s.text.includes(text));
+
+test("Visio export: a valid package with every page, image and connector", async () => {
+	await loadFixture(visioFixture);
+	const r = await exportVisio();
+	assert.deepEqual([r.pages, r.connectors, r.images], [2, 4, 2]);
+	assert.deepEqual(r.warnings, ["Hidden layers were not exported: Notes layer"]);
+
+	const names = Object.keys(r.files);
+	assert.equal(names[0], "[Content_Types].xml");
+	for (const part of ["visio/document.xml", "visio/pages/pages.xml", "visio/pages/page1.xml", "visio/pages/page2.xml", "visio/masters/master1.xml", "docProps/core.xml"]) {
+		assert.ok(names.includes(part), `missing ${part}`);
+	}
+
+	// Every part has a content type and every relationship points at a part that exists.
+	const types = r.files["[Content_Types].xml"].data.toString();
+	for (const name of names.filter((n) => n !== "[Content_Types].xml")) {
+		const ext = name.split(".").pop();
+		assert.ok(types.includes(`PartName="/${name}"`) || types.includes(`Extension="${ext}"`), `no content type for ${name}`);
+	}
+	for (const rels of names.filter((n) => n.endsWith(".rels"))) {
+		const dir = path.posix.dirname(path.posix.dirname(rels));
+		for (const [, target] of r.files[rels].data.toString().matchAll(/Target="([^"]+)"/g)) {
+			const resolved = path.posix.normalize(path.posix.join(dir, target)).replace(/^\.\//, "");
+			assert.ok(names.includes(resolved), `${rels} points at missing ${resolved}`);
+		}
+	}
+
+	const pagesXml = r.files["visio/pages/pages.xml"].data.toString();
+	assert.deepEqual([...pagesXml.matchAll(/<Page [^>]*Name="([^"]+)"/g)].map((m) => m[1]), ["Overview", "Overview (2)"]);
+	const xml = r.files["visio/pages/page1.xml"].data.toString();
+	assert.doesNotMatch(xml, /light-dark|var\(/);
+	assert.doesNotMatch(xml, /Hidden note/);
+
+	const { shapes, connects, error } = await shapesOf(xml);
+	assert.equal(error, undefined);
+	const api = byText(shapes, "Gateway");
+	assert.equal(api.text, "API Gateway");
+	assert.equal(api.cells.FillForegnd, "#DAE8FC");
+	assert.equal(api.cells.LineColor, "#6C8EBF");
+	// Children in schema order: Cells, then Sections, then Text.
+	assert.deepEqual([...new Set(api.order)], ["Cell", "Section", "Text"]);
+
+	const worker = byText(shapes, "Worker");
+	assert.deepEqual(worker.data, [["owner", "team-a"], ["cost-center", "42"]]);
+	assert.equal(worker.link, "https://example.com/worker");
+	assert.equal(worker.cells.Comment, "Runs jobs");
+	assert.ok(Math.abs(parseFloat(worker.cells.Angle) - (330 * Math.PI) / 180) < 1e-9);
+
+	// The AWS icon is painted in two colors: an orange tile and a white glyph.
+	const lambda = byText(shapes, "Lambda");
+	assert.equal(lambda.type, "Group");
+	assert.deepEqual(lambda.children.map((c) => c.cells.FillForegnd), ["#ED7100", "#FFFFFF"]);
+
+	const pool = byText(shapes, "Pool");
+	const group = shapes.find((s) => s.children.includes(pool) || s.children.some((c) => c.id === pool.id));
+	assert.equal(group.type, "Group");
+	assert.deepEqual(group.children.map((c) => c.text ?? (c.master === "4" ? "connector" : null)), ["Pool", "Task", "Step 2", "connector"]);
+
+	assert.equal(flat(shapes).filter((s) => s.master === "4").length, 3);
+	assert.equal(connects.length, 6, "each connector is glued at both ends");
+	const ids = new Set(flat(shapes).map((s) => s.id));
+	for (const [from, , to] of connects) assert.ok(ids.has(from) && ids.has(to));
+
+	const page2 = await shapesOf(r.files["visio/pages/page2.xml"].data.toString());
+	assert.equal(flat(page2.shapes).filter((s) => s.type === "Foreign").length, 2);
+	assert.equal(page2.connects.length, 2);
+});
+
+test("Visio export: draw.io's own Visio importer reads the file back", async () => {
+	await loadFixture(visioFixture);
+	const { data } = await exportVisio();
+	const back = await page.evaluate(async (b64) => {
+		const ui = editorUi;
+		if (!ui.doImportVisio) {
+			await new Promise((resolve, reject) => mxscript("js/extensions.min.js", resolve, null, null, null, reject));
+		}
+		const blob = new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))]);
+		const xml = await new Promise((resolve, reject) =>
+			ui.importVisio(blob, resolve, (e) => reject(new Error(e?.message || String(e))), "export.vsdx")
+		);
+		const doc = mxUtils.parseXml(xml);
+		return Array.from(doc.getElementsByTagName("diagram")).map((d) => {
+			let model = d.getElementsByTagName("mxGraphModel")[0];
+			if (!model) model = mxUtils.parseXml(Graph.decompress(d.textContent)).documentElement;
+			const cells = Array.from(model.getElementsByTagName("mxCell"));
+			const label = (c) => {
+				const owner = /^(object|UserObject)$/.test(c.parentNode.nodeName) ? c.parentNode : c;
+				const div = document.createElement("div");
+				div.innerHTML = owner.getAttribute("value") || owner.getAttribute("label") || "";
+				div.querySelectorAll("li, p, div, br").forEach((e) => e.append(" "));
+				return div.textContent.replace(/\s+/g, " ").trim();
+			};
+			return {
+				name: d.getAttribute("name"),
+				labels: cells.map(label).filter(Boolean),
+				edges: cells.filter((c) => c.getAttribute("edge") === "1").map((c) => !!c.getAttribute("source") && !!c.getAttribute("target")),
+				data: Array.from(model.getElementsByTagName("*"))
+					.filter((o) => /^(object|UserObject)$/.test(o.nodeName) && o.getAttribute("owner"))
+					.map((o) => [o.getAttribute("owner"), o.getAttribute("cost-center"), o.getAttribute("link")]),
+			};
+		});
+	}, data);
+
+	assert.deepEqual(back.map((p) => p.name), ["Overview", "Overview (2)"]);
+	for (const label of ["API Gateway", "Orders DB", "queries", "sql", "Worker", "Pool", "Task", "Step 2", "Lambda", "one two red tail"]) {
+		assert.ok(back[0].labels.includes(label), `"${label}" did not survive: ${back[0].labels.join(" | ")}`);
+	}
+	assert.deepEqual(back[0].edges, [true, true, true], "connectors stay glued");
+	assert.deepEqual(back[0].data, [["team-a", "42", "https://example.com/worker"]]);
+	assert.deepEqual(back[1].labels, ["Second page", "Also here"]);
+	assert.deepEqual(back[1].edges, [true]);
+});
+
+test("Visio export: only the current page, without touching the editor", async () => {
+	await loadFixture(visioFixture);
+	await page.evaluate(() => editorUi.selectPage(editorUi.pages[1]));
+	const before = await page.evaluate(() => ({
+		page: editorUi.currentPage.getId(),
+		xml: mxUtils.getXml(editorUi.editor.getGraphXml()),
+		undo: editorUi.editor.undoManager.history.length,
+	}));
+	const r = await exportVisio(true);
+	assert.equal(r.pages, 1);
+	assert.ok(!("visio/pages/page2.xml" in r.files));
+	assert.doesNotMatch(r.files["[Content_Types].xml"].data.toString(), /page2/);
+	assert.match(r.files["visio/pages/pages.xml"].data.toString(), /Name="Overview"/);
+	assert.match(r.files["visio/pages/page1.xml"].data.toString(), /Second page/);
+	const after = await page.evaluate(() => ({
+		page: editorUi.currentPage.getId(),
+		xml: mxUtils.getXml(editorUi.editor.getGraphXml()),
+		undo: editorUi.editor.undoManager.history.length,
+	}));
+	assert.deepEqual(after, before);
+});
+
+test("Visio export: label anchoring, directions, plain containers, data names and connector glue", async () => {
+	const xml = `<mxfile><diagram id="q" name="Edge cases"><mxGraphModel><root>
+<mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="left" value="Hi" style="text;html=1;align=left;verticalAlign=top;spacing=0;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="200" height="60" as="geometry"/></mxCell>
+<mxCell id="west" value="West" style="triangle;whiteSpace=wrap;html=1;direction=west;" vertex="1" parent="1"><mxGeometry x="300" y="40" width="80" height="80" as="geometry"/></mxCell>
+<mxCell id="south" value="South" style="shape=process;whiteSpace=wrap;html=1;direction=south;" vertex="1" parent="1"><mxGeometry x="420" y="40" width="160" height="60" as="geometry"/></mxCell>
+<mxCell id="plain" parent="1"/>
+<mxCell id="a" value="Inside plain" style="whiteSpace=wrap;html=1;" vertex="1" parent="plain"><mxGeometry x="40" y="200" width="100" height="40" as="geometry"/></mxCell>
+<object id="d" label="Data" Owner="x" owner="y"><mxCell style="whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="300" y="200" width="100" height="40" as="geometry"/></mxCell></object>
+<mxCell id="e1" style="html=1;" edge="1" parent="1" source="a" target="d"><mxGeometry relative="1" as="geometry"/></mxCell>
+<mxCell id="e2" style="html=1;" edge="1" parent="1" source="west" target="e1"><mxGeometry relative="1" as="geometry"/></mxCell>
+</root></mxGraphModel></diagram></mxfile>`;
+	inbox.length = 0;
+	await send({ action: "load", xml, autosave: 1 });
+	await page.waitForFunction(() => editorUi.editor.graph.model.getCell("e2") != null);
+	const r = await exportVisio();
+	const { shapes, connects } = await shapesOf(r.files["visio/pages/page1.xml"].data.toString());
+	const num = (s, n) => parseFloat(s.cells[n]);
+	const near = (a, b, what) => assert.ok(Math.abs(a - b) < 1e-6, `${what}: ${a} != ${b}`);
+	const inch = 101.6;
+
+	// A left/top aligned label: the text block's top-left corner is the label box's top-left corner.
+	const left = byText(shapes, "Hi");
+	const anchor = await page.evaluate(() => {
+		const g = editorUi.editor.graph;
+		const st = g.view.getState(g.model.getCell("left"));
+		return { x: (st.text.bounds.x - st.x) / g.view.scale, y: (st.text.bounds.y - st.y) / g.view.scale };
+	});
+	near(num(left, "TxtLocPinX"), 0, "TxtLocPinX");
+	near(num(left, "TxtLocPinY"), num(left, "TxtHeight"), "TxtLocPinY");
+	near(num(left, "TxtPinX"), anchor.x / inch, "TxtPinX");
+	near(num(left, "TxtPinY"), (60 - anchor.y) / inch, "TxtPinY");
+	assert.equal(left.cells.VerticalAlign, "0");
+
+	// direction turns the outline, never the label.
+	const west = byText(shapes, "West");
+	near(num(west, "Angle"), Math.PI, "west Angle");
+	near(num(west, "TxtAngle"), Math.PI, "west TxtAngle");
+	const south = byText(shapes, "South");
+	near(num(south, "Width"), 60 / inch, "south Width");
+	near(num(south, "Height"), 160 / inch, "south Height");
+	near(num(south, "Angle") + num(south, "TxtAngle"), 2 * Math.PI, "south text upright");
+
+	// Shapes inside a plain (non-shape) container cell are exported.
+	const inside = byText(shapes, "Inside plain");
+	assert.ok(inside, "shape in a plain container was dropped");
+
+	// Visio row names are case-insensitive.
+	const data = byText(shapes, "Data");
+	assert.deepEqual(data.data, [["Owner", "x"], ["owner", "y"]]);
+	const rowNames = await page.evaluate((xml) => {
+		const doc = new DOMParser().parseFromString(xml, "application/xml");
+		return Array.from(doc.getElementsByTagName("Row")).map((r) => r.getAttribute("N")).filter(Boolean);
+	}, r.files["visio/pages/page1.xml"].data.toString());
+	assert.equal(new Set(rowNames.map((n) => n.toLowerCase())).size, rowNames.length);
+
+	// Connectors glue to shapes only; every trigger formula names a sheet on the page.
+	const ids = new Set(flat(shapes).map((s) => s.id));
+	const connectorIds = new Set(flat(shapes).filter((s) => s.master === "4").map((s) => s.id));
+	assert.equal(connects.length, 3, JSON.stringify(connects));
+	for (const [, , to] of connects) assert.ok(ids.has(to) && !connectorIds.has(to));
+	for (const [, sheet] of r.files["visio/pages/page1.xml"].data.toString().matchAll(/_XFTRIGGER\(Sheet\.(\d+)!/g)) {
+		assert.ok(ids.has(sheet) && !connectorIds.has(sheet), `trigger points at sheet ${sheet}`);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Opening files from other tools (Visio, Gliffy, GraphML, Lucidchart)
+// ---------------------------------------------------------------------------
+// import.vsdx was written by the Visio exporter above; import.vssx is the same
+// package marked as a stencil, with a "Web tier" master added. The Gliffy, GraphML
+// and Lucidchart files are small hand-written exports.
+
+const fixture64 = (name) => fs.readFileSync(path.join(__dirname, "fixtures", name)).toString("base64");
+const importFile = (format, fileName, data = fixture64(fileName), extra = {}) =>
+	request({ action: "aiImportDiagram", format, fileName, data, ...extra });
+
+/** Every request the page makes while the import tests run; all must go to the local test server. */
+const importRequests = [];
+const recordRequest = (r) => importRequests.push({ method: r.method(), url: r.url() });
+
+/** Page names, labels as text, whether each connector is glued at both ends, and custom data. */
+function readImported(xml) {
+	return page.evaluate((xml) => {
+		const doc = mxUtils.parseXml(xml);
+		return Array.from(doc.documentElement.children).map((d) => {
+			const model = d.getElementsByTagName("mxGraphModel")[0];
+			const cells = model ? Array.from(model.getElementsByTagName("mxCell")) : [];
+			const label = (c) => {
+				const owner = /^(object|UserObject)$/.test(c.parentNode.nodeName) ? c.parentNode : c;
+				const div = document.createElement("div");
+				div.innerHTML = owner.getAttribute("value") || owner.getAttribute("label") || "";
+				div.querySelectorAll("li, p, div, br").forEach((e) => e.append(" "));
+				return div.textContent.replace(/\s+/g, " ").trim();
+			};
+			return {
+				name: d.getAttribute("name"),
+				inline: !!model,
+				labels: cells.map(label).filter(Boolean),
+				edges: cells.filter((c) => c.getAttribute("edge") === "1").map((c) => !!c.getAttribute("source") && !!c.getAttribute("target")),
+				data: model
+					? Array.from(model.getElementsByTagName("*"))
+							.filter((o) => /^(object|UserObject)$/.test(o.nodeName) && o.getAttribute("owner"))
+							.map((o) => o.getAttribute("owner"))
+					: [],
+			};
+		});
+	}, xml);
+}
+
+test("import: a Visio drawing, read with draw.io's own importer, leaves the open diagram alone", async () => {
+	page.on("request", recordRequest);
+	await loadFixture(visioFixture);
+	const editorState = () =>
+		page.evaluate(() => ({ xml: mxUtils.getXml(editorUi.editor.getGraphXml()), undo: editorUi.editor.undoManager.history.length }));
+	const before = await editorState();
+
+	const r = await importFile("visio", "import.vsdx");
+	assert.equal(r.error, undefined);
+	assert.equal(r.message.data, "", "the file is not echoed back");
+	assert.deepEqual([r.kind, r.pages, r.shapes, r.connectors, r.warnings], ["diagram", 2, 3, 1, []]);
+	assert.match(r.xml, /^<mxfile host="65bd71144e"><diagram name="Architecture" id="[^"]+"><mxGraphModel/);
+
+	const pages = await readImported(r.xml);
+	assert.deepEqual(pages.map((p) => [p.name, p.inline]), [["Architecture", true], ["Notes", true]]);
+	for (const label of ["Web App", "Orders DB", "SQL"]) {
+		assert.ok(pages[0].labels.includes(label), `"${label}" missing: ${pages[0].labels.join(" | ")}`);
+	}
+	assert.deepEqual(pages[0].edges, [true], "the connector stays glued");
+	assert.deepEqual(pages[0].data, ["team-a"], "Shape Data becomes custom data");
+	assert.deepEqual(pages[1].labels, ["Deployed nightly"]);
+	assert.deepEqual(await editorState(), before);
+});
+
+test("import: a Visio stencil becomes one page with every master and its name", async () => {
+	const r = await importFile("visio", "import.vssx");
+	assert.equal(r.error, undefined);
+	assert.deepEqual([r.kind, r.pages], ["stencil", 1]);
+	const entries = await page.evaluate(async (vssx) => {
+		const xml = await new Promise((done, fail) => editorUi.doImportVisio(new Blob([Uint8Array.from(atob(vssx), (c) => c.charCodeAt(0))]), done, fail, "s.vssx"));
+		return JSON.parse(mxUtils.parseXml(xml).documentElement.textContent.replace(/:NaN/g, ":null")).length;
+	}, fixture64("import.vssx"));
+	assert.equal(r.shapes, entries, "one shape per stencil entry, not per cell or name label");
+	const [stencil] = await readImported(r.xml);
+	assert.equal(stencil.name, "import");
+	for (const label of ["Web tier", "Dynamic connector", "Web App"]) {
+		assert.ok(stencil.labels.includes(label), `"${label}" missing: ${stencil.labels.join(" | ")}`);
+	}
+});
+
+test("import: binary Visio (.vsd) goes through drawio-vsd, and what it could not read is reported", async () => {
+	const header = Buffer.concat([Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]), Buffer.alloc(1024)]).toString("base64");
+	// The real converter is loaded from draw.io's own files and rejects a damaged file.
+	const damaged = await importFile("visio", "damaged.vsd", header);
+	assert.match(damaged.error, /This binary Visio file could not be read/);
+	assert.equal(await page.evaluate(() => typeof DrawioVsd.convert), "function");
+
+	// No real .vsd can be made without Visio: stand in for drawio-vsd with one that
+	// returns the .vsdx fixture and a warning, to check what is done with its result.
+	await page.evaluate((vsdx) => {
+		window.__drawioVsd = DrawioVsd;
+		window.DrawioVsd = {
+			convert: (bytes, options) => {
+				window.__vsdCall = { bytes: bytes.length, filename: options.filename };
+				return { type: "vsdx", warnings: ["No layout for record 0x47 on page 1", "Shape 3 Width: bad formula"], bytes: () => Uint8Array.from(atob(vsdx), (c) => c.charCodeAt(0)) };
+			},
+		};
+	}, fixture64("import.vsdx"));
+	try {
+		const r = await importFile("visio", "legacy.vsd", header);
+		assert.equal(r.error, undefined);
+		assert.deepEqual(await page.evaluate(() => window.__vsdCall), { bytes: 1032, filename: "legacy.vsd" });
+		assert.equal(r.pages, 2);
+		assert.equal(r.warnings.length, 1);
+		assert.match(r.warnings[0], /^2 parts of the binary Visio file could not be read .*first: No layout for record 0x47 on page 1/);
+	} finally {
+		await page.evaluate(() => (window.DrawioVsd = window.__drawioVsd));
+	}
+});
+
+test("import: Gliffy, with the converter's own warnings", async () => {
+	const r = await importFile("gliffy", "import.gliffy");
+	assert.equal(r.error, undefined);
+	assert.deepEqual([r.pages, r.connectors], [1, 1]);
+	const [p] = await readImported(r.xml);
+	assert.ok(p.labels.includes("Checkout") && p.labels.includes("Inventory"), p.labels.join(" | "));
+	assert.deepEqual(p.edges, [true]);
+	assert.equal(r.warnings.length, 1);
+	assert.match(r.warnings[0], /^Object 5 \(com\.gliffy\.shape\.example\.example_v1\.default\.mystery\) has no mapping/);
+});
+
+test("import: yEd GraphML with a connector", async () => {
+	// draw.io 32's GraphML importer fails on any connector without the plugin's fix.
+	const r = await importFile("graphml", "import.graphml");
+	assert.equal(r.error, undefined);
+	const [p] = await readImported(r.xml);
+	assert.equal(p.name, "Page-1");
+	for (const label of ["Order Service", "Payments", "charges"]) {
+		assert.ok(p.labels.includes(label), `"${label}" missing: ${p.labels.join(" | ")}`);
+	}
+	assert.deepEqual(p.edges, [true]);
+	assert.deepEqual(r.warnings, []);
+});
+
+test("import: Lucidchart, naming the shapes that have no draw.io equivalent", async () => {
+	const r = await importFile("lucidchart", "import-lucidchart.json");
+	assert.equal(r.error, undefined);
+	const [p] = await readImported(r.xml);
+	assert.equal(p.name, "Signup flow");
+	assert.ok(p.labels.includes("Sign up") && p.labels.includes("Valid?"), p.labels.join(" | "));
+	assert.deepEqual(p.edges, [true]);
+	assert.deepEqual(r.warnings, [
+		"No mapping found for: QuantumFluxCapacitorBlock",
+		"Some Lucidchart shapes have no draw.io equivalent; they were imported as plain shapes or left out.",
+	]);
+});
+
+test("import: broken files fail with a message, also when draw.io's converter crashes or hangs", async () => {
+	const b64 = (s) => Buffer.from(s).toString("base64");
+	assert.match((await importFile("visio", "x.vsdx", b64("hello"))).error, /not a Visio file draw\.io can read/);
+	const docx = await page.evaluate(() => new JSZip().file("word/document.xml", "<w:document/>").generateAsync({ type: "base64" }));
+	assert.match((await importFile("visio", "renamed.vsdx", docx)).error, /not a Visio package/);
+	assert.match((await importFile("graphml", "x.graphml", b64("<html/>"))).error, /not a GraphML file/);
+	assert.match((await importFile("lucidchart", "x.json", b64('{"name":"x"}'))).error, /not a Lucidchart export/);
+	const empty = '{"contentType":"application/gliffy+json","version":"1.3","stage":{"objects":[],"layers":[]}}';
+	assert.match((await importFile("gliffy", "empty.gliffy", b64(empty))).error, /contains no shapes/);
+
+	// A stencil without pages makes draw.io's Visio codec throw from inside a promise.
+	const noPages = await page.evaluate(async (vssx) => {
+		const zip = await JSZip.loadAsync(vssx, { base64: true });
+		for (const name of Object.keys(zip.files)) if (name.startsWith("visio/pages/")) zip.remove(name);
+		const rels = await zip.file("visio/_rels/document.xml.rels").async("string");
+		zip.file("visio/_rels/document.xml.rels", rels.replace(/<Relationship Id='rId2'[^>]*\/>/, ""));
+		const types = await zip.file("[Content_Types].xml").async("string");
+		zip.file("[Content_Types].xml", types.replace(/<Override PartName="\/visio\/pages\/[^>]*\/>/g, ""));
+		return zip.generateAsync({ type: "base64" });
+	}, fixture64("import.vssx"));
+	const started = Date.now();
+	const crashed = await importFile("visio", "broken.vssx", noPages);
+	assert.match(crashed.error, /^draw\.io's converter failed: /);
+	assert.ok(Date.now() - started < 10000, "a crash must not wait for the timeout");
+
+	await page.evaluate(() => {
+		window.__doImportGraphML = editorUi.doImportGraphML;
+		editorUi.doImportGraphML = () => {};
+	});
+	try {
+		const hung = await importFile("graphml", "import.graphml", undefined, { timeoutMs: 300 });
+		assert.match(hung.error, /did not finish within 0s/);
+	} finally {
+		await page.evaluate(() => (editorUi.doImportGraphML = window.__doImportGraphML));
+	}
+	// Later conversions are not held up by the ones that failed.
+	assert.equal((await importFile("graphml", "import.graphml")).error, undefined);
+});
+
+test("import: draw.io CSV gets its connectors and layout, and the converting editor is left empty", async () => {
+	// CSV is laid out in the editor itself, so it is only converted in an empty one.
+	assert.match((await importFile("csv", "import.csv")).error, /CSV files are converted in an empty draw\.io editor/);
+	await send({ action: "load", xml: "", autosave: 1 });
+	await page.waitForFunction(() => editorUi.pages.length === 1 && editorUi.editor.graph.model.getChildCount(editorUi.editor.graph.getDefaultParent()) === 0);
+	const editorState = () =>
+		page.evaluate(() => ({ cells: Object.keys(editorUi.editor.graph.model.cells).length, undo: editorUi.editor.undoManager.history.length }));
+	const before = await editorState();
+
+	const r = await importFile("csv", "import.csv");
+	assert.equal(r.error, undefined);
+	assert.deepEqual([r.pages, r.shapes, r.connectors, r.warnings], [1, 4, 3, []]);
+	const team = await page.evaluate((xml) => {
+		const doc = mxUtils.parseXml(xml);
+		const rows = Array.from(doc.getElementsByTagName("UserObject"));
+		const y = (o) => parseFloat(o.getElementsByTagName("mxGeometry")[0].getAttribute("y"));
+		return {
+			names: rows.map((o) => o.getAttribute("name")),
+			adaAboveGrace: y(rows[0]) < y(rows[1]),
+			edges: Array.from(doc.getElementsByTagName("mxCell"))
+				.filter((c) => c.getAttribute("edge") === "1")
+				.map((c) => [!!c.getAttribute("source") && !!c.getAttribute("target"), c.getAttribute("value")]),
+		};
+	}, r.xml);
+	assert.deepEqual(team.names, ["Ada", "Grace", "Linus", "Margaret"]);
+	assert.ok(team.adaAboveGrace, "the tree layout ran");
+	assert.deepEqual(team.edges, [[true, "reports to"], [true, "reports to"], [true, "reports to"]]);
+	assert.deepEqual(await editorState(), before, "the editor is emptied again, without undo steps");
+
+	const b64 = (s) => Buffer.from(s).toString("base64");
+	const plain = await importFile("csv", "plain.csv", b64("name,team\nAda,Platform\nGrace,Platform\n"));
+	assert.deepEqual([plain.shapes, plain.connectors], [2, 0]);
+	assert.match(plain.warnings[0], /no draw\.io configuration .*each row became one shape/);
+	const bad = await importFile("csv", "bad.csv", b64('# connect: {"from": "x"\nname\nAda\n'));
+	assert.match(bad.error, /^The CSV could not be read: /);
+	// Images a CSV links to are reported, and not fetched while converting (see the next test).
+	const linked = await importFile("csv", "logos.csv", b64("# style: shape=image;image=https://example.invalid/%name%.png;\nname\nacme\n"));
+	assert.equal(linked.error, undefined);
+	assert.match(linked.warnings.join(" "), /1 image is linked from the web/);
+	assert.deepEqual(await editorState(), before);
+});
+
+test("import: Miro board data, with widgets draw.io does not know reported", async () => {
+	const r = await importFile("miro", "import-miro.json");
+	assert.equal(r.error, undefined);
+	assert.deepEqual([r.shapes, r.connectors], [3, 1]);
+	const [p] = await readImported(r.xml);
+	for (const label of ["Idea", "Research", "next"]) {
+		assert.ok(p.labels.includes(label), `"${label}" missing: ${p.labels.join(" | ")}`);
+	}
+	assert.deepEqual(p.edges, [true]);
+	assert.deepEqual(r.warnings, ["1 Miro widget of a kind draw.io does not know (mindmap) became a plain box or was left out."]);
+	const old = Buffer.from(JSON.stringify({ isProtected: false, version: 1, data: { objects: [] } })).toString("base64");
+	assert.match((await importFile("miro", "old.json", old)).error, /Only version 2 of Miro's board data can be converted; this is version 1/);
+});
+
+test("import: nothing is uploaded, and the converters load from the bundled draw.io", async () => {
+	page.off("request", recordRequest);
+	const fetched = importRequests.filter((r) => !/^(data|blob):/.test(r.url));
+	// Only GETs of draw.io's own files from the local server: no uploads, nothing from the web.
+	assert.deepEqual(fetched.filter((r) => r.method !== "GET" || !r.url.startsWith(base + "/webapp/")), []);
+	assert.ok(fetched.some((r) => r.url.endsWith("/webapp/js/gliffy/drawio-gliffy.min.js")));
+	assert.ok(fetched.some((r) => r.url.endsWith("/webapp/js/vsd/drawio-vsd.min.js")));
+});

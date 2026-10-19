@@ -27,6 +27,7 @@ async function invoke(name, input) {
 
 const steps = [];
 async function step(name, fn) {
+	console.log(`▶ ${name}`); // shows which step is running if the suite hangs
 	const start = Date.now();
 	try {
 		await fn();
@@ -64,6 +65,8 @@ async function runSteps() {
 			"drawio_search_shapes",
 			"drawio_style_reference",
 			"drawio_get_xml",
+			"drawio_export",
+			"drawio_import",
 		]) {
 			assert.ok(names.includes(n), `tool ${n} not registered`);
 		}
@@ -77,6 +80,50 @@ async function runSteps() {
 	await step("tools report a missing diagram instead of failing", async () => {
 		const text = await invoke("drawio_get_diagram", {});
 		assert.match(text, /No draw.io diagram is open/);
+	});
+
+	await step("Open Visio File as Draw.io: converts in a temporary draw.io webview, opens the result, never overwrites", async () => {
+		const fixtures = path.join(__dirname, "../fixtures");
+		fs.copyFileSync(path.join(fixtures, "import.vsdx"), path.join(dir, "network.vsdx"));
+		fs.copyFileSync(path.join(fixtures, "import.gliffy"), path.join(dir, "flow.gliffy"));
+		fs.copyFileSync(path.join(fixtures, "import.graphml"), path.join(dir, "services.graphml"));
+		fs.copyFileSync(path.join(fixtures, "import-lucidchart.json"), path.join(dir, "signup.json"));
+		fs.copyFileSync(path.join(fixtures, "import-miro.json"), path.join(dir, "board.json"));
+		fs.copyFileSync(path.join(fixtures, "import.csv"), path.join(dir, "team.csv"));
+		const tabs = () => vscode.window.tabGroups.all.flatMap((g) => g.tabs);
+		const vsdx = vscode.Uri.file(path.join(dir, "network.vsdx"));
+
+		// No diagram is open yet, so draw.io runs in a webview of its own.
+		const first = await vscode.commands.executeCommand("drawio-ai.openVisio", vsdx);
+		assert.deepEqual(first.failed, []);
+		assert.equal(path.basename(first.converted[0].target.fsPath), "network.drawio");
+		assert.deepEqual([first.converted[0].pages, first.converted[0].warnings], [2, []]);
+		const converted = path.join(dir, "network.drawio");
+		const text = fs.readFileSync(converted, "utf8");
+		assert.match(text, /<diagram name="Architecture"[\s\S]*Web App[\s\S]*<diagram name="Notes"/);
+		const tab = await waitFor(
+			() => tabs().find((t) => t.input instanceof vscode.TabInputCustom && path.basename(t.input.uri.fsPath) === "network.drawio"),
+			"the converted diagram to open"
+		);
+		assert.equal(tab.input.viewType, "drawio-ai-text");
+		assert.ok(!tabs().some((t) => t.input instanceof vscode.TabInputWebview && /drawio-ai\.converter/.test(t.input.viewType)), "the converter webview is closed");
+
+		// Converting again, with a diagram open, never replaces the first result and leaves the open editor alone.
+		const second = await vscode.commands.executeCommand("drawio-ai.openVisio", vsdx);
+		assert.equal(path.basename(second.converted[0].target.fsPath), "network-2.drawio");
+		assert.equal(fs.readFileSync(converted, "utf8"), text);
+		assert.ok(!tabs().some((t) => t.input instanceof vscode.TabInputWebview && /drawio-ai\.converter/.test(t.input.viewType)), "the converter webview is closed");
+
+		const graphml = await vscode.commands.executeCommand("drawio-ai.importDiagram", vscode.Uri.file(path.join(dir, "services.graphml")));
+		assert.deepEqual([graphml.failed, graphml.converted[0].format], [[], "graphml"]);
+		fs.writeFileSync(path.join(dir, "notes.txt"), "hello");
+		const bad = await vscode.commands.executeCommand("drawio-ai.importDiagram", vscode.Uri.file(path.join(dir, "notes.txt")));
+		assert.equal(bad.converted.length, 0);
+		assert.match(bad.failed[0].error, /not a file draw\.io can convert/);
+
+		await sleep(1000);
+		assert.ok(!tabs().some((t) => t.isDirty), "opening a converted diagram leaves it unchanged");
+		await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 	});
 
 	await step("opens the diagram in the draw.io custom editor and reads it", async () => {
@@ -172,6 +219,42 @@ async function runSteps() {
 		const result = await vscode.lm.invokeTool("drawio_render_image", { input: {}, toolInvocationToken: undefined });
 		const text = result.content.map((p) => p.value ?? "").join("");
 		assert.match(text, /Rendered PNG attached/);
+	});
+
+	await step("drawio_export writes a Visio file next to the diagram and never overwrites unasked", async () => {
+		const result = JSON.parse(await invoke("drawio_export", { format: "vsdx" }));
+		assert.equal(result.path.split(/[\\/]/).pop(), "test.vsdx");
+		assert.equal(result.pages, 1);
+		assert.ok(result.shapes >= 2 && result.connectors >= 1, JSON.stringify(result));
+		const bytes = fs.readFileSync(path.join(dir, "test.vsdx"));
+		assert.equal(bytes.readUInt32LE(0), 0x04034b50, "not a ZIP package");
+		assert.ok(bytes.includes(Buffer.from("visio/pages/page1.xml")));
+		assert.match(await invoke("drawio_export", { format: "vsdx" }), /already exists/);
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes("drawio-ai.exportVisio"));
+	});
+
+	await step("drawio_import converts Gliffy, Lucidchart, Miro and CSV files next to the open diagram without switching to them", async () => {
+		const gliffy = JSON.parse(await invoke("drawio_import", { path: "flow.gliffy", open: false }));
+		assert.equal(path.basename(gliffy.path), "flow.drawio");
+		assert.deepEqual([gliffy.format, gliffy.pages, gliffy.connectors, gliffy.opened], ["gliffy", 1, 1, false]);
+		assert.match(gliffy.warnings.join(" "), /has no mapping/);
+		const lucid = JSON.parse(await invoke("drawio_import", { path: "signup.json", open: false }));
+		assert.equal(lucid.format, "lucidchart");
+		assert.match(lucid.warnings.join(" "), /QuantumFluxCapacitorBlock/);
+		assert.match(fs.readFileSync(path.join(dir, "signup.drawio"), "utf8"), /<diagram name="Signup flow"/);
+		const miro = JSON.parse(await invoke("drawio_import", { path: "board.json", open: false }));
+		assert.deepEqual([miro.format, miro.shapes, miro.connectors], ["miro", 3, 1]);
+		// CSV is laid out in the conversion panel's own editor, never in the open diagram.
+		const csv = JSON.parse(await invoke("drawio_import", { path: "team.csv", open: false }));
+		assert.deepEqual([csv.format, csv.shapes, csv.connectors, csv.warnings], ["csv", 4, 3, []]);
+		assert.match(fs.readFileSync(path.join(dir, "team.drawio"), "utf8"), /name="Margaret"/);
+		assert.match(await invoke("drawio_import", { path: "../elsewhere.vsdx" }), /inside the diagram's folder/);
+		assert.match(await invoke("drawio_import", { path: "missing.vsdx" }), /missing\.vsdx was not found/);
+		// The other tools still work on the diagram that was open.
+		assert.match(await invoke("drawio_get_xml", {}), /Orders DB/);
+		const commands = await vscode.commands.getCommands(true);
+		assert.ok(commands.includes("drawio-ai.openVisio") && commands.includes("drawio-ai.importDiagram"));
 	});
 
 	await step("v2 commands and tools are registered", async () => {
@@ -322,5 +405,14 @@ async function runSteps() {
 		const doc = vscode.workspace.textDocuments.find((d) => d.uri.fsPath === file.fsPath);
 		await doc.save();
 		assert.match(fs.readFileSync(file.fsPath, "utf8"), /Orders DB/);
+	});
+
+	await step("drawio_import opens the new diagram, and the next tool calls work on it", async () => {
+		const r = JSON.parse(await invoke("drawio_import", { path: "services.graphml" }));
+		assert.deepEqual([r.opened, r.openError], [true, undefined]);
+		assert.equal(path.basename(r.path), "services-2.drawio");
+		const xml = await invoke("drawio_get_xml", {});
+		assert.match(xml, /Order Service/);
+		assert.doesNotMatch(xml, /Orders DB/);
 	});
 }

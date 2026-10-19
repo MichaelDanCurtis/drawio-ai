@@ -15,6 +15,8 @@ export interface ToolSchema {
 	requiresVision?: boolean;
 	/** Mutates the diagram. */
 	mutates?: boolean;
+	/** Writes files in the workspace. */
+	writesFiles?: boolean;
 }
 
 const OP_KINDS = [
@@ -290,6 +292,41 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 				ids: { type: "array", items: { type: "string" }, description: "Only report these cells." },
 				refresh: { type: "array", items: { type: "string" }, description: "Re-point these cells' links at where their code is now (after you updated the shapes)." },
 			},
+		},
+	},
+	{
+		name: "drawio_export",
+		displayName: "Export Draw.io Diagram",
+		writesFiles: true,
+		description:
+			"Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true, and then only after the user confirms; never replaces a diagram. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				format: { type: "string", enum: ["vsdx", "svg", "png", "drawio"] },
+				path: {
+					type: "string",
+					description: "Workspace-relative output path, e.g. \"docs/architecture.vsdx\". Default: next to the diagram, same name with the format's extension.",
+				},
+				currentPageOnly: { type: "boolean", description: "[vsdx] Only the page shown in the editor. Default false (all pages)." },
+				overwrite: { type: "boolean", description: "Replace an existing export; the user is asked to confirm. Default false." },
+			},
+			required: ["format"],
+		},
+	},
+	{
+		name: "drawio_import",
+		displayName: "Import Diagram File",
+		writesFiles: true,
+		description:
+			"Convert a diagram made in another tool into a new .drawio file next to it, and open it, when the user asks to open, import or convert such a file: Microsoft Visio (.vsdx, .vsd, .vssx stencils, .vstx/.vst templates), Gliffy (.gliffy), yEd/GraphML (.graphml), Lucidchart (.json export), Miro board data (.json copied from a board) or draw.io's CSV format (.csv rows with '# label:'/'# connect:' configuration lines; without them each row becomes one shape). Uses draw.io's own converters inside VS Code; nothing is uploaded. Needs no open diagram. Never replaces a file: when name.drawio exists, name-2.drawio (and so on) is created instead. Returns the new path, page/shape/connector counts and the warnings (unmapped shapes, unreadable parts, linked web images): tell the user about them. When opened, the new diagram takes focus and the other tools work on it from then on; with open: false they keep working on the current diagram.",
+		inputSchema: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: "Workspace-relative path of the file to convert, e.g. \"docs/network.vsdx\"." },
+				open: { type: "boolean", description: "Open the new diagram in the editor. Default true." },
+			},
+			required: ["path"],
 		},
 	},
 	{

@@ -3,11 +3,11 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
-    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction;
+    | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent;
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -157,6 +157,53 @@ declare interface AiExportImageEvent {
     error?: string;
 }
 
+declare interface AiExportVsdxAction {
+    action: "aiExportVsdx";
+    /** Only the page that is visible in the editor; otherwise every page. */
+    currentPageOnly: boolean;
+}
+
+declare interface AiExportVsdxEvent {
+    event: "aiExportVsdx";
+    message: AiExportVsdxAction;
+    /** Base64 of the .vsdx package; empty when the export failed. */
+    data: string;
+    pages: number;
+    shapes: number;
+    connectors: number;
+    images: number;
+    warnings: string[];
+    error?: string;
+}
+
+declare interface AiImportDiagramAction {
+    action: "aiImportDiagram";
+    /** "csv" builds the diagram in the editor, which must be empty, and empties it again. */
+    format: "visio" | "gliffy" | "graphml" | "lucidchart" | "miro" | "csv";
+    /** The file's name: it tells Visio drawings, stencils and templates apart. */
+    fileName: string;
+    /** Base64 of the file. */
+    data: string;
+    /** Gives up when draw.io's converter has not finished by then. */
+    timeoutMs?: number;
+}
+
+declare interface AiImportDiagramEvent {
+    event: "aiImportDiagram";
+    /** The action without its data. */
+    message: AiImportDiagramAction;
+    /** An uncompressed <mxfile>; empty when the conversion failed. */
+    xml: string;
+    /** "stencil" when a Visio stencil's shapes were laid out on a page. */
+    kind: "diagram" | "stencil";
+    pages: number;
+    shapes: number;
+    connectors: number;
+    /** What did not carry over. */
+    warnings: string[];
+    error?: string;
+}
+
 declare interface AiSearchShapesAction {
     action: "aiSearchShapes";
     query: string;
@@ -234,7 +281,7 @@ declare interface AiLassoEvent {
 
 declare interface InvokeCommandEvent {
     event: "invokeCommand";
-    command: "export" | "save" | "convert";
+    command: "export" | "exportVisio" | "importDiagram" | "save" | "convert";
 }
 
 declare interface FocusChangedEvent {

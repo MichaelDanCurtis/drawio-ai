@@ -79,7 +79,7 @@ export class McpService {
 			onCall: (name) => this.markBusy(name),
 			deps: {
 				serverVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
-				tools: () => TOOL_SCHEMAS.map((t): McpTool => ({ name: t.name, title: t.displayName, description: t.description, inputSchema: t.inputSchema, readOnly: !t.mutates && t.name !== "drawio_code_links" })),
+				tools: () => TOOL_SCHEMAS.map((t): McpTool => ({ name: t.name, title: t.displayName, description: t.description, inputSchema: t.inputSchema, readOnly: !t.mutates && !t.writesFiles && t.name !== "drawio_code_links" })),
 				callTool: (name, args) => this.toolbox.invoke(name, args),
 				instructions: async () => {
 					const template = await this.templatePrompt().catch(() => undefined);

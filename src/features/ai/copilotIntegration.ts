@@ -93,6 +93,8 @@ function progressLabel(tool: string): string {
 		case "drawio_lint": return "Checking the diagram for problems…";
 		case "drawio_get_template": return "Reading the design template…";
 		case "drawio_code_links": return "Checking code links…";
+		case "drawio_export": return "Exporting the diagram…";
+		case "drawio_import": return "Converting the file to draw.io…";
 		default: return "Working…";
 	}
 }
