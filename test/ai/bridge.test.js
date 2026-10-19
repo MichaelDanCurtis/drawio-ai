@@ -188,6 +188,10 @@ test("forwards tool calls to the right window, with the agent's name, and passes
 
 	const create = await call("tools/call", { name: "drawio_create", arguments: { path: "/elsewhere/new.drawio" } });
 	assert.equal(create.result.content[0].text, "B:drawio_create", "drawio_create routes by its path");
+	fs.writeFileSync(path.join(folderA, "net.vsdx"), "");
+	const imported = await call("tools/call", { name: "drawio_import", arguments: { path: "net.vsdx" } });
+	assert.equal(imported.result.content[0].text, "A:drawio_import", "drawio_import routes by its path");
+	assert.equal(a.calls.at(-1).args.path, path.join(folderA, "net.vsdx"));
 
 	const focused = await call("tools/call", { name: "drawio_render_image", arguments: {} });
 	assert.equal(focused.result.content[0].text, "A:drawio_render_image");

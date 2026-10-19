@@ -21,32 +21,44 @@ if (!executable || !fs.existsSync(executable)) {
 }
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-vscode-"));
-// A workspace folder for the `file` and agent tests, and throwaway homes for the agent
-// bridge, Claude Code and Codex, so the Connect test never touches the real configuration.
-const workspace = path.join(profile, "workspace");
+// Throwaway homes for the agent bridge, Claude Code and Codex, so the Connect test
+// never touches the real configuration.
 const isolated = {
 	DRAWIO_AI_HOME: path.join(profile, "drawio-ai-home"),
 	CLAUDE_CONFIG_DIR: path.join(profile, "claude"),
 	CODEX_HOME: path.join(profile, "codex"),
 };
+const workspace = path.join(profile, "workspace");
 for (const dir of [workspace, ...Object.values(isolated)]) fs.mkdirSync(dir, { recursive: true });
-const child = spawn(
-	executable,
-	[
-		`--extensionDevelopmentPath=${root}`,
-		`--extensionTestsPath=${path.join(__dirname, "suite.js")}`,
-		`--user-data-dir=${path.join(profile, "user")}`,
-		`--extensions-dir=${path.join(profile, "extensions")}`,
-		"--disable-extensions",
-		"--disable-workspace-trust",
-		"--skip-welcome",
-		"--skip-release-notes",
-		"--new-window",
-		workspace,
-	],
-	{ stdio: "inherit", env: { ...process.env, ...isolated, ELECTRON_RUN_AS_NODE: undefined } }
-);
-child.on("exit", (code) => {
+
+/** One VS Code run of suite.js; `folder` opens a workspace folder. */
+function runPart(part, folder) {
+	return new Promise((resolve) => {
+		const child = spawn(
+			executable,
+			[
+				`--extensionDevelopmentPath=${root}`,
+				`--extensionTestsPath=${path.join(__dirname, "suite.js")}`,
+				`--user-data-dir=${path.join(profile, `user-${part}`)}`,
+				`--extensions-dir=${path.join(profile, "extensions")}`,
+				"--disable-extensions",
+				"--disable-workspace-trust",
+				"--skip-welcome",
+				"--skip-release-notes",
+				"--new-window",
+				...(folder ? [folder] : []),
+			],
+			{ stdio: "inherit", env: { ...process.env, ...isolated, DRAWIO_AI_IT_PART: part, ELECTRON_RUN_AS_NODE: undefined } }
+		);
+		child.on("exit", (code) => resolve(code ?? 1));
+	});
+}
+
+(async () => {
+	// The main steps run without a folder (relative paths resolve against the diagram's folder);
+	// the agent steps need one for `file`, list, search and create.
+	const main = await runPart("main");
+	const agents = await runPart("agents", workspace);
 	fs.rmSync(profile, { recursive: true, force: true });
-	process.exit(code ?? 1);
-});
+	process.exit(main || agents);
+})();

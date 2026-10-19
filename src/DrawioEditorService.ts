@@ -8,6 +8,7 @@ import {
 	QuickPickItem, QuickPickItemKind, StatusBarAlignment,
 	TextDocument,
 	Uri,
+	ViewColumn,
 	WebviewPanel,
 	window,
 	workspace
@@ -135,6 +136,55 @@ export class DrawioEditorService {
 		});
 	}
 
+	/**
+	 * Throws when files cannot be handed to draw.io for the given location: only
+	 * the draw.io bundled with the extension is used, never the online app.
+	 */
+	public assertBundledDrawio(forUri: Uri | undefined): void {
+		const mode = forUri ? this.config.getDiagramConfig(forUri).mode : { kind: "offline" as const };
+		if (mode.kind !== "offline") {
+			throw new Error(
+				`This needs the draw.io that is bundled with the extension, but the setting "drawio-ai.offline" is off (draw.io is loaded from ${mode.url}). Turn it on to convert files.`
+			);
+		}
+	}
+
+	/**
+	 * Runs a task in a draw.io webview of its own, e.g. to convert a file with
+	 * draw.io's importers, and closes it afterwards. Open diagrams are never used:
+	 * a large or broken file must not freeze or crash an editor with unsaved work.
+	 */
+	public async withDrawioWebview<T>(
+		forUri: Uri,
+		task: (client: CustomizedDrawioClient) => Promise<T>
+	): Promise<T> {
+		this.assertBundledDrawio(forUri);
+		const name = forUri.path.split("/").pop();
+		const panel = window.createWebviewPanel(
+			"drawio-ai.converter",
+			`Converting ${name}…`,
+			{ viewColumn: ViewColumn.Active, preserveFocus: true },
+			{ enableScripts: true, retainContextWhenHidden: true }
+		);
+		let disposed = false;
+		const closed = new Promise<never>((_, reject) =>
+			panel.onDidDispose(() => {
+				disposed = true;
+				reject(new Error(`The conversion stopped because its panel was closed.`));
+			})
+		);
+		closed.catch(() => undefined);
+		try {
+			const client = await this.drawioClientFactory.createDrawioClientInWebview(forUri, panel, { isReadOnly: false });
+			client.onInit.sub(() => void client.loadXmlLike(""));
+			return await Promise.race([task(client), closed]);
+		} finally {
+			if (!disposed) {
+				panel.dispose();
+			}
+		}
+	}
+
 	public async createDrawioEditorInWebview(
 		webviewPanel: WebviewPanel,
 		document:
@@ -233,6 +283,8 @@ export class DrawioEditor {
 				this.handleExportCommand().catch(showError);
 			} else if (command === "exportVisio") {
 				this.exportToVisio().catch(showError);
+			} else if (command === "importDiagram") {
+				commands.executeCommand("drawio-ai.importDiagram");
 			} else if (command === "save") {
 				this.drawioClient.triggerOnSave();
 			}

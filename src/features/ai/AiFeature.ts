@@ -21,6 +21,7 @@ import { CodeLinkService } from "./CodeLinkService";
 import { McpService } from "./McpService";
 import { AgentConnector, ConnectArgs } from "./agentConnect";
 import { exportDiagramToWorkspace } from "./exportDiagram";
+import { importForAgent } from "../importDiagram";
 
 const CODE_GLOB = /\.(tsx?|jsx?|mjs|cjs|py|java|cs|kt|go|sql|prisma|tf|ya?ml)$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "out", "build", ".venv", "venv", "__pycache__", "target", "bin", "obj", ".next", ".terraform", "coverage", ".drawio-ai"]);
@@ -60,6 +61,16 @@ export class AiFeature {
 		(editor) => this.templates.active(editor.uri),
 		this.codeLinks,
 		exportDiagramToWorkspace,
+		(request) =>
+			importForAgent(
+				request,
+				(uri, task) => this.editorService.withDrawioWebview(uri, task),
+				() => {
+					const editor = this.targetEditor();
+					return editor ? vscode.Uri.joinPath(editor.uri, "..") : undefined;
+				},
+				(diagram) => this.whenTarget(diagram)
+			),
 		new DiagramWorkspace(this.editorService, () => this.targetEditor())
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
@@ -486,6 +497,22 @@ export class AiFeature {
 	}
 
 	/** The diagram the AI acts on: the focused one, else the one used most recently. */
+	/**
+	 * Waits until the tools work on the given diagram, e.g. one that was just opened,
+	 * and its draw.io has loaded, so that the next tool call does not reach it too early.
+	 */
+	private async whenTarget(diagram: vscode.Uri, timeoutMs = 30_000): Promise<boolean> {
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			const editor = this.targetEditor();
+			if (editor?.uri.toString() === diagram.toString()) {
+				return editor.drawioClient.whenLoaded(deadline - Date.now());
+			}
+			await new Promise((resolve) => setTimeout(resolve, 100));
+		}
+		return false;
+	}
+
 	private targetEditor(): DrawioEditor | undefined {
 		const active = this.editorService.activeDrawioEditor;
 		if (active) return active;

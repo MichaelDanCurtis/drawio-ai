@@ -35,6 +35,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 -   **Saved chats**: each diagram keeps its chat panel conversation across VS Code restarts. **New AI Chat** starts over.
 -   **Live code links**: shapes linked to code (by **Diagram from Code…** or **Link Code with Selected Node**) remember what the code looked like. When it moves, changes or disappears, the shape gets a badge; click it to re-point the link, let the AI update the shape, open the code or remove the link. **Draw.AI: Check Code Links** lists every stale link, and the AI can refresh code-derived diagrams with the `drawio_code_links` tool.
 -   **Export from chat**: ask for a Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace (never through symbolic links), asks you before replacing an earlier export, and never replaces a diagram.
+-   **Import from chat**: ask the AI to open a Visio, Gliffy, yEd, Lucidchart, Miro or draw.io CSV file ("open docs/network.vsdx") and it converts it into a new `.drawio` file with the `drawio_import` tool, then tells you what did not carry over. It only reads files inside the workspace and never replaces a file.
 -   **External agents (MCP)**: turn on the local MCP server and Claude Code, Codex, Cursor and other MCP clients can read and edit your diagrams with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
 
 ## Privacy
@@ -44,7 +45,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 -   Saved chats stay on your machine in VS Code's extension storage (`drawio-ai.persistChat`). Design templates are plain files in your repository.
 -   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, a session token that only works while that window runs, its folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`). The long-lived token you copy for hand-configured clients never goes there.
 -   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
--   Exports, including Visio files, are made inside VS Code. Nothing is uploaded.
+-   Exports and imports, including Visio files, are made inside VS Code. Nothing is uploaded.
 
 ## Main Settings
 
@@ -58,6 +59,24 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 | `drawio-ai.mcp.enabled` / `.port` | `false` / `47821` | Local MCP server for external agents |
 | `drawio-ai.mcp.discovery` | `true` | Let connected Claude Code / Codex find each VS Code window without a copied token |
 | `drawio-ai.maxToolRounds` | `16` | Tool calls per request before the AI pauses |
+
+## Open Visio, Gliffy, yEd, Lucidchart, Miro and CSV Files
+
+**Draw.io: Open Visio File as Draw.io…** (or right-click a Visio file in the Explorer) converts it into a new `.drawio` file next to the original and opens it. **Draw.io: Import Diagram from Another Tool…** does the same for every format below; it is also in the diagram's **File** menu as **Open from Another Tool…**, and on `.gliffy` and `.graphml` files in the Explorer. In chat, the AI does it with `drawio_import`.
+
+| From | Files |
+| --- | --- |
+| Microsoft Visio | `.vsdx` drawings, `.vstx` templates, `.vssx` stencils (their shapes are laid out on one page, each with its name), and the binary `.vsd`, `.vst` and `.vss` files of Visio 2003–2010 |
+| Gliffy | `.gliffy` files, or Gliffy `.json` exports |
+| yEd | `.graphml` |
+| Lucidchart | `.json` files with Lucidchart document data, the format draw.io's own Lucidchart import reads. Lucidchart can also export `.vsdx`, which opens as Visio. |
+| Miro | `.json` files with the board data Miro puts on the clipboard when you copy shapes (it starts with `{"isProtected":`). Miro board backups (`.rtb`) are not supported. |
+| CSV | `.csv` files in draw.io's CSV format: rows plus `# label:`, `# style:`, `# connect:` and `# layout:` lines that turn them into shapes, connectors and a layout (see **Arrange > Insert > Advanced > CSV** in draw.io). Without those lines, each row becomes one shape. |
+
+-   The conversion is done by draw.io's own importers, inside VS Code, in a draw.io panel of its own that closes again when it is done, so open diagrams are not affected. Nothing is uploaded. This uses the draw.io bundled with the extension (`drawio-ai.offline`, on by default).
+-   Existing files are never replaced: if `network.drawio` exists, the new diagram is `network-2.drawio`.
+-   What did not carry over is reported when the diagram opens: shapes with no draw.io equivalent, parts of a binary Visio file that could not be read, images that are linked from the web instead of embedded. **Show Details** lists everything.
+-   Visio 2003–2010 XML files (`.vdx`, `.vsx`, `.vtx`) cannot be converted; save them as `.vsdx` in Visio first.
 
 ## Claude Code and Codex
 

@@ -783,6 +783,35 @@
 				}
 			},
 			{
+				"name": "drawio_import",
+				"displayName": "Import Diagram File",
+				"toolReferenceName": "drawio-import",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram"
+				],
+				"userDescription": "Import Diagram File",
+				"modelDescription": "Convert a diagram made in another tool into a new .drawio file next to it, and open it, when the user asks to open, import or convert such a file: Microsoft Visio (.vsdx, .vsd, .vssx stencils, .vstx/.vst templates), Gliffy (.gliffy), yEd/GraphML (.graphml), Lucidchart (.json export), Miro board data (.json copied from a board) or draw.io's CSV format (.csv rows with '# label:'/'# connect:' configuration lines; without them each row becomes one shape). Uses draw.io's own converters inside VS Code; nothing is uploaded. Needs no open diagram. Never replaces a file: when name.drawio exists, name-2.drawio (and so on) is created instead. Returns the new path, page/shape/connector counts and the warnings (unmapped shapes, unreadable parts, linked web images): tell the user about them. When opened, the new diagram takes focus and the other tools work on it from then on; with open: false they keep working on the current diagram.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"path": {
+							"type": "string",
+							"description": "Workspace-relative path of the file to convert, e.g. \"docs/network.vsdx\"."
+						},
+						"open": {
+							"type": "boolean",
+							"description": "Open the new diagram in the editor. Default true."
+						}
+					},
+					"required": [
+						"path"
+					]
+				}
+			},
+			{
 				"name": "drawio_get_template",
 				"displayName": "Get Draw.io Design Template",
 				"toolReferenceName": "drawio-get-template",
@@ -991,6 +1020,16 @@
 			{
 				"command": "drawio-ai.exportVisio",
 				"title": "Export to Visio (.vsdx)...",
+				"category": "Draw.io"
+			},
+			{
+				"command": "drawio-ai.openVisio",
+				"title": "Open Visio File as Draw.io…",
+				"category": "Draw.io"
+			},
+			{
+				"command": "drawio-ai.importDiagram",
+				"title": "Import Diagram from Another Tool…",
 				"category": "Draw.io"
 			},
 			{
@@ -1648,6 +1687,16 @@
 					"when": "resourceExtname =~ /^\\.(png|jpe?g|gif|webp)$/i",
 					"command": "drawio-ai.diagramFromImage",
 					"group": "Draw.AI"
+				},
+				{
+					"when": "resourceExtname =~ /^\\.(vsdx|vsd|vssx|vss|vstx|vst)$/i",
+					"command": "drawio-ai.openVisio",
+					"group": "Draw.io"
+				},
+				{
+					"when": "resourceExtname =~ /^\\.(gliffy|graphml)$/i",
+					"command": "drawio-ai.importDiagram",
+					"group": "Draw.io"
 				}
 			],
 			"commandPalette": [
@@ -1695,7 +1744,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/bridge.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/bridge.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"

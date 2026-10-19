@@ -100,7 +100,8 @@ export class AgentBridge {
 	private async forward(msg: any): Promise<object> {
 		const name = msg.params?.name;
 		const args = msg.params?.arguments && typeof msg.params.arguments === "object" ? msg.params.arguments : {};
-		const key = name === "drawio_create" ? "path" : "file";
+		// drawio_create and drawio_import name their file `path`; the rest name a diagram `file`.
+		const key = name === "drawio_create" || name === "drawio_import" ? "path" : "file";
 		const file = typeof args[key] === "string" && args[key].trim() ? args[key] : undefined;
 		const skip = new Set<number>();
 		let unauthorized = 0;

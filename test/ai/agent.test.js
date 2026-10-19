@@ -229,7 +229,8 @@ test("chat panel tools stay on the focused diagram; agents can name another one"
 		search: async () => ({ text: "searched", summary: "" }),
 		create: async () => ({ text: "created", summary: "" }),
 	};
-	const toolbox = new DiagramToolbox(() => undefined, undefined, undefined, undefined, workspace);
+	const toolbox = new DiagramToolbox(() => undefined, undefined, undefined, undefined, undefined, workspace);
+	assert.ok(toolbox.specs({ vision: true }).some((t) => t.name === "drawio_import"), "the panel can still import files");
 	const specs = toolbox.specs({ vision: true });
 	assert.ok(specs.some((t) => t.name === "drawio_style_reference"));
 	assert.ok(!specs.some((t) => ["drawio_create", "drawio_list_diagrams", "drawio_search_diagrams"].includes(t.name)));

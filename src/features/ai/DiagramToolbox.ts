@@ -1,6 +1,7 @@
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
 import type { ExportRequest } from "./exportDiagram";
+import type { ImportRequest } from "../importDiagram";
 import { lintDiagram } from "./lint";
 import type { LoadedTemplate } from "./templates/profile";
 import type { ImageData, ToolSpec } from "./providers/types";
@@ -48,6 +49,7 @@ export class DiagramToolbox {
 			refresh(editor: DrawioEditor, ids: string[]): Promise<{ updated: string[]; skipped: string[] }>;
 		},
 		private readonly exporter?: (editor: DrawioEditor, request: ExportRequest) => Promise<{ text: string; summary: string }>,
+		private readonly importer?: (request: ImportRequest) => Promise<{ text: string; summary: string }>,
 		private readonly diagrams?: DiagramWorkspace
 	) {}
 
@@ -57,13 +59,18 @@ export class DiagramToolbox {
 	 * (Copilot agent mode and MCP agents get every tool.)
 	 */
 	public specs(options: { vision: boolean }): ToolSpec[] {
-		return TOOL_SCHEMAS.filter((t) => (options.vision || !t.requiresVision) && (!t.workspace || t.name === "drawio_style_reference")).map((t) => {
+		const forPanel = new Set(["drawio_style_reference", "drawio_import"]);
+		return TOOL_SCHEMAS.filter((t) => (options.vision || !t.requiresVision) && (!t.workspace || forPanel.has(t.name))).map((t) => {
 			const { file, ...properties } = (t.inputSchema.properties ?? {}) as Record<string, unknown>;
 			return { name: t.name, description: t.description, inputSchema: { ...t.inputSchema, properties } };
 		});
 	}
 
 	public async invoke(name: string, rawInput: unknown, options: InvokeOptions = {}): Promise<ToolResult> {
+		if (name === "drawio_import") {
+			// Needs no open diagram: it creates one.
+			return this.importFile(rawInput);
+		}
 		let input: Record<string, any>;
 		let editor: DrawioEditor | undefined;
 		try {
@@ -161,6 +168,20 @@ export class DiagramToolbox {
 				default:
 					throw new ToolInputError(`Unknown tool "${name}"`);
 			}
+		} catch (e: any) {
+			return {
+				isError: true,
+				summary: `Failed: ${String(e?.message ?? e).slice(0, 80)}`,
+				text: `Error: ${e?.message ?? e}`,
+			};
+		}
+	}
+
+	private async importFile(rawInput: unknown): Promise<ToolResult> {
+		try {
+			if (!this.importer) throw new ToolInputError("Import is not available.");
+			const input = normalizeInput(rawInput);
+			return await this.importer({ path: typeof input.path === "string" ? input.path : "", open: input.open !== false });
 		} catch (e: any) {
 			return {
 				isError: true,

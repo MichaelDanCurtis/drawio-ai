@@ -42,7 +42,7 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 		for (const uri of candidates) {
 			const folder = vscode.workspace.getWorkspaceFolder(uri);
 			if (!folder || !(await exists(uri))) continue;
-			await assertNoSymbolicLinks(folder.uri, uri);
+			await assertNoSymbolicLinks(folder.uri, uri, "diagrams are not opened through links");
 			return this.openEditor(uri);
 		}
 		if (!vscode.workspace.workspaceFolders?.length) {
@@ -154,7 +154,7 @@ export class DiagramWorkspace implements DiagramWorkspaceApi {
 		const uri = this.candidates(p)[0];
 		const folder = uri && vscode.workspace.getWorkspaceFolder(uri);
 		if (!uri || !folder) throw new Error("path must be inside the workspace folder.");
-		await assertNoSymbolicLinks(folder.uri, uri);
+		await assertNoSymbolicLinks(folder.uri, uri, "diagrams are not created through links");
 		const taken = () => new Error(`${this.shown(uri)} already exists. Pass it as \`file\` to edit it.`);
 		if (await exists(uri)) throw taken();
 		await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(uri, ".."));

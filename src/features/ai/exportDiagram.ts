@@ -40,7 +40,8 @@ export async function exportDiagramToWorkspace(
 		throw new Error("That path is the open diagram itself. Choose another path.");
 	}
 	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
-	if (await exists(target)) {
+	const existed = await exists(target);
+	if (existed) {
 		if (isDiagramFile(target.path)) {
 			throw new Error(`${shown} is an existing draw.io diagram; exports never replace diagrams. Choose another path.`);
 		}
@@ -66,8 +67,24 @@ export async function exportDiagramToWorkspace(
 		// The page shown in the editor, with the diagram embedded so it stays editable.
 		data = await editor.drawioClient.export(`.${format}`, true);
 	}
+	// Exporting can take a while: check the path again right before writing.
+	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
 	await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-	await vscode.workspace.fs.writeFile(target, data);
+	if (existed) {
+		// The user agreed to replace this file.
+		await vscode.workspace.fs.writeFile(target, data);
+	} else {
+		// Only creates the file, so one that appeared there meanwhile is not replaced.
+		const edit = new vscode.WorkspaceEdit();
+		edit.createFile(target, { overwrite: false, ignoreIfExists: false, contents: data });
+		if (!(await vscode.workspace.applyEdit(edit))) {
+			throw new Error(
+				(await exists(target))
+					? `${shown} was created by something else while the diagram was being exported, and was not replaced. Export again to decide what to do.`
+					: `${shown} could not be created.`
+			);
+		}
+	}
 	return {
 		text: JSON.stringify({ path: shown, format, bytes: data.length, ...details }),
 		summary: `Exported ${shown}`,
@@ -98,15 +115,19 @@ export function resolveExportTarget(
 	const joined = absolute ? vscode.Uri.file(withExt).path : `${root.path}/${withExt}`;
 	// Resolve "." and ".." before checking where the file goes.
 	const target = root.with({ path: normalizePath(joined) });
-	const base = root.path.endsWith("/") ? root.path : root.path + "/";
-	const caseInsensitive = /^\/[a-z]:/i.test(base);
-	const inside = caseInsensitive
-		? target.path.toLowerCase().startsWith(base.toLowerCase())
-		: target.path.startsWith(base);
-	if (!inside) {
+	if (!isInsideFolder(root, target)) {
 		throw new Error(`path must be inside ${folder ? "the workspace folder" : "the diagram's folder"}.`);
 	}
 	return target;
+}
+
+/** Whether a normalized path lies below the folder (drive letters compare without case). */
+export function isInsideFolder(root: vscode.Uri, target: vscode.Uri): boolean {
+	const base = root.path.endsWith("/") ? root.path : root.path + "/";
+	const caseInsensitive = /^\/[a-z]:/i.test(base);
+	return caseInsensitive
+		? target.path.toLowerCase().startsWith(base.toLowerCase())
+		: target.path.startsWith(base);
 }
 
 /** Exports stay inside the diagram's workspace folder, or its own folder outside a workspace. */
@@ -120,7 +141,11 @@ function exportRoot(diagram: vscode.Uri): vscode.Uri {
  * link in place of the file), since the file could land outside the workspace.
  * Also used for diagrams that agents name with `file`.
  */
-export async function assertNoSymbolicLinks(root: vscode.Uri, target: vscode.Uri): Promise<void> {
+export async function assertNoSymbolicLinks(
+	root: vscode.Uri,
+	target: vscode.Uri,
+	reason = "exports are not written through links"
+): Promise<void> {
 	const base = root.path.endsWith("/") ? root.path : root.path + "/";
 	let at = root;
 	for (const segment of target.path.slice(base.length).split("/").filter(Boolean)) {
@@ -132,12 +157,12 @@ export async function assertNoSymbolicLinks(root: vscode.Uri, target: vscode.Uri
 			return; // Nothing below a missing folder exists yet.
 		}
 		if (stat.type & vscode.FileType.SymbolicLink) {
-			throw new Error(`${vscode.workspace.asRelativePath(at, false)} is a symbolic link; exports are not written through links.`);
+			throw new Error(`${vscode.workspace.asRelativePath(at, false)} is a symbolic link; ${reason}.`);
 		}
 	}
 }
 
-function normalizePath(p: string): string {
+export function normalizePath(p: string): string {
 	const out: string[] = [];
 	for (const segment of p.split("/")) {
 		if (segment === "" || segment === ".") continue;
