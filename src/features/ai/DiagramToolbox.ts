@@ -25,6 +25,14 @@ const MAX_XML_CHARS = 80_000;
  * (or was last active), so tools keep working while the chat has focus.
  */
 export class DiagramToolbox {
+	private readonly applyListeners = new Set<(editor: DrawioEditor) => void>();
+
+	/** Called after every drawio_apply_operations batch that changed the diagram. */
+	public onDidApplyOperations(listener: (editor: DrawioEditor) => void): { dispose(): void } {
+		this.applyListeners.add(listener);
+		return { dispose: () => void this.applyListeners.delete(listener) };
+	}
+
 	constructor(
 		private readonly getEditor: () => DrawioEditor | undefined,
 		private readonly getTemplate: (editor: DrawioEditor) => Promise<LoadedTemplate | undefined> = async () => undefined,
@@ -212,6 +220,15 @@ export class DiagramToolbox {
 
 		const failed = result.results.filter((r) => !r.ok);
 		const okCount = result.results.length - failed.length;
+		if (!result.rolledBack && okCount > 0) {
+			for (const listener of [...this.applyListeners]) {
+				try {
+					listener(editor);
+				} catch (e) {
+					console.error("Draw.AI: apply listener failed", e);
+				}
+			}
+		}
 		const createdOrChanged = [...new Set(result.results.flatMap((r) => r.ids ?? []))];
 		const payload = {
 			ok: failed.length === 0,

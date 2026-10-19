@@ -52,7 +52,7 @@ export class AiFeature {
 	private readonly templates = new TemplateService();
 	private readonly codeLinks: CodeLinkService = new CodeLinkService(
 		() => this.editorService.openedEditors,
-		(editor, prompt, attachments) => this.ask(prompt, { cellIds: [] }, { editor, attachments })
+		async (editor, prompt, attachments) => void (await this.ask(prompt, { cellIds: [] }, { editor, attachments }))
 	);
 	private readonly toolbox = new DiagramToolbox(
 		() => this.targetEditor(),
@@ -254,12 +254,12 @@ export class AiFeature {
 	 * fixes, Diagram from Code/Image, code link fixes) goes through here, to the chat
 	 * surface the user prefers (drawio-ai.chatSurface).
 	 */
-	private async ask(text: string, selection: SelectionContext | undefined, extras: SendExtras): Promise<void> {
+	private async ask(text: string, selection: SelectionContext | undefined, extras: SendExtras): Promise<"native" | "panel"> {
 		if (await this.useNativeChat()) {
 			try {
 				await sendToNativeChat(this.context.globalStorageUri, text, selection, extras);
 				void this.noticeNativeChat();
-				return;
+				return "native";
 			} catch (e) {
 				// Never lose a request: the panel works without VS Code's chat.
 				console.error("Draw.AI: could not open VS Code's chat, using the Draw.AI panel", e);
@@ -267,6 +267,7 @@ export class AiFeature {
 		}
 		await this.chatView.reveal();
 		await this.chatView.send(text, selection, extras);
+		return "panel";
 	}
 
 	// ----- design templates -----
@@ -464,19 +465,62 @@ export class AiFeature {
 		const label = targets.length === 1 ? targets[0].path.split("/").pop()! : `${targets.length} items`;
 		const editor = await this.diagramTarget(vscode.Uri.joinPath(root, `${label.replace(/\.[^.]+$/, "")}-${kind}.drawio`), args);
 		if (!editor) return;
-		await this.ask(
+		const surface = await this.ask(
 			`Create a ${kind === "erd" ? "database ERD" : kind === "classes" ? "class diagram" : kind === "infrastructure" ? "infrastructure diagram" : "module dependency diagram"} of ${label} from the attached code analysis. Place it in empty space on the page.`,
 			{ cellIds: [] },
 			{ editor, attachments: [{ name: `code analysis of ${label} (${files.length} files, ${analysis.entities.length} entities)`, text }] }
 		);
-		await this.linkShapesToCode(editor, codeRefs(analysis), root, files).catch((e) => console.error("Draw.AI: linking shapes failed", e));
+		const refs = codeRefs(analysis);
+		if (surface === "panel") {
+			// The panel returns once the AI is done drawing.
+			await this.linkShapesToCode(editor, refs, root, files).catch((e) => console.error("Draw.AI: linking shapes failed", e));
+		} else {
+			// VS Code's chat only accepted the request: link the shapes as the agent draws them.
+			this.linkCodeWhileDrawing(editor, refs, root, files);
+		}
+	}
+
+	/**
+	 * Links shapes to code after each batch the agent applies to the diagram, for
+	 * up to 30 minutes or until every entity is linked.
+	 */
+	private linkCodeWhileDrawing(editor: DrawioEditor, refs: Map<string, Entity>, root: vscode.Uri, files: SourceFile[]): void {
+		const linked = new Set<string>();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let running = Promise.resolve();
+		const stop = () => {
+			clearTimeout(timer);
+			clearTimeout(deadline);
+			sub.dispose();
+			closed.dispose();
+		};
+		const sub = this.toolbox.onDidApplyOperations((changed) => {
+			if (changed !== editor) return;
+			clearTimeout(timer);
+			timer = setTimeout(() => {
+				running = running
+					.then(() => this.linkShapesToCode(editor, refs, root, files, linked))
+					.then(() => {
+						if (linked.size >= refs.size) stop();
+					})
+					.catch((e) => console.error("Draw.AI: linking shapes failed", e));
+			}, 1000);
+		});
+		const closed = editor.webviewPanel.onDidDispose(stop);
+		const deadline = setTimeout(stop, 30 * 60 * 1000);
 	}
 
 	/** Turns `codeRef` attributes (and exact name matches) into code links (double-click → source). */
-	private async linkShapesToCode(editor: DrawioEditor, refs: Map<string, Entity>, root: vscode.Uri, files: SourceFile[]): Promise<number> {
+	private async linkShapesToCode(
+		editor: DrawioEditor,
+		refs: Map<string, Entity>,
+		root: vscode.Uri,
+		files: SourceFile[],
+		/** Entities linked by earlier runs (updated): they are not linked again by name. */
+		linked = new Set<string>()
+	): Promise<number> {
 		const model = await editor.drawioClient.aiGetModel({ scope: "page", includeStyles: false, maxCells: 20000 });
 		const ops: AiOp[] = [];
-		const linked = new Set<string>();
 		const lines = new Map(files.map((f) => [f.path, splitLines(f.text)]));
 		const link = (e: Entity): Record<string, string> => {
 			const rel = path.relative(editor.uri.fsPath, path.join(root.fsPath, e.file)).replace(/\\/g, "/");
@@ -495,7 +539,10 @@ export class AiFeature {
 			const candidates = model.cells.filter(
 				(c) => c.kind !== "edge" && !c.data?.hedietLinkedDataV1_path && !c.data?.codeRef && firstLine(c.label) === e.name
 			);
-			if (candidates.length === 1) ops.push({ op: "update", id: candidates[0].id, data: link(e) });
+			if (candidates.length === 1) {
+				ops.push({ op: "update", id: candidates[0].id, data: link(e) });
+				linked.add(ref);
+			}
 		}
 		if (ops.length === 0) return 0;
 		const settings = getAiSettings();

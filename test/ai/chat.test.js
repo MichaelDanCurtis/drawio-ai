@@ -178,3 +178,29 @@ test("attachments are kept for a week", async () => {
 	await pruneAttachments(new Uri("/storage"), now);
 	assert.deepEqual([...files.keys()], [`/storage/chat-attachments/${now - 6 * 86400000}-new/1.md`]);
 });
+
+test("the toolbox reports each applied batch, so code links can follow what the native agent draws", async () => {
+	const { DiagramToolbox } = require(src("DiagramToolbox.ts"));
+	let rollBack = false;
+	const editor = {
+		drawioClient: {
+			aiApplyOps: async (ops) => ({
+				results: ops.map((o, index) => ({ index, op: o.op, ok: !rollBack, ids: ["x"], error: rollBack ? "nope" : undefined })),
+				idMap: {},
+				rolledBack: rollBack,
+			}),
+		},
+	};
+	const toolbox = new DiagramToolbox(() => editor);
+	const seen = [];
+	const sub = toolbox.onDidApplyOperations((e) => seen.push(e));
+	await toolbox.invoke("drawio_apply_operations", { ops: [{ op: "addShape", label: "A" }] });
+	assert.deepEqual(seen, [editor]);
+	rollBack = true;
+	await toolbox.invoke("drawio_apply_operations", { ops: [{ op: "addShape", label: "B" }] });
+	assert.equal(seen.length, 1, "a rolled-back batch changed nothing");
+	rollBack = false;
+	sub.dispose();
+	await toolbox.invoke("drawio_apply_operations", { ops: [{ op: "addShape", label: "C" }] });
+	assert.equal(seen.length, 1);
+});
