@@ -34,16 +34,29 @@ class Uri {
 }
 let workspaceFolder;
 const files = new Map();
+const symlinks = new Set();
+let dialogAnswer;
+const dialogs = [];
 const vscodeStub = {
 	Uri,
+	FileType: { File: 1, Directory: 2, SymbolicLink: 64 },
+	window: {
+		showWarningMessage: async (message, options, ...items) => {
+			dialogs.push({ message, modal: options?.modal, items });
+			return dialogAnswer;
+		},
+	},
 	workspace: {
 		getWorkspaceFolder: () => workspaceFolder,
 		getConfiguration: () => ({ get: (_k, d) => d }),
 		asRelativePath: (u) => (workspaceFolder ? u.path.replace(workspaceFolder.uri.path + "/", "") : u.path),
 		fs: {
 			stat: async (u) => {
+				const dir = [...files.keys()].some((f) => f.startsWith(u.path + "/"));
+				if (symlinks.has(u.path)) return { type: (dir ? 2 : 1) | 64, size: 0 };
+				if (dir) return { type: 2, size: 0 };
 				if (!files.has(u.path)) throw Object.assign(new Error("not found"), { code: "FileNotFound" });
-				return { size: files.get(u.path).length };
+				return { type: 1, size: files.get(u.path).length };
 			},
 			writeFile: async (u, data) => void files.set(u.path, Buffer.from(data)),
 			createDirectory: async () => {},
@@ -172,8 +185,19 @@ test("drawio_export: writes the Visio file, reports what was exported, never ove
 	assert.equal(files.get("/ws/docs/arch.vsdx").toString(), "PK-vsdx");
 
 	await assert.rejects(exportDiagramToWorkspace(editor, { format: "vsdx" }), /already exists.*overwrite: true/);
+	// overwrite: true still needs the user's yes, whatever surface called the tool.
+	dialogs.length = 0;
+	dialogAnswer = undefined;
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "vsdx", overwrite: true }), /chose not to replace docs\/arch\.vsdx/);
+	assert.deepEqual(dialogs.map((d) => [d.modal, d.items]), [[true, ["Replace"]]]);
+	assert.equal(calls.length, 1, "nothing is exported when the user declines");
+	dialogAnswer = "Replace";
 	await exportDiagramToWorkspace(editor, { format: "vsdx", overwrite: true, currentPageOnly: true });
 	assert.deepEqual(calls[1], { currentPageOnly: true });
+	// A new file needs no confirmation.
+	dialogs.length = 0;
+	await exportDiagramToWorkspace(editor, { format: "vsdx", path: "out/new", overwrite: true });
+	assert.equal(dialogs.length, 0);
 
 	await assert.rejects(exportDiagramToWorkspace(editor, { format: "drawio", path: "docs/ARCH.drawio", overwrite: true }), /open diagram itself/);
 	await assert.rejects(exportDiagramToWorkspace(editor, { format: "drawio", path: "docs/./sub/../arch", overwrite: true }), /open diagram itself/);
@@ -188,4 +212,35 @@ test("drawio_export: writes the Visio file, reports what was exported, never ove
 	await exportDiagramToWorkspace(editor, { format: "png", path: "img/arch" });
 	assert.equal(files.get("/ws/img/arch.png").toString(), "image .png");
 	await assert.rejects(exportDiagramToWorkspace(editor, { format: "pdf" }), /format must be one of: vsdx, svg, png, drawio/);
+});
+
+test("drawio_export: never writes through a symbolic link inside the workspace", async () => {
+	workspaceFolder = { uri: new Uri("/ws") };
+	files.clear();
+	symlinks.clear();
+	files.set("/ws/linked/placeholder.txt", Buffer.from(""));
+	files.set("/ws/docs/link.png", Buffer.from("old"));
+	symlinks.add("/ws/linked");
+	symlinks.add("/ws/docs/link.png");
+	const written = [];
+	const editor = {
+		uri: new Uri("/ws/docs/arch.drawio"),
+		getUriWithExtension: (ext) => new Uri("/ws/docs/arch" + ext),
+		drawioClient: {
+			exportVsdx: async () => ({ data: Buffer.from("PK"), pages: 1, shapes: 1, connectors: 0, images: 0, warnings: [] }),
+			getXml: async () => "<mxfile/>",
+			export: async (ext) => (written.push(ext), Buffer.from("png")),
+		},
+	};
+	dialogAnswer = "Replace";
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "vsdx", path: "linked/out" }), /linked is a symbolic link/);
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "vsdx", path: "linked/deeper/out" }), /linked is a symbolic link/);
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "png", path: "docs/link.png", overwrite: true }), /docs\/link\.png is a symbolic link/);
+	assert.equal(files.get("/ws/docs/link.png").toString(), "old");
+	assert.deepEqual(written, []);
+	assert.ok(![...files.keys()].some((f) => f.startsWith("/ws/linked/out")));
+	// Missing folders below the root are fine: they are created as real folders.
+	await exportDiagramToWorkspace(editor, { format: "vsdx", path: "fresh/dir/out" });
+	assert.equal(files.get("/ws/fresh/dir/out.vsdx").toString(), "PK");
+	symlinks.clear();
 });

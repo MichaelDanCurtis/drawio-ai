@@ -10,13 +10,25 @@ export interface ExportRequest {
 	path?: string;
 	/** vsdx only: export just the page shown in the editor. */
 	currentPageOnly?: boolean;
+	/** Replace an existing export. The user still has to confirm. */
 	overwrite?: boolean;
 }
+
+/** Asks the user whether an existing file may be replaced. */
+export type ConfirmReplace = (shownPath: string) => Promise<boolean>;
+
+const confirmWithDialog: ConfirmReplace = async (shownPath) =>
+	(await vscode.window.showWarningMessage(
+		`The AI wants to replace ${shownPath} with a new export of the diagram.`,
+		{ modal: true },
+		"Replace"
+	)) === "Replace";
 
 /** Writes an export of the open diagram into the workspace (the drawio_export tool). */
 export async function exportDiagramToWorkspace(
 	editor: DrawioEditor,
-	request: ExportRequest
+	request: ExportRequest,
+	confirmReplace: ConfirmReplace = confirmWithDialog
 ): Promise<{ text: string; summary: string }> {
 	const format = String(request.format ?? "").toLowerCase().replace(/^\./, "") as ExportFormat;
 	if (!EXPORT_FORMATS.includes(format)) {
@@ -27,12 +39,17 @@ export async function exportDiagramToWorkspace(
 	if (sameFile(target, editor.uri)) {
 		throw new Error("That path is the open diagram itself. Choose another path.");
 	}
+	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
 	if (await exists(target)) {
 		if (isDiagramFile(target.path)) {
 			throw new Error(`${shown} is an existing draw.io diagram; exports never replace diagrams. Choose another path.`);
 		}
 		if (!request.overwrite) {
-			throw new Error(`${shown} already exists. Ask the user before replacing it, then pass overwrite: true.`);
+			throw new Error(`${shown} already exists. Pass overwrite: true to replace it; the user is asked to confirm.`);
+		}
+		// Whichever surface called the tool (chat panel, @drawio, MCP, Copilot), the user decides.
+		if (!(await confirmReplace(shown))) {
+			throw new Error(`The user chose not to replace ${shown}.`);
 		}
 	}
 
@@ -75,7 +92,7 @@ export function resolveExportTarget(
 		return sameFile(next, diagram) ? next.with({ path: next.path.slice(0, -ext.length) + `-copy${ext}` }) : next;
 	}
 	const folder = vscode.workspace.getWorkspaceFolder(diagram);
-	const root = folder?.uri ?? vscode.Uri.joinPath(diagram, "..");
+	const root = exportRoot(diagram);
 	const withExt = p.toLowerCase().endsWith(ext) ? p : p + ext;
 	const absolute = withExt.startsWith("/") || /^[a-z]:\//i.test(withExt);
 	const joined = absolute ? vscode.Uri.file(withExt).path : `${root.path}/${withExt}`;
@@ -90,6 +107,33 @@ export function resolveExportTarget(
 		throw new Error(`path must be inside ${folder ? "the workspace folder" : "the diagram's folder"}.`);
 	}
 	return target;
+}
+
+/** Exports stay inside the diagram's workspace folder, or its own folder outside a workspace. */
+function exportRoot(diagram: vscode.Uri): vscode.Uri {
+	return vscode.workspace.getWorkspaceFolder(diagram)?.uri ?? vscode.Uri.joinPath(diagram, "..");
+}
+
+/**
+ * The containment check is on the path text, but writes follow symbolic links:
+ * refuse targets that pass through a link below the root (a linked folder, or a
+ * link in place of the file), since the file could land outside the workspace.
+ */
+async function assertNoSymbolicLinks(root: vscode.Uri, target: vscode.Uri): Promise<void> {
+	const base = root.path.endsWith("/") ? root.path : root.path + "/";
+	let at = root;
+	for (const segment of target.path.slice(base.length).split("/").filter(Boolean)) {
+		at = vscode.Uri.joinPath(at, segment);
+		let stat: vscode.FileStat;
+		try {
+			stat = await vscode.workspace.fs.stat(at);
+		} catch {
+			return; // Nothing below a missing folder exists yet.
+		}
+		if (stat.type & vscode.FileType.SymbolicLink) {
+			throw new Error(`${vscode.workspace.asRelativePath(at, false)} is a symbolic link; exports are not written through links.`);
+		}
+	}
 }
 
 function normalizePath(p: string): string {

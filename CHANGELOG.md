@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Export to Microsoft Visio (`.vsdx`): **Draw.io: Export to Visio (.vsdx)…**, **File → Export as Visio (.vsdx)…** in the diagram, and `.vsdx` in **Draw.io: Export To...**. Exports every page with editable shapes (including stencils and vendor icons), formatted text, glued connectors, groups, layers, images, Shape Data, hyperlinks and ScreenTips
-- `drawio_export` tool for the chat panel, Copilot and MCP agents: writes a `.vsdx`, `.svg`, `.png` or `.drawio` export inside the workspace; it replaces an earlier export only when asked and never replaces a diagram
+- `drawio_export` tool for the chat panel, Copilot and MCP agents: writes a `.vsdx`, `.svg`, `.png` or `.drawio` export inside the workspace (never through symbolic links); it asks before replacing an earlier export and never replaces a diagram
 
 ## [0.1.0]
 
