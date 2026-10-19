@@ -1045,6 +1045,11 @@
 				"icon": "$(sparkle)"
 			},
 			{
+				"command": "drawio-ai.useForDiagrams",
+				"title": "Use Draw.AI for Diagram Files",
+				"category": "Draw.AI"
+			},
+			{
 				"command": "drawio-ai.openChatPanel",
 				"title": "Open Draw.AI Chat Panel",
 				"category": "Draw.AI"
@@ -1898,7 +1903,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"

@@ -16,7 +16,9 @@ export class DrawioFileSystemController {
 	public readonly dispose = Disposable.fn();
 
 	private readonly fs = new VirtualFileSystemProvider();
-	public readonly scheme = "drawio";
+	// Not "drawio": Draw.io Integration (hediet.vscode-drawio) registers that scheme, and
+	// VS Code fails the activation of whichever extension registers it second.
+	public readonly scheme = "drawio-ai";
 
 	constructor() {
 		this.dispose.track(

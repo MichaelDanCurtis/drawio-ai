@@ -120,6 +120,10 @@ Not exported: hidden layers (you are told which), LaTeX math, and curved connect
 
 The exporter is based on the VSDX exporter that draw.io shipped until v24.7.17 (Copyright JGraph Ltd, Apache License 2.0), updated for current draw.io.
 
+## Using Draw.AI Next to Draw.io Integration
+
+Draw.AI is a fork of Draw.io Integration (`hediet.vscode-drawio`) and includes everything it does. If both are enabled, VS Code may open diagrams in Draw.io Integration, where Draw.AI's lasso, review and AI tools are not available. Draw.AI says so when it starts: choose **Use Draw.AI for Diagrams** (or run **Draw.AI: Use Draw.AI for Diagram Files**), which makes Draw.AI the editor for `.drawio`, `.dio`, `.drawio.svg` and `.drawio.png` files, or disable Draw.io Integration.
+
 ## Draw.io Editor Features
 
 These come from [hediet/vscode-drawio](https://github.com/hediet/vscode-drawio):

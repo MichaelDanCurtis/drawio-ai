@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
+import { diagramOpenInOtherEditor, UPSTREAM_EXTENSION } from "../conflictingExtensions";
 import type { ExportRequest } from "./exportDiagram";
 import type { ImportRequest } from "../importDiagram";
 import { lintDiagram } from "./lint";
@@ -123,6 +124,14 @@ export class DiagramToolbox {
 			return { isError: true, summary: `Failed: ${String(e?.message ?? e).slice(0, 80)}`, text: `Error: ${e?.message ?? e}` };
 		}
 		if (!editor) {
+			const elsewhere = diagramOpenInOtherEditor();
+			if (elsewhere) {
+				return {
+					isError: true,
+					summary: `Open in ${UPSTREAM_EXTENSION.name}`,
+					text: `${elsewhere.path.split("/").pop()} is open in ${UPSTREAM_EXTENSION.name} (another draw.io extension), not in Draw.AI, so these tools cannot reach it. Ask the user to run "Draw.AI: Use Draw.AI for Diagram Files", or to reopen the file with Reopen Editor With… → Draw.AI.`,
+				};
+			}
 			return {
 				isError: true,
 				summary: "No diagram open",
