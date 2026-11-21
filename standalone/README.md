@@ -164,6 +164,25 @@ zoom, F to fit. Pages are dots in the bottom left: click one, or use Tab / Shift
 the arrow keys. Esc returns to the editor. Presenting never edits or marks the diagram
 as changed. Pages with a map tour show ▶ next to the dots to play it.
 
+## Look
+
+The app's own pages (the chat, the Mapper, the presentation overlay) and draw.io's
+chrome use one design language: warm paper and ink in light mode, OLED black in dark,
+Space Grotesk with Space Mono caps labels, flat hairline cards, an ink primary button,
+and one signal red for the single thing that needs you (a permission request, the
+findings count, the current tour step). Depth comes from dots: a live dot field behind
+the chat and Mapper heads that leans away from the pointer and ripples when you switch
+agents or start a new chat, and a 3D dot object (stacked diagram layers) while the chat
+is empty. Motion is short and ease-out only: messages, menus, cards and tour captions
+rise in. Under *reduce motion* nothing moves.
+
+- Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
+  skill), served at `/ui/`. The fonts are self-hosted from `@fontsource` packages
+  (`build.mjs` copies them).
+- draw.io's chrome: `src/renderer/theme.js`, a draw.io plugin that only changes
+  draw.io's theme variables, its UI font and its primary buttons, never diagrams.
+- `DRAWAI_THEME=light|dark` forces the appearance (for checks and screenshots).
+
 ## How it works
 
 ```

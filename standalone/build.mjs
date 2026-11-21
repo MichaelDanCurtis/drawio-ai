@@ -2,7 +2,7 @@
 // MCP stdio proxy with esbuild. Shared code is imported straight from ../src
 // (read-only); `vscode` resolves to a small shim (src/main/vscode-shim.ts).
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync, readFileSync } from "fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
@@ -96,5 +96,14 @@ const jobs = [
 ];
 
 await Promise.all(jobs.map((j) => build(j)));
-for (const f of ["chat.html", "mapper.html", "desktop-menu.js", "presentation.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+for (const f of ["chat.html", "mapper.html", "desktop-menu.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+// The app's look (omni-design): tokens, motion, the dot layers, and the self-hosted fonts.
+mkdirSync(join(out, "ui/fonts"), { recursive: true });
+for (const f of readdirSync(join(here, "src/renderer/ui"))) copyFileSync(join(here, "src/renderer/ui", f), join(out, "ui", f));
+for (const [pkg, files] of Object.entries({
+	"space-grotesk": ["latin-400-normal", "latin-ext-400-normal", "latin-500-normal", "latin-ext-500-normal"],
+	"space-mono": ["latin-400-normal", "latin-ext-400-normal"],
+	doto: ["latin-700-normal"],
+}))
+	for (const f of files) copyFileSync(join(here, "node_modules/@fontsource", pkg, "files", `${pkg}-${f}.woff2`), join(out, "ui/fonts", `${pkg}-${f}.woff2`));
 console.log(`Built to ${out}${watch ? " (watch not supported; rerun)" : ""}`);

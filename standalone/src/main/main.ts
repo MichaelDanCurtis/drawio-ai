@@ -1,4 +1,4 @@
-import { app, dialog, Menu, MenuItemConstructorOptions, session, shell } from "electron";
+import { app, dialog, Menu, MenuItemConstructorOptions, nativeTheme, session, shell } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { AGENTS } from "./agents";
@@ -12,6 +12,8 @@ import { settingsPath, updateSettings } from "./settings";
 import { StaticServer } from "./staticServer";
 
 app.setName("Draw.AI");
+// For checks and screenshots: DRAWAI_THEME=light|dark overrides the system appearance.
+if (process.env.DRAWAI_THEME === "light" || process.env.DRAWAI_THEME === "dark") nativeTheme.themeSource = process.env.DRAWAI_THEME;
 // Test runs get their own data folder: they must not touch the user's settings or
 // collide with a copy of the app that is already running.
 if (process.env.DRAWAI_E2E) {

@@ -21,18 +21,35 @@
 		"body.drawai-presenting.drawai-panning .geDiagramContainer, body.drawai-presenting.drawai-panning .geDiagramContainer * { cursor: grabbing !important; }",
 		// Desktop app, always: draw.io's GitHub link in the page-tab bar.
 		'a:has(> img[title="jgraph/drawio"]), img[title="jgraph/drawio"] { display: none !important; }',
-		"#drawai-page-dots { position: fixed; left: 18px; bottom: 16px; z-index: 20000; display: flex; gap: 9px; align-items: center; padding: 7px 10px; border-radius: 999px; background: rgba(127,127,127,.14); backdrop-filter: blur(6px); }",
-		"#drawai-page-dots button { width: 11px; height: 11px; padding: 0; border-radius: 50%; border: 1.5px solid rgba(127,127,127,.85); background: transparent; cursor: pointer; transition: transform .12s, background .12s; }",
-		"#drawai-page-dots button:hover { transform: scale(1.3); }",
-		"#drawai-page-dots button.current { background: #7c3aed; border-color: #7c3aed; transform: scale(1.15); }",
-		"#drawai-page-dots .name { font: 12px -apple-system, system-ui, sans-serif; color: rgba(127,127,127,.95); margin-left: 4px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
-		"#drawai-page-dots .tour { width: auto; height: auto; border-radius: 999px; padding: 2px 9px; font: 11px -apple-system, system-ui, sans-serif; color: #fff; background: #7c3aed; border-color: #7c3aed; }",
-		"#drawai-page-dots .tour:hover { transform: none; filter: brightness(1.1); }",
-		"#drawai-tour-caption { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 20000; max-width: min(720px, 80vw); padding: 12px 18px; border-radius: 12px; font: 14px/1.45 -apple-system, system-ui, sans-serif; color: #fff; background: rgba(24,20,32,.92); box-shadow: 0 8px 28px rgba(0,0,0,.35); }",
-		"#drawai-tour-caption .step { font-size: 11px; opacity: .7; margin-bottom: 2px; }",
-		"#drawai-tour-caption .title { font-weight: 600; margin-bottom: 2px; }",
-		"#drawai-tour-caption .keys { font-size: 11px; opacity: .55; margin-top: 6px; }",
-		"#drawai-present-hint { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 20000; padding: 6px 14px; border-radius: 999px; font: 12px -apple-system, system-ui, sans-serif; color: #fff; background: rgba(30,30,34,.78); pointer-events: none; transition: opacity .6s; }",
+		// The overlay in the app's look (omni-design): ink on paper (light) or white on OLED black, mono caps labels, dots, one signal red.
+		"@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('/ui/fonts/space-grotesk-latin-400-normal.woff2') format('woff2'); }",
+		"@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/ui/fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }",
+		"@font-face { font-family: 'Space Mono'; font-weight: 400; font-display: swap; src: url('/ui/fonts/space-mono-latin-400-normal.woff2') format('woff2'); }",
+		":root { --dp-surface: #ffffff; --dp-ink: #141414; --dp-muted: #5f5d59; --dp-faint: #8b8984; --dp-line: #d2cfc8; --dp-signal: #d71921; --dp-shadow: 0 18px 48px rgb(20 20 20 / 12%), 0 2px 6px rgb(20 20 20 / 6%); --dp-ease: cubic-bezier(0.16, 0.84, 0.3, 1); }",
+		"@media (prefers-color-scheme: dark) { :root { --dp-surface: #0f0f0f; --dp-ink: #ededed; --dp-muted: #9b9b9b; --dp-faint: #6b6b6b; --dp-line: #333333; --dp-signal: #e5262f; --dp-shadow: 0 18px 48px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 6%); } }",
+		"@keyframes drawai-rise { from { opacity: 0; transform: translateY(6px); } }",
+		"@keyframes drawai-rise-x { from { opacity: 0; transform: translate(-50%, 6px); } }",
+		"#drawai-page-dots { position: fixed; left: 18px; bottom: 16px; z-index: 20000; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 999px; background: var(--dp-surface); border: 1px solid var(--dp-line); box-shadow: var(--dp-shadow); animation: drawai-rise 220ms var(--dp-ease); }",
+		"#drawai-page-dots button { width: 8px; height: 8px; padding: 0; border-radius: 50%; border: 0; background: var(--dp-line); cursor: pointer; transition: transform 140ms var(--dp-ease), background 140ms ease-out; }",
+		"#drawai-page-dots button:hover { transform: scale(1.35); background: var(--dp-faint); }",
+		"#drawai-page-dots button.current { background: var(--dp-ink); transform: scale(1.25); }",
+		"#drawai-page-dots .name { font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--dp-muted); margin-left: 4px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+		"#drawai-page-dots .tour { width: auto; height: auto; border-radius: 999px; padding: 3px 11px; font: 500 12px 'Space Grotesk', system-ui, sans-serif; color: var(--dp-surface); background: var(--dp-ink); }",
+		"#drawai-page-dots .tour:hover { transform: translateY(-1px); background: var(--dp-ink); }",
+		"#drawai-tour-caption { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 20000; width: min(620px, 80vw); padding: 14px 18px 12px; border-radius: 14px; font: 14px/1.5 'Space Grotesk', system-ui, sans-serif; color: var(--dp-ink); background: var(--dp-surface); border: 1px solid var(--dp-line); box-shadow: var(--dp-shadow); animation: drawai-rise-x 220ms var(--dp-ease); }",
+		"#drawai-tour-caption.again { animation: none; }",
+		"#drawai-tour-caption .step { display: flex; align-items: center; gap: 10px; font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--dp-muted); margin-bottom: 6px; }",
+		"#drawai-tour-caption .progress { display: inline-flex; gap: 4px; margin-left: auto; }",
+		"#drawai-tour-caption .progress i { width: 5px; height: 5px; border-radius: 50%; background: var(--dp-line); transition: background 140ms ease-out; }",
+		"#drawai-tour-caption .progress i.done { background: var(--dp-faint); }",
+		"#drawai-tour-caption .progress i.now { background: var(--dp-signal); }",
+		"#drawai-tour-caption .title { font-weight: 500; font-size: 16px; letter-spacing: -.01em; margin-bottom: 2px; }",
+		"#drawai-tour-caption .text { color: var(--dp-ink); }",
+		"#drawai-tour-caption .keys { font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .04em; color: var(--dp-faint); margin-top: 10px; }",
+		"#drawai-tour-caption > * { animation: drawai-rise 380ms var(--dp-ease) backwards; }",
+		"#drawai-tour-caption > :nth-child(2) { animation-delay: 45ms; } #drawai-tour-caption > :nth-child(3) { animation-delay: 90ms; } #drawai-tour-caption > :nth-child(4) { animation-delay: 135ms; }",
+		"@media (prefers-reduced-motion: reduce) { #drawai-page-dots, #drawai-tour-caption, #drawai-tour-caption > *, #drawai-page-dots button { animation: none !important; transition: none !important; } }",
+		"#drawai-present-hint { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 20000; padding: 6px 14px; border-radius: 999px; font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--dp-surface); background: var(--dp-ink); pointer-events: none; transition: opacity .6s; }",
 	].join("\n");
 
 	Draw.loadPlugin(function (ui) {
@@ -141,7 +158,7 @@
 					var r = new mxRectangle(st.x, st.y, st.width, st.height);
 					if (b) b.add(r);
 					else b = r;
-					var h = new mxCellHighlight(graph, "#7c3aed", 4);
+					var h = new mxCellHighlight(graph, "#d71921", 3);
 					h.highlight(st);
 					highlights.push(h);
 				});
@@ -155,7 +172,7 @@
 					step.nodeIds.forEach(function (id) {
 						var st = cells[id] && graph.view.getState(cells[id]);
 						if (!st) return;
-						var h = new mxCellHighlight(graph, "#7c3aed", 4);
+						var h = new mxCellHighlight(graph, "#d71921", 3);
 						h.highlight(st);
 						highlights.push(h);
 					});
@@ -167,13 +184,28 @@
 				document.body.appendChild(caption);
 			}
 			caption.replaceChildren();
+			// each step rises in again
+			caption.classList.add("again");
+			void caption.offsetWidth;
+			caption.classList.remove("again");
 			var meta = document.createElement("div");
 			meta.className = "step";
 			meta.textContent = tour.title + " · step " + (tourStep + 1) + " of " + tour.steps.length;
+			var progress = document.createElement("span");
+			progress.className = "progress";
+			progress.setAttribute("aria-hidden", "true");
+			for (var pi = 0; pi < tour.steps.length && pi < 24; pi++) {
+				var pd = document.createElement("i");
+				if (pi < tourStep) pd.className = "done";
+				else if (pi === tourStep) pd.className = "now";
+				progress.appendChild(pd);
+			}
+			meta.appendChild(progress);
 			var title = document.createElement("div");
 			title.className = "title";
 			title.textContent = step.title || "";
 			var text = document.createElement("div");
+			text.className = "text";
 			text.textContent = step.caption;
 			var keys = document.createElement("div");
 			keys.className = "keys";

@@ -23,6 +23,9 @@ own coding agents.
   - Recent changes from git, and refresh.
   - Guided tours, and Ask the map.
 - **Presentation mode** (F5): only the diagram, read-only, pages as dots, tours.
+- **A new look**: paper and ink, or OLED black, with Space Grotesk, mono caps
+  labels, one signal red, a live dot field and a 3D dot object, and short ease-out
+  motion. It applies to the chat, the Mapper, presentation mode and draw.io's own chrome.
 - **MCP for Claude Code and Codex**: Agent → Connect Claude Code / Codex to Draw.AI
   lets coding agents on this computer use the open diagrams and maps.
 
