@@ -47,6 +47,15 @@ export class DrawioEditorService {
 		return this._lastActiveDrawioEditor;
 	}
 
+	/**
+	 * The diagram a command acts on: the active one, else the one used last if it is
+	 * still open (commands also run from VS Code's chat, where no diagram is active).
+	 */
+	get targetDrawioEditor(): DrawioEditor | undefined {
+		const last = this._lastActiveDrawioEditor;
+		return this.activeDrawioEditor ?? (last && this.openedEditors.has(last) ? last : undefined);
+	}
+
 	private readonly statusBar = this.dispose.track(
 		window.createStatusBarItem(StatusBarAlignment.Right)
 	);
@@ -100,18 +109,18 @@ export class DrawioEditorService {
 
 		this.dispose.track(
 			registerFailableCommand("drawio-ai.export", () => {
-				// Also from VS Code's chat, where the diagram is not the active editor.
-				const activeDrawioEditor = this.activeDrawioEditor ?? this.lastActiveDrawioEditor;
-				if (!activeDrawioEditor) {
+				const editor = this.targetDrawioEditor;
+				if (!editor) {
+					window.showInformationMessage("Open a draw.io diagram to export it.");
 					return;
 				}
-				return activeDrawioEditor.handleExportCommand();
+				return editor.handleExportCommand();
 			})
 		);
 
 		this.dispose.track(
 			registerFailableCommand("drawio-ai.exportPdf", () => {
-				const editor = this.activeDrawioEditor ?? this.lastActiveDrawioEditor;
+				const editor = this.targetDrawioEditor;
 				if (!editor) {
 					window.showInformationMessage("Open a draw.io diagram to export it to PDF.");
 					return;
@@ -122,7 +131,7 @@ export class DrawioEditorService {
 
 		this.dispose.track(
 			registerFailableCommand("drawio-ai.exportVisio", () => {
-				const editor = this.activeDrawioEditor ?? this.lastActiveDrawioEditor;
+				const editor = this.targetDrawioEditor;
 				if (!editor) {
 					window.showInformationMessage("Open a draw.io diagram to export it to Visio.");
 					return;
