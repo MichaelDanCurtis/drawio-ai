@@ -225,6 +225,7 @@ export class ChatController {
 			this.postState();
 			return Promise.reject(new Error(spec.error));
 		}
+		this.mcp.compactDescriptions = !!spec.compactTools;
 		const session = new AcpAgentSession(def, spec, this.host.cwd(), { url: this.mcp.url, token: this.mcp.token, stdioProxy: paths.stdioProxy }, {
 			onUpdate: (u) => this.onUpdate(u),
 			requestPermission: (req, signal) => this.requestPermission(req, signal),
@@ -360,6 +361,7 @@ export class ChatController {
 			}
 			this.assistant = undefined;
 			this.thought = undefined;
+			this.toolSummaries = [];
 			stop = await session.prompt(blocks);
 			if (stop === "cancelled") this.push({ kind: "error", text: "Stopped." });
 			else if (stop === "refusal") this.push({ kind: "error", text: `${session.label} declined this request.` });

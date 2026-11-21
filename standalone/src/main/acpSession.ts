@@ -54,7 +54,7 @@ export class AcpAgentSession {
 	) {}
 
 	public get label(): string {
-		return this.info?.agentName ?? this.def.label;
+		return this.info?.agentName ?? this.launch.label ?? this.def.label;
 	}
 
 	public async start(): Promise<SessionInfo> {

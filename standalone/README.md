@@ -2,7 +2,8 @@
 
 A desktop app for draw.io diagrams with an AI chat beside the editor. It does not
 use its own model API keys: the chat drives a coding agent you already have
-installed and signed in to — **Claude Code**, **Gemini CLI** or **Codex** — over the
+installed and signed in to — **Claude Code**, **Gemini** (Google's Antigravity CLI, or
+Gemini CLI) or **Codex** — over the
 [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
 open diagram live through Draw.AI's diagram tools, and you keep or revert its
 changes.
@@ -26,8 +27,14 @@ at least one agent:
 | Agent | Install | Sign in | How Draw.AI starts it |
 | --- | --- | --- | --- |
 | Claude Code | `npm i -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp` | `claude` → `/login` | `claude-agent-acp` (or `npx -y @agentclientprotocol/claude-agent-acp`) |
-| Gemini CLI | `npm i -g @google/gemini-cli` | `gemini` | `gemini --acp` |
+| Gemini (Antigravity CLI) | `agy`, from [antigravity.google](https://antigravity.google) | `agy acp --login` (or sign in from `agy`) | `agy acp` |
+| Gemini CLI (fallback when `agy` is not installed) | `npm i -g @google/gemini-cli` | `gemini` | `gemini --acp` |
 | Codex | `npm i -g @openai/codex @agentclientprotocol/codex-acp` | `codex login` | `codex-acp` (or `npx -y @agentclientprotocol/codex-acp`) |
+
+Google has moved personal Google accounts from Gemini CLI to the Antigravity CLI:
+Gemini CLI now refuses them ("This client is no longer supported for Gemini Code Assist
+for individuals"), so the Gemini entry uses `agy` when it is installed. Gemini CLI still
+works with an API key or Vertex AI.
 
 The ACP adapters for Claude Code and Codex are fetched with `npx` on first use when
 they are not installed globally. The agent picker in the chat shows which agents are
@@ -74,6 +81,12 @@ Electron main process                          agent subprocess (cwd = diagram f
   (`out/mcp-stdio-proxy.js`, run with Electron's Node) that forwards to the same
   endpoint. Tools that need VS Code (workspace search, code links, imports) are left
   out; `file` arguments are dropped because a window is one diagram.
+- Antigravity CLI (agy 1.5) silently leaves out MCP tools with large definitions (in
+  testing, tools up to ~690 bytes of JSON were offered to the model; from ~720 bytes they
+  were "not enabled"). For it, the server sends shortened descriptions and, for the large
+  tools (`drawio_apply_operations`, `drawio_pages`, ...), only parameter names and types;
+  the full descriptions and JSON Schemas are in the server instructions, which it reads
+  (`compactTools` in `src/main/mcpServer.ts`). Other agents get the full definitions.
 - The draw.io page is the extension's `src/DrawioClient/webview-content.html`,
   served unchanged; a preload recreates the `acquireVsCodeApi()` bridge over IPC.
   The Draw.AI plugin is built from `drawio-custom-plugins/` by `build.mjs`.
@@ -101,5 +114,6 @@ is optional:
   exports PDF/SVG and screenshots the editor and chat into a temp folder.
   `yarn e2e --agent claude` (or `gemini`, `codex`) also sends one prompt through that
   agent over ACP, auto-approving its permission requests, and fails if the diagram
-  did not change. `--prompt "…"` and `--file path` pick the request and diagram.
+  did not change. `--click-permissions` answers them by clicking the permission card
+  in the chat instead. `--prompt "…"` and `--file path` pick the request and diagram.
 - View → Editor/Chat Developer Tools for the two web views.

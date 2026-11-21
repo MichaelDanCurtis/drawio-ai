@@ -9,10 +9,16 @@ export type AgentId = "gemini" | "claude" | "codex";
 export interface AgentDef {
 	id: AgentId;
 	label: string;
-	/** The CLI the user has installed and signed in to. */
-	cli: string;
-	/** Executable that speaks ACP on stdio, and its args. */
-	acp: { command: string; args: string[] } | { npxPackage: string; bin: string };
+	/** The CLI(s) the user has installed and signed in to; any one is enough. */
+	cli: string[];
+	/**
+	 * Executable that speaks ACP on stdio, and its args: one command, an npx-installable
+	 * adapter, or several CLIs of which the first one installed is used.
+	 */
+	acp:
+		| { command: string; args: string[] }
+		| { npxPackage: string; bin: string }
+		| { candidates: { command: string; args: string[]; label: string; compactTools?: boolean }[] };
 	install: string;
 	signIn: string;
 	/** Heuristic: is there a saved sign-in or an API key? (The agent has the final word.) */
@@ -26,7 +32,7 @@ export const AGENTS: AgentDef[] = [
 	{
 		id: "claude",
 		label: "Claude Code",
-		cli: "claude",
+		cli: ["claude"],
 		// Zed's adapter, now published by the ACP project (was @zed-industries/claude-code-acp).
 		acp: { npxPackage: "@agentclientprotocol/claude-agent-acp", bin: "claude-agent-acp" },
 		install: "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp",
@@ -39,22 +45,31 @@ export const AGENTS: AgentDef[] = [
 	},
 	{
 		id: "gemini",
-		label: "Gemini CLI",
-		cli: "gemini",
-		acp: { command: "gemini", args: ["--acp"] },
-		install: "npm install -g @google/gemini-cli",
-		signIn: "gemini  (pick a sign-in method)",
+		label: "Gemini",
+		// Google's Antigravity CLI (`agy`, ACP via its `acp` subcommand) replaces Gemini CLI for
+		// personal Google accounts; plain Gemini CLI (`gemini --acp`) is the fallback.
+		cli: ["agy", "gemini"],
+		acp: {
+			candidates: [
+				// Antigravity drops MCP tools with long descriptions: send compact ones.
+				{ command: "agy", args: ["acp"], label: "Gemini (Antigravity CLI)", compactTools: true },
+				{ command: "gemini", args: ["--acp"], label: "Gemini CLI" },
+			],
+		},
+		install: "Install the Antigravity CLI (agy) from https://antigravity.google, or: npm install -g @google/gemini-cli",
+		signIn: "agy acp --login  (or `gemini` for Gemini CLI)",
 		hasCredentials: (env) =>
 			!!env.GEMINI_API_KEY ||
 			!!env.GOOGLE_API_KEY ||
 			!!env.GOOGLE_GENAI_USE_VERTEXAI ||
+			exists(home, ".gemini", "antigravity-cli") ||
 			exists(home, ".gemini", "oauth_creds.json") ||
 			exists(home, ".gemini", "google_accounts.json"),
 	},
 	{
 		id: "codex",
 		label: "Codex",
-		cli: "codex",
+		cli: ["codex"],
 		acp: { npxPackage: "@agentclientprotocol/codex-acp", bin: "codex-acp" },
 		install: "npm install -g @openai/codex @agentclientprotocol/codex-acp",
 		signIn: "codex login",
@@ -150,6 +165,10 @@ export interface LaunchSpec {
 	command: string;
 	args: string[];
 	env: NodeJS.ProcessEnv;
+	/** Which CLI this is, when an agent has several (e.g. "Gemini (Antigravity CLI)"). */
+	label?: string;
+	/** The agent needs short MCP tool descriptions (see compactTools in mcpServer.ts). */
+	compactTools?: boolean;
 }
 
 export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
@@ -159,6 +178,13 @@ export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
 		const command = which(override.command, env);
 		if (!command) return { error: `${override.command} (from settings.json) was not found.` };
 		return { command, args: override.args ?? [], env: { ...env, ...(override.env ?? {}) } };
+	}
+	if ("candidates" in def.acp) {
+		for (const c of def.acp.candidates) {
+			const command = which(c.command, env);
+			if (command) return { command, args: c.args, env, label: c.label, compactTools: c.compactTools };
+		}
+		return { error: `${def.label} is not installed. ${def.install}` };
 	}
 	if ("command" in def.acp) {
 		const command = which(def.acp.command, env);
@@ -174,7 +200,7 @@ export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
 export function agentStatuses(): AgentStatus[] {
 	const env = agentEnv();
 	return AGENTS.map((def) => {
-		const installed = !!which(def.cli, env) || !!settings().agents[def.id]?.command;
+		const installed = def.cli.some((c) => !!which(c, env)) || !!settings().agents[def.id]?.command;
 		const signedIn = def.hasCredentials(env);
 		const spec = launchSpec(def);
 		const viaNpx = !("error" in spec) && path.basename(spec.command) === "npx";
@@ -187,7 +213,7 @@ export function agentStatuses(): AgentStatus[] {
 			: undefined;
 		return {
 			id: def.id,
-			label: def.label,
+			label: ("error" in spec ? undefined : spec.label) ?? def.label,
 			installed,
 			signedIn,
 			viaNpx,

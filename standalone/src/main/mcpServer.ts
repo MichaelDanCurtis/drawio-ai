@@ -21,11 +21,104 @@ export function standaloneTools(): McpTool[] {
 		});
 }
 
-export function standaloneInstructions(fileName: string | undefined): string {
+/**
+ * Antigravity CLI (agy 1.5) silently leaves out MCP tools whose definition is large: in our
+ * runs every tool up to ~690 bytes of JSON (name, description, schema) was offered to the
+ * model and every one from ~720 bytes was not ("tool … is not enabled for server").
+ * For it, long descriptions are cut to their first sentences, and schemas still too big
+ * are reduced to their parameters' types; the full text and schemas go into the server
+ * instructions, which it reads. DiagramToolbox validates the input either way.
+ */
+const COMPACT_DESCRIPTION_MAX = 220;
+const COMPACT_TOOL_MAX = 640;
+
+const toolSize = (t: McpTool) => JSON.stringify({ name: t.name, description: t.description, parameters: t.inputSchema }).length;
+
+/** Just the parameters' names and types (and enums, when they fit). */
+function skeleton(schema: any, withEnums: boolean): any {
+	const prop = (v: any): any => {
+		const out: any = { type: v?.type ?? "object" };
+		if (withEnums && Array.isArray(v?.enum)) out.enum = v.enum;
+		if (v?.type === "array") out.items = { type: v.items?.type ?? "object" };
+		return out;
+	};
+	return {
+		type: "object",
+		properties: Object.fromEntries(Object.entries(schema?.properties ?? {}).map(([k, v]) => [k, prop(v)])),
+		...(schema?.required ? { required: schema.required } : {}),
+	};
+}
+
+function shorten(text: string, pointer: string): string {
+	const budget = COMPACT_DESCRIPTION_MAX - pointer.length;
+	let short = "";
+	for (const s of text.match(/[^.!?]+[.!?]+(\s|$)/g) ?? []) {
+		if ((short + s).trim().length > budget) break;
+		short += s;
+	}
+	return (short.trim() || text.slice(0, budget - 1).trimEnd() + "…") + pointer;
+}
+
+/** Long descriptions anywhere in a tool (its own, its parameters'), as [path, full text]. */
+function longDescriptions(t: McpTool): [string, string][] {
+	const found: [string, string][] = [];
+	if (t.description.length > COMPACT_DESCRIPTION_MAX) found.push([t.name, t.description]);
+	const walk = (node: any, path: string) => {
+		if (!node || typeof node !== "object") return;
+		if (typeof node.description === "string" && node.description.length > COMPACT_DESCRIPTION_MAX) found.push([`${t.name} ${path}`, node.description]);
+		for (const [k, v] of Object.entries(node.properties ?? {})) walk(v, `${path}${path ? "." : ""}${k}`);
+		if (node.items) walk(node.items, `${path}[]`);
+	};
+	walk(t.inputSchema, "");
+	return found;
+}
+
+function compactTool(t: McpTool): { tool: McpTool; reducedSchema: boolean } {
+	const compactSchema = (node: any): any => {
+		if (!node || typeof node !== "object" || Array.isArray(node)) return node;
+		const out: any = { ...node };
+		if (typeof out.description === "string" && out.description.length > COMPACT_DESCRIPTION_MAX) out.description = shorten(out.description, " (More in the instructions.)");
+		if (out.properties) out.properties = Object.fromEntries(Object.entries(out.properties).map(([k, v]) => [k, compactSchema(v)]));
+		if (out.items) out.items = compactSchema(out.items);
+		return out;
+	};
+	let tool: McpTool = {
+		...t,
+		description: t.description.length > COMPACT_DESCRIPTION_MAX ? shorten(t.description, " Full reference in the server instructions.") : t.description,
+		inputSchema: compactSchema(t.inputSchema),
+	};
+	let reducedSchema = false;
+	for (const withEnums of [true, false]) {
+		if (toolSize(tool) <= COMPACT_TOOL_MAX) break;
+		tool = { ...tool, inputSchema: skeleton(t.inputSchema, withEnums) };
+		reducedSchema = true;
+	}
+	if (reducedSchema && !tool.description.includes("server instructions")) {
+		tool = { ...tool, description: shorten(tool.description, " Full parameter schema in the server instructions.") };
+	}
+	return { tool, reducedSchema };
+}
+
+export function compactTools(tools: McpTool[]): McpTool[] {
+	return tools.map((t) => compactTool(t).tool);
+}
+
+function toolReference(tools: McpTool[]): string {
+	return [
+		"Tool reference. This client gets shortened tool descriptions and, for large tools, only parameter names and types; these are the full versions.",
+		...tools.flatMap(longDescriptions).map(([where, text]) => `- ${where}: ${text}`),
+		...tools.filter((t) => compactTool(t).reducedSchema).map((t) => `\n${t.name} parameters (JSON Schema):\n${JSON.stringify(t.inputSchema)}`),
+	].join("\n");
+}
+
+export function standaloneInstructions(fileName: string | undefined, compact = false): string {
 	return [
 		`These tools edit the draw.io diagram${fileName ? ` "${fileName}"` : ""} that is open in the Draw.AI desktop app, live: the user watches every change happen and can keep or revert your edits. Change the diagram ONLY through these drawio_* tools; never edit .drawio, .drawio.svg or .drawio.png files on disk (the open editor would not show it and the user's review would be skipped).`,
 		SYSTEM_PROMPT.replace("embedded in VS Code", "in the Draw.AI desktop app").split("\n\nAnswering:")[0],
-	].join("\n\n");
+		compact ? toolReference(standaloneTools()) : undefined,
+	]
+		.filter(Boolean)
+		.join("\n\n");
 }
 
 /**
@@ -38,6 +131,8 @@ export class WindowMcpServer {
 	private port = 0;
 	/** Summaries of finished tool calls, for the chat transcript. */
 	public onToolResult: ((name: string, result: ToolResult) => void) | undefined;
+	/** Short tool descriptions (full text in the instructions), for agents that drop long ones. */
+	public compactDescriptions = false;
 
 	constructor(private readonly toolbox: DiagramToolbox, private readonly fileName: () => string | undefined) {}
 
@@ -47,13 +142,14 @@ export class WindowMcpServer {
 
 	public async start(): Promise<void> {
 		const tools = standaloneTools();
+		const compact = compactTools(tools);
 		const listener = createMcpListener({
 			token: () => this.token,
 			port: () => this.port,
 			deps: {
 				serverVersion: "0.1.0",
-				tools: () => tools,
-				instructions: async () => standaloneInstructions(this.fileName()),
+				tools: () => (this.compactDescriptions ? compact : tools),
+				instructions: async () => standaloneInstructions(this.fileName(), this.compactDescriptions),
 				callTool: async (name, args) => {
 					const result = await this.toolbox.invoke(name, args, { scoped: true });
 					this.onToolResult?.(name, result);
