@@ -67,7 +67,13 @@ export class StaticServer {
 
 	private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
 		const url = new URL(req.url ?? "/", "http://x");
-		const p = decodeURIComponent(url.pathname);
+		let p: string;
+		try {
+			p = decodeURIComponent(url.pathname);
+		} catch {
+			return void res.writeHead(400).end();
+		}
+		if (p.includes("\0")) return void res.writeHead(400).end();
 		const page = /^\/editor\/([\w-]+)\.html$/.exec(p);
 		if (page) {
 			const o = this.pages.get(page[1]);

@@ -26,7 +26,7 @@
 		"@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/ui/fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }",
 		"@font-face { font-family: 'Space Mono'; font-weight: 400; font-display: swap; src: url('/ui/fonts/space-mono-latin-400-normal.woff2') format('woff2'); }",
 		":root { --dp-surface: #ffffff; --dp-ink: #141414; --dp-muted: #5f5d59; --dp-faint: #8b8984; --dp-line: #d2cfc8; --dp-signal: #d71921; --dp-shadow: 0 18px 48px rgb(20 20 20 / 12%), 0 2px 6px rgb(20 20 20 / 6%); --dp-ease: cubic-bezier(0.16, 0.84, 0.3, 1); }",
-		"@media (prefers-color-scheme: dark) { :root { --dp-surface: #0f0f0f; --dp-ink: #ededed; --dp-muted: #9b9b9b; --dp-faint: #6b6b6b; --dp-line: #333333; --dp-signal: #e5262f; --dp-shadow: 0 18px 48px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 6%); } }",
+		"html.drawai-dark { --dp-surface: #0f0f0f; --dp-ink: #ededed; --dp-muted: #9b9b9b; --dp-faint: #6b6b6b; --dp-line: #333333; --dp-signal: #e5262f; --dp-shadow: 0 18px 48px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 6%); }",
 		"@keyframes drawai-rise { from { opacity: 0; transform: translateY(6px); } }",
 		"@keyframes drawai-rise-x { from { opacity: 0; transform: translate(-50%, 6px); } }",
 		"#drawai-page-dots { position: fixed; left: 18px; bottom: 16px; z-index: 20000; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 999px; background: var(--dp-surface); border: 1px solid var(--dp-line); box-shadow: var(--dp-shadow); animation: drawai-rise 220ms var(--dp-ease); }",
@@ -310,7 +310,15 @@
 			}
 		}
 
+		// The overlay follows the editor's own dark mode (which can differ from the system's).
+		function syncDark() {
+			var dark = false;
+			try { dark = typeof Editor !== "undefined" && typeof Editor.isDarkMode === "function" && Editor.isDarkMode(); } catch (e) { dark = false; }
+			document.documentElement.classList.toggle("drawai-dark", !!dark);
+		}
+
 		function enter() {
+			syncDark();
 			if (active) return;
 			active = true;
 			if (graph.isEditing()) graph.stopEditing(false);

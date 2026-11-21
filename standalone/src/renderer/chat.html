@@ -152,7 +152,7 @@
 			<select id="model" class="pick" title="Model or mode"></select>
 			<span class="spacer"></span>
 			<button id="allowAllChip" class="tag hidden" data-tone="warn" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">Allow all ✕</button>
-			<span id="status" class="state" data-state="off" title=""></span>
+			<span id="status" class="state" data-state="off" role="img" aria-label="Agent status" title=""></span>
 			<button id="newChat" class="icon-btn" title="New chat (starts a new agent session)" aria-label="New chat"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
 		</header>
 		<div id="context">
@@ -515,6 +515,7 @@
 		if (status.dataset.state !== (state.agentState || "off") && state.agentState === "ready") window.drawaiUI?.pulse();
 		status.dataset.state = state.agentState || "off";
 		status.title = state.agentInfo || state.modelsError || "";
+		status.setAttribute("aria-label", "Agent " + (state.agentState || "off") + (status.title ? ": " + status.title : ""));
 		renderReview(state.review);
 		$("allowAllChip").classList.toggle("hidden", !state.allowAll);
 		setBusy(state.busy);
