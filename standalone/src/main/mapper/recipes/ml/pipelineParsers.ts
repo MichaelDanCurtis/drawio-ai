@@ -40,7 +40,12 @@ export class PipelineBuilder {
 		this.nodes.push(n);
 	}
 
-	step(local: string, label: string, opts: { rows?: MapRow[]; data?: Record<string, string>; parent?: string; kind?: string } = {}): void {
+	/** The definition file, plus files the entry names (code a step runs, a file it writes), relative to the scanned folder. */
+	private filesFor(extra?: string[]): string[] {
+		return [...new Set([this.file, ...(extra ?? [])])];
+	}
+
+	step(local: string, label: string, opts: { rows?: MapRow[]; data?: Record<string, string>; parent?: string; kind?: string; files?: string[] } = {}): void {
 		const rows = (opts.rows ?? []).filter((r) => r.text);
 		this.add({
 			id: local,
@@ -49,10 +54,11 @@ export class PipelineBuilder {
 			parent: opts.parent,
 			...(rows.length ? { shape: "table" as const, rows, style: ML_STYLES.stepTable } : { style: ML_STYLES.step }),
 			data: { framework: this.framework, file: this.file, step: label, ...(opts.data ?? {}) },
+			files: this.filesFor(opts.files),
 		});
 	}
 
-	artifact(local: string, label: string, type: ArtifactType, opts: { data?: Record<string, string>; parent?: string } = {}): void {
+	artifact(local: string, label: string, type: ArtifactType, opts: { data?: Record<string, string>; parent?: string; files?: string[] } = {}): void {
 		this.add({
 			id: local,
 			label,
@@ -62,6 +68,7 @@ export class PipelineBuilder {
 			width: Math.max(110, Math.min(220, label.length * 7 + 30)),
 			height: type === "data" ? 60 : 50,
 			data: { framework: this.framework, file: this.file, ...(opts.data ?? {}) },
+			files: this.filesFor(opts.files),
 		});
 	}
 
@@ -70,11 +77,11 @@ export class PipelineBuilder {
 	}
 
 	note(local: string, text: string, parent?: string): void {
-		this.add({ id: local, label: text, kind: "ml:params", shape: "note", parent, style: ML_STYLES.params, width: 220, data: { file: this.file } });
+		this.add({ id: local, label: text, kind: "ml:params", shape: "note", parent, style: ML_STYLES.params, width: 220, data: { file: this.file }, files: this.filesFor() });
 	}
 
 	condition(local: string, label: string, parent?: string, data: Record<string, string> = {}): void {
-		this.add({ id: local, label, kind: "ml:condition", parent, style: ML_STYLES.condition, width: 220, height: 80, data: { framework: this.framework, file: this.file, ...data } });
+		this.add({ id: local, label, kind: "ml:condition", parent, style: ML_STYLES.condition, width: 220, height: 80, data: { framework: this.framework, file: this.file, ...data }, files: this.filesFor() });
 	}
 
 	edge(from: string, to: string, label?: string, kind = "dataflow"): void {
@@ -123,6 +130,8 @@ export function parseDvc(doc: any, file: string): ParsedPipeline | undefined {
 	const b = new PipelineBuilder(dir === "." ? "dvc.yaml" : dir, "DVC", file);
 	const outs = new Map<string, string>();
 	const entries = Object.entries<any>(stages).map(([name, st]) => [name, st?.do ?? st] as [string, any]);
+	/** A stage path (relative to dvc.yaml and its wdir) relative to the scanned folder. */
+	const rel = (st: any, p: string) => path.posix.normalize(path.posix.join(dir, typeof st?.wdir === "string" ? st.wdir : "", p)).replace(/\/$/, "");
 	for (const [name, st] of entries) {
 		const kinds: [any, ArtifactType | undefined][] = [
 			[st?.outs, undefined],
@@ -133,7 +142,7 @@ export function parseDvc(doc: any, file: string): ParsedPipeline | undefined {
 			for (const p of dvcPaths(list)) {
 				const id = `a:${p}`;
 				outs.set(p.replace(/\/$/, ""), id);
-				b.artifact(id, p, forced ?? artifactType(p), { data: { path: p, producedBy: name } });
+				b.artifact(id, p, forced ?? artifactType(p), { data: { path: p, producedBy: name }, files: [rel(st, p)] });
 			}
 		}
 	}
@@ -158,6 +167,7 @@ export function parseDvc(doc: any, file: string): ParsedPipeline | undefined {
 		if (params.length > 8) rows.push({ text: `… ${params.length - 8} more params` });
 		const foreach = rawSt?.foreach !== undefined ? "foreach" : rawSt?.matrix !== undefined ? "matrix" : "";
 		b.step(id, foreach ? `${name}  (${foreach})` : name, {
+			files: code.map((c) => rel(st, c)),
 			rows,
 			data: { stage: name, ...(cmd.length ? { cmd: cmd.join(" && ").slice(0, 500) } : {}), ...(code.length ? { code: code.join(", ") } : {}), ...(params.length ? { params: params.join(", ").slice(0, 500) } : {}), ...(st?.wdir ? { wdir: String(st.wdir) } : {}) },
 		});
@@ -167,7 +177,7 @@ export function parseDvc(doc: any, file: string): ParsedPipeline | undefined {
 				b.edge(out, id);
 			} else if (!CODE_FILE.test(d)) {
 				const ext = `a:${d}`;
-				b.artifact(ext, d, artifactType(d), { data: { path: d, role: "input" } });
+				b.artifact(ext, d, artifactType(d), { data: { path: d, role: "input" }, files: [rel(st, d)] });
 				b.edge(ext, id);
 			}
 		}
@@ -363,6 +373,7 @@ export function parseAzureMl(doc: any, file: string, root?: string): ParsedPipel
 			...(type === "sweep" && merged.objective ? [{ text: `${merged.objective.goal ?? ""} ${merged.objective.primary_metric ?? ""}`.trim(), detail: "objective" }] : []),
 		];
 		b.step(id, String(job.display_name ?? jobName), {
+			files: typeof job.component === "string" && component && /\.ya?ml$/i.test(job.component) && !job.component.startsWith("azureml:") ? [path.posix.normalize(path.posix.join(path.posix.dirname(file), job.component))] : [],
 			rows,
 			data: { job: jobName, type, ...(typeof job.component === "string" ? { component: job.component } : {}), ...(merged.code ? { code: String(merged.code) } : {}), ...(merged.command ? { command: String(merged.command).slice(0, 600) } : {}) },
 		});

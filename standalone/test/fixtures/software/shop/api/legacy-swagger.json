@@ -1,11 +1,14 @@
 {
   "swagger": "2.0",
   "info": { "title": "Legacy Inventory", "version": "0.9" },
-  "host": "inventory.internal",
+  "host": "legacy.acme-shop.com",
+  "schemes": ["http"],
   "basePath": "/api",
+  "securityDefinitions": { "apiKey": { "type": "apiKey", "name": "X-Api-Key", "in": "header" } },
   "paths": {
     "/items/{sku}": {
       "get": {
+        "security": [{ "apiKey": [] }],
         "parameters": [{ "name": "sku", "in": "path", "required": true, "type": "string" }],
         "responses": { "200": { "description": "ok", "schema": { "$ref": "#/definitions/Item" } } }
       }

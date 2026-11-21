@@ -5,7 +5,9 @@
  * by region and edges found by scanning resources for references to each other.
  * Pure (no CLI calls), unit-tested with documented JSON shapes.
  */
-import type { MapEdge, MapGraph, MapNode } from "../../../types";
+import type { CheckCoverage, MapEdge, MapFinding, MapGraph, MapNode } from "../../../types";
+import { findingsMarkdown } from "../findings";
+import { gcpHealth } from "./health";
 import { CONTAINER_STYLES, EDGE_STYLES, GENERIC_STENCIL, gcpStencil, ICON_STYLE } from "./icons";
 
 export interface GcpResource {
@@ -26,11 +28,23 @@ export interface GcpResource {
 	additional?: any;
 }
 
+/** An IAM binding that grants a role to everyone (allUsers / allAuthenticatedUsers). */
+export interface GcpPublicBinding {
+	/** Full resource name, e.g. //storage.googleapis.com/my-bucket */
+	resource: string;
+	role: string;
+	members: string[];
+}
+
 export interface GcpInventory {
 	project: { id: string; name?: string; number?: string };
 	resources: GcpResource[];
 	source: "asset-inventory" | "cli";
 	collectedAt?: string;
+	/** Bindings to allUsers / allAuthenticatedUsers; undefined when IAM policies could not be read. */
+	publicBindings?: GcpPublicBinding[];
+	/** How the IAM policies were read: every resource in the project, or bucket by bucket. */
+	iamScope?: "project" | "buckets";
 }
 
 /** Types never drawn (enabled APIs, keys, default routes...): counted in the facts only. */
@@ -259,6 +273,10 @@ interface Built {
 	graph: MapGraph;
 	stats: { resources: number; drawn: number; networks: number; subnets: number; regions: number; edges: number; byType: Record<string, number>; hidden: Record<string, number> };
 	facts: string;
+	/** Health findings on the drawn shapes. */
+	findings: MapFinding[];
+	/** The checks that ran (those with nothing to examine are left out, except the firewall rules). */
+	checked: CheckCoverage[];
 }
 
 export function buildGcpGraph(inv: GcpInventory): Built {
@@ -590,7 +608,9 @@ export function buildGcpGraph(inv: GcpInventory): Built {
 		"Blue: data flow (Pub/Sub, push, Cloud SQL). Red dashed: firewall rules → the instances they open. Green: VPC peering. Grey: other references.",
 	];
 	const graph: MapGraph = { title: `Google Cloud · ${pid}`, nodes, edges, direction: "down", legend };
-	return { graph, stats, facts: gcpFacts(inv, nodes, edges, stats) };
+	const health = gcpHealth(inv, resolve).finish(graph, new Map([...alias.keys()].map((k) => [k, owner(k)])));
+	const checked = health.checked.filter((c) => c.scanned > 0 || /^Firewall/.test(c.check));
+	return { graph, stats, facts: gcpFacts(inv, nodes, edges, stats) + findingsMarkdown(health.findings).join("\n"), findings: health.findings, checked };
 }
 
 function gcpFacts(inv: GcpInventory, nodes: MapNode[], edges: MapEdge[], stats: Built["stats"]): string {

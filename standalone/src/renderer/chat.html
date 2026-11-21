@@ -66,6 +66,20 @@
 	.permission .options { display: flex; gap: 6px; flex-wrap: wrap; }
 	.permission .outcome { opacity: .75; }
 	.permission .options button.allow-all { margin-left: auto; }
+	#mapMenu { position: absolute; z-index: 20; top: 80px; left: 8px; right: 8px; display: flex; flex-direction: column; gap: 1px; padding: 4px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--vscode-sideBar-background); box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+	#mapMenu button { text-align: left; border: 0; background: none; color: inherit; font: inherit; font-size: 12px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }
+	#mapMenu button:hover { background: var(--vscode-toolbar-hoverBackground); }
+	.report { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+	.report .rtitle { font-weight: 600; }
+	.report .rsub { opacity: .7; }
+	.report .row { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; border-top: 1px solid var(--border); }
+	.report .row:first-of-type { border-top: 0; }
+	.report .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 4px; flex: none; }
+	.report .rbody { flex: 1; min-width: 0; }
+	.report .rdetail { opacity: .7; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+	.report .ractions { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+	.report .ractions button { font-size: 11px; padding: 1px 8px; }
+	.report .rfooter { opacity: .7; font-size: 11px; white-space: pre-wrap; border-top: 1px solid var(--border); padding-top: 6px; }
 	/* Approved by "Allow all": one dimmed line. */
 	.permission.auto { border: 0; padding: 0 8px; flex-direction: row; gap: 8px; opacity: .6; font-size: 11px; }
 	.permission.auto .title { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -78,7 +92,9 @@
 	/* Header and toolbar: flat, like draw.io's toolbar and format panel tabs. */
 	header, #context { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text); flex: none; }
 	header { height: 40px; }
-	#context { height: 36px; }
+	#context { height: 36px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+	#context::-webkit-scrollbar { display: none; }
+	#context > * { flex: none; }
 	select { appearance: none; -webkit-appearance: none; min-width: 0; font: inherit; font-size: 12px; color: var(--strong); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%238e8e93' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 6px center; border: none; border-radius: 4px; padding: 5px 20px 5px 6px; cursor: pointer; text-overflow: ellipsis; }
 	select:hover, select:focus-visible { background-color: var(--hover); outline: none; }
 	#provider { flex: 0 1 auto; max-width: 48%; font-weight: 600; }
@@ -166,7 +182,17 @@
 		<button id="lint" class="tb" title="Review: ask the agent to check the diagram for problems and fix them"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8"/></svg>Review</button>
 		<button id="map" class="tb" title="Map software, a database, a cloud environment or an ML system into this diagram (read-only)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1.5 3.5l4-1.5 5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5z"/><path d="M5.5 2v10.5M10.5 3.5V14"/></svg>Map…</button>
 		<button id="digDeeper" class="tb hidden" title="Dig deeper: ask the agent to investigate the selected mapped shapes, read-only. Type a question in the box first to focus it."><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4L14 14"/></svg><span id="digDeeperLabel">Dig deeper</span></button>
+		<button id="mapActions" class="tb hidden" title="Map actions for the maps on this page: findings, plain-English descriptions, recent changes, refresh, tour, ask"><span id="mapActionsLabel">Map ▾</span></button>
 		<span class="chip hidden" id="selection"></span>
+	</div>
+	<div id="mapMenu" class="hidden" role="menu">
+		<button data-action="findings">⚠ Show findings</button>
+		<button data-action="describe">✎ Describe shapes in plain English</button>
+		<button data-action="describe-dev">✎ Describe for developers</button>
+		<button data-action="recent">⟳ Show recent changes (git)</button>
+		<button data-action="refresh">↻ Refresh map</button>
+		<button data-action="tour">▶ Build a tour (focus: text in the box)</button>
+		<button data-action="ask">❓ Ask the map (question in the box)</button>
 	</div>
 	<div id="messages">
 		<div id="empty">
@@ -289,6 +315,57 @@
 			el.title = item.text;
 			lastThought = el;
 			lastAssistant = null;
+		} else if (item.kind === "report") {
+			el.className = "report";
+			const t = document.createElement("div");
+			t.className = "rtitle";
+			t.textContent = item.title;
+			el.appendChild(t);
+			if (item.subtitle) {
+				const s = document.createElement("div");
+				s.className = "rsub";
+				s.textContent = item.subtitle;
+				el.appendChild(s);
+			}
+			for (const r of item.rows || []) {
+				const row = document.createElement("div");
+				row.className = "row";
+				const dot = document.createElement("span");
+				dot.className = "dot";
+				dot.style.background = r.color || "transparent";
+				row.appendChild(dot);
+				const body = document.createElement("div");
+				body.className = "rbody";
+				const tx = document.createElement("div");
+				tx.textContent = r.text;
+				body.appendChild(tx);
+				if (r.detail) {
+					const d = document.createElement("div");
+					d.className = "rdetail";
+					d.textContent = r.detail;
+					body.appendChild(d);
+				}
+				if (r.actions && r.actions.length) {
+					const acts = document.createElement("div");
+					acts.className = "ractions";
+					for (const a of r.actions) {
+						const b = document.createElement("button");
+						b.textContent = a.title;
+						b.addEventListener("click", () => vscode.postMessage({ type: "reportAction", action: a.action }));
+						acts.appendChild(b);
+					}
+					body.appendChild(acts);
+				}
+				row.appendChild(body);
+				el.appendChild(row);
+			}
+			if (item.footer) {
+				const f = document.createElement("div");
+				f.className = "rfooter";
+				f.textContent = item.footer;
+				el.appendChild(f);
+			}
+			lastAssistant = null;
 		} else if (item.kind === "permission") {
 			el.className = "permission" + (item.auto ? " auto" : "");
 			const title = document.createElement("div");
@@ -405,6 +482,9 @@
 		sel.textContent = "◉ " + state.selectionCount + " selected";
 		$("lasso").classList.toggle("active", !!state.lassoActive);
 		$("digDeeper").classList.toggle("hidden", !state.mappedSelection);
+		$("mapActions").classList.toggle("hidden", !state.pageMaps);
+		$("mapActionsLabel").textContent = state.pageFindings ? "⚠" + state.pageFindings + " ▾" : "Map ▾";
+		$("mapActions").title = (state.pageFindings ? state.pageFindings + " finding(s) on this page's maps. " : "") + "Map actions: findings, plain-English descriptions, recent changes, refresh, tour, ask";
 		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
 		$("provider").title = state.providerTitle || "Coding agent";
@@ -531,6 +611,20 @@
 	$("lint").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.reviewDiagram" }));
 	$("attach").addEventListener("click", () => vscode.postMessage({ type: "pickImage" }));
 	$("map").addEventListener("click", () => vscode.postMessage({ type: "openMapper" }));
+	$("mapActions").addEventListener("click", (e) => {
+		e.stopPropagation();
+		$("mapMenu").classList.toggle("hidden");
+	});
+	document.addEventListener("click", () => $("mapMenu").classList.add("hidden"));
+	for (const b of document.querySelectorAll("#mapMenu button")) {
+		b.addEventListener("click", () => {
+			$("mapMenu").classList.add("hidden");
+			const text = $("input").value.trim();
+			const action = b.dataset.action;
+			if ((action === "ask" || action === "tour") && text) $("input").value = "";
+			vscode.postMessage({ type: "mapAction", action, text });
+		});
+	}
 	$("digDeeper").addEventListener("click", () => {
 		const question = $("input").value.trim();
 		$("input").value = "";

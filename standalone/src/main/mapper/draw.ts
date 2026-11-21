@@ -1,5 +1,5 @@
 import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/CustomizedDrawioClient";
-import { renderGraph } from "./render";
+import { escapeXml, renderGraph } from "./render";
 import type { MapGraph } from "./types";
 
 export interface DrawResult {
@@ -14,11 +14,16 @@ export interface DrawResult {
  * Draws a map into the open diagram as one pending AI change the user keeps or
  * reverts: on the current page when it is empty, otherwise on a new page.
  */
-export async function drawMap(client: CustomizedDrawioClient, graph: MapGraph, recipe: string): Promise<DrawResult> {
+export async function drawMap(
+	client: CustomizedDrawioClient,
+	graph: MapGraph,
+	recipe: string,
+	opts: { mapId?: string; descriptions?: Record<string, string>; forceNewPage?: boolean } = {}
+): Promise<DrawResult> {
 	const current = await client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 1 });
 	let page = current.page.name;
 	let newPage = false;
-	if (current.totalCells > 0) {
+	if (current.totalCells > 0 || opts.forceNewPage) {
 		const names = new Set((await client.aiPages({ op: "list" })).pages.map((p) => p.name));
 		let name = graph.title.slice(0, 80);
 		for (let i = 2; names.has(name); i++) name = `${graph.title.slice(0, 74)} (${i})`;
@@ -27,7 +32,7 @@ export async function drawMap(client: CustomizedDrawioClient, graph: MapGraph, r
 		page = name;
 		newPage = true;
 	}
-	const { xml, cells } = renderGraph(graph, { recipe });
+	const { xml, cells } = renderGraph(graph, { recipe, mapId: opts.mapId, descriptions: opts.descriptions });
 	const r = await client.aiApplyOps([{ op: "insertXml", xml }], { selectResult: false, flash: true, atomic: true, review: true });
 	const failed = r.results.find((x) => !x.ok);
 	if (failed || r.rolledBack) throw new Error(`Drawing the map failed: ${failed?.error ?? "the change was rolled back"}`);
@@ -39,6 +44,121 @@ export async function mappedSelection(client: CustomizedDrawioClient): Promise<{
 	if (client.currentSelection.length === 0) return [];
 	const model = await client.aiGetModel({ scope: "selection", includeStyles: false, maxCells: 300 });
 	return model.cells
-		.filter((c) => c.selected !== false && !c.context && c.data?.mapper && c.data.mapperKind !== "legend")
+		.filter((c) => c.selected !== false && !c.context && c.data?.mapper && c.data.mapperKind !== "legend" && !OVERLAY_KINDS.has(c.data.mapperKind))
 		.map((c) => ({ recipe: c.data!.mapper, label: c.label.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), data: c.data! }));
+}
+
+// ----- the maps on a page, and overlays on them -----
+
+/** Badges the app adds on top of a map; they live on a layer of their own. */
+export const OVERLAY_KINDS = new Set(["finding-badge", "change-badge"]);
+
+export interface PlacedCell {
+	cellId: string;
+	nodeId: string;
+	mapId: string;
+	/** Absolute position on the page. */
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+}
+
+/** Every shape of the maps on the shown page, by map, with absolute positions. */
+export async function mapsOnPage(client: CustomizedDrawioClient): Promise<{ pageName: string; maps: Map<string, Map<string, PlacedCell>>; overlayCells: { id: string; mapId: string; kind: string }[]; layers: { id: string; name: string }[] }> {
+	const model = await client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 20000 });
+	const byId = new Map(model.cells.map((c) => [c.id, c]));
+	const abs = (id: string, guard = 0): { x: number; y: number } => {
+		const c = byId.get(id);
+		if (!c?.geometry) return { x: 0, y: 0 };
+		const p = c.parent && guard < 40 ? abs(c.parent, guard + 1) : { x: 0, y: 0 };
+		return { x: p.x + c.geometry.x, y: p.y + c.geometry.y };
+	};
+	const maps = new Map<string, Map<string, PlacedCell>>();
+	const overlayCells: { id: string; mapId: string; kind: string }[] = [];
+	for (const c of model.cells) {
+		const d = c.data;
+		if (!d?.mapId) continue;
+		if (OVERLAY_KINDS.has(d.mapperKind)) {
+			overlayCells.push({ id: c.id, mapId: d.mapId, kind: d.mapperKind });
+			continue;
+		}
+		if (!d.mapperId || !c.geometry || c.kind === "edge") continue;
+		const { x, y } = abs(c.id);
+		if (!maps.has(d.mapId)) maps.set(d.mapId, new Map());
+		maps.get(d.mapId)!.set(d.mapperId, { cellId: c.id, nodeId: d.mapperId, mapId: d.mapId, x, y, width: c.geometry.width, height: c.geometry.height });
+	}
+	return { pageName: model.page.name, maps, overlayCells, layers: model.layers };
+}
+
+export interface Badge {
+	nodeId: string;
+	text: string;
+	fill: string;
+	fontColor?: string;
+	tooltip: string;
+	data?: Record<string, string>;
+}
+
+/**
+ * Replaces one kind of overlay badges of a map with new ones, on a layer of their
+ * own ("Health", "Changes") that can be hidden from draw.io's Layers panel.
+ * Badges sit on the top-right corner of their shape. One pending change.
+ */
+export async function drawBadges(client: CustomizedDrawioClient, mapId: string, kind: "finding-badge" | "change-badge", layerName: string, badges: Badge[]): Promise<number> {
+	const page = await mapsOnPage(client);
+	const cells = page.maps.get(mapId);
+	const ops: AiOp[] = [];
+	const stale = page.overlayCells.filter((o) => o.mapId === mapId && o.kind === kind).map((o) => o.id);
+	if (stale.length) ops.push({ op: "delete", ids: stale, includeEdges: false });
+	if (!cells || badges.length === 0) {
+		if (ops.length) await client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: true, review: true });
+		return 0;
+	}
+	const layer = page.layers.find((l) => l.name === layerName);
+	let parent = layer?.id;
+	if (!parent) {
+		ops.push({ op: "addLayer", tempId: "$overlay", name: layerName, position: "front" });
+		parent = "$overlay";
+	}
+	// Several badges on one shape stack to the left.
+	const perNode = new Map<string, number>();
+	const parts: string[] = ['<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'];
+	let n = 0;
+	for (const b of badges) {
+		const c = cells.get(b.nodeId);
+		if (!c) continue;
+		const k = perNode.get(b.nodeId) ?? 0;
+		perNode.set(b.nodeId, k + 1);
+		const w = Math.max(20, b.text.length * 7 + 10);
+		const x = Math.round(c.x + c.width - w / 2 - k * (w + 4));
+		const y = Math.round(c.y - 10);
+		const attrs: Record<string, string> = { mapper: "overlay", mapperKind: kind, mapId, mapperId: `${kind}:${b.nodeId}:${k}`, forNode: b.nodeId, tooltip: b.tooltip, ...(b.data ?? {}) };
+		const style = `rounded=1;arcSize=50;whiteSpace=wrap;html=1;fillColor=${b.fill};strokeColor=#ffffff;strokeWidth=1.5;fontColor=${b.fontColor ?? "#ffffff"};fontStyle=1;fontSize=10;spacing=0;resizable=0;movable=1;`;
+		parts.push(
+			`<object id="b${++n}" label="${escapeXml(b.text)}"${Object.entries(attrs).map(([key, v]) => ` ${key}="${escapeXml(v)}"`).join("")}><mxCell style="${escapeXml(style)}" vertex="1" parent="1"><mxGeometry x="${x}" y="${y}" width="${w}" height="20" as="geometry"/></mxCell></object>`
+		);
+	}
+	parts.push("</root></mxGraphModel>");
+	if (n) ops.push({ op: "insertXml", xml: parts.join(""), parent });
+	if (!ops.length) return 0;
+	const r = await client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: true, review: true });
+	const failed = r.results.find((x) => !x.ok);
+	if (failed || r.rolledBack) throw new Error(`Drawing the badges failed: ${failed?.error ?? "rolled back"}`);
+	return n;
+}
+
+/** Sets the shapes' tooltips (plain-English descriptions) of a map on the shown page. */
+export async function applyDescriptions(client: CustomizedDrawioClient, mapId: string, items: { nodeId: string; description: string }[]): Promise<number> {
+	const page = await mapsOnPage(client);
+	const cells = page.maps.get(mapId);
+	if (!cells) throw new Error("That map is not on the page shown in the editor. Show its page first.");
+	const ops: AiOp[] = [];
+	for (const it of items) {
+		const c = cells.get(it.nodeId);
+		if (c) ops.push({ op: "update", id: c.cellId, data: { tooltip: it.description } });
+	}
+	if (!ops.length) return 0;
+	const r = await client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: false, review: true });
+	return r.results.filter((x) => x.ok).length;
 }

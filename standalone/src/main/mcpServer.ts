@@ -4,6 +4,8 @@ import type { DiagramToolbox, ToolResult } from "../../../src/features/ai/Diagra
 import { createMcpListener, McpTool } from "../../../src/features/ai/mcp";
 import { SYSTEM_PROMPT } from "../../../src/features/ai/systemPrompt";
 import { toMcpTools, TOOL_SCHEMAS } from "../../../src/features/ai/toolSchemas";
+import { callMapperTool, MAPPER_TOOL_NAMES, MAPPER_TOOLS } from "./mapper/mcpTools";
+import type { MapperService } from "./mapper/service";
 
 /** Tools that need VS Code (workspace search, code links, imports into the workspace) are left out. */
 const UNAVAILABLE = new Set(["drawio_code_links", "drawio_import", "drawio_get_attachment"]);
@@ -134,14 +136,27 @@ export class WindowMcpServer {
 	/** Short tool descriptions (full text in the instructions), for agents that drop long ones. */
 	public compactDescriptions = false;
 
-	constructor(private readonly toolbox: DiagramToolbox, private readonly fileName: () => string | undefined) {}
+	constructor(
+		private readonly toolbox: DiagramToolbox,
+		private readonly fileName: () => string | undefined,
+		/** The window's Mapper: its maps become mapper_* tools. */
+		private readonly mapper?: () => MapperService
+	) {}
+
+	/** Runs a tool the way the endpoint does (the desktop-wide endpoint routes calls here). */
+	public async call(name: string, args: unknown): Promise<ToolResult> {
+		const result = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args) : await this.toolbox.invoke(name, args as any, { scoped: true });
+		this.onToolResult?.(name, result);
+		return result;
+	}
 
 	public get url(): string {
 		return `http://127.0.0.1:${this.port}/mcp`;
 	}
 
 	public async start(): Promise<void> {
-		const tools = standaloneTools();
+		const mapperTools = this.mapper ? MAPPER_TOOLS.map(({ run, ...t }) => t) : [];
+		const tools = [...standaloneTools(), ...mapperTools];
 		const compact = compactTools(tools);
 		const listener = createMcpListener({
 			token: () => this.token,
@@ -150,11 +165,7 @@ export class WindowMcpServer {
 				serverVersion: "0.1.0",
 				tools: () => (this.compactDescriptions ? compact : tools),
 				instructions: async () => standaloneInstructions(this.fileName(), this.compactDescriptions),
-				callTool: async (name, args) => {
-					const result = await this.toolbox.invoke(name, args, { scoped: true });
-					this.onToolResult?.(name, result);
-					return result;
-				},
+				callTool: async (name, args) => this.call(name, args),
 			},
 		});
 		this.server = http.createServer(listener);

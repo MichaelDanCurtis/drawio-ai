@@ -1,9 +1,10 @@
 import * as fs from "fs";
 import * as path from "path";
 import { agentRequest, digDeeperRequest, readFiles } from "../common";
-import type { CollectResult, MapGraph, MapInput, Recipe } from "../../types";
+import type { CheckCoverage, CollectResult, MapFinding, MapGraph, MapInput, Recipe } from "../../types";
 import { MapperError } from "../../types";
 import { AGENT_FRAMEWORKS, assemblePipelines, ParsedPipeline, parsePipelineFile } from "./pipelineParsers";
+import { floatingImage, keepOnMap } from "./shared";
 
 /** What a scan found: parsed pipelines plus files of frameworks only the agent can map. */
 export interface PipelineScan {
@@ -48,6 +49,18 @@ export function scanPipelines(target: string, progress: (t: string) => void = ()
 
 export function pipelinesToGraph(scan: PipelineScan): MapGraph {
 	const { nodes, edges } = assemblePipelines(scan.pipelines);
+	// Only files that exist (outputs not produced yet, folders and remote paths are left out).
+	for (const n of nodes) {
+		if (!n.files) continue;
+		n.files = n.files.filter((f) => {
+			try {
+				return !f.split("/").includes("..") && fs.statSync(path.join(scan.root, f)).isFile();
+			} catch {
+				return false;
+			}
+		});
+		if (!n.files.length) delete n.files;
+	}
 	const name = scan.root.split(/[\\/]/).pop() ?? scan.root;
 	const frameworks = [...new Set(scan.pipelines.map((p) => p.framework))];
 	const one = scan.pipelines.length === 1 ? scan.pipelines[0] : undefined;
@@ -63,6 +76,65 @@ export function pipelinesToGraph(scan: PipelineScan): MapGraph {
 			...(scan.agentOnly.length ? [`Not drawn (ask the agent): ${scan.agentOnly.map((a) => `${a.framework} (${a.files.length})`).join(", ")}.`] : []),
 		],
 	};
+}
+
+/** Frameworks whose steps declare their outputs (Airflow, Metaflow and Argo steps usually do not). */
+function declaresOutputs(framework: string, data: Record<string, string>): boolean {
+	if (framework === "DVC" || /^Kubeflow( \(|\s*\/)/.test(framework)) return true;
+	if (framework === "Azure ML") return data.type !== "pipeline";
+	if (framework === "SageMaker Pipelines") return data.type === "Processing";
+	return false;
+}
+
+/** Steps without declared outputs and container images that float (exported for tests). */
+export function pipelineFindings(graph: MapGraph): { findings: MapFinding[]; checked: CheckCoverage[] } {
+	const findings: MapFinding[] = [];
+	const kinds = new Map(graph.nodes.map((n) => [n.id, n.kind]));
+	const ARTIFACT = /^ml:(data|model|metrics|artifact)$/;
+	let stepsChecked = 0;
+	let images = 0;
+	for (const n of graph.nodes) {
+		if (n.kind !== "ml:step") continue;
+		const data = n.data ?? {};
+		const where = `${data.file ?? ""}${data.pipeline ? ` (pipeline ${data.pipeline})` : ""}`;
+		if (declaresOutputs(data.framework ?? "", data)) {
+			stepsChecked++;
+			const writes = graph.edges.some((e) => e.from === n.id && ARTIFACT.test(kinds.get(e.to) ?? ""));
+			const outputParams = (n.rows ?? []).some((r) => r.detail === "output");
+			if (!writes && !outputParams) {
+				findings.push({
+					id: `step-without-outputs:${n.id}`,
+					kind: "step-without-outputs",
+					severity: "low",
+					title: `${data.step ?? n.label} declares no outputs`,
+					detail: `${where}: the ${data.framework} step declares no output artifacts${data.framework === "DVC" ? " (outs, metrics or plots)" : ""}, so what it produces is not tracked, cached or passed on.`,
+					nodeIds: [n.id],
+					fix: data.framework === "DVC" ? `Declare what the stage writes under outs (or metrics / plots) in ${data.file}.` : `Declare the step's outputs in ${data.file} so downstream steps, caching and lineage can use them.`,
+				});
+			}
+		}
+		const image = data.image;
+		if (image && !/\{\{|\$\{|^Parameters\./.test(image)) {
+			images++;
+			const tag = floatingImage(image);
+			if (tag) {
+				findings.push({
+					id: `floating-image:${n.id}`,
+					kind: "floating-image",
+					severity: "low",
+					title: `${data.step ?? n.label} runs ${tag === "latest" ? "a :latest image" : "an image without a tag"}`,
+					detail: `${where}: image ${image}${tag === "none" ? " has no tag (Docker pulls :latest)" : ""}; runs are not reproducible when the image changes.`,
+					nodeIds: [n.id],
+					fix: `Pin the image to a version tag or a digest (${image.replace(/:latest$/, "")}@sha256:…).`,
+				});
+			}
+		}
+	}
+	const checked: CheckCoverage[] = [
+		{ check: "Steps without declared outputs", scanned: stepsChecked, note: "DVC, Kubeflow, Azure ML and SageMaker processing steps" },
+		{ check: "Container images on :latest or without a tag", scanned: images, note: "steps with a container image" },
+	];
+	return { findings: keepOnMap(findings, graph), checked };
 }
 
 function pipelineFacts(scan: PipelineScan): string {
@@ -115,6 +187,7 @@ export const mlPipelineRecipe: Recipe = {
 			return { summary: `No ML pipeline definitions found in ${target}.`, warnings: scan.warnings };
 		}
 		const graph = pipelinesToGraph(scan);
+		const { findings, checked } = pipelineFindings(graph);
 		const steps = graph.nodes.filter((n) => n.kind === "ml:step" || n.kind === "ml:register" || n.kind === "ml:condition").length;
 		const artifacts = graph.nodes.filter((n) => /^ml:(data|model|metrics|artifact)$/.test(n.kind)).length;
 		return {
@@ -122,6 +195,8 @@ export const mlPipelineRecipe: Recipe = {
 			summary: `${scan.pipelines.length} pipeline(s) (${[...new Set(scan.pipelines.map((p) => p.framework))].join(", ")}): ${steps} step(s), ${artifacts} artifact(s)${scan.agentOnly.length ? `; ${scan.agentOnly.map((a) => a.framework).join(", ")} left to the agent` : ""}`,
 			facts,
 			warnings: scan.warnings,
+			findings,
+			checked,
 		};
 	},
 	agentPrompt(_input, result) {

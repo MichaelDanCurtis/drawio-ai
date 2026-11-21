@@ -6,7 +6,7 @@
  */
 import type { CollectContext } from "../../../types";
 import { MapperError } from "../../../types";
-import { AWS_SERVICES, AwsInventory, AwsRegionInventory, AwsService, emptyRegion } from "./inventory";
+import { AWS_SERVICES, AwsInventory, AwsRegionInventory, AwsService, emptyRegion, S3PublicAccessBlock } from "./inventory";
 
 /** Runs `fn` over `items`, at most `limit` at a time, stopping when cancelled. */
 export async function pool<T, R>(items: T[], limit: number, signal: AbortSignal, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -66,8 +66,11 @@ export class AwsCli {
 		return parse(r.stdout, `aws ${service} ${op}`);
 	}
 
-	/** A call whose failure is a warning; returns undefined then. */
-	async call(region: string | undefined, service: string, op: string, args: string[] = []): Promise<any> {
+	/**
+	 * A call whose failure is a warning; returns undefined then. Error codes in
+	 * `absent` mean "there is none" (NoSuchBucketPolicy...): null, no warning.
+	 */
+	async call(region: string | undefined, service: string, op: string, args: string[] = [], absent: string[] = []): Promise<any> {
 		if (this.ctx.signal.aborted) throw new MapperError("Cancelled");
 		if (region && this.disabledRegions.has(region)) return undefined;
 		const r = await this.ctx.exec("aws", this.args(service, op, args, region), { timeoutMs: 180_000 });
@@ -80,6 +83,7 @@ export class AwsCli {
 			}
 		}
 		const code = awsErrorCode(r.stderr || r.stdout);
+		if (absent.includes(code)) return null;
 		if (region && REGION_OFF.has(code)) {
 			if (!this.disabledRegions.has(region)) this.warnings.push(`${region}: skipped (${code}: the region is not enabled for this account or not reachable with these credentials).`);
 			this.disabledRegions.add(region);
@@ -244,9 +248,20 @@ export async function collectRegion(cli: AwsCli, region: string, services: AwsSe
 	return inv;
 }
 
-/** S3 buckets with their regions, and CloudFront distributions (global). */
-export async function collectGlobal(cli: AwsCli, services: AwsService[], ctx: CollectContext): Promise<Pick<AwsInventory, "buckets" | "distributions">> {
-	const out: Pick<AwsInventory, "buckets" | "distributions"> = { buckets: [], distributions: [] };
+const EVERYONE = /acs\.amazonaws\.com\/groups\/global\/(AllUsers|AuthenticatedUsers)$/;
+/** Buckets whose public-access settings are read (3 get calls each). */
+const MAX_BUCKET_CHECKS = 150;
+
+/** Block Public Access settings from a get-public-access-block answer: null when none are set, undefined when unknown. */
+function blockSettings(r: any): S3PublicAccessBlock | null | undefined {
+	if (r === null) return null;
+	const c = r?.PublicAccessBlockConfiguration;
+	return c && typeof c === "object" ? c : undefined;
+}
+
+/** S3 buckets with their regions and public-access settings, and CloudFront distributions (global). */
+export async function collectGlobal(cli: AwsCli, services: AwsService[], ctx: CollectContext, account?: string): Promise<Pick<AwsInventory, "buckets" | "distributions" | "accountPublicAccessBlock">> {
+	const out: Pick<AwsInventory, "buckets" | "distributions" | "accountPublicAccessBlock"> = { buckets: [], distributions: [] };
 	if (services.includes("s3")) {
 		ctx.progress("S3 buckets…");
 		const r = await cli.call(undefined, "s3api", "list-buckets");
@@ -257,6 +272,20 @@ export async function collectGlobal(cli: AwsCli, services: AwsService[], ctx: Co
 			const loc = await cli.call(undefined, "s3api", "get-bucket-location", ["--bucket", b.name]);
 			if (loc) b.region = loc.LocationConstraint ? (loc.LocationConstraint === "EU" ? "eu-west-1" : String(loc.LocationConstraint)) : "us-east-1";
 		});
+		if (out.buckets.length) {
+			ctx.progress("S3 public access settings…");
+			if (account && /^\d{12}$/.test(account)) out.accountPublicAccessBlock = blockSettings(await cli.call(undefined, "s3control", "get-public-access-block", ["--account-id", account], ["NoSuchPublicAccessBlockConfiguration"]));
+			await pool(out.buckets.slice(0, MAX_BUCKET_CHECKS), 6, ctx.signal, async (b) => {
+				const bucket = ["--bucket", b.name];
+				b.publicAccessBlock = blockSettings(await cli.call(b.region, "s3api", "get-public-access-block", bucket, ["NoSuchPublicAccessBlockConfiguration"]));
+				const status = await cli.call(b.region, "s3api", "get-bucket-policy-status", bucket, ["NoSuchBucketPolicy"]);
+				if (status === null) b.policyIsPublic = false;
+				else if (typeof status?.PolicyStatus?.IsPublic === "boolean") b.policyIsPublic = status.PolicyStatus.IsPublic;
+				const acl = await cli.call(b.region, "s3api", "get-bucket-acl", bucket);
+				if (acl && Array.isArray(acl.Grants))
+					b.publicAclGrants = acl.Grants.filter((g: any) => EVERYONE.test(String(g?.Grantee?.URI ?? ""))).map((g: any) => `${EVERYONE.exec(g.Grantee.URI)![1]}:${g.Permission}`);
+			});
+		}
 	}
 	if (services.includes("cloudfront")) {
 		ctx.progress("CloudFront distributions…");
@@ -291,6 +320,6 @@ export async function collectAws(opts: CollectOptions, ctx: CollectContext, warn
 	const inv: AwsInventory = { account: String(who?.Account ?? "unknown"), callerArn: who?.Arn, profile: opts.profile || undefined, regions: [], buckets: [], distributions: [], services };
 	const perRegion = await pool(regions as string[], 4, ctx.signal, (region) => collectRegion(cli, region, services, ctx));
 	inv.regions = perRegion.filter((r): r is AwsRegionInventory => !!r);
-	Object.assign(inv, await collectGlobal(cli, services, ctx));
+	Object.assign(inv, await collectGlobal(cli, services, ctx, inv.account));
 	return inv;
 }

@@ -6,7 +6,7 @@ import { CLOUD_NAMES, iacToGraph } from "./graph";
 import { scanIac } from "./scan";
 
 export { scanIac } from "./scan";
-export { iacToGraph, shortType, iacFindings } from "./graph";
+export { iacToGraph, shortType, iacFindings, openPortRisk } from "./graph";
 export { parseTerraform, maskHcl, terraformBlocks } from "./terraform";
 export { parseCloudFormation, loadTemplate, cfnRefs } from "./cloudformation";
 export { parseBicep } from "./bicep";
@@ -38,7 +38,7 @@ export function iacRecipes(category: Extract<MapCategory, "azure" | "aws" | "gcp
 				if (ctx.signal.aborted) throw new MapperError("Cancelled");
 				const map = iacToGraph(scan, cloud, path.basename(root) || root);
 				const drawn = map.graph.nodes.some((n) => !n.container);
-				return { graph: drawn ? map.graph : undefined, facts: drawn ? map.facts : undefined, summary: map.summary, warnings: map.warnings };
+				return { graph: drawn ? map.graph : undefined, facts: drawn ? map.facts : undefined, summary: map.summary, warnings: map.warnings, ...(drawn ? { findings: map.findings, checked: map.checked } : {}) };
 			},
 			agentPrompt: () =>
 				`Review the ${name} infrastructure-as-code map on this page as an architect. The shapes carry the file and line of each declaration (file, line, address, type): read those definitions and add short review notes next to the shapes they concern — public exposure (open security rules, public access settings), single points of failure (single instances, single-AZ / non-zonal databases), missing encryption or TLS settings, risky defaults, and dependencies that are missing from the map (for example resources referenced through variables or remote state). Do not change any files.`,

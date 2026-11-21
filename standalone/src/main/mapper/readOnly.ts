@@ -38,7 +38,7 @@ function readVerbAmong(head: string[], verbs: Set<string>): boolean {
 const GCLOUD_VERBS = new Set(["list", "describe", "search-all-resources", "search-all-iam-policies", "get-iam-policy", "get-value", "version"]);
 const KUBECTL_VERBS = new Set(["get", "describe", "version", "api-resources", "cluster-info"]);
 const KUBECTL_CONFIG = new Set(["view", "current-context", "get-contexts"]);
-const GIT_COMMANDS = new Set(["rev-parse", "remote", "log", "ls-files", "show", "branch"]);
+const GIT_COMMANDS = new Set(["rev-parse", "remote", "log", "ls-files", "show", "branch", "diff", "status"]);
 
 /** Returns why the command is refused, or undefined when it may run. */
 export function checkReadOnly(command: string, args: string[]): string | undefined {

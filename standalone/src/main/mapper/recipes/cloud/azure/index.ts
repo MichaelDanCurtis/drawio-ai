@@ -1,6 +1,7 @@
 import { agentRequest, digDeeperRequest } from "../../common";
 import type { Recipe } from "../../../types";
 import { collectAzure, listResourceGroups, listSubscriptions } from "./collect";
+import { findingsSummary } from "../findings";
 import { buildAzureGraph } from "./model";
 
 export const azureEnvironmentRecipe: Recipe = {
@@ -42,13 +43,13 @@ export const azureEnvironmentRecipe: Recipe = {
 			ctx
 		);
 		ctx.progress("Drawing the map…");
-		const { graph, stats, facts } = buildAzureGraph(inventory);
+		const { graph, stats, facts, findings, checked } = buildAzureGraph(inventory);
 		const summary =
 			stats.drawn === 0
 				? `No resources found in ${inventory.subscription.name}${inventory.resourceGroupFilter ? ` (${inventory.resourceGroupFilter.join(", ")})` : ""} (${stats.resourceGroups} resource group(s) visible).`
-				: `${stats.drawn} resource(s) in ${stats.resourceGroups} resource group(s)${inventory.includeNetwork ? `, ${stats.vnets} VNet(s), ${stats.subnets} subnet(s)` : ""}, ${stats.edges} connection(s) · ${inventory.source === "resource-graph" ? "Resource Graph" : "az CLI"}`;
+				: `${stats.drawn} resource(s) in ${stats.resourceGroups} resource group(s)${inventory.includeNetwork ? `, ${stats.vnets} VNet(s), ${stats.subnets} subnet(s)` : ""}, ${stats.edges} connection(s)${findingsSummary(findings)} · ${inventory.source === "resource-graph" ? "Resource Graph" : "az CLI"}`;
 		if (stats.drawn > 600) warnings.push(`A large map (${stats.drawn} resources): drawing and editing may be slow; map one resource group at a time for detail.`);
-		return { graph, facts, summary, warnings };
+		return { graph, facts, summary, warnings, findings, checked };
 	},
 	agentPrompt: (_input, result) =>
 		agentRequest(

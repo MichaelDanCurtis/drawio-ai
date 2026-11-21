@@ -8,7 +8,7 @@
 import { execJson } from "../../../context";
 import type { CollectContext, FieldOption } from "../../../types";
 import { MapperError } from "../../../types";
-import { fromAsset, FROM_LIST, GcpInventory, GcpResource } from "./model";
+import { fromAsset, FROM_LIST, GcpInventory, GcpPublicBinding, GcpResource } from "./model";
 
 const PROJECT_ID = /^[a-z][-a-z0-9.:]{3,90}[a-z0-9]$/;
 const NOT_SIGNED_IN = /gcloud auth login|You do not currently have an active account|Reauthentication|reauth|could not be refreshed|invalid_grant/i;
@@ -165,5 +165,48 @@ export async function collectGcp(projectId: string, ctx: CollectContext): Promis
 		}
 	}
 	if (notEnabled.length) warnings.push(`APIs not enabled (nothing to list): ${notEnabled.join(", ")}.`);
-	return { inventory: { project, resources, source, collectedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC" }, warnings };
+	ctx.progress("Reading IAM policies that grant access to everyone…");
+	const iam = await publicBindings(ctx, id, source, resources, warnings);
+	return { inventory: { project, resources, source, collectedAt: new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC", ...iam }, warnings };
+}
+
+const PUBLIC = /^(allUsers|allAuthenticatedUsers)$/;
+/** Buckets whose IAM policy is read one by one when Cloud Asset is not available. */
+const MAX_BUCKET_POLICIES = 50;
+
+function bindingsOf(resource: string, policy: any): GcpPublicBinding[] {
+	return (Array.isArray(policy?.bindings) ? policy.bindings : [])
+		.map((b: any) => ({ resource, role: String(b?.role ?? ""), members: (Array.isArray(b?.members) ? b.members : []).filter((m: unknown) => typeof m === "string" && PUBLIC.test(m)) }))
+		.filter((b: GcpPublicBinding) => b.members.length > 0);
+}
+
+/**
+ * IAM bindings to allUsers / allAuthenticatedUsers: one Cloud Asset IAM search
+ * per member type for the whole project, else each bucket's policy.
+ */
+async function publicBindings(ctx: CollectContext, projectId: string, source: GcpInventory["source"], resources: GcpResource[], warnings: string[]): Promise<Pick<GcpInventory, "publicBindings" | "iamScope">> {
+	if (source === "asset-inventory") {
+		try {
+			const out: GcpPublicBinding[] = [];
+			for (const member of ["allUsers", "allAuthenticatedUsers"]) {
+				const rows = (await gcloud<any[]>(ctx, ["asset", "search-all-iam-policies", `--scope=projects/${projectId}`, `--query=policy:${member}`], 300_000)) ?? [];
+				for (const r of rows) if (typeof r?.resource === "string") out.push(...bindingsOf(r.resource, r.policy));
+			}
+			return { publicBindings: out, iamScope: "project" };
+		} catch (e: any) {
+			if (fatal(e)) throw e;
+			warnings.push(`Could not search IAM policies (${DENIED.test(String(e?.message)) ? "no permission — roles/cloudasset.viewer is needed" : brief(e)}), so public buckets and services were not checked.`);
+			return {};
+		}
+	}
+	const buckets = resources.filter((r) => r.assetType === "storage.googleapis.com/Bucket").slice(0, MAX_BUCKET_POLICIES);
+	if (!buckets.length) return { publicBindings: [], iamScope: "buckets" };
+	try {
+		const lists = await mapLimit(buckets, 4, async (b) => bindingsOf(b.name, await gcloud<any>(ctx, ["storage", "buckets", "get-iam-policy", `gs://${b.displayName}`, `--project=${projectId}`], 120_000)));
+		return { publicBindings: lists.flat(), iamScope: "buckets" };
+	} catch (e: any) {
+		if (fatal(e)) throw e;
+		warnings.push(`Could not read bucket IAM policies (${DENIED.test(String(e?.message)) ? "no permission" : brief(e)}), so public buckets were not checked.`);
+		return {};
+	}
 }

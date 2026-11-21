@@ -5,7 +5,7 @@
  */
 import * as yaml from "js-yaml";
 import * as path from "path";
-import { IacGroup, IacResource, IacTool, keepAttr, lineAt } from "./model";
+import { IacGroup, IacResource, IacTool, IngressRule, keepAttr, lineAt, markOpenIngress } from "./model";
 
 const scalar = (name: string, wrap: (v: string) => unknown) => yaml.defineScalarTag(name, { resolve: (s: string) => wrap(s), identify: () => false });
 const sequence = (name: string, wrap: (v: unknown[]) => unknown) =>
@@ -72,7 +72,22 @@ export function cfnRefs(value: unknown, out = new Set<string>()): Set<string> {
 	return out;
 }
 
-const PROP_ATTRS = ["BucketName", "FunctionName", "TableName", "QueueName", "TopicName", "Runtime", "InstanceType", "DBInstanceClass", "Engine", "PubliclyAccessible", "StorageEncrypted", "MultiAZ", "CidrBlock", "MapPublicIpOnLaunch", "Scheme"];
+const PROP_ATTRS = ["BucketName", "FunctionName", "TableName", "QueueName", "TopicName", "Runtime", "InstanceType", "DBInstanceClass", "Engine", "PubliclyAccessible", "StorageEncrypted", "Encrypted", "MultiAZ", "CidrBlock", "MapPublicIpOnLaunch", "Scheme", "AccessControl", "DeletionProtection"];
+
+const num = (v: unknown): number | undefined => (typeof v === "number" ? v : typeof v === "string" && /^-?\d+$/.test(v) ? Number(v) : undefined);
+
+/** Inbound rules of a security group (SecurityGroupIngress) or of a SecurityGroupIngress resource. */
+function cfnIngress(type: string, props: any): IngressRule[] {
+	const items: any[] = type === "AWS::EC2::SecurityGroup" ? (Array.isArray(props?.SecurityGroupIngress) ? props.SecurityGroupIngress : []) : type === "AWS::EC2::SecurityGroupIngress" ? [props] : [];
+	return items
+		.filter((i) => i && typeof i === "object")
+		.map((i) => {
+			const protocol = i.IpProtocol === undefined ? undefined : String(i.IpProtocol);
+			const from = num(i.FromPort);
+			const to = num(i.ToPort);
+			return { protocol, from, to, literal: /^(-1|all)$/i.test(protocol ?? "") || (from !== undefined && to !== undefined), sources: [i.CidrIp, i.CidrIpv6].filter((x): x is string => typeof x === "string") };
+		});
+}
 
 function lineOfLogicalId(text: string, id: string, json: boolean): number {
 	const esc = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -99,8 +114,7 @@ export function parseCloudFormation(file: string, text: string, doc: any): { gro
 		for (const d of [].concat(r.DependsOn ?? [])) refs.add(String(d));
 		const attrs: Record<string, string> = {};
 		for (const k of PROP_ATTRS) keepAttr(attrs, k, r.Properties?.[k]);
-		const propsText = JSON.stringify(r.Properties ?? {});
-		if (/"0\.0\.0\.0\/0"|"::\/0"/.test(propsText)) attrs.openToWorld = "true";
+		markOpenIngress(attrs, cfnIngress(type, r.Properties));
 		const cdkPath = r.Metadata?.["aws:cdk:path"];
 		const name = typeof cdkPath === "string" ? cdkPath.split("/").filter((p: string) => p !== "Resource" && p !== "Default").slice(1).join("/") || logicalId : logicalId;
 		const res: IacResource = {

@@ -4,7 +4,9 @@
  * with edges found by scanning every resource's properties for the ARM ids of the
  * others. Pure (no CLI calls), so it is unit-tested with recorded JSON.
  */
-import type { MapEdge, MapGraph, MapNode } from "../../../types";
+import type { CheckCoverage, MapEdge, MapFinding, MapGraph, MapNode } from "../../../types";
+import { findingsMarkdown } from "../findings";
+import { azureHealth } from "./health";
 import { azureIcon, CONTAINER_STYLES, EDGE_STYLES, GENERIC_ICON, ICON_STYLE } from "./icons";
 
 export interface AzResource {
@@ -302,6 +304,10 @@ interface Built {
 	stats: { resources: number; drawn: number; resourceGroups: number; vnets: number; subnets: number; edges: number; byType: Record<string, number> };
 	/** Markdown inventory for the agent. */
 	facts: string;
+	/** Health findings on the drawn shapes. */
+	findings: MapFinding[];
+	/** The checks that ran (those with nothing to examine are left out, except the NSG rules). */
+	checked: CheckCoverage[];
 }
 
 /** Builds the map, the facts and counts from an inventory. */
@@ -700,7 +706,11 @@ export function buildAzureGraph(inv: AzInventory): Built {
 	];
 	if (filter) legend.push(`Only resource groups: ${[...filter].join(", ")} (plus the VNets they attach to).`);
 	const graph: MapGraph = { title: `Azure · ${sub.name || sub.id}`, nodes, edges, direction: "down", legend };
-	return { graph, stats, facts: azureFacts(inv, nodes, edges, stats) };
+	// Health checks over everything collected in the drawn scope (the filter's groups and the VNets they use).
+	const inScope = all.filter((r) => inFilter(r) || usedVnets.has(L(r.id)));
+	const health = azureHealth({ resources: inScope, owner }).finish(graph);
+	const checked = health.checked.filter((c) => c.scanned > 0 || /^NSG/.test(c.check));
+	return { graph, stats, facts: azureFacts(inv, nodes, edges, stats) + findingsMarkdown(health.findings).join("\n"), findings: health.findings, checked };
 }
 
 /** The inventory for the agent: one line per resource with the ids it needs to dig deeper. */

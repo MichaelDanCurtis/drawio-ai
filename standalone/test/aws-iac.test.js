@@ -48,6 +48,27 @@ function fakeAws(responses, calls = []) {
 	};
 }
 const ctxWith = (exec, progress = []) => ({ cwd: os.tmpdir(), progress: (t) => progress.push(t), signal: new AbortController().signal, exec });
+
+const SEVERITIES = new Set(["high", "medium", "low", "info"]);
+/** The findings contract: unique stable ids `${kind}:…`, known severities, plain titles, nodes that are drawn; coverage with counts. */
+function assertFindingsContract(result) {
+	const ids = new Set(result.graph.nodes.map((n) => n.id));
+	const seen = new Set();
+	for (const f of result.findings) {
+		assert.ok(f.id.startsWith(`${f.kind}:`), f.id);
+		assert.ok(!seen.has(f.id), `duplicate finding id ${f.id}`);
+		seen.add(f.id);
+		assert.ok(SEVERITIES.has(f.severity), f.severity);
+		assert.ok(f.title && !f.title.includes("\n"), f.title);
+		assert.ok(f.detail && f.fix, `${f.id} has evidence and a fix`);
+		assert.ok(f.nodeIds.length > 0, `${f.id} has nodes`);
+		for (const n of f.nodeIds) assert.ok(ids.has(n), `${f.id}: node ${n} is not in the graph`);
+	}
+	assert.ok(Array.isArray(result.checked) && result.checked.length > 0, "checked is filled");
+	for (const c of result.checked) assert.ok(c.check && Number.isInteger(c.scanned) && c.scanned >= 0, JSON.stringify(c));
+}
+const findingOf = (result, kind, nodeId) => result.findings.find((f) => f.kind === kind && f.nodeIds.includes(nodeId));
+const checkOf = (result, re) => result.checked.find((c) => re.test(c.check));
 const loadResponses = () => JSON.parse(fs.readFileSync(path.join(FIX, "aws/responses.json"), "utf8"));
 
 // ----- draw.io shape names -----
@@ -238,13 +259,11 @@ test("aws: edges for targets, origins, integrations, event sources, subscription
 test("aws: review findings, facts without secrets, a valid draw.io fragment with real aws4 icons", { skip: !fs.existsSync(WEBAPP) }, async () => {
 	const { result } = await collectFixture();
 	const f = result.facts;
-	assert.match(f, /\[high\] EC2 bastion \(us-east-1\) has a public IP and allows tcp\/22 from 0\.0\.0\.0\/0/);
-	assert.match(f, /\[medium\] RDS legacy-db \(us-east-1\) storage is not encrypted/);
-	assert.match(f, /\[medium\] RDS legacy-db \(us-east-1\) is single-AZ/);
-	assert.doesNotMatch(f, /RDS orders-db-1 \(us-east-1\) is single-AZ/, "cluster members are not single-AZ findings");
-	assert.match(f, /EKS platform \(us-east-1\) API endpoint is public/);
-	assert.match(f, /routes 2 AZs through one NAT gateway/);
-	assert.match(f, /ElastiCache sessions-cache-001 .* encryption at rest off/);
+	assert.match(f, /## Health findings/);
+	assert.match(f, /\[high\] bastion accepts SSH from the internet — security group sg-bastion \(bastion\) allows tcp\/22 from 0\.0\.0\.0\/0/);
+	assert.match(f, /\[medium\] RDS legacy-db stores data unencrypted/);
+	assert.match(f, /\[low\] RDS legacy-db runs in a single availability zone/);
+	assert.doesNotMatch(f, /RDS orders-db-1 runs in a single/, "cluster members are not single-AZ findings");
 	assert.match(f, /i-web1/);
 	const { xml } = renderGraph(result.graph, { recipe: "aws.environment" });
 	checkModelXml(xml);
@@ -269,6 +288,126 @@ test("aws: review findings, facts without secrets, a valid draw.io fragment with
 	const dig = aws.awsRecipes[0].digDeeper([{ label: "web-1", data: { id: "i-web1", region: "us-east-1", awsProfile: "example" } }], "what can reach it?");
 	assert.match(dig, /describe-\*/);
 	assert.match(dig, /what can reach it\?[\s\S]*"id":"i-web1"/);
+});
+
+test("aws: structured findings on the right shapes, with severities, evidence and coverage", async () => {
+	const { result, calls } = await collectFixture();
+	assertFindingsContract(result);
+	const R = (id) => `arn:aws:rds:us-east-1:111122223333:db:${id}`;
+	const CACHE = "arn:aws:elasticache:us-east-1:111122223333:cluster:sessions-cache-001";
+	const CF = "arn:aws:cloudfront::111122223333:distribution/E2EXAMPLE";
+	const ALB = "arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/web-alb/50dc6c495c0c9188";
+	const expect = [
+		["open-ingress", "i-bastion", "high"],
+		["public-database", R("legacy-db"), "high"],
+		["public-bucket", "arn:aws:s3:::example-assets", "high"],
+		["open-ingress", CACHE, "low"],
+		["unencrypted-storage", R("legacy-db"), "medium"],
+		["unencrypted-storage", CACHE, "medium"],
+		["unencrypted-transit", CACHE, "medium"],
+		["public-access-block-off", "arn:aws:s3:::example-logs-eu", "medium"],
+		["public-control-plane", "arn:aws:eks:us-east-1:111122223333:cluster/platform", "medium"],
+		["https-not-enforced", CF, "medium"],
+		["old-tls", CF, "medium"],
+		["no-healthy-targets", ALB, "medium"],
+		["single-az-database", R("legacy-db"), "low"],
+		["single-nat-gateway", "nat-1", "low"],
+		["no-waf", CF, "info"],
+	];
+	for (const [kind, node, severity] of expect) {
+		const f = findingOf(result, kind, node);
+		assert.ok(f, `${kind} on ${node}: ${result.findings.map((x) => x.id).join(", ")}`);
+		assert.equal(f.severity, severity, f.id);
+	}
+	assert.equal(result.findings.length, expect.length, result.findings.map((x) => x.id).join("\n"));
+	assert.equal(findingOf(result, "open-ingress", "i-bastion").id, "open-ingress:i-bastion");
+	assert.match(findingOf(result, "open-ingress", "i-bastion").title, /^bastion accepts SSH from the internet$/);
+	assert.match(findingOf(result, "open-ingress", "i-bastion").detail, /sg-bastion \(bastion\) allows tcp\/22 from 0\.0\.0\.0\/0; bastion has a public IP address in us-east-1/);
+	assert.match(findingOf(result, "open-ingress", CACHE).detail, /no public address today/);
+	assert.match(findingOf(result, "public-database", R("legacy-db")).detail, /PubliclyAccessible = true/);
+	assert.match(findingOf(result, "public-database", R("legacy-db")).fix, /--no-publicly-accessible/);
+	assert.match(findingOf(result, "public-bucket", "arn:aws:s3:::example-assets").detail, /IsPublic = true/);
+	assert.match(findingOf(result, "public-access-block-off", "arn:aws:s3:::example-logs-eu").detail, /No bucket-level Block Public Access configuration and no account-level configuration/);
+	assert.match(findingOf(result, "https-not-enforced", CF).detail, /allow-all for cache behavior \/legacy\/\*/);
+	assert.ok(findingOf(result, "single-nat-gateway", "vpc-0a1"), "the NAT finding marks its VPC too");
+	// Precision: the ALB's 443 from the world and the Aurora cluster members are not findings.
+	assert.ok(!result.findings.some((x) => x.nodeIds.includes(ALB) && x.kind === "open-ingress"));
+	assert.ok(!result.findings.some((x) => x.nodeIds.some((n) => /orders-db-[12]$/.test(n))));
+	// The public-access calls are read-only gets; expected "none configured" answers are not warnings.
+	assert.ok(calls.some((c) => c[1] === "s3control" && c[2] === "get-public-access-block" && c.includes("111122223333")));
+	assert.ok(calls.some((c) => c[2] === "get-bucket-policy-status" && c.includes("example-assets") && c.includes("us-east-1")));
+	assert.ok(!result.warnings.some((w) => /NoSuch/.test(w)), result.warnings.join("\n"));
+	// Coverage.
+	assert.equal(checkOf(result, /^Security group rules/).scanned, 7, "ingress rules of the region's security groups");
+	assert.equal(checkOf(result, /^Publicly accessible databases/).scanned, 3);
+	assert.equal(checkOf(result, /^S3 public access/).scanned, 2);
+	assert.equal(checkOf(result, /^CloudFront/).scanned, 1);
+	// Stable across runs; no secrets.
+	const again = (await collectFixture()).result;
+	assert.deepEqual(again.findings, result.findings);
+	assert.deepEqual(again.checked, result.checked);
+	const text = JSON.stringify(result.findings);
+	for (const secret of ["SUPER_SECRET_VALUE", "DB_PASSWORD", "ops-oncall@example.com", "admin_should_not_matter", "LS0tLS1CRUdJTi", "abc123"]) assert.ok(!text.includes(secret), `${secret} in the findings`);
+	assert.match(result.summary, /, 15 finding\(s\) \(3 high\)$/);
+});
+
+test("aws: a well-configured account has no findings, and only the services read are in the coverage", () => {
+	const inv = {
+		account: "111122223333",
+		profile: "example",
+		services: ["ec2", "rds", "s3"],
+		accountPublicAccessBlock: { BlockPublicAcls: true, IgnorePublicAcls: true, BlockPublicPolicy: true, RestrictPublicBuckets: true },
+		buckets: [{ name: "private-data", region: "us-east-1", publicAccessBlock: null, policyIsPublic: false, publicAclGrants: [] }],
+		distributions: [],
+		regions: [
+			{
+				region: "us-east-1",
+				vpcs: [{ VpcId: "vpc-1", CidrBlock: "10.0.0.0/16" }],
+				subnets: [{ SubnetId: "subnet-a", VpcId: "vpc-1", CidrBlock: "10.0.1.0/24", AvailabilityZone: "us-east-1a" }],
+				routeTables: [],
+				internetGateways: [],
+				natGateways: [],
+				vpcEndpoints: [],
+				peerings: [],
+				transitGateways: [],
+				tgwAttachments: [],
+				securityGroups: [
+					{ GroupId: "sg-app", GroupName: "app", VpcId: "vpc-1", IpPermissions: [{ IpProtocol: "tcp", FromPort: 443, ToPort: 443, IpRanges: [{ CidrIp: "0.0.0.0/0" }] }] },
+					{ GroupId: "sg-db", GroupName: "db", VpcId: "vpc-1", IpPermissions: [{ IpProtocol: "tcp", FromPort: 5432, ToPort: 5432, UserIdGroupPairs: [{ GroupId: "sg-app" }] }] },
+				],
+				instances: [{ InstanceId: "i-app", SubnetId: "subnet-a", VpcId: "vpc-1", State: { Name: "running" }, SecurityGroups: [{ GroupId: "sg-app" }] }],
+				loadBalancers: [],
+				targetGroups: [],
+				targetHealth: {},
+				classicLoadBalancers: [],
+				dbInstances: [{ DBInstanceIdentifier: "db", DBInstanceArn: "arn:aws:rds:us-east-1:111122223333:db:db", Engine: "postgres", PubliclyAccessible: false, StorageEncrypted: true, MultiAZ: true, VpcSecurityGroups: [{ VpcSecurityGroupId: "sg-db" }], DBSubnetGroup: { VpcId: "vpc-1", Subnets: [] } }],
+				dbClusters: [],
+				lambdas: [],
+				eventSourceMappings: [],
+				ecsClusters: [],
+				ecsServices: {},
+				eksClusters: [],
+				dynamoTables: [],
+				queueUrls: [],
+				topicArns: [],
+				subscriptions: [],
+				restApis: [],
+				restResources: {},
+				httpApis: [],
+				httpIntegrations: {},
+				cacheClusters: [],
+				cacheSubnetGroups: [],
+			},
+		],
+	};
+	const map = aws.awsInventoryToGraph(inv);
+	assert.deepEqual(map.findings, []);
+	assert.doesNotMatch(map.facts, /Health findings/);
+	assert.doesNotMatch(map.summary, /finding/);
+	const names = map.checked.map((c) => c.check);
+	assert.ok(names.includes("Security group rules open to the internet") && names.includes("Publicly accessible databases (RDS)") && names.some((n) => /^S3/.test(n)));
+	assert.ok(!names.some((n) => /EKS|CloudFront|in transit|ECS/.test(n)), `services not read are not checks: ${names.join(", ")}`);
+	assert.equal(map.checked.find((c) => /^Security group/.test(c.check)).scanned, 2);
 });
 
 test("aws: expired credentials stop with a sign-in hint; 'all' regions come from describe-regions", async () => {
@@ -349,7 +488,19 @@ test("terraform scanner: comments, strings with braces and heredocs do not confu
 	const blocks = iac.terraformBlocks(text);
 	assert.deepEqual(
 		blocks.map((b) => `${b.kind} ${b.type} ${b.name}`),
-		["data aws_ami ubuntu", "resource aws_vpc main", "resource aws_subnet public", "resource aws_security_group web", "resource aws_instance web", "resource aws_s3_bucket assets", "resource random_password db", "module module db", "module module remote_vpc"]
+		[
+			"data aws_ami ubuntu",
+			"resource aws_vpc main",
+			"resource aws_subnet public",
+			"resource aws_security_group web",
+			"resource aws_instance web",
+			"resource aws_s3_bucket assets",
+			"resource aws_security_group egress_only",
+			"resource aws_s3_bucket_public_access_block assets",
+			"resource random_password db",
+			"module module db",
+			"module module remote_vpc",
+		]
 	);
 	const lines = text.split("\n");
 	for (const b of blocks) assert.match(lines[text.slice(0, b.start).split("\n").length - 1], new RegExp(`^(resource|data|module) "${b.kind === "module" ? b.name : b.type}"`));
@@ -376,6 +527,30 @@ test("terraform: references, data sources, local and remote modules, one group p
 	assert.equal(r("aws_db_instance.this").attrs.publicly_accessible, "true");
 	assert.equal(r("aws_db_instance.this").attrs.password, undefined, "secret-looking settings are never kept");
 	assert.equal(r("aws_security_group.web").attrs.openToWorld, "true");
+	assert.equal(r("aws_security_group.web").attrs.openPorts, "tcp/22");
+	assert.equal(r("aws_security_group.web").attrs.openSources, "0.0.0.0/0");
+	assert.equal(r("aws_security_group.egress_only").attrs.openPorts, "tcp/443", "egress to 0.0.0.0/0 is not an inbound rule");
+	assert.equal(r("aws_s3_bucket_public_access_block.assets").attrs.block_public_acls, "false");
+});
+
+test("iac: inbound rules are read from Terraform, CloudFormation, ARM, Bicep and Deployment Manager", () => {
+	const tf = (text) => iac.parseTerraform([{ rel: "x/main.tf", text }]).resources[0].attrs;
+	assert.equal(tf('resource "aws_security_group_rule" "r" {\n  type = "ingress"\n  from_port = 0\n  to_port = 65535\n  protocol = "tcp"\n  cidr_blocks = [\n    "10.0.0.0/8",\n    "0.0.0.0/0",\n  ]\n}\n').openPorts, "tcp/*");
+	assert.equal(tf('resource "aws_security_group_rule" "r" {\n  type = "egress"\n  from_port = 0\n  to_port = 0\n  protocol = "-1"\n  cidr_blocks = ["0.0.0.0/0"]\n}\n').openToWorld, undefined);
+	assert.equal(tf('resource "aws_security_group" "r" {\n  ingress {\n    from_port = var.port\n    to_port = var.port\n    protocol = "tcp"\n    cidr_blocks = ["0.0.0.0/0"]\n  }\n}\n').openPorts, "tcp/?");
+	assert.equal(tf('resource "google_compute_firewall" "f" {\n  source_ranges = ["0.0.0.0/0"]\n  allow {\n    protocol = "tcp"\n    ports = ["22", "8000-8100"]\n  }\n  allow {\n    protocol = "icmp"\n  }\n}\n').openPorts, "tcp/22, tcp/8000-8100, icmp/*");
+	assert.equal(tf('resource "google_compute_firewall" "f" {\n  direction = "EGRESS"\n  source_ranges = ["0.0.0.0/0"]\n  allow {\n    protocol = "all"\n  }\n}\n').openToWorld, undefined);
+	assert.equal(tf('resource "azurerm_network_security_rule" "r" {\n  direction = "Inbound"\n  access = "Allow"\n  protocol = "Tcp"\n  source_address_prefix = "Internet"\n  destination_port_ranges = ["22", "3389"]\n}\n').openPorts, "tcp/22, tcp/3389");
+	assert.equal(tf('resource "azurerm_network_security_rule" "r" {\n  direction = "Inbound"\n  access = "Deny"\n  protocol = "*"\n  source_address_prefix = "*"\n  destination_port_range = "*"\n}\n').openToWorld, undefined);
+	assert.equal(tf('resource "google_storage_bucket_iam_binding" "b" {\n  role = "roles/storage.objectViewer"\n  members = ["allAuthenticatedUsers", "user:a@example.com"]\n}\n').publicMembers, "allAuthenticatedUsers");
+	const cfn = iac.parseCloudFormation("t.yaml", "", { Resources: { Sg: { Type: "AWS::EC2::SecurityGroup", Properties: { SecurityGroupIngress: [{ IpProtocol: "-1", CidrIpv6: "::/0" }, { IpProtocol: "tcp", FromPort: 22, ToPort: 22, CidrIp: "10.0.0.0/8" }] } } } }).resources[0].attrs;
+	assert.equal(cfn.openPorts, "all");
+	const arm = iac.parseArm("a.json", '{"type": "Microsoft.Network/networkSecurityGroups/securityRules"}', { resources: [{ type: "Microsoft.Network/networkSecurityGroups/securityRules", name: "x/ssh", properties: { direction: "Inbound", access: "Allow", protocol: "Tcp", sourceAddressPrefix: "*", destinationPortRange: "[parameters('port')]" } }] }).resources[0].attrs;
+	assert.equal(arm.openPorts, "tcp/?");
+	const bicep = iac.parseBicep("n.bicep", "resource nsg 'Microsoft.Network/networkSecurityGroups@2023-04-01' = {\n  name: 'n'\n  properties: {\n    securityRules: [\n      {\n        name: 'a'\n        properties: {\n          direction: 'Inbound'\n          access: 'Allow'\n          protocol: '*'\n          sourceAddressPrefixes: [ '0.0.0.0/0' ]\n          destinationPortRanges: [ '443', '5432' ]\n        }\n      }\n      {\n        name: 'b'\n        properties: { direction: 'Outbound', access: 'Allow', protocol: '*', sourceAddressPrefix: '*', destinationPortRange: '*' }\n      }\n    ]\n  }\n}\n").resources[0].attrs;
+	assert.equal(bicep.openPorts, "*/443, */5432");
+	const risk = iac.openPortRisk("tcp/443, */5432, icmp/*, udp/?");
+	assert.deepEqual(risk, { risky: ["5432 (PostgreSQL)"], unknown: true });
 });
 
 test("cloudformation: short-form tags, GetAtt/Sub/DependsOn references, SAM, CDK paths, nested stacks", () => {
@@ -446,8 +621,8 @@ async function runIac(cloud, folder = REPO) {
 test("aws.iac: Terraform, SAM, CloudFormation and CDK in one map; other clouds only in warnings", { skip: !fs.existsSync(WEBAPP) }, async () => {
 	const r = await runIac("aws");
 	const g = r.graph;
-	assert.match(r.summary, /^23 AWS resource\(s\) in 5 module\(s\)\/stack\(s\)\/template\(s\) \(terraform, cdk, sam, cloudformation\), 7 review finding\(s\)$/);
-	assert.ok(r.warnings.some((w) => /Not drawn \(not AWS\).*random_password.*Azure: 23.*Google Cloud: 12/.test(w)), r.warnings.join("\n"));
+	assert.match(r.summary, /^25 AWS resource\(s\) in 5 module\(s\)\/stack\(s\)\/template\(s\) \(terraform, cdk, sam, cloudformation\), 9 finding\(s\) \(5 high\)$/);
+	assert.ok(r.warnings.some((w) => /Not drawn \(not AWS\).*random_password.*Azure: 26.*Google Cloud: 14/.test(w)), r.warnings.join("\n"));
 	assert.ok(r.warnings.some((w) => /broken\.yaml/.test(w)));
 	assert.ok(!r.warnings.some((w) => /k8s|package\.json/.test(w)), "unrelated YAML/JSON is ignored quietly");
 	assert.ok(!g.nodes.some((n) => /azurerm|google_|bicep|arm:/.test(n.id)));
@@ -458,6 +633,11 @@ test("aws.iac: Terraform, SAM, CloudFormation and CDK in one map; other clouds o
 	assert.equal(web.data.line, "43");
 	assert.equal(web.data.address, "aws_instance.web");
 	assert.equal(web.label, "web [count]\ninstance");
+	assert.deepEqual(web.files, ["infra/terraform/main.tf"], "the file the resource is declared in, relative to the folder");
+	assert.deepEqual(node("tf:infra/terraform").files, ["infra/terraform/main.tf"]);
+	assert.deepEqual(node("cfn:cloudformation/app.yaml::OrdersFunction").files, ["cloudformation/app.yaml"]);
+	assert.deepEqual(node("tf:infra/terraform::module.db").files, ["infra/terraform/main.tf"]);
+	for (const n of g.nodes) if (!n.container && n.kind !== "external") for (const f of n.files ?? []) assert.ok(fs.existsSync(path.join(REPO, f)), f);
 	assert.match(web.style, /resIcon=mxgraph\.aws4\.ec2;/);
 	assert.match(node("tf:infra/terraform::data.aws_ami.ubuntu").style, /opacity=55/);
 	const has = (from, to, kind) => g.edges.some((e) => e.from === from && e.to === to && (!kind || e.kind === kind));
@@ -467,8 +647,8 @@ test("aws.iac: Terraform, SAM, CloudFormation and CDK in one map; other clouds o
 	assert.ok(has("cfn:cloudformation/app.yaml::Network", "cfn:cloudformation/network.yaml", "module"), "nested stack");
 	assert.ok(has("cfn:cloudformation/app.yaml::OrdersFunction", "cfn:cloudformation/app.yaml::OrdersQueue"));
 	assert.ok(node("tf:infra/terraform::module.remote_vpc").label.includes("terraform-aws-modules/vpc/aws"));
-	assert.match(r.facts, /aws_db_instance\.this \(infra\/terraform\/modules\/db\/main\.tf:11\): publicly accessible/);
-	assert.match(r.facts, /aws_s3_bucket\.assets .*public ACL/);
+	assert.match(r.facts, /\[high\] aws_db_instance\.this is publicly accessible — infra\/terraform\/modules\/db\/main\.tf:11 aws_db_instance\.this: publicly_accessible = true\./);
+	assert.match(r.facts, /\[high\] aws_s3_bucket\.assets makes its objects readable by anyone — .*acl = "public-read"/);
 	const { xml } = renderGraph(g, { recipe: "aws.iac" });
 	checkModelXml(xml);
 	assertAws4StylesExist(xml);
@@ -480,7 +660,7 @@ test("aws.iac: Terraform, SAM, CloudFormation and CDK in one map; other clouds o
 test("azure.iac: Terraform azurerm, Bicep (with modules) and ARM (with nested deployments) with azure2 images", { skip: !fs.existsSync(WEBAPP) }, async () => {
 	const r = await runIac("azure");
 	const g = r.graph;
-	assert.match(r.summary, /^23 Azure resource\(s\) in 5 .*\(terraform, arm, bicep\)/);
+	assert.match(r.summary, /^26 Azure resource\(s\) in 5 .*\(terraform, arm, bicep\), 8 finding\(s\) \(2 high\)$/);
 	assert.ok(!r.warnings.some((w) => /broken\.yaml/.test(w)), "AWS template problems are not Azure warnings");
 	const has = (from, to, kind) => g.edges.some((e) => e.from === from && e.to === to && (!kind || e.kind === kind));
 	assert.ok(has("bicep:bicep/main.bicep::db", "bicep:bicep/modules/db.bicep", "module"));
@@ -490,9 +670,9 @@ test("azure.iac: Terraform azurerm, Bicep (with modules) and ARM (with nested de
 	const fn = g.nodes.find((n) => n.id === "tf:infra/terraform-azure::azurerm_linux_function_app.fn");
 	assert.match(fn.style, /image=img\/lib\/azure2\/compute\/Function_Apps\.svg;/);
 	assert.match(g.nodes.find((n) => n.id === "bicep:bicep/main.bicep::kv").style, /opacity=55/, "existing resources are faded");
-	assert.match(r.facts, /stg .*allows public blob access/);
-	assert.match(r.facts, /site .*HTTPS not enforced/);
-	assert.match(r.facts, /sql .*public network access enabled/);
+	assert.match(r.facts, /stg allows containers to be made public — bicep\/main\.bicep:8 stg: allowBlobPublicAccess = true/);
+	assert.match(r.facts, /site accepts plain HTTP — bicep\/main\.bicep:\d+ site: httpsOnly = false/);
+	assert.match(r.facts, /sql \(sql-app\) is reachable over its public endpoint .*publicNetworkAccess = "Enabled"/);
 	const { xml } = renderGraph(g, { recipe: "azure.iac" });
 	checkModelXml(xml);
 	for (const m of xml.matchAll(/image=img\/lib\/azure2\/([^;"]+)/g)) assert.ok(fs.existsSync(path.join(WEBAPP, "img/lib/azure2", m[1])), m[1]);
@@ -501,7 +681,7 @@ test("azure.iac: Terraform azurerm, Bicep (with modules) and ARM (with nested de
 test("gcp.iac: Terraform google_* and Deployment Manager with gcp2 product icons", { skip: !fs.existsSync(WEBAPP) }, async () => {
 	const r = await runIac("gcp");
 	const g = r.graph;
-	assert.match(r.summary, /^12 Google Cloud resource\(s\) in 2 .*\(terraform, deployment-manager\), 3 review finding\(s\)$/);
+	assert.match(r.summary, /^14 Google Cloud resource\(s\) in 2 .*\(terraform, deployment-manager\), 5 finding\(s\) \(3 high\)$/);
 	const has = (from, to) => g.edges.some((e) => e.from === from && e.to === to);
 	assert.ok(has("tf:infra/terraform-gcp::google_compute_instance.app", "tf:infra/terraform-gcp::google_compute_subnetwork.app"));
 	assert.ok(has("dm:dm/config.yaml::dm-vm", "dm:dm/config.yaml::dm-subnet"));
@@ -514,6 +694,137 @@ test("gcp.iac: Terraform google_* and Deployment Manager with gcp2 product icons
 	assert.ok(used.length >= 12);
 	for (const n of used) assert.ok(known.has(n), n);
 	assert.ok(used.includes("cloud_run") && used.includes("cloud_sql") && used.includes("cloud_firewall_rules"));
+});
+
+test("iac: findings from the declared settings, on the declaring shapes, with file:line evidence and coverage", async () => {
+	const runs = {};
+	for (const cloud of ["aws", "azure", "gcp"]) {
+		const r = await runIac(cloud);
+		assertFindingsContract(r);
+		const again = await runIac(cloud);
+		assert.deepEqual(again.findings, r.findings, `${cloud}: stable across runs`);
+		assert.deepEqual(again.checked, r.checked);
+		for (const f of r.findings) {
+			assert.match(f.detail, /^[\w./-]+\.(tf|ya?ml|json|bicep):\d+ /, `${f.id}: file:line evidence`);
+			assert.equal(f.id, `${f.kind}:${f.nodeIds[0]}`);
+		}
+		const text = JSON.stringify(r.findings);
+		for (const secret of ["not-a-real-secret", "sqladmin", "adminPassword", "random_password"]) assert.ok(!text.includes(secret), `${cloud}: ${secret} in the findings`);
+		runs[cloud] = r;
+	}
+	const has = (cloud, kind, node, severity) => {
+		const f = findingOf(runs[cloud], kind, node);
+		assert.ok(f, `${cloud}: ${kind} on ${node}: ${runs[cloud].findings.map((x) => x.id).join(", ")}`);
+		assert.equal(f.severity, severity, f.id);
+		return f;
+	};
+	// AWS
+	has("aws", "open-ingress", "tf:infra/terraform::aws_security_group.web", "high");
+	has("aws", "open-ingress", "cfn:cloudformation/network.yaml::WebSg", "high");
+	has("aws", "public-database", "tf:infra/terraform/modules/db::aws_db_instance.this", "high");
+	has("aws", "public-database", "cfn:cloudformation/network.yaml::Db", "high");
+	has("aws", "public-bucket", "tf:infra/terraform::aws_s3_bucket.assets", "high");
+	has("aws", "unencrypted-storage", "tf:infra/terraform/modules/db::aws_db_instance.this", "medium");
+	has("aws", "single-az-database", "tf:infra/terraform/modules/db::aws_db_instance.this", "low");
+	const bpa = has("aws", "public-access-block-off", "tf:infra/terraform::aws_s3_bucket_public_access_block.assets", "medium");
+	assert.ok(bpa.nodeIds.includes("tf:infra/terraform::aws_s3_bucket.assets"), "the bucket it belongs to is marked too");
+	assert.match(bpa.detail, /block_public_acls = false, ignore_public_acls = false/);
+	assert.ok(!findingOf(runs.aws, "open-ingress", "tf:infra/terraform::aws_security_group.egress_only"), "443 in, all out: not a finding");
+	assert.match(has("aws", "open-ingress", "tf:infra/terraform::aws_security_group.web", "high").title, /opens SSH to the internet/);
+	// Azure
+	has("azure", "open-ingress", "bicep:bicep/main.bicep::nsg", "high");
+	has("azure", "public-database", "tf:infra/terraform-azure::azurerm_mssql_firewall_rule.everyone", "high");
+	has("azure", "https-not-enforced", "bicep:bicep/main.bicep::site", "medium");
+	has("azure", "old-tls", "tf:infra/terraform-azure::azurerm_storage_account.sa", "medium");
+	has("azure", "public-blob-access", "bicep:bicep/main.bicep::stg", "medium");
+	has("azure", "no-purge-protection", "tf:infra/terraform-azure::azurerm_key_vault.kv", "low");
+	has("azure", "public-network-access", "bicep:bicep/modules/db.bicep::sql", "low");
+	assert.ok(!findingOf(runs.azure, "open-ingress", "tf:infra/terraform-azure::azurerm_network_security_group.web"), "HTTPS from the internet: not a finding");
+	assert.ok(!runs.azure.findings.some((f) => f.nodeIds.includes("bicep:bicep/main.bicep::kv")), "existing resources are not judged");
+	// Google Cloud
+	has("gcp", "open-ingress", "tf:infra/terraform-gcp::google_compute_firewall.ssh", "high");
+	has("gcp", "public-database", "tf:infra/terraform-gcp::google_sql_database_instance.db", "high");
+	const iam = has("gcp", "public-bucket", "tf:infra/terraform-gcp::google_storage_bucket_iam_member.public_read", "high");
+	assert.ok(iam.nodeIds.includes("tf:infra/terraform-gcp::google_storage_bucket.data"));
+	has("gcp", "public-control-plane", "tf:infra/terraform-gcp::google_container_cluster.gke", "medium");
+	has("gcp", "deletion-protection-off", "tf:infra/terraform-gcp::google_sql_database_instance.db", "low");
+	assert.ok(!findingOf(runs.gcp, "open-ingress", "dm:dm/config.yaml::dm-fw"), "port 80 from the internet: not a finding");
+	// Coverage.
+	assert.equal(checkOf(runs.aws, /^Inbound rules/).scanned, 3);
+	assert.equal(checkOf(runs.azure, /^Inbound rules/).scanned, 2);
+	assert.equal(checkOf(runs.gcp, /^Inbound rules/).scanned, 2);
+	assert.equal(checkOf(runs.azure, /^Key Vault/).scanned, 1, "the existing vault is not counted");
+	// The findings badge the shapes in the rendered map.
+	checkModelXml(renderGraph(runs.aws.graph, { recipe: "aws.iac" }).xml);
+});
+
+test("iac: a well-configured repository has no findings, but says what it checked", async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "iac-clean-"));
+	fs.mkdirSync(path.join(dir, "infra"));
+	fs.writeFileSync(
+		path.join(dir, "infra/main.tf"),
+		[
+			'resource "aws_security_group" "web" {',
+			"  ingress {",
+			"    from_port   = 443",
+			"    to_port     = 443",
+			'    protocol    = "tcp"',
+			'    cidr_blocks = ["0.0.0.0/0"]',
+			"  }",
+			"  ingress {",
+			"    from_port   = 22",
+			"    to_port     = 22",
+			'    protocol    = "tcp"',
+			'    cidr_blocks = ["10.0.0.0/8"]',
+			"  }",
+			"  egress {",
+			"    from_port   = 0",
+			"    to_port     = 0",
+			'    protocol    = "-1"',
+			'    cidr_blocks = ["0.0.0.0/0"]',
+			"  }",
+			"}",
+			'resource "aws_db_instance" "db" {',
+			'  engine              = "postgres"',
+			"  publicly_accessible = false",
+			"  storage_encrypted   = true",
+			"  multi_az            = true",
+			"  deletion_protection = true",
+			"}",
+			'resource "aws_s3_bucket" "logs" {',
+			'  bucket = "logs"',
+			"}",
+			'resource "aws_s3_bucket_public_access_block" "logs" {',
+			"  bucket                  = aws_s3_bucket.logs.id",
+			"  block_public_acls       = true",
+			"  block_public_policy     = true",
+			"  ignore_public_acls      = true",
+			"  restrict_public_buckets = true",
+			"}",
+			'resource "aws_eks_cluster" "k8s" {',
+			'  name = "k8s"',
+			"  vpc_config {",
+			"    endpoint_public_access = false",
+			"  }",
+			"}",
+		].join("\n")
+	);
+	const r = await runIac("aws", dir);
+	assert.deepEqual(r.findings, []);
+	assert.doesNotMatch(r.facts, /Health findings/);
+	assert.match(r.summary, /^5 AWS resource\(s\) in 1 module/);
+	assert.doesNotMatch(r.summary, /finding/);
+	assert.deepEqual(
+		r.checked.map((c) => [c.check, c.scanned]),
+		[
+			["Inbound rules open to the internet", 1],
+			["Publicly accessible databases", 1],
+			["Public buckets and storage", 2],
+			["Encryption at rest", 1],
+			["Kubernetes API exposure", 1],
+			["Database deletion protection and availability", 1],
+		]
+	);
 });
 
 test("iac: a folder without IaC gives a summary and no map", async () => {

@@ -5,6 +5,7 @@ metadata:
   namespace: shop
 data:
   PAYMENTS_URL: https://api.stripe.com
+  SHIPPING_API_URL: http://api.parcel-partner.com/v2
   LOG_LEVEL: info
 ---
 apiVersion: v1
@@ -33,6 +34,8 @@ spec:
       containers:
         - name: orders
           image: ghcr.io/acme/orders:1.4.2
+          securityContext:
+            privileged: true
           envFrom:
             - configMapRef: { name: orders-config }
           env:

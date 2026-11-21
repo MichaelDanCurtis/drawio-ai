@@ -17,8 +17,9 @@ const { catalog } = require("../src/main/mapper/registry");
 const { mlRecipes } = require("../src/main/mapper/recipes/ml");
 const { mlPipelineRecipe, scanPipelines } = require("../src/main/mapper/recipes/ml/pipeline");
 const { parsePipelineFile } = require("../src/main/mapper/recipes/ml/pipelineParsers");
-const { mlflowRecipe, collectMlflow, pickKeyMetric } = require("../src/main/mapper/recipes/ml/mlflow");
+const { mlflowRecipe, collectMlflow, pickKeyMetric, mlflowToGraph, mlflowFindings } = require("../src/main/mapper/recipes/ml/mlflow");
 const { lifecycleRecipe, scanLifecycle } = require("../src/main/mapper/recipes/ml/lifecycle");
+const { floatingImage } = require("../src/main/mapper/recipes/ml/shared");
 const { modelRecipe, mapLocalModel, mapHubModel, normalizeHfId } = require("../src/main/mapper/recipes/ml/model");
 const { onnxToGraph, moduleOf } = require("../src/main/mapper/recipes/ml/modelArch");
 const { parseOnnx, ByteSource } = require("../src/main/mapper/recipes/ml/modelFormats");
@@ -32,6 +33,27 @@ const draws = (graph, recipe) => {
 	return xml;
 };
 const edge = (g, from, to) => g.edges.find((e) => e.from === from && e.to === to);
+
+/** Findings point at shapes that exist, ids are unique, and every check says what it scanned. */
+function checkFindings(r, label) {
+	const ids = new Set(r.graph.nodes.map((n) => n.id));
+	assert.ok(Array.isArray(r.findings) && Array.isArray(r.checked) && r.checked.length, label);
+	for (const c of r.checked) assert.ok(c.check && Number.isInteger(c.scanned), `${label}: ${JSON.stringify(c)}`);
+	for (const f of r.findings) assert.ok(f.title && f.nodeIds.length && f.nodeIds.every((id) => ids.has(id)) && ["high", "medium", "low", "info"].includes(f.severity), `${label}: ${JSON.stringify(f)}`);
+	assert.equal(new Set(r.findings.map((f) => f.id)).size, r.findings.length, `${label}: unique ids`);
+}
+
+/** Node files are relative paths (forward slashes) to files that exist under the mapped folder. */
+function checkFiles(g, root, label) {
+	let n = 0;
+	for (const x of g.nodes)
+		for (const f of x.files ?? []) {
+			n++;
+			assert.ok(!path.isAbsolute(f) && !f.includes("\\") && !f.split("/").includes(".."), `${label}: ${x.id} ${f}`);
+			assert.ok(fs.statSync(path.join(root, f)).isFile(), `${label}: ${x.id} ${f} exists`);
+		}
+	assert.ok(n > 0, `${label}: some nodes carry files`);
+}
 
 // ---------------------------------------------------------------- pipelines
 
@@ -159,6 +181,39 @@ test("Airflow (static scan): operators, TaskFlow, >> / << with lists, XCom data 
 	assert.match(p.nodes.find((n) => n.id === "params").label, /@daily/);
 });
 
+test("pipeline findings: steps without declared outputs, floating images; files of steps and artifacts", async () => {
+	const root = path.join(FIX, "pipelines");
+	const r = await mlPipelineRecipe.collect({ folder: root }, ctx());
+	checkFindings(r, "pipelines");
+	const byId = Object.fromEntries(r.findings.map((f) => [f.id, f]));
+	const ids = r.findings.map((f) => f.id).sort();
+	const kfp = r.graph.nodes.find((n) => n.data?.task === "deploy").id;
+	const dvc = r.graph.nodes.find((n) => n.data?.stage === "publish").id;
+	assert.deepEqual(ids, [`floating-image:${kfp}`, `step-without-outputs:${dvc}`, `step-without-outputs:${kfp}`].sort());
+	assert.match(byId[`floating-image:${kfp}`].detail, /kfp\/pipeline\.yaml \(pipeline churn-training\): image gcr\.io\/my-project\/deployer:latest/);
+	assert.equal(byId[`step-without-outputs:${dvc}`].severity, "low");
+	assert.match(byId[`step-without-outputs:${dvc}`].fix, /outs/);
+	assert.ok(!r.findings.some((f) => /Airflow|Metaflow/.test(r.graph.nodes.find((n) => n.id === f.nodeIds[0]).data.framework)), "frameworks without declared outputs are not checked");
+	assert.deepEqual(r.checked.map((c) => c.check), ["Steps without declared outputs", "Container images on :latest or without a tag"]);
+	assert.ok(r.checked.every((c) => c.scanned > 0));
+	assert.deepEqual((await mlPipelineRecipe.collect({ folder: root }, ctx())).findings.map((f) => f.id), r.findings.map((f) => f.id), "stable ids");
+	// Files: the definition, plus the code a step runs and the outputs that exist.
+	checkFiles(r.graph, root, "pipelines");
+	const one = await mlPipelineRecipe.collect({ file: path.join(root, "dvc/dvc.yaml") }, ctx());
+	const node = (id) => one.graph.nodes.find((n) => n.id === id);
+	assert.deepEqual(node("s:train").files, ["dvc.yaml", "src/train.py"]);
+	assert.deepEqual(node("a:eval/metrics.json").files, ["dvc.yaml", "eval/metrics.json"]);
+	assert.deepEqual(node("a:data/prepared").files, ["dvc.yaml"], "folders and missing outputs are left out");
+	checkFiles(one.graph, path.join(root, "dvc"), "dvc");
+	assert.deepEqual(r.graph.nodes.find((n) => n.data?.job === "prep_job").files, ["azureml/pipeline.yml", "azureml/prep.yml"], "a local component file");
+	// Clean definitions: Azure ML and SageMaker declare their outputs and pin their images.
+	for (const f of ["azureml/pipeline.yml", "sagemaker/pipeline-definition.json"]) assert.deepEqual((await mlPipelineRecipe.collect({ file: path.join(root, f) }, ctx())).findings, [], f);
+	assert.equal(floatingImage("python:3.11-slim"), undefined);
+	assert.equal(floatingImage("ghcr.io/acme/x:latest"), "latest");
+	assert.equal(floatingImage("localhost:5000/trainer"), "none");
+	assert.equal(floatingImage("ghcr.io/acme/x@sha256:0123456789abcdef0123"), undefined);
+});
+
 test("pipeline recipe: frameworks without a parser go to the agent with source excerpts", async () => {
 	const r = await mlPipelineRecipe.collect({ folder: path.join(FIX, "pipelines/prefect") }, ctx());
 	assert.equal(r.graph, undefined);
@@ -190,6 +245,28 @@ test("MLflow file store: experiments › top runs by the key metric, plus regist
 	assert.ok(edge(g, "run:3d4e5f60718293a4b5c6d7e8f9a0b1c2", "model:churn-model/v1"));
 	draws(g, "ml.mlflow");
 	assert.match(mlflowRecipe.agentPrompt({}, r), /best runs[\s\S]*"keyMetric"/);
+});
+
+test("MLflow findings: registered models with no version in Production or with an alias", async () => {
+	const r = await mlflowRecipe.collect({ trackingUri: path.join(FIX, "mlruns"), maxRuns: "2" }, ctx());
+	checkFindings(r, "mlflow");
+	assert.deepEqual(r.findings, [], "churn-model v2 is in Production with @champion");
+	assert.deepEqual(r.checked, [{ check: "Registered models without a version in Production or with an alias", scanned: 1, note: "registered models read" }]);
+	const store = {
+		uri: "/x/mlruns",
+		kind: "file",
+		experiments: [],
+		warnings: [],
+		models: [
+			{ name: "fraud model", versions: [{ name: "fraud model", version: "3", stage: "Staging", aliases: [] }], totalVersions: 3 },
+			{ name: "ranker", versions: [{ name: "ranker", version: "1", aliases: ["prod"] }], totalVersions: 1 },
+		],
+	};
+	const g = mlflowToGraph(store);
+	const f = mlflowFindings(store, g);
+	assert.deepEqual(f.findings.map((x) => [x.id, x.severity, x.nodeIds]), [["no-serving-version:model:fraud_model", "info", ["model:fraud_model"]]]);
+	assert.match(f.findings[0].detail, /3 version\(s\) registered \(latest v3\); staged: v3 Staging/);
+	assert.ok(g.nodes.some((n) => n.id === "model:fraud_model"));
 });
 
 test("MLflow: key metric choice prefers validation quality metrics; loss-like metrics rank lowest first", () => {
@@ -321,6 +398,22 @@ test("ML lifecycle: evidence per stage, links from imports / artifacts / tools /
 	const xml = draws(g, "ml.lifecycle");
 	assert.match(xml, /mapperKind="ml:lifecycle:gap"/);
 	assert.match(lifecycleRecipe.agentPrompt({}, r), /red gap box/);
+	// Findings: the monitoring gap, the :latest serving image; files of the components.
+	checkFindings(r, "lifecycle");
+	assert.deepEqual(r.findings.map((f) => [f.severity, f.id, f.nodeIds]), [
+		["medium", "lifecycle-gap:monitoring", ["gap:monitoring"]],
+		["low", "floating-image:k8s/inference.yaml:ghcr.io/acme/churn-serve:latest", ["tool:deployment:KServe_InferenceService"]],
+	]);
+	assert.match(r.findings[1].detail, /^k8s\/inference\.yaml:9: /);
+	assert.match(r.findings[0].fix, /drift/);
+	assert.deepEqual(r.checked.map((c) => [c.check, c.scanned]), [
+		["ML lifecycle stages without evidence", 7],
+		["Container images on :latest or without a tag", 2],
+	]);
+	checkFiles(g, root, "lifecycle");
+	assert.deepEqual(comp("code:src/train.py").files, ["src/train.py"]);
+	assert.deepEqual(comp("tool:deployment:Docker_image").files, ["Dockerfile"]);
+	assert.deepEqual((await lifecycleRecipe.collect({ folder: root }, ctx(root))).findings.map((f) => f.id), r.findings.map((f) => f.id), "stable ids");
 	// Layout: stages left to right.
 	const { layoutGraph } = require("../src/main/mapper/layout");
 	const boxes = layoutGraph(g).boxes;
@@ -616,6 +709,14 @@ test("model (trees): XGBoost JSON and LightGBM text", async () => {
 	assert.deepEqual(l.graph.nodes.find((n) => n.id === "in:features").rows.map((r) => r.text), ["sqft", "bedrooms", "age"]);
 	assert.ok(l.graph.nodes.find((n) => n.id === "ensemble").rows.some((r) => r.text === "≈ 4 leaves per tree"));
 	draws(l.graph, "ml.model");
+	// A local model's shapes carry the model files, relative to the mapped folder.
+	const trees = path.join(FIX, "models/trees");
+	const viaRecipe = await modelRecipe.collect({ file: path.join(trees, "xgb-model.json") }, ctx());
+	assert.ok(viaRecipe.graph.nodes.filter((n) => !n.container).every((n) => JSON.stringify(n.files) === '["xgb-model.json"]'));
+	checkFiles(viaRecipe.graph, trees, "model file");
+	const folder = await modelRecipe.collect({ folder: path.join(FIX, "models/tiny-llama") }, ctx());
+	assert.deepEqual(folder.graph.nodes.find((n) => !n.container).files, ["config.json"]);
+	checkFiles(folder.graph, path.join(FIX, "models/tiny-llama"), "model folder");
 });
 
 test("model: pickles are never opened; ids are validated; module names are classified", () => {

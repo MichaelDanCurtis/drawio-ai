@@ -5,7 +5,7 @@
  * deployments with a relative templateLink as module links.
  */
 import * as path from "path";
-import { IacGroup, IacResource, keepAttr, lineAt } from "./model";
+import { IacGroup, IacResource, IngressRule, keepAttr, lineAt, markOpenIngress, rulesFromPortSpecs } from "./model";
 
 export function isArmTemplate(doc: any): boolean {
 	return !!doc && typeof doc === "object" && /deploymentTemplate\.json/i.test(String(doc.$schema ?? "")) && (Array.isArray(doc.resources) || (doc.resources && typeof doc.resources === "object"));
@@ -79,6 +79,22 @@ function parseResourceIds(text: string): { type: string; name: string }[] {
 	return out;
 }
 
+/** Inbound Allow rules of an NSG (properties.securityRules) or of a securityRules child resource, as declared. */
+export function armIngress(type: string, props: any): IngressRule[] {
+	const P = (o: any) => (o && typeof o === "object" ? o.properties ?? o : {});
+	const list: any[] = /networkSecurityGroups$/i.test(type) ? (Array.isArray(props?.securityRules) ? props.securityRules.map(P) : []) : /networkSecurityGroups\/securityRules$/i.test(type) ? [props ?? {}] : [];
+	const expr = (v: unknown) => typeof v === "string" && /^\[/.test(v);
+	const out: IngressRule[] = [];
+	for (const r of list) {
+		if (!/^inbound$/i.test(String(r?.direction ?? "")) || !/^allow$/i.test(String(r?.access ?? ""))) continue;
+		const sources = [r.sourceAddressPrefix, ...(Array.isArray(r.sourceAddressPrefixes) ? r.sourceAddressPrefixes : [])].filter((x): x is string => typeof x === "string");
+		const ports = [r.destinationPortRange, ...(Array.isArray(r.destinationPortRanges) ? r.destinationPortRanges : [])].filter((x) => x !== undefined && x !== null);
+		if (ports.some(expr) || expr(r.destinationPortRanges)) out.push({ protocol: String(r.protocol ?? "*"), literal: false, sources });
+		else out.push(...rulesFromPortSpecs(String(r.protocol ?? "*"), ports, sources));
+	}
+	return out;
+}
+
 export function parseArm(file: string, text: string, doc: any): { group: IacGroup; resources: IacResource[] } {
 	const group = `arm:${file}`;
 	const flat: Flat[] = [];
@@ -148,8 +164,15 @@ export function parseArm(file: string, text: string, doc: any): { group: IacGrou
 		keepAttr(attrs, "location", typeof f.res.location === "string" && !f.res.location.startsWith("[") ? f.res.location : undefined);
 		keepAttr(attrs, "kind", f.res.kind);
 		if (f.res.sku && typeof f.res.sku === "object") keepAttr(attrs, "sku", f.res.sku.name);
-		for (const k of ["publicNetworkAccess", "allowBlobPublicAccess", "supportsHttpsTrafficOnly", "minimumTlsVersion", "addressPrefix"]) keepAttr(attrs, k, f.res.properties?.[k]);
-		if (/"sourceAddressPrefix":"(\*|Internet|0\.0\.0\.0\/0)"/.test(props)) attrs.openToWorld = "true";
+		for (const k of ["publicNetworkAccess", "allowBlobPublicAccess", "supportsHttpsTrafficOnly", "minimumTlsVersion", "minimalTlsVersion", "httpsOnly", "enablePurgeProtection", "publicAccess", "startIpAddress", "endIpAddress", "enableNonSslPort", "addressPrefix"])
+			keepAttr(attrs, k, f.res.properties?.[k]);
+		keepAttr(attrs, "minTlsVersion", f.res.properties?.siteConfig?.minTlsVersion);
+		markOpenIngress(attrs, armIngress(f.type, f.res.properties));
+		if (/Microsoft\.ContainerService\/managedClusters$/i.test(f.type)) {
+			const api = f.res.properties?.apiServerAccessProfile ?? {};
+			attrs.privateCluster = String(api.enablePrivateCluster === true);
+			attrs.authorizedIpRanges = String(Array.isArray(api.authorizedIPRanges) ? api.authorizedIPRanges.length > 0 : typeof api.authorizedIPRanges === "string");
+		}
 		if (f.res.condition !== undefined) attrs.condition = String(f.res.condition).slice(0, 60);
 		if (f.res.copy) attrs.copy = String(f.res.copy.name ?? "loop");
 		const r: IacResource = {

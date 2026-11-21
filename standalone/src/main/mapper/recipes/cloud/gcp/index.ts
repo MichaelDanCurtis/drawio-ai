@@ -1,6 +1,7 @@
 import { agentRequest, digDeeperRequest } from "../../common";
 import type { Recipe } from "../../../types";
 import { collectGcp, listProjects } from "./collect";
+import { findingsSummary } from "../findings";
 import { buildGcpGraph } from "./model";
 
 export const gcpEnvironmentRecipe: Recipe = {
@@ -17,13 +18,13 @@ export const gcpEnvironmentRecipe: Recipe = {
 	async collect(input, ctx) {
 		const { inventory, warnings } = await collectGcp(input.project ?? "", ctx);
 		ctx.progress("Drawing the map…");
-		const { graph, stats, facts } = buildGcpGraph(inventory);
+		const { graph, stats, facts, findings, checked } = buildGcpGraph(inventory);
 		const summary =
 			stats.drawn === 0
 				? `No resources found in project ${inventory.project.id}.`
-				: `${stats.drawn} resource(s), ${stats.networks} VPC network(s), ${stats.subnets} subnetwork(s), ${stats.edges} connection(s) · ${inventory.source === "asset-inventory" ? "Cloud Asset Inventory" : "gcloud lists"}`;
+				: `${stats.drawn} resource(s), ${stats.networks} VPC network(s), ${stats.subnets} subnetwork(s), ${stats.edges} connection(s)${findingsSummary(findings)} · ${inventory.source === "asset-inventory" ? "Cloud Asset Inventory" : "gcloud lists"}`;
 		if (stats.drawn > 600) warnings.push(`A large map (${stats.drawn} resources): drawing and editing may be slow.`);
-		return { graph, facts, summary, warnings };
+		return { graph, facts, summary, warnings, findings, checked };
 	},
 	agentPrompt: (_input, result) =>
 		agentRequest(

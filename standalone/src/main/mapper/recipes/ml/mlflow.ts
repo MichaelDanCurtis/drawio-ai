@@ -7,9 +7,9 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { agentRequest, digDeeperRequest, slug } from "../common";
-import type { CollectContext, MapEdge, MapGraph, MapInput, MapNode, MapRow, Recipe } from "../../types";
+import type { CheckCoverage, CollectContext, MapEdge, MapFinding, MapGraph, MapInput, MapNode, MapRow, Recipe } from "../../types";
 import { MapperError } from "../../types";
-import { firstLine, fmtNum, httpRequest, ML_STYLES, redactUrl } from "./shared";
+import { firstLine, fmtNum, httpRequest, keepOnMap, ML_STYLES, redactUrl } from "./shared";
 
 export interface MlRun {
 	id: string;
@@ -530,6 +530,26 @@ export function mlflowToGraph(store: MlflowStore): MapGraph {
 	};
 }
 
+/** Registered models none of whose versions is in Production or carries an alias (exported for tests). */
+export function mlflowFindings(store: MlflowStore, graph: MapGraph): { findings: MapFinding[]; checked: CheckCoverage[] } {
+	const findings: MapFinding[] = [];
+	for (const m of store.models) {
+		if (!m.versions.length) continue;
+		if (m.versions.some((v) => /^production$/i.test(v.stage ?? "") || v.aliases.length)) continue;
+		const staged = m.versions.filter((v) => v.stage).map((v) => `v${v.version} ${v.stage}`);
+		findings.push({
+			id: `no-serving-version:model:${slug(m.name)}`,
+			kind: "no-serving-version",
+			severity: "info",
+			title: `${m.name} has no version in Production or with an alias`,
+			detail: `${m.totalVersions} version(s) registered (latest v${m.versions[m.versions.length - 1].version})${staged.length ? `; staged: ${staged.join(", ")}` : ""}; none is in the Production stage or tagged with an alias such as @champion, so it is not clear which one serves.`,
+			nodeIds: [`model:${slug(m.name)}`],
+			fix: `Mark the version that serves: set an alias (e.g. client.set_registered_model_alias("${m.name}", "champion", <version>)) and load it as models:/${m.name}@champion.`,
+		});
+	}
+	return { findings: keepOnMap(findings, graph), checked: [{ check: "Registered models without a version in Production or with an alias", scanned: store.models.filter((m) => m.versions.length).length, note: "registered models read" }] };
+}
+
 function mlflowFacts(store: MlflowStore): string {
 	return JSON.stringify(
 		{
@@ -611,6 +631,7 @@ export const mlflowRecipe: Recipe = {
 		const store = await collectMlflow(input, ctx);
 		if (store.experiments.length === 0 && store.models.length === 0) return { summary: `No experiments or registered models in ${store.uri}.`, warnings: store.warnings };
 		const graph = mlflowToGraph(store);
+		const { findings, checked } = mlflowFindings(store, graph);
 		const runs = store.experiments.reduce((a, e) => a + e.runs.length, 0);
 		const versions = store.models.reduce((a, m) => a + m.versions.length, 0);
 		return {
@@ -618,6 +639,8 @@ export const mlflowRecipe: Recipe = {
 			summary: `${store.experiments.length} experiment(s), ${runs} top run(s), ${store.models.length} registered model(s) with ${versions} version(s)`,
 			facts: mlflowFacts(store),
 			warnings: store.warnings,
+			findings,
+			checked,
 		};
 	},
 	agentPrompt: (_input, result) =>

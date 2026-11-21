@@ -48,6 +48,30 @@ const noSecrets = (label, ...texts) => {
 };
 const iconFilesIn = (xml) => [...xml.matchAll(/image=img\/lib\/azure2\/([^;&"]+)/g)].map((m) => m[1]);
 
+const SEVERITIES = new Set(["high", "medium", "low", "info"]);
+/** The findings contract: unique stable ids `${kind}:…`, known severities, evidence and a fix, nodes that are drawn; coverage with counts. */
+function assertFindingsContract(graph, findings, checked) {
+	const ids = new Set(graph.nodes.map((n) => n.id));
+	const seen = new Set();
+	for (const f of findings) {
+		assert.ok(f.id.startsWith(`${f.kind}:`), f.id);
+		assert.ok(!seen.has(f.id), `duplicate finding id ${f.id}`);
+		seen.add(f.id);
+		assert.ok(SEVERITIES.has(f.severity), f.severity);
+		assert.ok(f.title && f.detail && f.fix, f.id);
+		assert.ok(f.nodeIds.length > 0, `${f.id} has nodes`);
+		for (const n of f.nodeIds) assert.ok(ids.has(n), `${f.id}: node ${n} is not in the graph`);
+	}
+	assert.ok(Array.isArray(checked) && checked.length > 0, "checked is filled");
+	for (const c of checked) assert.ok(c.check && Number.isInteger(c.scanned) && c.scanned >= 0, JSON.stringify(c));
+}
+/** The finding of a kind on the shape with this label. */
+const findingOn = (g, findings, kind, label) => {
+	const node = g.nodes.find((n) => n.label === label);
+	assert.ok(node, `no node ${label}`);
+	return findings.find((f) => f.kind === kind && f.nodeIds.includes(node.id));
+};
+
 // ---------------------------------------------------------------- Azure
 
 const SUB = "00000000-1111-2222-3333-444444444444";
@@ -107,7 +131,7 @@ test("Azure via Resource Graph: containment by subnet, reference edges, folded N
 	assert.ok(progress.length > 0);
 	assert.deepEqual(r.warnings, []);
 	const g = r.graph;
-	assert.match(r.summary, /27 resource\(s\) in 5 resource group\(s\), 2 VNet\(s\), 7 subnet\(s\), \d+ connection\(s\) · Resource Graph/);
+	assert.match(r.summary, /27 resource\(s\) in 5 resource group\(s\), 2 VNet\(s\), 7 subnet\(s\), \d+ connection\(s\), 7 finding\(s\) \(1 high\) · Resource Graph$/);
 
 	// Containment: subscription › RG › VNet › subnet › resources (across resource groups).
 	assert.equal(parentLabel(g, "rg-network  (westeurope)"), "Subscription: Contoso Production");
@@ -211,6 +235,72 @@ test("Azure: networking detail off, and a resource group filter that keeps the V
 	checkModelXml(renderGraph(only, { recipe: azure.id }).xml);
 });
 
+test("Azure: health findings with evidence on the right shapes, stable ids, coverage, no secrets", async () => {
+	const { ctx } = fakeContext(azureAnswers());
+	const r = await azure.collect({ subscription: SUB, includeNetwork: "true" }, ctx);
+	const g = r.graph;
+	assertFindingsContract(g, r.findings, r.checked);
+	const has = (kind, label, severity) => {
+		const f = findingOn(g, r.findings, kind, label);
+		assert.ok(f, `${kind} on ${label}: ${r.findings.map((x) => x.id).join(", ")}`);
+		assert.equal(f.severity, severity, f.id);
+		return f;
+	};
+	const nsg = has("open-ingress", "nsg-web", "high");
+	assert.equal(nsg.title, "NSG nsg-web opens SSH to the internet");
+	assert.match(nsg.detail, /allow-ssh-any \(priority 110\): allow Tcp 22 from \*/);
+	assert.doesNotMatch(nsg.detail, /443/, "the HTTPS rule is not part of it");
+	for (const label of ["vm-web-01", "snet-web  10.1.1.0/24  · NSG nsg-web"]) assert.ok(findingOn(g, r.findings, "open-ingress", label), `NSG finding also on ${label}`);
+	assert.equal(nsg.id, `open-ingress:${byLabel(g, "nsg-web").id}`);
+	has("public-blob-access", "stproddata", "medium");
+	has("https-not-enforced", "func-jobs", "medium");
+	assert.ok(!findingOn(g, r.findings, "https-not-enforced", "app-api"), "httpsOnly = true is fine");
+	has("public-control-plane", "aks-prod", "medium");
+	has("no-purge-protection", "kv-app-prod", "low");
+	assert.ok(!findingOn(g, r.findings, "public-network-access", "kv-app-prod"), "the vault denies by default");
+	has("no-waf", "agw-prod", "info");
+	has("single-instance", "plan-web", "info");
+	assert.ok(!findingOn(g, r.findings, "public-network-access", "sql-prod"), "SQL with public access disabled");
+	assert.equal(r.findings.length, 7, r.findings.map((x) => x.id).join("\n"));
+	const check = (re) => r.checked.find((c) => re.test(c.check));
+	assert.equal(check(/^NSG rules/).scanned, 2, "inbound rules of nsg-web");
+	assert.equal(check(/^Storage accounts/).scanned, 1);
+	assert.equal(check(/^Web apps/).scanned, 2);
+	assert.ok(!check(/^Redis/), "nothing to check: left out");
+	assert.match(r.facts, /## Health findings[\s\S]*\[high\] NSG nsg-web opens SSH to the internet/);
+	noSecrets("Azure findings", JSON.stringify(r.findings), JSON.stringify(r.checked));
+	const again = await azure.collect({ subscription: SUB, includeNetwork: "true" }, fakeContext(azureAnswers()).ctx);
+	assert.deepEqual(again.findings, r.findings, "stable across runs");
+	// Without networking detail the NSG finding stays on the VMs behind it, with the same id and evidence.
+	const rows = [...fixture("azure", "graph-resources-page1.json").data, ...fixture("azure", "graph-resources-page2.json").data].map(normalizeResource);
+	const off = buildAzureGraph({ subscription: { id: SUB, name: "Contoso Production" }, resourceGroups: fixture("azure", "graph-groups.json").data, resources: rows, source: "resource-graph", includeNetwork: false });
+	assertFindingsContract(off.graph, off.findings, off.checked);
+	const offNsg = off.findings.find((f) => f.id === nsg.id);
+	assert.ok(offNsg && offNsg.detail === nsg.detail, "same finding without networking detail");
+	assert.deepEqual(offNsg.nodeIds.map((id) => off.graph.nodes.find((n) => n.id === id).label).sort(), ["vm-web-01", "vm-web-02"]);
+	// The CLI path without NSG permissions: no NSG finding (no rules were read), and the coverage says 0.
+	const cli = await azure.collect({ subscription: SUB, includeNetwork: "true" }, fakeContext(azureAnswers({ graph: false, failNsg: true })).ctx);
+	assert.ok(!cli.findings.some((f) => f.kind === "open-ingress"));
+	assert.equal(cli.checked.find((c) => /^NSG rules/.test(c.check)).scanned, 0);
+});
+
+test("Azure: a well-configured subscription has no findings", () => {
+	const id = (t, n) => `/subscriptions/${SUB}/resourceGroups/rg/providers/${t}/${n}`;
+	const resources = [
+		{ id: id("Microsoft.Network/networkSecurityGroups", "nsg"), type: "Microsoft.Network/networkSecurityGroups", name: "nsg", properties: { securityRules: [{ name: "https", properties: { direction: "Inbound", access: "Allow", protocol: "Tcp", sourceAddressPrefix: "Internet", destinationPortRange: "443", priority: 100 } }, { name: "ssh-office", properties: { direction: "Inbound", access: "Allow", protocol: "Tcp", sourceAddressPrefix: "203.0.113.0/24", destinationPortRange: "22", priority: 110 } }, { name: "deny-rdp", properties: { direction: "Inbound", access: "Deny", protocol: "*", sourceAddressPrefix: "*", destinationPortRange: "3389", priority: 120 } }] } },
+		{ id: id("Microsoft.Storage/storageAccounts", "st"), type: "Microsoft.Storage/storageAccounts", name: "st", properties: { allowBlobPublicAccess: false, supportsHttpsTrafficOnly: true, minimumTlsVersion: "TLS1_2" } },
+		{ id: id("Microsoft.KeyVault/vaults", "kv"), type: "Microsoft.KeyVault/vaults", name: "kv", properties: { tenantId: "t", enablePurgeProtection: true, publicNetworkAccess: "Disabled" } },
+		{ id: id("Microsoft.Web/sites", "app"), type: "Microsoft.Web/sites", name: "app", properties: { httpsOnly: true, siteConfig: { minTlsVersion: "1.2", ftpsState: "Disabled" } } },
+		{ id: id("Microsoft.Sql/servers", "sql"), type: "Microsoft.Sql/servers", name: "sql", properties: { publicNetworkAccess: "Disabled", minimalTlsVersion: "1.2" } },
+		{ id: id("Microsoft.ContainerService/managedClusters", "aks"), type: "Microsoft.ContainerService/managedClusters", name: "aks", properties: { kubernetesVersion: "1.30", apiServerAccessProfile: { enablePrivateCluster: true } } },
+	].map((r) => normalizeResource({ ...r, resourceGroup: "rg", location: "westeurope" }));
+	const built = buildAzureGraph({ subscription: { id: SUB, name: "Clean" }, resourceGroups: [{ name: "rg", location: "westeurope" }], resources, source: "resource-graph", includeNetwork: true });
+	assert.deepEqual(built.findings, []);
+	assert.doesNotMatch(built.facts, /Health findings/);
+	assert.equal(built.checked.find((c) => /^NSG rules/.test(c.check)).scanned, 3);
+	assert.ok(built.checked.length >= 6, built.checked.map((c) => c.check).join(", "));
+});
+
 test("Azure: not signed in and cancelled runs are clear errors", async () => {
 	const { ctx } = fakeContext(() => new Error("ERROR: Please run 'az login' to setup account."));
 	await assert.rejects(azure.collect({ subscription: SUB }, ctx), (e) => /not signed in/.test(e.message) && /az login/.test(e.hint));
@@ -301,6 +391,12 @@ function gcpAnswers({ asset = true, failGke = false } = {}) {
 			"pubsub topics list": "pubsub-topics-list",
 			"pubsub subscriptions list": "pubsub-subscriptions-list",
 		};
+		if (line.startsWith("asset search-all-iam-policies")) {
+			assert.ok(args.includes(`--scope=projects/${PROJECT}`));
+			return args.includes("--query=policy:allUsers") ? fixture("gcp", "asset-iam-policies.json") : [];
+		}
+		if (line.startsWith("storage buckets get-iam-policy gs://acme-shop-assets"))
+			return { bindings: [{ role: "roles/storage.objectViewer", members: ["allUsers"] }, { role: "roles/storage.legacyBucketOwner", members: ["projectOwner:acme-shop-prod"] }], etag: "CAE=" };
 		if (failGke && line.startsWith("container clusters list"))
 			return new Error("ERROR: (gcloud.container.clusters.list) ResponseError: code=403, message=Kubernetes Engine API has not been used in project 123456789012 before or it is disabled.");
 		for (const [prefix, file] of Object.entries(lists)) if (line.startsWith(prefix)) return fixture("gcp", `${file}.json`);
@@ -324,7 +420,7 @@ test("GCP via Cloud Asset Inventory: project › VPC › region › subnetwork, 
 	assert.ok(commands.some((c) => /asset search-all-resources --scope=projects\/acme-shop-prod --read-mask=\*/.test(c)));
 	assert.ok(!commands.some((c) => /compute instances list/.test(c)), "no per-service lists when the asset JSON is complete");
 	assert.deepEqual(r.warnings, []);
-	assert.match(r.summary, /28 resource\(s\), 2 VPC network\(s\), 4 subnetwork\(s\), \d+ connection\(s\) · Cloud Asset Inventory/);
+	assert.match(r.summary, /28 resource\(s\), 2 VPC network\(s\), 4 subnetwork\(s\), \d+ connection\(s\), 6 finding\(s\) \(3 high\) · Cloud Asset Inventory$/);
 	const g = r.graph;
 	assert.equal(parentLabel(g, "VPC network vpc-prod"), "Project: Acme Shop (prod) (acme-shop-prod)");
 	assert.equal(parentLabel(g, "subnet-web  10.10.0.0/24"), "us-central1");
@@ -395,6 +491,69 @@ test("GCP with the Cloud Asset API disabled: per-service lists, a clear warning,
 	assert.ok(hasEdge(g, "allow-web", "web-2"));
 	checkModelXml(renderGraph(g, { recipe: gcp.id }).xml);
 	noSecrets("GCP lists", r.facts, JSON.stringify(g));
+});
+
+test("GCP: health findings on firewall rules, instances, Cloud SQL, GKE and public buckets; the same ids from both collection paths", async () => {
+	const { ctx, commands } = fakeContext(gcpAnswers());
+	const r = await gcp.collect({ project: PROJECT }, ctx);
+	const g = r.graph;
+	assertFindingsContract(g, r.findings, r.checked);
+	assert.ok(commands.some((c) => c.startsWith("gcloud asset search-all-iam-policies --scope=projects/acme-shop-prod --query=policy:allUsers")));
+	assert.ok(commands.some((c) => c.includes("--query=policy:allAuthenticatedUsers")));
+	const has = (kind, label, severity) => {
+		const f = findingOn(g, r.findings, kind, label);
+		assert.ok(f, `${kind} on ${label}: ${r.findings.map((x) => x.id).join(", ")}`);
+		assert.equal(f.severity, severity, f.id);
+		return f;
+	};
+	const fw = has("open-ingress", "allow-ssh-anywhere", "high");
+	assert.ok(findingOn(g, r.findings, "open-ingress", "web-1"), "the instance the rule opens");
+	assert.ok(!findingOn(g, r.findings, "open-ingress", "web-2"), "web-2 has no ssh tag");
+	assert.match(fw.detail, /allows tcp:22 from 0\.0\.0\.0\/0 to instances tagged ssh \(1 instance\(s\), 1 with an external IP: web-1\)/);
+	assert.ok(!findingOn(g, r.findings, "open-ingress", "allow-web"), "80/443 from the internet is not a finding");
+	const bucket = has("public-bucket", "acme-shop-assets", "high");
+	assert.match(bucket.detail, /allUsers → roles\/storage\.objectViewer/);
+	assert.doesNotMatch(bucket.detail, /ops@acme\.example/, "only the public members are named");
+	assert.ok(!r.findings.some((f) => f.nodeIds.includes(byLabel(g, "orders-api").id)), "a public Cloud Run invoker is a public API, not a finding");
+	has("public-database", "orders-db", "high");
+	has("unencrypted-transit", "orders-db", "medium");
+	has("single-zone-database", "orders-db", "low");
+	has("public-control-plane", "shop-cluster", "medium");
+	assert.equal(r.findings.length, 6, r.findings.map((x) => x.id).join("\n"));
+	const check = (re) => r.checked.find((c) => re.test(c.check));
+	assert.equal(check(/^Firewall rules/).scanned, 3, "enabled ingress rules");
+	assert.equal(check(/^Cloud SQL/).scanned, 1);
+	assert.ok(check(/^IAM grants/));
+	noSecrets("GCP findings", JSON.stringify(r.findings), JSON.stringify(r.checked));
+	assert.match(r.facts, /## Health findings[\s\S]*\[high\] Firewall rule allow-ssh-anywhere opens SSH to the internet/);
+	const again = await gcp.collect({ project: PROJECT }, fakeContext(gcpAnswers()).ctx);
+	assert.deepEqual(again.findings, r.findings, "stable across runs");
+	// The per-service lists (no Cloud Asset): bucket policies one by one, same finding ids where the facts are the same.
+	const cli = fakeContext(gcpAnswers({ asset: false, failGke: true }));
+	const lr = await gcp.collect({ project: PROJECT }, cli.ctx);
+	assertFindingsContract(lr.graph, lr.findings, lr.checked);
+	assert.ok(cli.commands.some((c) => c.startsWith("gcloud storage buckets get-iam-policy gs://acme-shop-assets")));
+	for (const id of [fw.id, bucket.id, findingOn(g, r.findings, "public-database", "orders-db").id]) assert.ok(lr.findings.some((f) => f.id === id), `${id} from the lists too`);
+	assert.ok(!lr.findings.some((f) => f.kind === "public-control-plane"), "GKE could not be listed: nothing claimed about it");
+});
+
+test("GCP: a well-configured project has no findings", () => {
+	const { buildGcpGraph } = require("../src/main/mapper/recipes/cloud/gcp/model");
+	const net = "https://www.googleapis.com/compute/v1/projects/p-clean/global/networks/vpc";
+	const resources = [
+		{ name: "//compute.googleapis.com/projects/p-clean/global/networks/vpc", assetType: "compute.googleapis.com/Network", displayName: "vpc", location: "global", data: { autoCreateSubnetworks: false } },
+		{ name: "//compute.googleapis.com/projects/p-clean/global/firewalls/https", assetType: "compute.googleapis.com/Firewall", displayName: "https", location: "global", data: { network: net, direction: "INGRESS", sourceRanges: ["0.0.0.0/0"], allowed: [{ IPProtocol: "tcp", ports: ["443"] }] } },
+		{ name: "//compute.googleapis.com/projects/p-clean/global/firewalls/iap-ssh", assetType: "compute.googleapis.com/Firewall", displayName: "iap-ssh", location: "global", data: { network: net, direction: "INGRESS", sourceRanges: ["35.235.240.0/20"], allowed: [{ IPProtocol: "tcp", ports: ["22"] }] } },
+		{ name: "//compute.googleapis.com/projects/p-clean/global/firewalls/old", assetType: "compute.googleapis.com/Firewall", displayName: "old", location: "global", data: { network: net, direction: "INGRESS", disabled: true, sourceRanges: ["0.0.0.0/0"], allowed: [{ IPProtocol: "all" }] } },
+		{ name: "//cloudsql.googleapis.com/projects/p-clean/instances/db", assetType: "sqladmin.googleapis.com/Instance", displayName: "db", location: "us-central1", data: { databaseVersion: "POSTGRES_16", settings: { availabilityType: "REGIONAL", backupConfiguration: { enabled: true }, ipConfiguration: { ipv4Enabled: false, privateNetwork: "projects/p-clean/global/networks/vpc" } } } },
+		{ name: "//container.googleapis.com/projects/p-clean/locations/us-central1/clusters/k", assetType: "container.googleapis.com/Cluster", displayName: "k", location: "us-central1", data: { privateClusterConfig: { enablePrivateNodes: true }, masterAuthorizedNetworksConfig: { enabled: true } } },
+		{ name: "//storage.googleapis.com/clean-bucket", assetType: "storage.googleapis.com/Bucket", displayName: "clean-bucket", location: "us", data: { iamConfiguration: { publicAccessPrevention: "enforced" } } },
+	];
+	const built = buildGcpGraph({ project: { id: "p-clean" }, resources, source: "asset-inventory", publicBindings: [{ resource: "//run.googleapis.com/projects/p-clean/locations/us-central1/services/site", role: "roles/run.invoker", members: ["allUsers"] }], iamScope: "project" });
+	assert.deepEqual(built.findings, []);
+	assert.doesNotMatch(built.facts, /Health findings/);
+	assert.equal(built.checked.find((c) => /^Firewall rules/.test(c.check)).scanned, 2, "the disabled rule is not examined");
+	assert.ok(built.checked.some((c) => /^Cloud SQL/.test(c.check)) && built.checked.some((c) => /^GKE/.test(c.check)) && built.checked.some((c) => /^IAM grants/.test(c.check)));
 });
 
 test("GCP: invalid project ids and missing sign-in are clear errors", async () => {

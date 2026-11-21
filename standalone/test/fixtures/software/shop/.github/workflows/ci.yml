@@ -1,0 +1,27 @@
+name: CI
+on:
+  pull_request_target:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: acme-tools/setup-thing@v2
+      - name: Greet
+        run: echo "Testing ${{ github.event.pull_request.title }}"
+      - run: npm test
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - uses: aws-actions/configure-aws-credentials@0123456789abcdef0123456789abcdef01234567
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/deploy
+      - run: ./deploy.sh

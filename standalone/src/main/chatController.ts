@@ -18,7 +18,17 @@ type TranscriptItem =
 	| { kind: "tool"; id: string; summary: string; status: "running" | "ok" | "error" }
 	| { kind: "note"; text: string }
 	| { kind: "error"; text: string; action?: { title: string; command: string } }
-	| { kind: "permission"; id: string; title: string; detail?: string; options: acp.PermissionOption[]; outcome?: string; auto?: boolean };
+	| { kind: "permission"; id: string; title: string; detail?: string; options: acp.PermissionOption[]; outcome?: string; auto?: boolean }
+	| ReportItem;
+
+/** A card in the transcript (map findings, recent changes, refresh results) with per-row buttons. */
+export interface ReportItem {
+	kind: "report";
+	title: string;
+	subtitle?: string;
+	rows: { text: string; detail?: string; color?: string; actions?: { title: string; action: unknown }[] }[];
+	footer?: string;
+}
 
 interface ImageData {
 	mimeType: string;
@@ -37,6 +47,10 @@ export interface ChatHost {
 	openMapper?(): void;
 	mappedSelectionCount?(): number;
 	digDeeper?(question: string): void;
+	/** Maps on the page shown (count, active findings), and the Map menu's actions. */
+	pageMaps?(): { maps: number; findings: number };
+	mapAction?(action: string, text: string): void;
+	reportAction?(action: unknown): void;
 }
 
 const MAX_IMAGES = 4;
@@ -165,6 +179,12 @@ export class ChatController {
 				break;
 			case "digDeeper":
 				this.host.digDeeper?.(String(msg.text ?? ""));
+				break;
+			case "mapAction":
+				this.host.mapAction?.(String(msg.action ?? ""), String(msg.text ?? ""));
+				break;
+			case "reportAction":
+				this.host.reportAction?.(msg.action);
 				break;
 		}
 	}
@@ -551,6 +571,16 @@ export class ChatController {
 
 	// ----- diagram events -----
 
+	/** Adds a card to the transcript (map findings, changes...). */
+	public report(item: Omit<ReportItem, "kind">): void {
+		this.push({ kind: "report", ...item });
+	}
+
+	/** A plain note in the transcript. */
+	public note(text: string): void {
+		this.push({ kind: "note", text });
+	}
+
 	public setLassoActive(active: boolean): void {
 		this.lassoActive = active;
 		this.postState();
@@ -608,6 +638,8 @@ export class ChatController {
 				file: this.host.fileName() ?? "Untitled diagram",
 				selectionCount: client?.currentSelection.length ?? 0,
 				mappedSelection: this.host.mappedSelectionCount?.() ?? 0,
+				pageMaps: this.host.pageMaps?.().maps ?? 0,
+				pageFindings: this.host.pageMaps?.().findings ?? 0,
 				lassoActive: this.lassoActive,
 				busy: this.busy,
 				transcript: this.transcript,

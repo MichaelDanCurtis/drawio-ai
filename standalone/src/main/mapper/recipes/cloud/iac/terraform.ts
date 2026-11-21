@@ -6,7 +6,7 @@
  * braces can be matched and references found reliably.
  */
 import * as path from "path";
-import { IacGroup, IacResource, keepAttr, lineAt, terraformCloud } from "./model";
+import { IacGroup, IacResource, IngressRule, keepAttr, lineAt, markOpenIngress, rulesFromPortSpecs, terraformCloud } from "./model";
 
 /**
  * Same length as `src`; comments, string contents and heredoc bodies become
@@ -192,6 +192,127 @@ function topLevelAttrs(body: string, maskedBody: string): Record<string, string>
 	return attrs;
 }
 
+/** Nested blocks `name { … }` directly in a body (not deeper), with their text. */
+export function nestedBlocks(body: string, maskedBody: string, name: string): { text: string; masked: string }[] {
+	const out: { text: string; masked: string }[] = [];
+	const re = new RegExp(`(^|\\n)[ \\t]*${name}[ \\t]*\\{`, "g");
+	for (const m of maskedBody.matchAll(re)) {
+		let depth = 0;
+		for (let i = 0; i < m.index!; i++) {
+			const c = maskedBody[i];
+			if (c === "{" || c === "[" || c === "(") depth++;
+			else if (c === "}" || c === "]" || c === ")") depth--;
+		}
+		if (depth !== 0) continue;
+		const open = m.index! + m[0].length - 1;
+		const close = matchBracket(maskedBody, open);
+		if (close > open) out.push({ text: body.slice(open + 1, close), masked: maskedBody.slice(open + 1, close) });
+	}
+	return out;
+}
+
+const esc = (k: string) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/** `key = "value"` in a block's text. */
+const hclString = (text: string, key: string): string | undefined => new RegExp(`(?:^|\\n)[ \\t]*${esc(key)}[ \\t]*=[ \\t]*"([^"\\n]*)"`).exec(text)?.[1];
+/** `key = 22` or `key = "22"`. */
+const hclNumber = (text: string, key: string): number | undefined => {
+	const m = new RegExp(`(?:^|\\n)[ \\t]*${esc(key)}[ \\t]*=[ \\t]*"?(-?\\d+)"?[ \\t]*(?:\\n|$|#|//)`).exec(text);
+	return m ? Number(m[1]) : undefined;
+};
+const hclBool = (text: string, key: string): boolean | undefined => {
+	const m = new RegExp(`(?:^|\\n)[ \\t]*${esc(key)}[ \\t]*=[ \\t]*(true|false)\\b`).exec(text);
+	return m ? m[1] === "true" : undefined;
+};
+/** The quoted strings of `key = ["a", "b"]` (also over several lines). */
+const hclList = (text: string, key: string): string[] => {
+	const m = new RegExp(`(?:^|\\n)[ \\t]*${esc(key)}[ \\t]*=[ \\t]*\\[([^\\]]*)\\]`).exec(text);
+	return m ? [...m[1].matchAll(/"([^"\n]*)"/g)].map((x) => x[1]) : [];
+};
+const PUBLIC_MEMBER = /^(allUsers|allAuthenticatedUsers)$/;
+
+/** Settings read from nested blocks that matter for health checks (open rules, public members, endpoints). */
+export function terraformDerived(type: string, body: string, maskedBody: string, attrs: Record<string, string>): void {
+	const rules: IngressRule[] = [];
+	const awsRule = (t: string): IngressRule => {
+		const protocol = hclString(t, "protocol") ?? hclString(t, "ip_protocol");
+		const from = hclNumber(t, "from_port");
+		const to = hclNumber(t, "to_port");
+		const sources = [...hclList(t, "cidr_blocks"), ...hclList(t, "ipv6_cidr_blocks"), hclString(t, "cidr_ipv4"), hclString(t, "cidr_ipv6")].filter((x): x is string => !!x);
+		const all = /^(-1|all)$/i.test(protocol ?? "");
+		return { protocol, from, to, literal: all || (from !== undefined && to !== undefined), sources };
+	};
+	const azureRule = (t: string): IngressRule[] => {
+		if (!/^inbound$/i.test(hclString(t, "direction") ?? "") || !/^allow$/i.test(hclString(t, "access") ?? "")) return [];
+		const sources = [hclString(t, "source_address_prefix"), ...hclList(t, "source_address_prefixes")].filter((x): x is string => !!x);
+		const ports = [hclString(t, "destination_port_range"), ...hclList(t, "destination_port_ranges")].filter((x): x is string => !!x);
+		const literal = /destination_port_ranges?\s*=\s*("|\[\s*")/.test(t) || !/destination_port_range/.test(t);
+		return literal ? rulesFromPortSpecs(hclString(t, "protocol"), ports, sources) : [{ protocol: hclString(t, "protocol"), literal: false, sources }];
+	};
+	switch (type) {
+		case "aws_security_group":
+			for (const b of nestedBlocks(body, maskedBody, "ingress")) rules.push(awsRule(b.text));
+			break;
+		case "aws_security_group_rule":
+			if (hclString(body, "type") === "ingress") rules.push(awsRule(body));
+			break;
+		case "aws_vpc_security_group_ingress_rule":
+			rules.push(awsRule(body));
+			break;
+		case "google_compute_firewall":
+			if (!/^egress$/i.test(hclString(body, "direction") ?? "") && hclBool(body, "disabled") !== true) {
+				const sources = hclList(body, "source_ranges");
+				for (const b of nestedBlocks(body, maskedBody, "allow")) {
+					const ports = hclList(b.text, "ports");
+					rules.push(...(/ports\s*=/.test(b.masked) && !ports.length ? [{ protocol: hclString(b.text, "protocol"), literal: false, sources }] : rulesFromPortSpecs(hclString(b.text, "protocol"), ports, sources)));
+				}
+			}
+			break;
+		case "azurerm_network_security_group":
+			for (const b of nestedBlocks(body, maskedBody, "security_rule")) rules.push(...azureRule(b.text));
+			break;
+		case "azurerm_network_security_rule":
+			rules.push(...azureRule(body));
+			break;
+		case "google_storage_bucket_iam_member":
+		case "google_storage_bucket_iam_binding": {
+			const members = [hclString(body, "member"), ...hclList(body, "members")].filter((m): m is string => !!m && PUBLIC_MEMBER.test(m));
+			if (members.length) {
+				attrs.publicMembers = [...new Set(members)].join(", ");
+				const role = hclString(body, "role");
+				if (role) attrs.role = role;
+			}
+			break;
+		}
+		case "google_sql_database_instance": {
+			const nets = [...body.matchAll(/authorized_networks\s*\{([^}]*)\}/g)].flatMap((m) => [hclString(m[1], "value")].filter((v): v is string => !!v));
+			const world = nets.filter((v) => /^0\.0\.0\.0\/0$/.test(v));
+			if (world.length) attrs.authorizedNetworks = world.join(", ");
+			const ipv4 = hclBool(body, "ipv4_enabled");
+			if (ipv4 !== undefined) attrs.ipv4_enabled = String(ipv4);
+			break;
+		}
+		case "google_container_cluster":
+			attrs.privateEndpoint = String(/enable_private_endpoint\s*=\s*true\b/.test(maskedBody));
+			attrs.masterAuthorizedNetworks = String(/(^|\n)\s*master_authorized_networks_config\s*\{/.test(maskedBody));
+			break;
+		case "azurerm_kubernetes_cluster":
+			attrs.privateCluster = String(/private_cluster_enabled\s*=\s*true\b/.test(maskedBody));
+			attrs.authorizedIpRanges = String(/authorized_ip_ranges\s*=\s*\[\s*"/.test(body));
+			break;
+		case "aws_eks_cluster": {
+			const vpc = nestedBlocks(body, maskedBody, "vpc_config")[0];
+			if (vpc) {
+				const pub = hclBool(vpc.text, "endpoint_public_access");
+				attrs.endpointPublicAccess = String(pub !== false);
+				const cidrs = hclList(vpc.text, "public_access_cidrs");
+				attrs.publicAccessCidrs = /public_access_cidrs\s*=/.test(vpc.masked) ? (cidrs.length ? cidrs.join(", ") : "(expression)") : "0.0.0.0/0 (default)";
+			}
+			break;
+		}
+	}
+	markOpenIngress(attrs, rules);
+}
+
 export interface TfFile {
 	rel: string;
 	text: string;
@@ -217,7 +338,7 @@ export function parseTerraform(files: TfFile[]): { groups: IacGroup[]; resources
 				const body = f.text.slice(b.bodyStart, b.bodyEnd);
 				const mbody = masked.slice(b.bodyStart, b.bodyEnd);
 				const attrs = topLevelAttrs(body, mbody);
-				if (/0\.0\.0\.0\/0|::\/0/.test(body) && /security|firewall|ingress|rule|sg/i.test(b.type + body)) attrs.openToWorld = "true";
+				if (b.kind === "resource") terraformDerived(b.type, body, mbody, attrs);
 				const address = b.kind === "module" ? `module.${b.name}` : b.kind === "data" ? `data.${b.type}.${b.name}` : `${b.type}.${b.name}`;
 				const r: IacResource = {
 					id: `${group}::${address}`,

@@ -7,8 +7,8 @@
  */
 import * as path from "path";
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug } from "../common";
-import type { MapEdge, MapGraph, MapNode, Recipe } from "../../types";
-import { ML_STYLES, stripPyComments } from "./shared";
+import type { CheckCoverage, MapEdge, MapFinding, MapGraph, MapNode, Recipe } from "../../types";
+import { floatingImage, keepOnMap, ML_STYLES, stripPyComments } from "./shared";
 
 export type StageId = "data" | "features" | "training" | "evaluation" | "registry" | "deployment" | "monitoring" | "tracking" | "orchestration";
 
@@ -227,6 +227,8 @@ export interface LifecycleScan {
 	gaps: StageId[];
 	overflow: Map<StageId, string[]>;
 	fileCount: number;
+	/** Container images of the packaging / serving tools: where, and whether they float. */
+	images: { component: string; file: string; line: number; image: string; floating?: "latest" | "none" }[];
 }
 
 /** Code cells of a notebook as one Python text. */
@@ -430,7 +432,77 @@ export function scanLifecycle(root: string, progress: (t: string) => void = () =
 	const components = [...kept.filter((c) => codeOf.has(c.files[0])), ...tools.values()];
 	const present = new Set(components.map((c) => c.stage));
 	const gaps = STAGES.filter((s) => s.main && !present.has(s.id)).map((s) => s.id);
-	return { root, components, edges, gaps, overflow, fileCount: files.length };
+	// Images the packaging and serving tools build from or run.
+	const images: LifecycleScan["images"] = [];
+	const byRel = new Map(files.map((f) => [f.rel, f.text]));
+	for (const t of tools.values()) {
+		if (t.stage !== "deployment") continue;
+		for (const rel of t.files) {
+			const text = byRel.get(rel) ?? "";
+			const isDockerfile = /(^|\/)(Dockerfile|Containerfile)[^/]*$/.test(rel);
+			const buildStages = new Set<string>();
+			text.split("\n").forEach((line, i) => {
+				let image: string | undefined;
+				if (isDockerfile) {
+					const from = /^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?/i.exec(line);
+					if (!from) return;
+					const base = from[1];
+					if (from[2]) buildStages.add(from[2].toLowerCase());
+					// FROM an earlier build stage, or scratch, is not an image to pin.
+					if (!/^scratch$/i.test(base) && !(buildStages.has(base.toLowerCase()) && base.toLowerCase() !== from[2]?.toLowerCase())) image = base;
+				} else if (/\.ya?ml$/i.test(rel)) image = /^\s*-?\s*image:\s*["']?([^\s"'#]+)/.exec(line)?.[1];
+				if (!image || /\$\{?|\{\{/.test(image)) return;
+				images.push({ component: t.id, file: rel, line: i + 1, image, floating: floatingImage(image) });
+			});
+		}
+	}
+	return { root, components, edges, gaps, overflow, fileCount: files.length, images };
+}
+
+const GAP_FIX: Record<StageId, string> = {
+	data: "Add (or point the map at) the code that loads and validates the training data, so its source and schema are known.",
+	features: "If features are engineered, keep that code in its own module or a feature store so training and serving compute them the same way.",
+	training: "Add the training code (or the managed training job definition) to the repository, or note where training runs.",
+	evaluation: "Add an evaluation step that computes held-out metrics and gates registration / deployment on them (e.g. a threshold check in the pipeline or CI).",
+	registry: "Register trained models with a version (MLflow Model Registry, SageMaker / Vertex / Azure ML registry) instead of copying files, so deployments are traceable.",
+	deployment: "Add the packaging / serving definition (Dockerfile, serving app, endpoint config) or note where the model is served.",
+	monitoring: "Add production monitoring: log predictions and inputs, and track data drift and model quality (e.g. Evidently, WhyLabs, Prometheus metrics) with alerts that trigger retraining.",
+	tracking: "",
+	orchestration: "",
+};
+
+/** Lifecycle gaps and floating container images (exported for tests). */
+export function lifecycleFindings(scan: LifecycleScan, graph: MapGraph): { findings: MapFinding[]; checked: CheckCoverage[] } {
+	const findings: MapFinding[] = [];
+	for (const gap of scan.gaps) {
+		const stage = STAGE.get(gap)!;
+		findings.push({
+			id: `lifecycle-gap:${gap}`,
+			kind: "lifecycle-gap",
+			severity: gap === "evaluation" || gap === "monitoring" ? "medium" : "low",
+			title: `No evidence of ${stage.title.toLowerCase()}`,
+			detail: `None of the ${scan.fileCount} code and config files read shows ${stage.title.toLowerCase()} (code by name or calls, or a known tool). It may live outside this repository.`,
+			nodeIds: [`gap:${gap}`],
+			fix: GAP_FIX[gap],
+		});
+	}
+	for (const i of scan.images) {
+		if (!i.floating) continue;
+		findings.push({
+			id: `floating-image:${i.file}:${i.image}`,
+			kind: "floating-image",
+			severity: "low",
+			title: `${i.file.split("/").pop()} uses ${i.floating === "latest" ? "a :latest image" : "an image without a tag"} (${i.image})`,
+			detail: `${i.file}:${i.line}: ${i.image}${i.floating === "none" ? " has no tag, so :latest is pulled" : ""}; builds and deployments are not reproducible when it changes.`,
+			nodeIds: [i.component],
+			fix: `Pin ${i.image.replace(/:latest$/, "")} to a version tag or digest in ${i.file}.`,
+		});
+	}
+	const checked: CheckCoverage[] = [
+		{ check: "ML lifecycle stages without evidence", scanned: STAGES.filter((s) => s.main).length, note: `stages, from ${scan.fileCount} file(s)` },
+		{ check: "Container images on :latest or without a tag", scanned: scan.images.length, note: "images in Dockerfiles and serving manifests" },
+	];
+	return { findings: keepOnMap(findings, graph), checked };
 }
 
 export function lifecycleToGraph(scan: LifecycleScan): MapGraph {
@@ -463,11 +535,12 @@ export function lifecycleToGraph(scan: LifecycleScan): MapGraph {
 						: `rounded=1;arcSize=40;whiteSpace=wrap;html=1;fillColor=${s.fill};strokeColor=${s.stroke};fontStyle=1;fontSize=11;`,
 				width: Math.max(150, Math.min(240, Math.max(c.label.length, (c.sub ?? "").length) * 7 + 24)),
 				height: c.sub ? 50 : 40,
+				files: c.files.slice(0, 30),
 				data: { stage: s.id, ...(c.kind === "code" ? { file: c.files[0] } : { tool: c.label, files: c.files.slice(0, 30).join(", "), ...(c.runs?.length ? { runs: c.runs.join(", ") } : {}) }), ...(c.evidence.length ? { evidence: c.evidence.join("; ") } : {}), ...(c.sub && c.kind === "code" ? { frameworks: c.sub } : {}) },
 			});
 		}
 		const more = scan.overflow.get(s.id);
-		if (more?.length) nodes.push({ id: `more:${s.id}`, label: `+ ${more.length} more file(s): ${more.slice(0, 6).join(", ")}${more.length > 6 ? ", …" : ""}`, kind: "ml:lifecycle:more", shape: "note", parent: sid, width: 220, data: { stage: s.id, files: more.join(", ") } });
+		if (more?.length) nodes.push({ id: `more:${s.id}`, label: `+ ${more.length} more file(s): ${more.slice(0, 6).join(", ")}${more.length > 6 ? ", …" : ""}`, kind: "ml:lifecycle:more", shape: "note", parent: sid, width: 220, data: { stage: s.id, files: more.join(", ") }, files: more.slice(0, 60) });
 		if (s.main && mine.length === 0) {
 			nodes.push({ id: `gap:${s.id}`, label: `No evidence found\n(gap — or not in this repo)`, kind: "ml:lifecycle:gap", parent: sid, style: ML_STYLES.gap, width: 170, height: 48, data: { stage: s.id, gap: "true" } });
 		}
@@ -517,8 +590,11 @@ export const lifecycleRecipe: Recipe = {
 		if (scan.components.length === 0) return { summary: `No ML code or tooling found in ${root}.`, facts: lifecycleFacts(scan) };
 		const graph = lifecycleToGraph(scan);
 		const stages = STAGES.filter((s) => s.main && !scan.gaps.includes(s.id)).length;
+		const { findings, checked } = lifecycleFindings(scan, graph);
 		return {
 			graph,
+			findings,
+			checked,
 			summary: `${stages}/7 lifecycle stages with evidence, ${scan.components.length} component(s), ${scan.edges.length} link(s)${scan.gaps.length ? `; gaps: ${scan.gaps.join(", ")}` : ""}`,
 			facts: lifecycleFacts(scan),
 		};
