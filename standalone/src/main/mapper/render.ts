@@ -48,6 +48,10 @@ function nodeStyle(n: MapNode, isContainer: boolean): string {
 export interface RenderOptions {
 	/** Recipe that drew the map; stored on every shape. */
 	recipe: string;
+	/** The map's id (its record in .drawai/maps); stored on every shape. */
+	mapId?: string;
+	/** Plain-English descriptions by node id, shown as the shapes' tooltips. */
+	descriptions?: Record<string, string>;
 	/** Top-left of the map on the page. */
 	origin?: { x: number; y: number };
 	layout?: Layout;
@@ -80,6 +84,9 @@ export function renderGraph(graph: MapGraph, options: RenderOptions): { xml: str
 		const y = parent === "1" ? box.y + origin.y : box.y;
 		const isContainer = (!!n.container || hasChildren.has(n.id)) && n.shape !== "table";
 		const attrs: Record<string, string> = { mapper: options.recipe, mapperKind: n.kind, mapperId: n.id };
+		if (options.mapId) attrs.mapId = options.mapId;
+		const description = options.descriptions?.[n.id];
+		if (description) attrs.tooltip = description;
 		for (const [k, v] of Object.entries(n.data ?? {})) if (v !== undefined && v !== null && v !== "") attrs[dataAttributeName(k)] = String(v);
 		// Labels are HTML (html=1): keep line breaks.
 		const label = escapeHtml(n.label).replace(/\n/g, "<br>");
@@ -124,7 +131,7 @@ export function renderGraph(graph: MapGraph, options: RenderOptions): { xml: str
 		const text = graph.legend.join("\n");
 		const size = cellSize({ id: "legend", label: text, kind: "legend", shape: "note" });
 		out.push(
-			`<object id="mapLegend" label="${escapeXml(escapeHtml(text).replace(/\n/g, "<br>"))}" mapper="${escapeXml(options.recipe)}" mapperKind="legend"><mxCell style="${escapeXml(STYLES.note)}" vertex="1" parent="1"><mxGeometry x="${origin.x + layout.width + 60}" y="${origin.y}" width="${size.w}" height="${size.h}" as="geometry"/></mxCell></object>`
+			`<object id="mapLegend" label="${escapeXml(escapeHtml(text).replace(/\n/g, "<br>"))}" mapper="${escapeXml(options.recipe)}" mapperKind="legend"${options.mapId ? ` mapId="${escapeXml(options.mapId)}"` : ""}><mxCell style="${escapeXml(STYLES.note)}" vertex="1" parent="1"><mxGeometry x="${origin.x + layout.width + 60}" y="${origin.y}" width="${size.w}" height="${size.h}" as="geometry"/></mxCell></object>`
 		);
 		cells++;
 	}

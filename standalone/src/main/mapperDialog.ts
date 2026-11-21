@@ -3,7 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { agentEnv } from "./agents";
 import { createContext } from "./mapper/context";
-import { drawMap } from "./mapper/draw";
+import { describePrompt } from "./mapper/prompts";
+import type { MapperService } from "./mapper/service";
 import { catalog, recipeById } from "./mapper/registry";
 import { agentRequest } from "./mapper/recipes/common";
 import { CollectResult, MapInput, MapperError, Recipe } from "./mapper/types";
@@ -17,6 +18,7 @@ export interface MapperHost {
 	/** The diagram's folder: default for folder and file fields. */
 	cwd(): string;
 	ready(): boolean;
+	service: MapperService;
 	/** Sends a request to the agent in the chat; `shown` is what the transcript shows. */
 	askAgent(text: string, shown: string): void;
 	showChat(): void;
@@ -144,7 +146,7 @@ export class MapperDialog {
 				break;
 			}
 			case "run":
-				await this.run(String(msg.recipeId), msg.input ?? {}, !!msg.askAgent);
+				await this.run(String(msg.recipeId), msg.input ?? {}, !!msg.askAgent, !!msg.describe);
 				break;
 			case "cancel":
 				this.running?.abort();
@@ -156,7 +158,7 @@ export class MapperDialog {
 	}
 
 	/** Collect → draw → (optionally) hand to the agent. */
-	public async run(recipeId: string, input: MapInput, askAgent: boolean): Promise<{ result?: CollectResult; error?: string }> {
+	public async run(recipeId: string, input: MapInput, askAgent: boolean, describe = false): Promise<{ result?: CollectResult; error?: string; mapId?: string }> {
 		const recipe = recipeById(recipeId);
 		if (!recipe) return { error: `Unknown map ${recipeId}` };
 		if (this.running) {
@@ -179,22 +181,20 @@ export class MapperDialog {
 		const progress = (text: string) => this.post({ type: "progress", text });
 		try {
 			let result: CollectResult | undefined;
-			if (recipe.collect) {
-				progress("Collecting (read-only)…");
-				result = await recipe.collect(input, this.context(ac.signal, progress));
-				if (ac.signal.aborted) throw new MapperError("Cancelled");
-			}
 			let drawn = "";
-			// Dig deeper needs to know where relative paths in the shapes' data point.
-			const root = ["folder", "file"].map((k) => String(input[k] ?? "").trim()).find(Boolean);
-			if (root && result?.graph) for (const n of result.graph.nodes) n.data = { mapRoot: root, ...(n.data ?? {}) };
-			if (result?.graph && result.graph.nodes.length > 0) {
-				progress(`Drawing ${result.graph.nodes.length} shapes…`);
-				const d = await drawMap(this.host.client, result.graph, recipe.id);
-				drawn = `Drew ${d.cells} cells on ${d.newPage ? "a new page" : "this page"} "${d.page}" (pending: keep or revert it).`;
+			let record: import("./mapper/store").MapRecord | undefined;
+			if (recipe.collect) {
+				// Collects read-only, draws the map and its health badges, and stores its record.
+				const out = await this.host.service.run(recipe.id, input, { signal: ac.signal, progress });
+				result = out.result;
+				record = out.record;
+				if (out.drawn) drawn = `Drew ${out.drawn.cells} cells on ${out.drawn.newPage ? "a new page" : "this page"} "${out.drawn.page}" (pending: keep or revert it).${out.badges ? ` ${out.record.findings.length} finding(s) marked on the Health layer.` : ""}`;
 			}
 			const wantsAgent = recipe.mode === "agent" || (askAgent && !!recipe.agentPrompt);
-			if (wantsAgent && recipe.agentPrompt) {
+			if (describe && record && record.graph.nodes.length) {
+				this.host.showChat();
+				this.host.askAgent(describePrompt(record, "everyone"), `🗺 Describe "${record.title}" in plain English`);
+			} else if (wantsAgent && recipe.agentPrompt) {
 				const task = recipe.agentPrompt(input, result);
 				const text = agentRequest(
 					`${task}${drawn ? `\n\nThe Mapper has just drawn the map on the page "${result?.graph?.title ?? ""}" from read-only data (${result?.summary ?? ""}); build on it.` : ""}`,
@@ -203,9 +203,9 @@ export class MapperDialog {
 				this.host.showChat();
 				this.host.askAgent(text, `🗺 ${recipe.title}${result?.summary ? ` — ${result.summary}` : ""}`);
 			}
-			const summary = [result?.summary, drawn, wantsAgent ? "Handed to the agent in the chat." : ""].filter(Boolean).join(" ");
+			const summary = [result?.summary, drawn, wantsAgent || describe ? "Handed to the agent in the chat." : ""].filter(Boolean).join(" ");
 			this.post({ type: "done", summary: summary || "Done.", warnings: result?.warnings ?? [], close: !result?.warnings?.length });
-			return { result };
+			return { result, mapId: record?.id };
 		} catch (e: any) {
 			const message = errorText(e);
 			this.post({ type: "failed", message, hint: e instanceof MapperError ? e.hint : undefined });

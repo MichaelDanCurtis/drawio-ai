@@ -12,6 +12,9 @@ import { diagramContent } from "./xmlContent";
 import { digDeeperRequest } from "./mapper/recipes/common";
 import { recipeById } from "./mapper/registry";
 import { MapperDialog } from "./mapperDialog";
+import { agentEnv } from "./agents";
+import { createContext } from "./mapper/context";
+import { MapperService } from "./mapper/service";
 import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { settings, updateSettings } from "./settings";
@@ -68,6 +71,8 @@ export class DiagramWindow {
 	private enteredFullScreen = false;
 	private closing = false;
 	public readonly mapper: MapperDialog;
+	/** The Mapper's maps of this diagram: runs, lookups, findings, descriptions, tours. */
+	public readonly maps: MapperService;
 	/** Mapped shapes in the selection (for Dig Deeper), refreshed when the selection changes. */
 	private mapped: { recipe: string; label: string; data: Record<string, string> }[] = [];
 	private mappedTimer: NodeJS.Timeout | undefined;
@@ -170,7 +175,13 @@ export class DiagramWindow {
 				return r.response === 0;
 			}
 		);
-		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName());
+		this.maps = new MapperService({
+			client: this.client,
+			cwd: () => this.cwd(),
+			diagram: () => this.file,
+			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress }),
+		});
+		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName(), () => this.maps);
 		this.chat = new ChatController(
 			{
 				client: () => this.client,
@@ -187,6 +198,7 @@ export class DiagramWindow {
 			{
 				win: this.win,
 				client: this.client,
+				service: this.maps,
 				cwd: () => this.cwd(),
 				ready: () => this.loaded,
 				askAgent: (text, shown) => void this.chat.send(text, { cellIds: [] }, [], shown),
