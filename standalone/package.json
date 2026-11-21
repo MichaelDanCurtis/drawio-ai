@@ -1,0 +1,30 @@
+{
+	"name": "draw-ai-desktop",
+	"productName": "Draw.AI",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Standalone Draw.AI desktop app: the draw.io editor with a chat panel that drives your installed coding agents (Gemini CLI, Claude Code, Codex) over the Agent Client Protocol.",
+	"license": "GPL-3.0",
+	"main": "out/main.js",
+	"scripts": {
+		"prepare-assets": "node scripts/prepare-assets.mjs",
+		"build": "node build.mjs",
+		"start": "node scripts/prepare-assets.mjs && node build.mjs && electron .",
+		"typecheck": "tsc -p tsconfig.json --noEmit",
+		"e2e": "node build.mjs && node scripts/e2e.mjs"
+	},
+	"dependencies": {
+		"@agentclientprotocol/sdk": "^2.8.0",
+		"@hediet/std": "^0.6.0",
+		"js-sha256": "^1.1.0"
+	},
+	"devDependencies": {
+		"@types/node": "^26.6.6",
+		"@types/vscode": "1.105.0",
+		"electron": "^45.4.1",
+		"esbuild": "^0.28.2",
+		"mithril": "^2.0.4",
+		"mobx": "^5",
+		"typescript": "^5.7.3"
+	}
+}

@@ -1,0 +1,388 @@
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
+import * as fs from "fs";
+import * as path from "path";
+import { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
+import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
+import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
+import { ChatController } from "./chatController";
+import { exportDiagram, EXPORT_FORMATS, ExportFormat } from "./exporter";
+import { WindowMcpServer } from "./mcpServer";
+import { paths } from "./paths";
+import { settings, updateSettings } from "./settings";
+import type { StaticServer } from "./staticServer";
+
+const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
+let nextId = 1;
+
+// draw.io's preferences (recent colours, panels, ...) are kept across windows and runs.
+const localStorageFile = () => path.join(app.getPath("userData"), "drawio-local-storage.json");
+let localStorage: Record<string, string> | undefined;
+let saveTimer: NodeJS.Timeout | undefined;
+function drawioLocalStorage(): Record<string, string> {
+	if (!localStorage) {
+		try {
+			localStorage = JSON.parse(fs.readFileSync(localStorageFile(), "utf8"));
+		} catch {
+			localStorage = {};
+		}
+	}
+	return localStorage!;
+}
+
+/** One diagram: a window with the draw.io editor on the left and the agent chat on the right. */
+export class DiagramWindow {
+	public static readonly all = new Set<DiagramWindow>();
+	private static byEditor = new Map<number, DiagramWindow>();
+	private static byChat = new Map<number, DiagramWindow>();
+
+	public readonly id = `w${nextId++}`;
+	public readonly win: BrowserWindow;
+	public readonly editorView: WebContentsView;
+	public readonly chatView: WebContentsView;
+	public readonly client: CustomizedDrawioClient;
+	public readonly chat: ChatController;
+	public readonly toolbox: DiagramToolbox;
+	private readonly mcp: WindowMcpServer;
+	private messageHandler: ((msg: unknown) => void) | undefined;
+	public file: string | undefined;
+	private dirty = false;
+	private loaded = false;
+	private loadedWaiters: (() => void)[] = [];
+	private chatVisible = true;
+	private closing = false;
+
+	public static async open(server: StaticServer, file?: string): Promise<DiagramWindow> {
+		if (file) {
+			const existing = [...DiagramWindow.all].find((w) => w.file === file);
+			if (existing) {
+				existing.win.focus();
+				return existing;
+			}
+		}
+		const w = new DiagramWindow(server, file);
+		await w.start(server);
+		return w;
+	}
+
+	public static focused(): DiagramWindow | undefined {
+		const win = BrowserWindow.getFocusedWindow();
+		return [...DiagramWindow.all].find((w) => w.win === win) ?? [...DiagramWindow.all].pop();
+	}
+
+	public static installIpc(): void {
+		ipcMain.on("drawio:toHost", (e, msg) => DiagramWindow.byEditor.get(e.sender.id)?.messageHandler?.(msg));
+		ipcMain.on("chat:toHost", (e, msg) => void DiagramWindow.byChat.get(e.sender.id)?.chat.onMessage(msg));
+	}
+
+	private constructor(server: StaticServer, file: string | undefined) {
+		this.file = file;
+		this.win = new BrowserWindow({
+			width: 1500,
+			height: 950,
+			minWidth: 800,
+			minHeight: 500,
+			title: "Draw.AI",
+			backgroundColor: nativeTheme.shouldUseDarkColors ? "#1e1e22" : "#ffffff",
+			show: false,
+		});
+		const prefs = (preload: string) => ({
+			preload: path.join(paths.out, preload),
+			contextIsolation: true,
+			sandbox: true,
+			nodeIntegration: false,
+		});
+		this.editorView = new WebContentsView({ webPreferences: prefs("preload-editor.js") });
+		this.chatView = new WebContentsView({ webPreferences: prefs("preload-chat.js") });
+		this.win.contentView.addChildView(this.editorView);
+		this.win.contentView.addChildView(this.chatView);
+		DiagramWindow.byEditor.set(this.editorView.webContents.id, this);
+		DiagramWindow.byChat.set(this.chatView.webContents.id, this);
+		DiagramWindow.all.add(this);
+
+		for (const wc of [this.editorView.webContents, this.chatView.webContents]) {
+			wc.setWindowOpenHandler(({ url }) => {
+				if (/^https?:/.test(url)) void shell.openExternal(url);
+				return { action: "deny" };
+			});
+			wc.on("will-navigate", (e, url) => {
+				if (!url.startsWith(server.base)) e.preventDefault();
+			});
+		}
+
+		this.client = new CustomizedDrawioClient(
+			{
+				sendMessage: (msg) => {
+					if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.send("drawio:toWebview", msg);
+				},
+				registerMessageHandler: (handler) => {
+					this.messageHandler = handler;
+					return { dispose: () => (this.messageHandler = undefined) } as any;
+				},
+			},
+			async () => drawioConfig(),
+			() => this.editorView.webContents.reload(),
+			() => "light"
+		);
+
+		this.toolbox = new DiagramToolbox(
+			() => this.editorHandle(),
+			undefined,
+			undefined,
+			async (_editor, request) => this.exportForTool(request),
+			undefined,
+			undefined,
+			undefined,
+			async (message, action) => {
+				const r = await dialog.showMessageBox(this.win, { type: "warning", message, buttons: [action, "Cancel"], defaultId: 1, cancelId: 1 });
+				return r.response === 0;
+			}
+		);
+		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName());
+		this.chat = new ChatController(
+			{
+				client: () => this.client,
+				fileName: () => this.fileName(),
+				cwd: () => (this.file ? path.dirname(this.file) : app.getPath("documents")),
+				ready: () => this.loaded,
+			},
+			this.mcp
+		);
+		this.chat.attach(this.chatView.webContents);
+		this.wireEditorEvents();
+
+		this.win.on("resize", () => this.layout());
+		this.win.on("close", (e) => this.onClose(e));
+		this.win.on("closed", () => this.dispose());
+		this.win.on("focus", () => this.chat.postState());
+		this.layout();
+		this.updateTitle();
+	}
+
+	private async start(server: StaticServer): Promise<void> {
+		await this.mcp.start();
+		const dark = nativeTheme.shouldUseDarkColors;
+		this.win.show();
+		void this.editorView.webContents.loadURL(server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() }));
+		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
+		void dark;
+	}
+
+	/** What DiagramToolbox calls a DrawioEditor: the client and the document's URI. */
+	private editorHandle(): any {
+		if (!this.loaded) return undefined;
+		const p = this.file ?? path.join(app.getPath("documents"), "Untitled.drawio");
+		return { drawioClient: this.client, uri: { path: p, fsPath: p, scheme: "file", toString: () => `file://${encodeURI(p)}` } };
+	}
+
+	public fileName(): string | undefined {
+		return this.file ? path.basename(this.file) : undefined;
+	}
+
+	public whenLoaded(): Promise<void> {
+		return this.loaded ? Promise.resolve() : new Promise((r) => this.loadedWaiters.push(r));
+	}
+
+	private wireEditorEvents(): void {
+		const c = this.client;
+		c.onInit.sub(async () => {
+			this.loaded = false;
+			try {
+				if (this.file && /\.png$/i.test(this.file)) {
+					await c.loadPngWithEmbeddedXml(fs.readFileSync(this.file));
+				} else {
+					await c.loadXmlLike(this.file ? fs.readFileSync(this.file, "utf8") : "");
+				}
+			} catch (e: any) {
+				dialog.showErrorBox("Could not open the diagram", String(e?.message ?? e));
+			}
+			await c.whenLoaded(30_000);
+			this.loaded = true;
+			this.setDirty(false);
+			this.loadedWaiters.splice(0).forEach((r) => r());
+			this.chat.postState();
+		});
+		c.onChange.sub(() => this.setDirty(true));
+		c.onSave.sub(() => void this.save());
+		c.onSelectedCellsChanged.sub(() => this.chat.postState());
+		c.onAiReview.sub(() => this.chat.postState());
+		let lastLasso: { cellIds: string[] } | undefined;
+		c.onAiLasso.sub((evt) => {
+			this.chat.setLassoActive(evt.lassoModeEnabled);
+			if (!evt.lassoModeEnabled && (evt.cellIds.length > 0 || evt.region)) lastLasso = { cellIds: evt.cellIds };
+		});
+		c.onAiAsk.sub((evt) => {
+			const viaLasso = !evt.source && !!lastLasso && lastLasso.cellIds.length === evt.cellIds.length && lastLasso.cellIds.every((id) => evt.cellIds.includes(id));
+			lastLasso = undefined;
+			if (!this.chatVisible) this.toggleChat();
+			void this.chat.send(
+				evt.prompt,
+				{ cellIds: evt.cellIds, region: evt.region, viaLasso, source: evt.source === "prompt" ? undefined : evt.source, markCount: evt.markCount },
+				evt.images ?? []
+			);
+		});
+		c.onInvokeCommand.sub(({ command }) => {
+			if (command === "save") void this.save();
+			else if (command === "export") void this.exportInteractive("pdf");
+			else if (command === "exportVisio") void this.exportInteractive("vsdx");
+		});
+		c.onUnknownMessage.sub(({ message }) => {
+			const m = message as any;
+			if (m?.event === "updateLocalStorage" && m.newLocalStorage && typeof m.newLocalStorage === "object") {
+				localStorage = m.newLocalStorage;
+				clearTimeout(saveTimer);
+				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "openLink" && typeof m.url === "string" && /^https?:/.test(m.url)) {
+				void shell.openExternal(m.url);
+			}
+		});
+	}
+
+	// ----- layout -----
+
+	private layout(): void {
+		const { width, height } = this.win.getContentBounds();
+		const chatWidth = this.chatVisible ? Math.min(Math.max(280, settings().chatWidth), Math.floor(width * 0.6)) : 0;
+		this.editorView.setBounds({ x: 0, y: 0, width: width - chatWidth, height });
+		this.chatView.setBounds({ x: width - chatWidth, y: 0, width: chatWidth, height });
+		this.chatView.setVisible(this.chatVisible);
+	}
+
+	public toggleChat(): void {
+		this.chatVisible = !this.chatVisible;
+		this.layout();
+	}
+
+	public resizeChat(delta: number): void {
+		updateSettings({ chatWidth: Math.max(280, Math.min(900, settings().chatWidth + delta)) });
+		this.layout();
+	}
+
+	// ----- document -----
+
+	private setDirty(dirty: boolean): void {
+		this.dirty = dirty;
+		this.updateTitle();
+	}
+
+	private updateTitle(): void {
+		if (this.win.isDestroyed()) return;
+		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — Draw.AI`);
+		this.win.setDocumentEdited(this.dirty);
+		if (this.file) this.win.setRepresentedFilename(this.file);
+	}
+
+	public async save(): Promise<boolean> {
+		if (!this.file) return this.saveAs();
+		return this.writeTo(this.file);
+	}
+
+	public async saveAs(): Promise<boolean> {
+		const r = await dialog.showSaveDialog(this.win, {
+			defaultPath: this.file ?? path.join(app.getPath("documents"), "Untitled.drawio"),
+			filters: [
+				{ name: "draw.io", extensions: ["drawio"] },
+				{ name: "Editable SVG (.drawio.svg)", extensions: ["drawio.svg"] },
+				{ name: "Editable PNG (.drawio.png)", extensions: ["drawio.png"] },
+			],
+		});
+		if (r.canceled || !r.filePath) return false;
+		const ok = await this.writeTo(r.filePath);
+		if (ok) {
+			this.file = r.filePath;
+			app.addRecentDocument(r.filePath);
+			this.updateTitle();
+			this.chat.postState();
+		}
+		return ok;
+	}
+
+	private async writeTo(file: string): Promise<boolean> {
+		try {
+			const ext = /\.(png|svg)$/i.test(file) ? file : file.replace(/\.(xml|dio)$/i, ".drawio");
+			const buffer = await this.client.export(ext.endsWith(".png") || ext.endsWith(".svg") ? ext : ".drawio");
+			fs.writeFileSync(file, Buffer.from(buffer.toString("base64"), "base64"));
+			this.setDirty(false);
+			return true;
+		} catch (e: any) {
+			dialog.showErrorBox("Could not save", String(e?.message ?? e));
+			return false;
+		}
+	}
+
+	public async exportInteractive(format: ExportFormat): Promise<void> {
+		const f = EXPORT_FORMATS.find((x) => x.format === format)!;
+		const base = (this.file ? path.basename(this.file) : "Untitled.drawio").replace(/\.(drawio|dio)(\.(svg|png))?$|\.(xml|svg|png)$/i, "");
+		const dir = this.file ? path.dirname(this.file) : app.getPath("documents");
+		const r = await dialog.showSaveDialog(this.win, {
+			title: `Export as ${f.label}`,
+			defaultPath: path.join(dir, `${base}.${f.ext}`),
+			filters: [{ name: f.label, extensions: [f.ext] }],
+		});
+		if (r.canceled || !r.filePath) return;
+		try {
+			await exportDiagram(this.client, format, r.filePath);
+			shell.showItemInFolder(r.filePath);
+		} catch (e: any) {
+			dialog.showErrorBox("Export failed", String(e?.message ?? e));
+		}
+	}
+
+	/** drawio_export from an agent: next to the diagram unless a path is given; never silently overwrites. */
+	private async exportForTool(request: { format: string; path?: string; currentPageOnly?: boolean; overwrite?: boolean }) {
+		const format = request.format as ExportFormat;
+		const f = EXPORT_FORMATS.find((x) => x.format === format);
+		if (!f) throw new Error(`format must be one of ${EXPORT_FORMATS.map((x) => x.format).join(", ")}`);
+		const dir = this.file ? path.dirname(this.file) : app.getPath("documents");
+		const base = (this.file ? path.basename(this.file) : "Untitled.drawio").replace(/\.(drawio|dio)(\.(svg|png))?$|\.(xml|svg|png)$/i, "");
+		const target = request.path ? path.resolve(dir, request.path) : path.join(dir, `${base}.${f.ext}`);
+		if (this.file && path.resolve(target) === path.resolve(this.file)) throw new Error("That would replace the diagram itself.");
+		if (fs.existsSync(target)) {
+			if (!request.overwrite) throw new Error(`${target} exists. Pass overwrite: true to replace it (the user is asked).`);
+			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
+			if (r.response !== 0) throw new Error("The user chose not to replace the file.");
+		}
+		const r = await exportDiagram(this.client, format, target, { currentPageOnly: request.currentPageOnly });
+		return { text: JSON.stringify({ path: target, bytes: r.bytes, note: r.note }), summary: `Exported ${path.basename(target)}` };
+	}
+
+	private async onClose(e: Electron.Event): Promise<void> {
+		if (this.closing || !this.dirty) return;
+		e.preventDefault();
+		const r = await dialog.showMessageBox(this.win, {
+			type: "warning",
+			message: `Save changes to ${this.fileName() ?? "Untitled"}?`,
+			detail: "Your changes will be lost if you don't save them.",
+			buttons: ["Save", "Don't Save", "Cancel"],
+			defaultId: 0,
+			cancelId: 2,
+		});
+		if (r.response === 2) return;
+		if (r.response === 0 && !(await this.save())) return;
+		this.closing = true;
+		this.win.close();
+	}
+
+	private dispose(): void {
+		this.chat.dispose();
+		this.mcp.dispose();
+		this.client.dispose();
+		DiagramWindow.all.delete(this);
+		for (const [k, v] of DiagramWindow.byEditor) if (v === this) DiagramWindow.byEditor.delete(k);
+		for (const [k, v] of DiagramWindow.byChat) if (v === this) DiagramWindow.byChat.delete(k);
+		if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.close();
+		if (!this.chatView.webContents.isDestroyed()) this.chatView.webContents.close();
+	}
+
+	public static readonly openFilters = [{ name: "Diagrams", extensions: DIAGRAM_EXTS.map((e) => e.split(".").pop()!) }];
+}
+
+function drawioConfig(): DrawioConfig {
+	return {
+		compressXml: false,
+		defaultLibraries: "general",
+		suppressNewWindows: true,
+		compact: true,
+		hideMenuItems: ["exportAs", "importFrom", "print", "saveAndExit", "plugins", "exit"],
+		hideMenus: ["language", "help"],
+	} as DrawioConfig;
+}

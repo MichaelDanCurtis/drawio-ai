@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; style-src 'nonce-$$nonce$$'; script-src 'nonce-$$nonce$$';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--
+	Draw.AI desktop chat panel. Adapted from src/features/ai/chatView.html (the VS Code
+	panel): the --vscode-* theme variables are defined here, the provider/model pickers
+	pick an ACP agent and its model or mode, and agents' permission requests and
+	thoughts get their own transcript items.
+-->
+<style nonce="$$nonce$$">
+	:root {
+		color-scheme: light dark;
+		--vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+		--vscode-font-size: 13px;
+		--vscode-editor-font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		--vscode-foreground: #1f2328;
+		--vscode-descriptionForeground: #6b7280;
+		--vscode-errorForeground: #c62828;
+		--vscode-panel-border: #e2e2e6;
+		--vscode-sideBar-background: #f7f7f9;
+		--vscode-dropdown-background: #ffffff;
+		--vscode-dropdown-foreground: #1f2328;
+		--vscode-dropdown-border: #d0d0d7;
+		--vscode-button-background: #7c3aed;
+		--vscode-button-foreground: #ffffff;
+		--vscode-button-hoverBackground: #6d28d9;
+		--vscode-button-secondaryBackground: #e9e9ee;
+		--vscode-button-secondaryForeground: #1f2328;
+		--vscode-button-secondaryHoverBackground: #dcdce3;
+		--vscode-icon-foreground: #424242;
+		--vscode-toolbar-hoverBackground: rgba(0,0,0,.07);
+		--vscode-input-background: #ffffff;
+		--vscode-input-foreground: #1f2328;
+		--vscode-input-border: #d0d0d7;
+		--vscode-focusBorder: #7c3aed;
+		--vscode-textCodeBlock-background: rgba(0,0,0,.06);
+	}
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--vscode-foreground: #e4e4e7;
+			--vscode-descriptionForeground: #9ca3af;
+			--vscode-errorForeground: #f48771;
+			--vscode-panel-border: #2f2f35;
+			--vscode-sideBar-background: #1e1e22;
+			--vscode-dropdown-background: #2a2a30;
+			--vscode-dropdown-foreground: #e4e4e7;
+			--vscode-dropdown-border: #3c3c44;
+			--vscode-button-secondaryBackground: #34343c;
+			--vscode-button-secondaryForeground: #e4e4e7;
+			--vscode-button-secondaryHoverBackground: #40404a;
+			--vscode-icon-foreground: #c5c5c5;
+			--vscode-toolbar-hoverBackground: rgba(255,255,255,.08);
+			--vscode-input-background: #2a2a30;
+			--vscode-input-foreground: #e4e4e7;
+			--vscode-input-border: #3c3c44;
+			--vscode-textCodeBlock-background: rgba(255,255,255,.08);
+		}
+	}
+	body { background: var(--vscode-sideBar-background); border-left: 1px solid var(--vscode-panel-border); }
+	.thought { font-size: 12px; font-style: italic; opacity: .6; white-space: pre-wrap; border-left: 2px solid var(--vscode-panel-border); padding-left: 8px; max-height: 6.5em; overflow: hidden; }
+	.permission { border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px; font-size: 12px; display: flex; flex-direction: column; gap: 6px; }
+	.permission .title { font-weight: 600; }
+	.permission .detail { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8; white-space: pre-wrap; max-height: 8em; overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 4px 6px; border-radius: 4px; }
+	.permission .options { display: flex; gap: 6px; flex-wrap: wrap; }
+	.permission .outcome { opacity: .75; }
+	#agentInfo { font-size: 11px; opacity: .65; padding: 0 8px 4px; }
+	#agentInfo:empty { display: none; }
+	:root { --accent: #a855f7; --radius: 6px; }
+	* { box-sizing: border-box; }
+	body { margin: 0; padding: 0; font: var(--vscode-font-size) var(--vscode-font-family); color: var(--vscode-foreground); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+	header { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--vscode-panel-border); align-items: center; flex-wrap: wrap; }
+	select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px; padding: 2px 4px; min-width: 0; font: inherit; }
+	#provider { flex: 0 1 auto; max-width: 45%; }
+	#model { flex: 1 1 auto; }
+	button { font: inherit; cursor: pointer; border: none; border-radius: 4px; padding: 3px 8px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+	button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+	button.primary:hover { background: var(--vscode-button-hoverBackground); }
+	button.icon { padding: 2px 6px; background: transparent; color: var(--vscode-icon-foreground); }
+	button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
+	button.active { outline: 1px solid var(--accent); color: var(--accent); }
+	button:disabled { opacity: .5; cursor: default; }
+	#context { display: flex; gap: 6px; padding: 6px 8px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--vscode-panel-border); flex-wrap: wrap; }
+	#context .file { opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 60px; }
+	.chip { display: inline-flex; gap: 4px; align-items: center; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-size: 11px; white-space: nowrap; }
+	.hidden { display: none !important; }
+	#messages { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+	.msg { line-height: 1.45; word-wrap: break-word; }
+	.msg.user { align-self: flex-end; max-width: 90%; background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); padding: 6px 10px; border-radius: var(--radius); white-space: pre-wrap; }
+	.msg.user .scope { display: block; font-size: 11px; color: var(--accent); margin-bottom: 2px; }
+	.msg.assistant p { margin: 0 0 6px; }
+	.msg.assistant ul { margin: 0 0 6px; padding-left: 18px; }
+	.msg.assistant code { font-family: var(--vscode-editor-font-family); background: var(--vscode-textCodeBlock-background); padding: 0 3px; border-radius: 3px; }
+	.msg.assistant pre { background: var(--vscode-textCodeBlock-background); padding: 6px; border-radius: 4px; overflow-x: auto; }
+	.msg.assistant pre code { padding: 0; background: none; }
+	.tool { font-size: 12px; display: flex; gap: 6px; align-items: center; opacity: .85; }
+	.tool .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: none; }
+	.tool.running .dot { background: var(--accent); animation: pulse 1s infinite; }
+	.tool.ok .dot { background: var(--vscode-testing-iconPassed, #3fb950); }
+	.tool.error .dot { background: var(--vscode-testing-iconFailed, #f85149); }
+	@keyframes pulse { 50% { opacity: .3; } }
+	.msg.error { color: var(--vscode-errorForeground); font-size: 12px; white-space: pre-wrap; }
+	.msg.error button { margin-top: 4px; }
+	.note { align-self: center; font-size: 11px; opacity: .6; padding: 2px 0; border-top: 1px dashed var(--vscode-panel-border); width: 100%; text-align: center; }
+	#empty { padding: 16px 8px; text-align: center; opacity: .9; }
+	#empty h3 { margin: 4px 0 8px; font-weight: 600; }
+	#empty p { opacity: .75; margin: 0 0 12px; font-size: 12px; }
+	.suggestions { display: flex; flex-direction: column; gap: 6px; }
+	.suggestions button { text-align: left; }
+	footer { border-top: 1px solid var(--vscode-panel-border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+	textarea { width: 100%; resize: none; min-height: 52px; max-height: 200px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--radius); padding: 6px 8px; outline: none; }
+	textarea:focus { border-color: var(--vscode-focusBorder); }
+	.row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+	.hint { font-size: 11px; opacity: .6; }
+	#review { display: flex; gap: 6px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 6px 8px; border: 1px solid var(--accent); border-radius: var(--radius); font-size: 12px; }
+	#review .counts span { margin-right: 6px; }
+	#review .added { color: var(--vscode-gitDecoration-addedResourceForeground, #16a34a); }
+	#review .changed { color: var(--vscode-gitDecoration-modifiedResourceForeground, #d97706); }
+	#review .removed { color: var(--vscode-gitDecoration-deletedResourceForeground, #dc2626); }
+	#review .pages { color: var(--accent); }
+	#attachments { display: flex; gap: 8px; flex-wrap: wrap; }
+	#attachments:empty { display: none; }
+	.att { position: relative; }
+	.att img { height: 48px; max-width: 96px; object-fit: cover; border-radius: 4px; border: 1px solid var(--vscode-panel-border); display: block; }
+	.att button { position: absolute; top: -6px; right: -6px; padding: 0 5px; border-radius: 999px; font-size: 11px; line-height: 16px; }
+	.msg.user .attached { display: block; font-size: 11px; opacity: .75; margin-top: 2px; }
+	#template { cursor: pointer; background: none; }
+	body.dragging footer { outline: 2px dashed var(--accent); outline-offset: -4px; }
+</style>
+</head>
+<body>
+	<header>
+		<select id="provider" title="Coding agent"></select>
+		<select id="model" title="Model or mode"></select>
+		<button id="newChat" class="icon" title="New chat (new agent session)">＋</button>
+	</header>
+	<div id="agentInfo"></div>
+	<div id="context">
+		<span class="file" id="file">No diagram open</span>
+		<span class="chip hidden" id="selection"></span>
+		<button id="lasso" title="Draw around shapes in the diagram to select them (Alt+L in the diagram)">◌ Lasso</button>
+		<button id="askInDiagram" title="Open the inline prompt next to the selection (Alt+K in the diagram)">✦ Inline</button>
+		<button id="markup" title="Draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M in the diagram)">✎ Markup</button>
+		<button id="lint" title="Ask the agent to check the diagram for problems and fix them">✓ Review</button>
+	</div>
+	<div id="messages">
+		<div id="empty">
+			<h3>✦ Draw.AI</h3>
+			<p>Pick one of your coding agents above (Claude Code, Gemini CLI or Codex) and describe a change; it edits the diagram live through Draw.AI's tools. Select or lasso shapes to change only those. Paste or drop a sketch or screenshot to turn it into an editable diagram.</p>
+			<div class="suggestions">
+				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
+				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
+				<button data-prompt="Restyle the diagram so it looks professional and consistent: one colour per concept, consistent fonts and edge styles. Do not change structure.">Make it look professional</button>
+				<button data-prompt="Create an architecture diagram of a typical three-tier web application on AWS with a load balancer, autoscaled web servers, an API layer, a cache and a database.">Draw an example AWS architecture</button>
+			</div>
+		</div>
+	</div>
+	<footer>
+		<div id="review" class="hidden" role="status">
+			<span class="counts"><strong>✦ Pending AI changes:</strong> <span id="reviewCounts"></span></span>
+			<span>
+				<button id="reviewReject" title="Revert every pending AI change">Reject</button>
+				<button id="reviewAccept" class="primary" title="Keep every pending AI change">Accept</button>
+			</span>
+		</div>
+		<div id="attachments"></div>
+		<textarea id="input" rows="2" placeholder="Describe a change… (Enter to send, Shift+Enter for newline, paste images)"></textarea>
+		<div class="row">
+			<span class="hint" id="hint">Edits are undoable with Ctrl/Cmd+Z in the diagram.</span>
+			<span>
+				<button id="attach" class="icon" title="Attach a sketch, whiteboard photo or screenshot">🖼</button>
+				<button id="stop" class="hidden">■ Stop</button>
+				<button id="send" class="primary">Send</button>
+			</span>
+		</div>
+	</footer>
+<script nonce="$$nonce$$">
+(function () {
+	const vscode = acquireVsCodeApi();
+	const $ = (id) => document.getElementById(id);
+	const messages = $("messages"), input = $("input"), empty = $("empty");
+	let state = { transcript: [], busy: false };
+	let lastAssistant = null, lastAssistantText = "";
+	const toolEls = new Map();
+
+	function escapeHtml(s) {
+		return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+	}
+
+	// Minimal, safe markdown: everything is escaped first, then a few constructs are re-introduced.
+	function renderMarkdown(src) {
+		const blocks = src.split(/```/);
+		let html = "";
+		blocks.forEach((block, i) => {
+			if (i % 2 === 1) {
+				const code = block.replace(/^[\w-]*\n/, "");
+				html += "<pre><code>" + escapeHtml(code) + "</code></pre>";
+				return;
+			}
+			const paragraphs = block.split(/\n{2,}/);
+			for (const para of paragraphs) {
+				if (!para.trim()) continue;
+				const lines = para.split("\n");
+				if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l) || !l.trim())) {
+					html += "<ul>" + lines.filter((l) => l.trim()).map((l) => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + "</ul>";
+				} else {
+					html += "<p>" + lines.map(inline).join("<br>") + "</p>";
+				}
+			}
+		});
+		return html;
+	}
+	function inline(s) {
+		return escapeHtml(s)
+			.replace(/`([^`]+)`/g, "<code>$1</code>")
+			.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+			.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+			.replace(/(^|\s)_([^_]+)_(?=\s|$|[.,])/g, "$1<em>$2</em>");
+	}
+
+	function scrollDown() { messages.scrollTop = messages.scrollHeight; }
+
+	function addItem(item) {
+		empty.classList.add("hidden");
+		const el = document.createElement("div");
+		if (item.kind === "user") {
+			el.className = "msg user";
+			if (item.scope) {
+				const s = document.createElement("span");
+				s.className = "scope";
+				s.textContent = item.scope;
+				el.appendChild(s);
+			}
+			el.appendChild(document.createTextNode(item.text));
+			if (item.attachments && item.attachments.length) {
+				const a = document.createElement("span");
+				a.className = "attached";
+				a.textContent = item.attachments.join(" · ");
+				el.appendChild(a);
+			}
+			lastAssistant = null;
+		} else if (item.kind === "assistant") {
+			el.className = "msg assistant";
+			el.innerHTML = renderMarkdown(item.text);
+			lastAssistant = el;
+			lastAssistantText = item.text;
+		} else if (item.kind === "tool") {
+			el.className = "tool " + item.status;
+			const dot = document.createElement("span");
+			dot.className = "dot";
+			const label = document.createElement("span");
+			label.textContent = item.summary;
+			el.append(dot, label);
+			toolEls.set(item.id, { el, label });
+			lastAssistant = null;
+		} else if (item.kind === "note") {
+			el.className = "note";
+			el.textContent = item.text;
+			lastAssistant = null;
+		} else if (item.kind === "thought") {
+			el.className = "thought";
+			el.dataset.raw = item.text;
+			el.textContent = item.text.trim();
+			el.title = item.text;
+			lastThought = el;
+			lastAssistant = null;
+		} else if (item.kind === "permission") {
+			el.className = "permission";
+			const title = document.createElement("div");
+			title.className = "title";
+			title.textContent = "⚑ " + item.title;
+			el.appendChild(title);
+			if (item.detail) {
+				const d = document.createElement("div");
+				d.className = "detail";
+				d.textContent = item.detail;
+				el.appendChild(d);
+			}
+			const opts = document.createElement("div");
+			opts.className = "options";
+			el.appendChild(opts);
+			permissionEls.set(item.id, { el, opts });
+			renderPermission(item);
+			lastAssistant = null;
+		} else if (item.kind === "error") {
+			el.className = "msg error";
+			el.textContent = "⚠ " + item.text;
+			if (item.action) {
+				const b = document.createElement("button");
+				b.textContent = item.action.title;
+				b.addEventListener("click", () => vscode.postMessage({ type: "command", command: item.action.command }));
+				el.appendChild(document.createElement("br"));
+				el.appendChild(b);
+			}
+			lastAssistant = null;
+		}
+		messages.appendChild(el);
+		scrollDown();
+	}
+
+	let lastThought = null;
+	const permissionEls = new Map();
+	function renderPermission(item) {
+		const p = permissionEls.get(item.id);
+		if (!p) return;
+		p.opts.textContent = "";
+		if (item.outcome) {
+			const o = document.createElement("span");
+			o.className = "outcome";
+			o.textContent = item.outcome;
+			p.opts.appendChild(o);
+			return;
+		}
+		for (const opt of item.options || []) {
+			const b = document.createElement("button");
+			b.textContent = opt.name;
+			if (opt.kind === "allow_once" || opt.kind === "allow_always") b.className = opt.kind === "allow_once" ? "primary" : "";
+			b.title = opt.kind.replace("_", " ");
+			b.addEventListener("click", () => vscode.postMessage({ type: "permissionReply", id: item.id, optionId: opt.optionId }));
+			p.opts.appendChild(b);
+		}
+	}
+	function appendThought(text) {
+		if (!lastThought || lastThought !== messages.lastElementChild) addItem({ kind: "thought", text: "" });
+		lastThought.dataset.raw = (lastThought.dataset.raw || "") + text;
+		lastThought.textContent = lastThought.dataset.raw.trim();
+		lastThought.title = lastThought.textContent;
+		lastThought.scrollTop = lastThought.scrollHeight;
+		scrollDown();
+	}
+
+	function appendText(text) {
+		if (!lastAssistant) {
+			addItem({ kind: "assistant", text: "" });
+		}
+		lastAssistantText += text;
+		lastAssistant.innerHTML = renderMarkdown(lastAssistantText);
+		scrollDown();
+	}
+
+	function renderAll() {
+		for (const el of [...messages.children]) if (el !== empty) el.remove();
+		toolEls.clear();
+		permissionEls.clear();
+		lastAssistant = null;
+		lastThought = null;
+		empty.classList.toggle("hidden", state.transcript.length > 0);
+		state.transcript.forEach(addItem);
+	}
+
+	function fillSelect(select, items, selected) {
+		select.textContent = "";
+		for (const it of items) {
+			const o = document.createElement("option");
+			o.value = it.id;
+			o.textContent = it.label;
+			o.selected = it.id === selected;
+			select.appendChild(o);
+		}
+	}
+
+	function renderChrome() {
+		fillSelect($("provider"), state.providers || [], state.providerId);
+		const models = (state.models || []).map((m) => ({ id: m.id, label: m.name }));
+		if (state.modelsError) models.unshift({ id: "", label: "⚠ " + state.modelsError });
+		else if (models.length === 0) models.push({ id: "", label: state.modelsLoading ? "Loading models…" : "No models" });
+		fillSelect($("model"), models, state.modelId);
+		$("model").title = state.modelsError || "Model";
+		$("file").textContent = state.file ? "📄 " + state.file : "No diagram open";
+		const sel = $("selection");
+		sel.classList.toggle("hidden", !state.selectionCount);
+		sel.textContent = "◉ " + state.selectionCount + " selected";
+		$("lasso").classList.toggle("active", !!state.lassoActive);
+		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
+		$("provider").title = state.providerTitle || "Coding agent";
+		$("agentInfo").textContent = state.agentInfo || "";
+		renderReview(state.review);
+		setBusy(state.busy);
+	}
+
+	function renderReview(summary) {
+		$("review").classList.toggle("hidden", !summary);
+		const counts = $("reviewCounts");
+		counts.textContent = "";
+		if (!summary) return;
+		for (const k of ["added", "changed", "removed"]) {
+			if (!summary[k]) continue;
+			const s = document.createElement("span");
+			s.className = k;
+			s.textContent = summary[k] + " " + k;
+			counts.appendChild(s);
+		}
+		if (summary.pages) {
+			const s = document.createElement("span");
+			s.className = "pages";
+			s.textContent = summary.pages + (summary.pages === 1 ? " page change" : " page changes");
+			counts.appendChild(s);
+		}
+	}
+
+	function setBusy(busy) {
+		state.busy = busy;
+		$("send").classList.toggle("hidden", busy);
+		$("stop").classList.toggle("hidden", !busy);
+		$("hint").textContent = busy ? "Working… watch the diagram." : "Edits are undoable with Ctrl/Cmd+Z in the diagram.";
+	}
+
+	// Providers accept at most 5 MB of base64 per image; larger or huge images are re-encoded smaller.
+	const MAX_IMAGES = 4, MAX_SEND_B64 = 5000000, MAX_SIDE = 2048;
+	let images = [];
+	function renderAttachments() {
+		const box = $("attachments");
+		box.textContent = "";
+		images.forEach((img, i) => {
+			const wrap = document.createElement("span");
+			wrap.className = "att";
+			const el = document.createElement("img");
+			el.src = "data:" + img.mimeType + ";base64," + img.base64;
+			el.alt = "attached image " + (i + 1);
+			const x = document.createElement("button");
+			x.textContent = "×";
+			x.title = "Remove";
+			x.addEventListener("click", () => { images.splice(i, 1); renderAttachments(); });
+			wrap.append(el, x);
+			box.appendChild(wrap);
+		});
+	}
+	function flashHint(text) {
+		$("hint").textContent = text;
+		setTimeout(() => setBusy(state.busy), 4000);
+	}
+	function addImageDataUrl(url) {
+		const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/.exec(url);
+		if (!m || images.length >= MAX_IMAGES) return;
+		const img = new Image();
+		img.onload = () => {
+			if (images.length >= MAX_IMAGES) return;
+			const w = img.naturalWidth, h = img.naturalHeight;
+			if (m[2].length <= MAX_SEND_B64 && Math.max(w, h) <= MAX_SIDE) {
+				images.push({ mimeType: m[1], base64: m[2] });
+			} else {
+				const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+				const canvas = document.createElement("canvas");
+				canvas.width = Math.max(1, Math.round(w * scale));
+				canvas.height = Math.max(1, Math.round(h * scale));
+				const ctx = canvas.getContext("2d");
+				ctx.fillStyle = "#ffffff";
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+				ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+				let out = "", quality = 0.9;
+				do {
+					out = canvas.toDataURL("image/jpeg", quality).split(",")[1];
+					quality -= 0.15;
+				} while (out.length > MAX_SEND_B64 && quality > 0.3);
+				if (out.length > MAX_SEND_B64) return flashHint("That image is too large to send.");
+				images.push({ mimeType: "image/jpeg", base64: out });
+			}
+			renderAttachments();
+		};
+		img.onerror = () => flashHint("Could not read that image.");
+		img.src = url;
+	}
+	function addFiles(files) {
+		for (const f of files) {
+			if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) continue;
+			const r = new FileReader();
+			r.onload = () => addImageDataUrl(String(r.result));
+			r.readAsDataURL(f);
+		}
+	}
+
+	function send(text) {
+		text = (text ?? input.value).trim();
+		if ((!text && images.length === 0) || state.busy) return;
+		const msg = { type: "send", text };
+		if (images.length) msg.images = images;
+		vscode.postMessage(msg);
+		images = [];
+		renderAttachments();
+		input.value = "";
+		autosize();
+	}
+
+	function autosize() { input.style.height = "auto"; input.style.height = Math.min(200, input.scrollHeight) + "px"; }
+
+	$("send").addEventListener("click", () => send());
+	$("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+	$("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
+	$("lasso").addEventListener("click", () => vscode.postMessage({ type: "lasso" }));
+	$("askInDiagram").addEventListener("click", () => vscode.postMessage({ type: "askInDiagram" }));
+	$("markup").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.markup" }));
+	$("lint").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.reviewDiagram" }));
+	$("attach").addEventListener("click", () => vscode.postMessage({ type: "pickImage" }));
+	input.addEventListener("paste", (e) => {
+		const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+		if (files.length) { e.preventDefault(); addFiles(files); }
+	});
+	document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
+	document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+	document.addEventListener("drop", (e) => {
+		e.preventDefault();
+		document.body.classList.remove("dragging");
+		addFiles([...(e.dataTransfer?.files || [])]);
+	});
+	$("reviewAccept").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "accept" }));
+	$("reviewReject").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "reject" }));
+	$("provider").addEventListener("change", (e) => vscode.postMessage({ type: "pickProvider", providerId: e.target.value }));
+	$("model").addEventListener("change", (e) => { if (e.target.value) vscode.postMessage({ type: "pickModel", modelId: e.target.value }); });
+	for (const b of document.querySelectorAll(".suggestions button")) {
+		b.addEventListener("click", () => send(b.dataset.prompt));
+	}
+	input.addEventListener("input", autosize);
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+			e.preventDefault();
+			send();
+		}
+	});
+
+	window.addEventListener("message", (e) => {
+		const m = e.data;
+		switch (m.type) {
+			case "state": {
+				const transcriptChanged = m.state.transcriptVersion !== state.transcriptVersion;
+				state = m.state;
+				if (transcriptChanged) renderAll();
+				renderChrome();
+				break;
+			}
+			case "append": state.transcript.push(m.item); addItem(m.item); break;
+			case "appendText": appendText(m.text); break;
+			case "appendThought": appendThought(m.text); break;
+			case "permissionResolved": {
+				const item = state.transcript.find((t) => t.kind === "permission" && t.id === m.id);
+				if (item) item.outcome = m.outcome;
+				renderPermission({ id: m.id, outcome: m.outcome });
+				break;
+			}
+			case "tool": {
+				const t = toolEls.get(m.id);
+				if (t) { t.el.className = "tool " + m.status; t.label.textContent = m.summary; }
+				break;
+			}
+			case "busy": setBusy(m.busy); break;
+			case "focusInput": input.focus(); break;
+			case "addImages": (m.images || []).forEach((img) => addImageDataUrl("data:" + img.mimeType + ";base64," + img.base64)); input.focus(); break;
+		}
+	});
+
+	vscode.postMessage({ type: "ready" });
+})();
+</script>
+</body>
+</html>
