@@ -1,11 +1,12 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
+import { app, BaseWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
 import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
-import { exportDiagram, EXPORT_FORMATS, ExportFormat } from "./exporter";
+import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram } from "./exporter";
+import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
 import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { settings, updateSettings } from "./settings";
@@ -36,7 +37,11 @@ export class DiagramWindow {
 	private static byChat = new Map<number, DiagramWindow>();
 
 	public readonly id = `w${nextId++}`;
-	public readonly win: BrowserWindow;
+	/**
+	 * A BaseWindow, not a BrowserWindow: a BrowserWindow's own (here empty) page sits in
+	 * front of its child views on macOS and gets in the way of mouse events, e.g. hover.
+	 */
+	public readonly win: BaseWindow;
 	public readonly editorView: WebContentsView;
 	public readonly chatView: WebContentsView;
 	public readonly client: CustomizedDrawioClient;
@@ -44,14 +49,20 @@ export class DiagramWindow {
 	public readonly toolbox: DiagramToolbox;
 	private readonly mcp: WindowMcpServer;
 	private messageHandler: ((msg: unknown) => void) | undefined;
+	/** Diagnostics: messages from the editor, counted by event. */
+	public traffic: Map<string, number> | undefined;
 	public file: string | undefined;
 	private dirty = false;
 	private loaded = false;
 	private loadedWaiters: (() => void)[] = [];
 	private chatVisible = true;
 	private closing = false;
+	/** Content for a new, unsaved window (an imported diagram), and the name to suggest when saving it. */
+	private initial: { xml: string; name: string } | undefined;
+	/** App-level commands the in-editor File menu can run. Set by main.ts. */
+	public static appCommands: { newDiagram(): void; open(): void } = { newDiagram: () => undefined, open: () => undefined };
 
-	public static async open(server: StaticServer, file?: string): Promise<DiagramWindow> {
+	public static async open(server: StaticServer, file?: string, initial?: { xml: string; name: string }): Promise<DiagramWindow> {
 		if (file) {
 			const existing = [...DiagramWindow.all].find((w) => w.file === file);
 			if (existing) {
@@ -60,23 +71,31 @@ export class DiagramWindow {
 			}
 		}
 		const w = new DiagramWindow(server, file);
+		w.initial = initial;
 		await w.start(server);
 		return w;
 	}
 
 	public static focused(): DiagramWindow | undefined {
-		const win = BrowserWindow.getFocusedWindow();
+		const win = BaseWindow.getFocusedWindow();
 		return [...DiagramWindow.all].find((w) => w.win === win) ?? [...DiagramWindow.all].pop();
 	}
 
 	public static installIpc(): void {
-		ipcMain.on("drawio:toHost", (e, msg) => DiagramWindow.byEditor.get(e.sender.id)?.messageHandler?.(msg));
+		ipcMain.on("drawio:toHost", (e, msg) => {
+			const w = DiagramWindow.byEditor.get(e.sender.id);
+			if (w?.traffic) {
+				const ev = /"event":"([^"]+)"/.exec(String(msg))?.[1] ?? "?";
+				w.traffic.set(ev, (w.traffic.get(ev) ?? 0) + 1);
+			}
+			w?.messageHandler?.(msg);
+		});
 		ipcMain.on("chat:toHost", (e, msg) => void DiagramWindow.byChat.get(e.sender.id)?.chat.onMessage(msg));
 	}
 
-	private constructor(server: StaticServer, file: string | undefined) {
+	private constructor(private readonly server: StaticServer, file: string | undefined) {
 		this.file = file;
-		this.win = new BrowserWindow({
+		this.win = new BaseWindow({
 			width: 1500,
 			height: 950,
 			minWidth: 800,
@@ -162,6 +181,7 @@ export class DiagramWindow {
 		await this.mcp.start();
 		const dark = nativeTheme.shouldUseDarkColors;
 		this.win.show();
+		this.editorView.webContents.focus();
 		void this.editorView.webContents.loadURL(server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() }));
 		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
 		void dark;
@@ -190,14 +210,14 @@ export class DiagramWindow {
 				if (this.file && /\.png$/i.test(this.file)) {
 					await c.loadPngWithEmbeddedXml(fs.readFileSync(this.file));
 				} else {
-					await c.loadXmlLike(this.file ? fs.readFileSync(this.file, "utf8") : "");
+					await c.loadXmlLike(this.file ? fs.readFileSync(this.file, "utf8") : this.initial?.xml ?? "");
 				}
 			} catch (e: any) {
 				dialog.showErrorBox("Could not open the diagram", String(e?.message ?? e));
 			}
 			await c.whenLoaded(30_000);
 			this.loaded = true;
-			this.setDirty(false);
+			this.setDirty(!!this.initial && !this.file);
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
 		});
@@ -222,8 +242,10 @@ export class DiagramWindow {
 		});
 		c.onInvokeCommand.sub(({ command }) => {
 			if (command === "save") void this.save();
-			else if (command === "export") void this.exportInteractive("pdf");
+			else if (command === "export") void this.exportAny();
 			else if (command === "exportVisio") void this.exportInteractive("vsdx");
+			else if (command === "convert") void this.saveAs();
+			else if (command === "importDiagram") void this.importFromOtherTool();
 		});
 		c.onUnknownMessage.sub(({ message }) => {
 			const m = message as any;
@@ -231,10 +253,53 @@ export class DiagramWindow {
 				localStorage = m.newLocalStorage;
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "desktopCommand") {
+				this.runDesktopCommand(String(m.command));
 			} else if (m?.event === "openLink" && typeof m.url === "string" && /^https?:/.test(m.url)) {
 				void shell.openExternal(m.url);
 			}
 		});
+	}
+
+	/** Commands from the in-editor File menu (src/renderer/desktop-menu.js). */
+	public runDesktopCommand(command: string): void {
+		switch (command) {
+			case "new": return DiagramWindow.appCommands.newDiagram();
+			case "open": return DiagramWindow.appCommands.open();
+			case "saveAs": return void this.saveAs();
+			case "exportPdf": return void this.exportInteractive("pdf");
+			case "export": return void this.exportAny();
+			case "importDiagram": return void this.importFromOtherTool();
+			case "print": return void this.print();
+		}
+	}
+
+	public async print(): Promise<void> {
+		try {
+			const r = await printDiagram(this.client, this.fileName() ?? "Untitled");
+			if (!r.printed && r.error && !/cancel/i.test(r.error)) dialog.showErrorBox("Could not print", r.error);
+		} catch (e: any) {
+			dialog.showErrorBox("Could not print", String(e?.message ?? e));
+		}
+	}
+
+	/** Converts a Visio/Gliffy/yEd/Lucidchart/Miro file with draw.io and opens it in a new window. */
+	public async importFromOtherTool(): Promise<void> {
+		const r = await dialog.showOpenDialog(this.win, { title: "Open from Another Tool", properties: ["openFile"], filters: IMPORT_FILTERS });
+		const source = r.filePaths[0];
+		if (!source) return;
+		try {
+			const bytes = fs.readFileSync(source);
+			const format = detectImportFormat(path.basename(source), bytes);
+			const result = await this.client.importDiagram(format, path.basename(source), bytes);
+			const name = path.basename(source).replace(/\.[^.]+$/, "") + ".drawio";
+			await DiagramWindow.open(this.server, undefined, { xml: result.xml, name: path.join(path.dirname(source), name) });
+			if (result.warnings.length) {
+				void dialog.showMessageBox({ type: "info", message: `Imported ${path.basename(source)}`, detail: `Some things did not carry over:\n- ${result.warnings.slice(0, 12).join("\n- ")}` });
+			}
+		} catch (e: any) {
+			dialog.showErrorBox("Could not open the file", String(e?.message ?? e));
+		}
 	}
 
 	// ----- layout -----
@@ -278,7 +343,7 @@ export class DiagramWindow {
 
 	public async saveAs(): Promise<boolean> {
 		const r = await dialog.showSaveDialog(this.win, {
-			defaultPath: this.file ?? path.join(app.getPath("documents"), "Untitled.drawio"),
+			defaultPath: this.file ?? this.initial?.name ?? path.join(app.getPath("documents"), "Untitled.drawio"),
 			filters: [
 				{ name: "draw.io", extensions: ["drawio"] },
 				{ name: "Editable SVG (.drawio.svg)", extensions: ["drawio.svg"] },
@@ -306,6 +371,27 @@ export class DiagramWindow {
 		} catch (e: any) {
 			dialog.showErrorBox("Could not save", String(e?.message ?? e));
 			return false;
+		}
+	}
+
+	/** One Save dialog with every export format; the chosen extension decides the format. */
+	public async exportAny(): Promise<void> {
+		const base = (this.file ? path.basename(this.file) : "Untitled.drawio").replace(/\.(drawio|dio)(\.(svg|png))?$|\.(xml|svg|png)$/i, "");
+		const dir = this.file ? path.dirname(this.file) : app.getPath("documents");
+		const r = await dialog.showSaveDialog(this.win, {
+			title: "Export",
+			defaultPath: path.join(dir, `${base}.pdf`),
+			filters: EXPORT_FORMATS.map((f) => ({ name: f.label, extensions: [f.ext] })),
+		});
+		if (r.canceled || !r.filePath) return;
+		const lower = r.filePath.toLowerCase();
+		const f = [...EXPORT_FORMATS].sort((a, b) => b.ext.length - a.ext.length).find((x) => lower.endsWith(`.${x.ext}`)) ?? EXPORT_FORMATS.find((x) => lower.endsWith(`.${x.ext.split(".").pop()}`));
+		if (!f) return void dialog.showErrorBox("Export failed", `Pick one of: ${EXPORT_FORMATS.map((x) => `.${x.ext}`).join(", ")}`);
+		try {
+			await exportDiagram(this.client, f.format, r.filePath);
+			shell.showItemInFolder(r.filePath);
+		} catch (e: any) {
+			dialog.showErrorBox("Export failed", String(e?.message ?? e));
 		}
 	}
 

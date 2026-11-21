@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, session, shell } from "electron";
+import { app, dialog, Menu, MenuItemConstructorOptions, session, shell } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { AGENTS } from "./agents";
@@ -10,6 +10,9 @@ import { settingsPath, updateSettings } from "./settings";
 import { StaticServer } from "./staticServer";
 
 app.setName("Draw.AI");
+// Test runs get their own data folder: they must not touch the user's settings or
+// collide with a copy of the app that is already running.
+if (process.env.DRAWAI_E2E) app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
 const server = new StaticServer();
 const pendingFiles: string[] = [];
 let ready = false;
@@ -85,14 +88,15 @@ function buildMenu(): void {
 				{ type: "separator" },
 				{ label: "Save", accelerator: "CmdOrCtrl+S", click: () => void w()?.save() },
 				{ label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: () => void w()?.saveAs() },
+				{ type: "separator" },
+				{ label: "Export as PDF…", accelerator: "CmdOrCtrl+Shift+E", click: () => void w()?.exportInteractive("pdf") },
 				{
 					label: "Export As",
-					submenu: EXPORT_FORMATS.map((f) => ({
-						label: f.label,
-						accelerator: f.format === "pdf" ? "CmdOrCtrl+Shift+E" : undefined,
-						click: () => void w()?.exportInteractive(f.format),
-					})),
+					submenu: EXPORT_FORMATS.map((f) => ({ label: f.label, click: () => void w()?.exportInteractive(f.format) })),
 				},
+				{ label: "Open from Another Tool…", click: () => void w()?.importFromOtherTool() },
+				{ type: "separator" },
+				{ label: "Print…", accelerator: "CmdOrCtrl+P", click: () => void w()?.print() },
 				{ type: "separator" },
 				{ role: "close" },
 			],
@@ -162,6 +166,7 @@ app.whenReady().then(async () => {
 	await server.start();
 	blockRemoteRequests();
 	DiagramWindow.installIpc();
+	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog() };
 	buildMenu();
 	ready = true;
 
@@ -176,7 +181,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("activate", () => {
-	if (ready && BrowserWindow.getAllWindows().length === 0) void openFile();
+	if (ready && DiagramWindow.all.size === 0) void openFile();
 });
 
 app.on("window-all-closed", () => {
