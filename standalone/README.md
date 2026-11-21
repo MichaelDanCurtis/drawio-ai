@@ -3,7 +3,7 @@
 A desktop app for draw.io diagrams with an AI chat beside the editor. It does not
 use its own model API keys: the chat drives a coding agent you already have
 installed and signed in to — **Claude Code**, **Gemini** (Google's Antigravity CLI, or
-Gemini CLI) or **Codex** — over the
+Gemini CLI), **Codex**, **GitHub Copilot** or **Kimi** — over the
 [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
 open diagram live through Draw.AI's diagram tools, and you keep or revert its
 changes.
@@ -30,6 +30,8 @@ at least one agent:
 | Gemini (Antigravity CLI) | `agy`, from [antigravity.google](https://antigravity.google) | `agy acp --login` (or sign in from `agy`) | `agy acp` |
 | Gemini CLI (fallback when `agy` is not installed) | `npm i -g @google/gemini-cli` | `gemini` | `gemini --acp` |
 | Codex | `npm i -g @openai/codex @agentclientprotocol/codex-acp` | `codex login` | `codex-acp` (or `npx -y @agentclientprotocol/codex-acp`) |
+| GitHub Copilot | `npm i -g @github/copilot` | `copilot` → `/login` | `copilot --acp` |
+| Kimi | Kimi Code CLI, from [moonshotai.github.io/kimi-code](https://moonshotai.github.io/kimi-code/) | `kimi login` | `kimi acp` |
 
 Google has moved personal Google accounts from Gemini CLI to the Antigravity CLI:
 Gemini CLI now refuses them ("This client is no longer supported for Gemini Code Assist
@@ -112,7 +114,7 @@ is optional:
   shared `../src` modules it uses.
 - `yarn e2e` — opens an example in the real app, calls the window's MCP endpoint,
   exports PDF/SVG and screenshots the editor and chat into a temp folder.
-  `yarn e2e --agent claude` (or `gemini`, `codex`) also sends one prompt through that
+  `yarn e2e --agent claude` (or `gemini`, `codex`, `copilot`, `kimi`) also sends one prompt through that
   agent over ACP, auto-approving its permission requests, and fails if the diagram
   did not change. `--click-permissions` answers them by clicking the permission card
   in the chat instead. `--prompt "…"` and `--file path` pick the request and diagram.

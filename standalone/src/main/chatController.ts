@@ -60,6 +60,10 @@ export class ChatController {
 	private permissions = new Map<string, (outcome: acp.RequestPermissionOutcome) => void>();
 	private nextPermission = 1;
 	private toolSummaries: { name: string; result: ToolResult }[] = [];
+	/** This window's agent; the saved setting is only the default for new windows. */
+	private agent: AgentId = settings().agent;
+	/** Stop was pressed during the current turn (possibly before the agent finished starting). */
+	private turnCancelled = false;
 	/** Tests: answer permission requests automatically. */
 	public autoApprove = false;
 	/** Tests: called whenever a prompt turn ends. */
@@ -79,7 +83,7 @@ export class ChatController {
 	}
 
 	public get agentId(): AgentId {
-		return settings().agent;
+		return this.agent;
 	}
 
 	public attach(view: WebContents): void {
@@ -192,6 +196,7 @@ export class ChatController {
 		if (!this.statuses.some((s) => s.id === id)) return;
 		this.stop();
 		this.resetSession();
+		this.agent = id;
 		updateSettings({ agent: id });
 		if (this.transcript.length) this.push({ kind: "note", text: `Switched to ${agentDef(id).label}: a new conversation starts.` });
 		this.postState();
@@ -335,6 +340,7 @@ export class ChatController {
 		}
 
 		this.setBusy(true);
+		this.turnCancelled = false;
 		let stop: string | undefined;
 		let error: string | undefined;
 		try {
@@ -347,6 +353,12 @@ export class ChatController {
 				return;
 			}
 			if (!session?.info) return;
+			if (this.turnCancelled) {
+				// Stop was pressed while the agent was still starting: never send the request.
+				stop = "cancelled";
+				this.push({ kind: "error", text: "Stopped." });
+				return;
+			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
 			const context = describeContext(this.host.fileName(), selection);
 			const preamble = this.firstPrompt ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
@@ -380,6 +392,7 @@ export class ChatController {
 
 	public stop(): void {
 		if (!this.busy) return;
+		this.turnCancelled = true;
 		this.session?.cancel();
 		for (const resolve of this.permissions.values()) resolve({ outcome: "cancelled" });
 	}

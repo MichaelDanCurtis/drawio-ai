@@ -1,6 +1,6 @@
 // End-to-end check of the real app (see src/main/e2e.ts).
 //   yarn e2e                                   editor + MCP endpoint + exports, no agent
-//   yarn e2e --agent claude|gemini|codex       also one prompt through that agent over ACP
+//   yarn e2e --agent claude|gemini|codex|copilot|kimi  also one prompt through that agent over ACP
 //   yarn e2e --agent codex --prompt "…" --file ../examples/use-cases/cloud-architecture.drawio
 // The diagram is copied to a temp folder first; results land in <temp>/out.
 import { spawnSync } from "child_process";

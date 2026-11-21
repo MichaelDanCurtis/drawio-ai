@@ -10,6 +10,9 @@ import { settingsPath, updateSettings } from "./settings";
 import { StaticServer } from "./staticServer";
 
 app.setName("Draw.AI");
+// Test runs get their own data folder: they must not touch the user's settings, or
+// hang on the data folder of a copy of the app that is already running.
+if (process.env.DRAWAI_E2E) app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
 const server = new StaticServer();
 const pendingFiles: string[] = [];
 let ready = false;
