@@ -231,3 +231,23 @@ test("render: line breaks in labels survive as <br> (draw.io labels are HTML)", 
 	const { xml } = renderGraph({ title: "t", nodes: [{ id: "a", label: "schedule\n0 3 * * *", kind: "x" }], edges: [] }, { recipe: "r" });
 	assert.match(xml, /label="schedule&lt;br&gt;0 3 \* \* \*"/);
 });
+
+test("read-only guard: read verbs with positional arguments pass, writes hidden among them do not", () => {
+	assert.equal(checkReadOnly("gcloud", ["projects", "describe", "my-project", "--format=json"]), undefined);
+	assert.equal(checkReadOnly("gcloud", ["compute", "instances", "describe", "vm-1", "--zone", "us-central1-a"]), undefined);
+	assert.equal(checkReadOnly("az", ["network", "vnet", "show", "-g", "rg", "-n", "v"]), undefined);
+	assert.ok(checkReadOnly("gcloud", ["compute", "instances", "delete", "describe"]));
+	assert.ok(checkReadOnly("gcloud", ["run", "services", "update", "list"]));
+	// Command groups that look like verbs are fine.
+	assert.equal(checkReadOnly("gcloud", ["run", "services", "list", "--format=json"]), undefined);
+	assert.equal(checkReadOnly("gcloud", ["deploy", "releases", "list"]), undefined);
+	assert.equal(checkReadOnly("az", ["lock", "list"]), undefined);
+	assert.ok(checkReadOnly("gcloud", ["run", "deploy", "svc", "list"]));
+	assert.ok(checkReadOnly("az", ["vm", "start", "list"]));
+});
+
+test("dig deeper names the mapped folder so relative paths can be found", () => {
+	const { digDeeperRequest } = require("../src/main/mapper/recipes/common");
+	const text = digDeeperRequest("jobs", [{ label: "build", data: { mapRoot: "/repo", file: ".github/workflows/ci.yml" } }], "");
+	assert.match(text, /made from "\/repo"; paths in the shapes' data are relative to it/);
+});

@@ -18,7 +18,7 @@ function checkModelXml(xml) {
 	const ids = [...xml.matchAll(/<(?:object|mxCell) id="([^"]+)"/g)].map((m) => m[1]);
 	assert.equal(new Set(ids).size, ids.length, "duplicate ids");
 	const known = new Set();
-	for (const m of xml.matchAll(/<(object|mxCell) id="([^"]+)"|parent="([^"]+)"|source="([^"]+)"|target="([^"]+)"/g)) {
+	for (const m of xml.matchAll(/<(object|mxCell) id="([^"]+)"|\sparent="([^"]+)"|\ssource="([^"]+)"|\starget="([^"]+)"/g)) {
 		if (m[2]) known.add(m[2]);
 		const ref = m[3] ?? m[4] ?? m[5];
 		if (ref) assert.ok(ids.includes(ref), `reference to unknown cell ${ref}`);

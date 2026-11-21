@@ -122,8 +122,9 @@ export function digDeeperRequest(what: string, shapes: { label: string; data: Re
 		.slice(0, 60)
 		.map((s) => `- ${s.label || "(no label)"}: ${JSON.stringify(s.data)}`)
 		.join("\n");
+	const roots = [...new Set(shapes.map((s) => s.data.mapRoot).filter(Boolean))];
 	return agentRequest(
-		`Dig deeper into these ${what} on the map${question.trim() ? `: ${question.trim()}` : "."} Investigate them read-only, then add what matters to the map (details, missing dependencies, connections, risks) next to the shapes it concerns, as pending changes.\n\nSelected shapes:\n${listed}${shapes.length > 60 ? `\n… and ${shapes.length - 60} more` : ""}`
+		`${roots.length ? `The map was made from ${roots.map((r) => `"${r}"`).join(", ")}; paths in the shapes' data are relative to it. ` : ""}Dig deeper into these ${what} on the map${question.trim() ? `: ${question.trim()}` : "."} Investigate them read-only, then add what matters to the map (details, missing dependencies, connections, risks) next to the shapes it concerns, as pending changes.\n\nSelected shapes:\n${listed}${shapes.length > 60 ? `\n… and ${shapes.length - 60} more` : ""}`
 	);
 }
 

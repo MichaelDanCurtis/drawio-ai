@@ -185,6 +185,9 @@ export class MapperDialog {
 				if (ac.signal.aborted) throw new MapperError("Cancelled");
 			}
 			let drawn = "";
+			// Dig deeper needs to know where relative paths in the shapes' data point.
+			const root = ["folder", "file"].map((k) => String(input[k] ?? "").trim()).find(Boolean);
+			if (root && result?.graph) for (const n of result.graph.nodes) n.data = { mapRoot: root, ...(n.data ?? {}) };
 			if (result?.graph && result.graph.nodes.length > 0) {
 				progress(`Drawing ${result.graph.nodes.length} shapes…`);
 				const d = await drawMap(this.host.client, result.graph, recipe.id);

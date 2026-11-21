@@ -13,6 +13,28 @@ function verbOf(args: string[]): { head: string[]; verb: string } {
 }
 
 const AZ_VERBS = new Set(["list", "show", "query", "list-locations", "version"]);
+/** Words that change something: a command containing one is refused even if it also lists. */
+const WRITE_WORDS = new Set([
+	"create", "delete", "update", "set", "add", "remove", "deploy", "start", "stop", "restart", "run", "invoke",
+	"import", "upload", "reset", "enable", "disable", "attach", "detach", "assign", "move", "resize", "scale",
+	"apply", "patch", "replace", "purge", "rotate", "ssh", "login", "logout", "install", "uninstall", "upgrade",
+	"cancel", "approve", "deny", "grant", "revoke", "tag", "untag", "lock", "unlock", "regenerate", "renew",
+	"restore", "failover", "swap", "sync", "execute", "exec", "connect", "copy", "rename", "wait", "create-or-update",
+]);
+
+/**
+ * az and gcloud: `<group>... <verb> [positional args] [--options]`. Positional
+ * arguments (gcloud projects describe my-project) follow the verb, so any read
+ * verb among the words counts, as long as no word changes anything. The first
+ * word is the command group, which may look like a verb (gcloud run, az lock, az tag).
+ */
+function writes(head: string[]): boolean {
+	return head.slice(1).some((w) => WRITE_WORDS.has(w));
+}
+
+function readVerbAmong(head: string[], verbs: Set<string>): boolean {
+	return head.some((w) => verbs.has(w)) && !writes(head);
+}
 const GCLOUD_VERBS = new Set(["list", "describe", "search-all-resources", "search-all-iam-policies", "get-iam-policy", "get-value", "version"]);
 const KUBECTL_VERBS = new Set(["get", "describe", "version", "api-resources", "cluster-info"]);
 const KUBECTL_CONFIG = new Set(["view", "current-context", "get-contexts"]);
@@ -24,7 +46,7 @@ export function checkReadOnly(command: string, args: string[]): string | undefin
 	const { head, verb } = verbOf(args);
 	switch (name) {
 		case "az":
-			return AZ_VERBS.has(verb) ? undefined : `\`az ${head.join(" ")}\` is not a read-only command`;
+			return (AZ_VERBS.has(verb) && !writes(head)) || readVerbAmong(head, AZ_VERBS) ? undefined : `\`az ${head.join(" ")}\` is not a read-only command`;
 		case "aws": {
 			const [service, op = ""] = head;
 			if (service === "sts" && op === "get-caller-identity") return undefined;
@@ -32,7 +54,7 @@ export function checkReadOnly(command: string, args: string[]): string | undefin
 			return /^(describe|list|get|search|lookup|select)-/.test(op) ? undefined : `\`aws ${head.slice(0, 2).join(" ")}\` is not a read-only command`;
 		}
 		case "gcloud":
-			return GCLOUD_VERBS.has(verb) || (head[0] === "auth" && verb === "list") || (head[0] === "config" && (verb === "list" || verb === "get-value"))
+			return (GCLOUD_VERBS.has(verb) && !writes(head)) || readVerbAmong(head, GCLOUD_VERBS) || (head[0] === "auth" && verb === "list") || (head[0] === "config" && (verb === "list" || verb === "get-value"))
 				? undefined
 				: `\`gcloud ${head.join(" ")}\` is not a read-only command`;
 		case "kubectl":
