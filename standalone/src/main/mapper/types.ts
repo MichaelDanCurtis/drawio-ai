@@ -39,6 +39,11 @@ export interface MapNode {
 	rows?: MapRow[];
 	/** Stored on the shape: resource ids, types, regions... Read by "dig deeper". */
 	data?: Record<string, string>;
+	/**
+	 * Source files this node stands for, relative to the mapped folder (forward slashes).
+	 * Used to tag shapes whose files changed (Recent changes) and to give the agent evidence.
+	 */
+	files?: string[];
 }
 
 export interface MapRow {
@@ -114,6 +119,32 @@ export interface CollectContext {
 	cwd: string;
 }
 
+/** A problem the Mapper found, drawn as a badge on the shapes it concerns. */
+export interface MapFinding {
+	/** Stable across runs (e.g. `${kind}:${nodeId}`), so a dismissed finding stays dismissed until it changes. */
+	id: string;
+	/** Machine name of the check, e.g. "open-ingress", "public-bucket", "missing-primary-key", "lifecycle-gap". */
+	kind: string;
+	severity: "high" | "medium" | "low" | "info";
+	/** One plain-English line, e.g. "orders-db accepts connections from the internet". */
+	title: string;
+	/** The evidence (setting, rule, file:line). Never secret values. */
+	detail?: string;
+	/** Ids of the MapNodes concerned (at least one). */
+	nodeIds: string[];
+	/** What to change, phrased so it can be handed to the agent. */
+	fix?: string;
+}
+
+/** What a check looked at, so an empty findings list is not mistaken for "all clear". */
+export interface CheckCoverage {
+	/** Plain-English name, e.g. "Security groups open to the internet". */
+	check: string;
+	/** How many things were examined (rules, buckets, endpoints, tables...). */
+	scanned: number;
+	note?: string;
+}
+
 export interface CollectResult {
 	/** What to draw. Omit when the agent draws everything (agent-only recipes). */
 	graph?: MapGraph;
@@ -122,6 +153,10 @@ export interface CollectResult {
 	/** One line for the user, e.g. "42 resources in 3 resource groups". */
 	summary: string;
 	warnings?: string[];
+	/** Health findings on the mapped shapes (precision over recall: only what the facts show). */
+	findings?: MapFinding[];
+	/** The checks that ran, found something or not. */
+	checked?: CheckCoverage[];
 }
 
 export interface Recipe {
