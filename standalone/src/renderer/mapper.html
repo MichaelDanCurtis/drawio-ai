@@ -128,9 +128,11 @@
 	const recipes = () => (state.catalog?.recipes ?? []).filter((r) => r.category === state.category);
 	const recipe = () => state.catalog?.recipes.find((r) => r.id === state.recipeId);
 
-	function visible(r, f) {
+	/** A field shows when its condition holds and the field it depends on shows too. */
+	function visible(r, f, depth = 0) {
 		if (!f.showIf) return true;
 		const other = r.fields.find((x) => x.id === f.showIf.field);
+		if (other && depth < 10 && !visible(r, other, depth + 1)) return false;
 		const v = state.values[f.showIf.field] ?? other?.default ?? "";
 		return f.showIf.values.includes(String(v));
 	}

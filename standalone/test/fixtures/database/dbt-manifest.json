@@ -1,0 +1,59 @@
+{
+	"metadata": { "dbt_version": "1.8.7", "project_name": "shop", "generated_at": "2026-01-01T00:00:00Z" },
+	"sources": {
+		"source.shop.stripe.charges": { "unique_id": "source.shop.stripe.charges", "resource_type": "source", "source_name": "stripe", "name": "charges", "identifier": "charges", "schema": "raw_stripe", "package_name": "shop", "description": "Raw charges" },
+		"source.shop.stripe.customers": { "unique_id": "source.shop.stripe.customers", "resource_type": "source", "source_name": "stripe", "name": "customers", "identifier": "customers", "schema": "raw_stripe", "package_name": "shop" }
+	},
+	"nodes": {
+		"seed.shop.country_codes": { "unique_id": "seed.shop.country_codes", "resource_type": "seed", "name": "country_codes", "package_name": "shop", "fqn": ["shop", "country_codes"], "schema": "analytics", "config": { "materialized": "seed" }, "depends_on": { "nodes": [] }, "original_file_path": "seeds/country_codes.csv" },
+		"model.shop.stg_orders": {
+			"unique_id": "model.shop.stg_orders",
+			"resource_type": "model",
+			"name": "stg_orders",
+			"package_name": "shop",
+			"fqn": ["shop", "staging", "stg_orders"],
+			"schema": "analytics",
+			"config": { "materialized": "view" },
+			"depends_on": { "nodes": ["source.shop.stripe.charges", "source.shop.stripe.customers"] },
+			"original_file_path": "models/staging/stg_orders.sql",
+			"description": "One row per charge",
+			"columns": { "order_id": {}, "customer_id": {} }
+		},
+		"model.shop.int_ephemeral": {
+			"unique_id": "model.shop.int_ephemeral",
+			"resource_type": "model",
+			"name": "int_ephemeral",
+			"package_name": "shop",
+			"fqn": ["shop", "intermediate", "int_ephemeral"],
+			"schema": "analytics",
+			"config": { "materialized": "ephemeral" },
+			"depends_on": { "nodes": ["model.shop.stg_orders"] },
+			"original_file_path": "models/intermediate/int_ephemeral.sql"
+		},
+		"model.shop.fct_orders": {
+			"unique_id": "model.shop.fct_orders",
+			"resource_type": "model",
+			"name": "fct_orders",
+			"package_name": "shop",
+			"fqn": ["shop", "marts", "core", "fct_orders"],
+			"schema": "analytics",
+			"config": { "materialized": "incremental" },
+			"depends_on": { "nodes": ["model.shop.stg_orders", "model.shop.int_ephemeral", "seed.shop.country_codes", "macro.dbt.is_incremental"] },
+			"original_file_path": "models/marts/core/fct_orders.sql"
+		},
+		"test.shop.unique_fct_orders_order_id.1a": { "unique_id": "test.shop.unique_fct_orders_order_id.1a", "resource_type": "test", "name": "unique_fct_orders_order_id", "depends_on": { "nodes": ["model.shop.fct_orders"] } },
+		"test.shop.not_null_fct_orders_order_id.2b": { "unique_id": "test.shop.not_null_fct_orders_order_id.2b", "resource_type": "test", "name": "not_null_fct_orders_order_id", "depends_on": { "nodes": ["model.shop.fct_orders"] } }
+	},
+	"exposures": {
+		"exposure.shop.revenue_dashboard": {
+			"unique_id": "exposure.shop.revenue_dashboard",
+			"resource_type": "exposure",
+			"name": "revenue_dashboard",
+			"label": "Revenue dashboard",
+			"type": "dashboard",
+			"maturity": "high",
+			"owner": { "name": "Finance", "email": "owner@example.com" },
+			"depends_on": { "nodes": ["model.shop.fct_orders"] }
+		}
+	}
+}

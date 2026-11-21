@@ -1,0 +1,84 @@
+openapi: 3.0.3
+info:
+  title: Orders API
+  version: 1.4.0
+servers:
+  - url: https://api.shop.example.com/v1
+security:
+  - bearer: []
+paths:
+  /orders:
+    get:
+      tags: [orders]
+      summary: List orders
+      parameters:
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Order" } }
+    post:
+      tags: [orders]
+      summary: Create an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OrderCreate" }
+      responses:
+        "201":
+          description: created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "422": { $ref: "#/components/responses/Invalid" }
+  /orders/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [orders]
+      responses:
+        "200":
+          description: ok
+          content: { application/json: { schema: { $ref: "#/components/schemas/Order" } } }
+        "404": { description: not found }
+    delete:
+      tags: [orders]
+      deprecated: true
+      responses: { "204": { description: cancelled } }
+  /health:
+    get:
+      security: []
+      responses: { "200": { description: ok } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  responses:
+    Invalid:
+      description: invalid
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Order:
+      type: object
+      required: [id, items]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [pending, paid, cancelled] }
+        items: { type: array, items: { $ref: "#/components/schemas/OrderItem" } }
+    OrderItem:
+      type: object
+      properties:
+        sku: { type: string }
+        quantity: { type: integer }
+    OrderCreate:
+      allOf:
+        - $ref: "#/components/schemas/OrderItem"
+        - type: object
+          properties:
+            note: { type: string }
+    Error:
+      type: object
+      properties:
+        message: { type: string }

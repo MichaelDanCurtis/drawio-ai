@@ -1,0 +1,608 @@
+{
+	"engine": "mysql",
+	"info": {
+		"database": "",
+		"version": "8.4.13",
+		"schemas": "shop,shop_billing"
+	},
+	"tables": [
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customer_profiles",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"table_type": "BASE TABLE",
+			"comment": "People who buy things",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_totals",
+			"table_type": "VIEW",
+			"comment": "VIEW",
+			"row_estimate": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"table_type": "BASE TABLE",
+			"comment": "",
+			"row_estimate": 0
+		}
+	],
+	"columns": [
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"column_name": "id",
+			"position": 1,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"column_name": "customer_id",
+			"position": 2,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "MUL"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"column_name": "line1",
+			"position": 3,
+			"column_type": "varchar(200)",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"column_name": "city",
+			"position": 4,
+			"column_type": "varchar(100)",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customer_profiles",
+			"column_name": "customer_id",
+			"position": 1,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customer_profiles",
+			"column_name": "bio",
+			"position": 2,
+			"column_type": "text",
+			"is_nullable": "YES",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"column_name": "id",
+			"position": 1,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"column_name": "email",
+			"position": 2,
+			"column_type": "varchar(255)",
+			"is_nullable": "NO",
+			"column_key": "UNI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"column_name": "name",
+			"position": 3,
+			"column_type": "varchar(100)",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"column_name": "created_at",
+			"position": 4,
+			"column_type": "datetime",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"column_name": "id",
+			"position": 1,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"column_name": "name",
+			"position": 2,
+			"column_type": "varchar(100)",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"column_name": "manager_id",
+			"position": 3,
+			"column_type": "int",
+			"is_nullable": "YES",
+			"column_key": "MUL"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"column_name": "order_id",
+			"position": 1,
+			"column_type": "bigint",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"column_name": "product_id",
+			"position": 2,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"column_name": "quantity",
+			"position": 3,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_totals",
+			"column_name": "order_id",
+			"position": 1,
+			"column_type": "bigint",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_totals",
+			"column_name": "total",
+			"position": 2,
+			"column_type": "decimal(42,2)",
+			"is_nullable": "YES",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"column_name": "id",
+			"position": 1,
+			"column_type": "bigint",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"column_name": "customer_id",
+			"position": 2,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "MUL"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"column_name": "shipping_address_id",
+			"position": 3,
+			"column_type": "int",
+			"is_nullable": "YES",
+			"column_key": "MUL"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"column_name": "status",
+			"position": 4,
+			"column_type": "varchar(20)",
+			"is_nullable": "NO",
+			"column_key": "MUL"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"column_name": "placed_at",
+			"position": 5,
+			"column_type": "datetime",
+			"is_nullable": "YES",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"column_name": "id",
+			"position": 1,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"column_name": "sku",
+			"position": 2,
+			"column_type": "varchar(32)",
+			"is_nullable": "NO",
+			"column_key": "UNI"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"column_name": "name",
+			"position": 3,
+			"column_type": "varchar(200)",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"column_name": "price",
+			"position": 4,
+			"column_type": "decimal(10,2)",
+			"is_nullable": "NO",
+			"column_key": ""
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"column_name": "id",
+			"position": 1,
+			"column_type": "int",
+			"is_nullable": "NO",
+			"column_key": "PRI"
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"column_name": "order_id",
+			"position": 2,
+			"column_type": "bigint",
+			"is_nullable": "NO",
+			"column_key": "MUL"
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"column_name": "amount",
+			"position": 3,
+			"column_type": "decimal(12,2)",
+			"is_nullable": "NO",
+			"column_key": ""
+		}
+	],
+	"keys": [
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"constraint_name": "addresses_ibfk_1",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "customer_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "customers",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customer_profiles",
+			"constraint_name": "customer_profiles_ibfk_1",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "customer_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "customers",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customer_profiles",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "customer_id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"constraint_name": "employees_ibfk_1",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "manager_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "employees",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"constraint_name": "order_items_ibfk_1",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "order_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "orders",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"constraint_name": "order_items_ibfk_2",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "product_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "products",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "order_id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "product_id",
+			"position": 2,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"constraint_name": "fk_orders_address",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "shipping_address_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "addresses",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"constraint_name": "fk_orders_customer",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "customer_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "customers",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"constraint_name": "invoices_ibfk_1",
+			"constraint_type": "FOREIGN KEY",
+			"column_name": "order_id",
+			"position": 1,
+			"ref_schema": "shop",
+			"ref_table": "orders",
+			"ref_column": "id"
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"constraint_name": "PRIMARY",
+			"constraint_type": "PRIMARY KEY",
+			"column_name": "id",
+			"position": 1,
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_column": null
+		}
+	],
+	"indexes": [
+		{
+			"table_schema": "shop",
+			"table_name": "addresses",
+			"index_name": "customer_id",
+			"non_unique": 1,
+			"column_name": "customer_id",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "customers",
+			"index_name": "email",
+			"non_unique": 0,
+			"column_name": "email",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "employees",
+			"index_name": "manager_id",
+			"non_unique": 1,
+			"column_name": "manager_id",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "order_items",
+			"index_name": "product_id",
+			"non_unique": 1,
+			"column_name": "product_id",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"index_name": "fk_orders_address",
+			"non_unique": 1,
+			"column_name": "shipping_address_id",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"index_name": "fk_orders_customer",
+			"non_unique": 1,
+			"column_name": "customer_id",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "orders",
+			"index_name": "orders_status_idx",
+			"non_unique": 1,
+			"column_name": "status",
+			"position": 1
+		},
+		{
+			"table_schema": "shop",
+			"table_name": "products",
+			"index_name": "sku",
+			"non_unique": 0,
+			"column_name": "sku",
+			"position": 1
+		},
+		{
+			"table_schema": "shop_billing",
+			"table_name": "invoices",
+			"index_name": "order_id",
+			"non_unique": 1,
+			"column_name": "order_id",
+			"position": 1
+		}
+	]
+}

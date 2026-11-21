@@ -213,9 +213,12 @@ export class MapperDialog {
 	}
 }
 
-function visible(recipe: Recipe, fieldId: string, input: MapInput): boolean {
+/** A field applies when its condition holds and the field it depends on applies too. */
+export function visible(recipe: Recipe, fieldId: string, input: MapInput, depth = 0): boolean {
 	const f = recipe.fields.find((x) => x.id === fieldId);
-	return !f?.showIf || f.showIf.values.includes(String(input[f.showIf.field] ?? recipe.fields.find((x) => x.id === f.showIf!.field)?.default ?? ""));
+	if (!f?.showIf) return true;
+	if (depth < 10 && !visible(recipe, f.showIf.field, input, depth + 1)) return false;
+	return f.showIf.values.includes(String(input[f.showIf.field] ?? recipe.fields.find((x) => x.id === f.showIf!.field)?.default ?? ""));
 }
 
 function errorText(e: any): string {

@@ -1,0 +1,351 @@
+{
+	"engine": "mongodb",
+	"info": {
+		"database": "shop",
+		"version": "7.0.48",
+		"sampleSize": 200
+	},
+	"databases": [
+		{
+			"name": "shop",
+			"collections": [
+				{
+					"name": "big_orders",
+					"type": "view",
+					"viewOn": "orders",
+					"stages": [
+						"$match",
+						"$project"
+					]
+				},
+				{
+					"name": "customers",
+					"type": "collection",
+					"count": 3,
+					"indexes": [
+						{
+							"name": "_id_",
+							"key": {
+								"_id": 1
+							},
+							"unique": false
+						},
+						{
+							"name": "email_1",
+							"key": {
+								"email": 1
+							},
+							"unique": true
+						}
+					],
+					"sample": [
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594819"
+							},
+							"email": "c0@example.com",
+							"name": "Customer 0",
+							"address": {
+								"city": "Berlin",
+								"zip": "10115"
+							}
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f059481a"
+							},
+							"email": "c1@example.com",
+							"name": "Customer 1",
+							"address": {
+								"city": "Berlin",
+								"zip": "10115"
+							},
+							"vip": true
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f059481b"
+							},
+							"email": "c2@example.com",
+							"name": "Customer 2",
+							"address": {
+								"city": "Berlin",
+								"zip": "10115"
+							},
+							"vip": true
+						}
+					]
+				},
+				{
+					"name": "orders",
+					"type": "collection",
+					"count": 6,
+					"indexes": [
+						{
+							"name": "_id_",
+							"key": {
+								"_id": 1
+							},
+							"unique": false
+						},
+						{
+							"name": "customerId_1",
+							"key": {
+								"customerId": 1
+							},
+							"unique": false
+						}
+					],
+					"sample": [
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f059481e"
+							},
+							"customerId": {
+								"$oid": "6b018b13bd36b715f0594819"
+							},
+							"status": "new",
+							"items": [
+								{
+									"productId": {
+										"$oid": "6b018b13bd36b715f059481c"
+									},
+									"qty": 1
+								}
+							],
+							"placedAt": {
+								"$date": "2026-11-21T12:14:11.933Z"
+							},
+							"couponCode": "X"
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f059481f"
+							},
+							"customerId": {
+								"$oid": "6b018b13bd36b715f059481a"
+							},
+							"status": "paid",
+							"items": [
+								{
+									"productId": {
+										"$oid": "6b018b13bd36b715f059481d"
+									},
+									"qty": 2
+								}
+							],
+							"placedAt": {
+								"$date": "2026-11-21T12:14:11.933Z"
+							}
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594820"
+							},
+							"customerId": {
+								"$oid": "6b018b13bd36b715f059481b"
+							},
+							"status": "new",
+							"items": [
+								{
+									"productId": {
+										"$oid": "6b018b13bd36b715f059481c"
+									},
+									"qty": 3
+								}
+							],
+							"placedAt": {
+								"$date": "2026-11-21T12:14:11.933Z"
+							}
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594821"
+							},
+							"customerId": {
+								"$oid": "6b018b13bd36b715f0594819"
+							},
+							"status": "paid",
+							"items": [
+								{
+									"productId": {
+										"$oid": "6b018b13bd36b715f059481d"
+									},
+									"qty": 4
+								}
+							],
+							"placedAt": {
+								"$date": "2026-11-21T12:14:11.933Z"
+							},
+							"couponCode": "X"
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594822"
+							},
+							"customerId": {
+								"$oid": "6b018b13bd36b715f059481a"
+							},
+							"status": "new",
+							"items": [
+								{
+									"productId": {
+										"$oid": "6b018b13bd36b715f059481c"
+									},
+									"qty": 5
+								}
+							],
+							"placedAt": {
+								"$date": "2026-11-21T12:14:11.933Z"
+							}
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594823"
+							},
+							"customerId": {
+								"$oid": "6b018b13bd36b715f059481b"
+							},
+							"status": "paid",
+							"items": [
+								{
+									"productId": {
+										"$oid": "6b018b13bd36b715f059481d"
+									},
+									"qty": 6
+								}
+							],
+							"placedAt": {
+								"$date": "2026-11-21T12:14:11.933Z"
+							}
+						}
+					]
+				},
+				{
+					"name": "payments",
+					"type": "collection",
+					"count": 3,
+					"indexes": [
+						{
+							"name": "_id_",
+							"key": {
+								"_id": 1
+							},
+							"unique": false
+						}
+					],
+					"sample": [
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594824"
+							},
+							"order": {
+								"$ref": "orders",
+								"$id": {
+									"$oid": "6b018b13bd36b715f059481e"
+								}
+							},
+							"amount": 10,
+							"method": "card"
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594825"
+							},
+							"order": {
+								"$ref": "orders",
+								"$id": {
+									"$oid": "6b018b13bd36b715f059481f"
+								}
+							},
+							"amount": 10,
+							"method": "card"
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594826"
+							},
+							"order": {
+								"$ref": "orders",
+								"$id": {
+									"$oid": "6b018b13bd36b715f0594820"
+								}
+							},
+							"amount": 10,
+							"method": "card"
+						}
+					]
+				},
+				{
+					"name": "products",
+					"type": "collection",
+					"count": 2,
+					"indexes": [
+						{
+							"name": "_id_",
+							"key": {
+								"_id": 1
+							},
+							"unique": false
+						}
+					],
+					"sample": [
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f059481c"
+							},
+							"sku": "SKU-0",
+							"name": "Product 0",
+							"price": 9.5,
+							"tags": [
+								"a",
+								"b"
+							]
+						},
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f059481d"
+							},
+							"sku": "SKU-1",
+							"name": "Product 1",
+							"price": 10.5,
+							"tags": [
+								"a",
+								"b"
+							]
+						}
+					]
+				},
+				{
+					"name": "reviews",
+					"type": "collection",
+					"count": 1,
+					"indexes": [
+						{
+							"name": "_id_",
+							"key": {
+								"_id": 1
+							},
+							"unique": false
+						}
+					],
+					"sample": [
+						{
+							"_id": {
+								"$oid": "6b018b13bd36b715f0594827"
+							},
+							"customer": {
+								"$oid": "6b018b13bd36b715f0594819"
+							},
+							"product_id": {
+								"$oid": "6b018b13bd36b715f059481d"
+							},
+							"stars": 5,
+							"text": "ok"
+						}
+					]
+				}
+			]
+		}
+	]
+}
