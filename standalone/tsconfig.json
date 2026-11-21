@@ -1,0 +1,19 @@
+{
+	// Type-checks the app and the shared modules it imports from ../src (read-only).
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "preserve",
+		"moduleResolution": "bundler",
+		"lib": ["es2022", "dom"],
+		"strict": true,
+		"noEmit": true,
+		"skipLibCheck": true,
+		"esModuleInterop": true,
+		"experimentalDecorators": true,
+		"useDefineForClassFields": false,
+		"types": ["node", "vscode"],
+		"typeRoots": ["./node_modules/@types"],
+		"paths": { "*": ["./node_modules/*", "./node_modules/@types/*"] }
+	},
+	"include": ["src/**/*", "../drawio-custom-plugins/src/types.d.ts", "../src/types.d.ts"]
+}
