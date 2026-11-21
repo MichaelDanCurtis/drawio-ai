@@ -381,6 +381,19 @@ async function runInsights(w: DiagramWindow, config: E2eConfig, log: (k: string,
 	log("layers", page.layers.map((l) => l.name));
 	const findings = await call("mapper_findings", { mapId });
 	log("findings", { n: findings.findings.length, checked: findings.checked.length, first: findings.findings[0]?.title ?? null });
+	// The chat's Map ▾ menu, clicked like the user would.
+	await pause(800);
+	const cw = w.chatView.webContents;
+	log("mapMenuButton", await cw.executeJavaScript(`(() => { const b = document.getElementById("mapActions"); return b.classList.contains("hidden") ? null : b.textContent.trim(); })()`));
+	await cw.executeJavaScript(`document.getElementById("mapActions").click(); document.querySelector('#mapMenu button[data-action="findings"]').click(); true`);
+	await pause(1500);
+	const report = w.chat.items.filter((i) => i.kind === "report").slice(-1)[0] as any;
+	log("findingsReport", report ? { title: report.title, rows: report.rows.length, firstActions: report.rows[0]?.actions?.map((a: any) => a.title), footer: String(report.footer ?? "").split("\n")[0] } : null);
+	fs.writeFileSync(path.join(config.out, "findings-chat.png"), (await cw.capturePage()).toPNG());
+	// "Show on map" selects the finding's shapes.
+	await cw.executeJavaScript(`(() => { const b = [...document.querySelectorAll(".report .ractions button")].find((x) => x.textContent === "Show on map"); b && b.click(); return !!b; })()`);
+	await pause(1200);
+	log("showOnMapSelected", w.client.currentSelection.length);
 
 	// Change a file the map knows about, and add one.
 	const known = run && (await call("mapper_show", { nodeId: any.id })).files?.[0];

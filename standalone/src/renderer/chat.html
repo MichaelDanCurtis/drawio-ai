@@ -92,7 +92,9 @@
 	/* Header and toolbar: flat, like draw.io's toolbar and format panel tabs. */
 	header, #context { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text); flex: none; }
 	header { height: 40px; }
-	#context { height: 36px; }
+	#context { height: 36px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+	#context::-webkit-scrollbar { display: none; }
+	#context > * { flex: none; }
 	select { appearance: none; -webkit-appearance: none; min-width: 0; font: inherit; font-size: 12px; color: var(--strong); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%238e8e93' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 6px center; border: none; border-radius: 4px; padding: 5px 20px 5px 6px; cursor: pointer; text-overflow: ellipsis; }
 	select:hover, select:focus-visible { background-color: var(--hover); outline: none; }
 	#provider { flex: 0 1 auto; max-width: 48%; font-weight: 600; }
@@ -481,7 +483,8 @@
 		$("lasso").classList.toggle("active", !!state.lassoActive);
 		$("digDeeper").classList.toggle("hidden", !state.mappedSelection);
 		$("mapActions").classList.toggle("hidden", !state.pageMaps);
-		$("mapActionsLabel").textContent = state.pageFindings ? "Map ▾ ⚠" + state.pageFindings : "Map ▾";
+		$("mapActionsLabel").textContent = state.pageFindings ? "⚠" + state.pageFindings + " ▾" : "Map ▾";
+		$("mapActions").title = (state.pageFindings ? state.pageFindings + " finding(s) on this page's maps. " : "") + "Map actions: findings, plain-English descriptions, recent changes, refresh, tour, ask";
 		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
 		$("provider").title = state.providerTitle || "Coding agent";
