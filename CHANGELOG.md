@@ -16,16 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Export to PDF: **Draw.io: Export to PDF…**, **File → Export as PDF…** in the diagram, `.pdf` in **Draw.io: Export To...**, and `pdf` in the `drawio_export` tool. Each page becomes one PDF page the size of its content, rendered at print resolution inside VS Code (draw.io's own PDF export needs its online service); empty pages are left out
-- **Draw.AI: Use Draw.AI for Diagram Files** sets VS Code's editor associations for draw.io files to Draw.AI and reopens diagrams that are open in another draw.io editor. Draw.AI offers it when Draw.io Integration is also enabled, and reports older Draw.AI builds that would block it from starting
-- The AI tools say when a diagram is open in Draw.io Integration instead of reporting that no diagram is open
 
 ### Removed
 
 - The Draw.AI chat panel (the Draw.AI view in the activity bar) and its own Anthropic and OpenAI-compatible providers: **Open Draw.AI Chat Panel**, **New AI Chat**, **Select AI Provider and Model**, **Set API Key**, and the settings `drawio-ai.chatSurface`, `drawio-ai.provider`, `drawio-ai.persistChat`, `drawio-ai.anthropic.*` and `drawio-ai.openai.*`. Use any model in VS Code's chat instead, or Claude Code / Codex through **Connect Claude Code / Codex…**. API keys you stored stay in VS Code's secret storage until you remove the extension
 
+## [0.2.1]
+
 ### Fixed
 
 - With Draw.io Integration (hediet.vscode-drawio) also enabled, Draw.AI failed to start whenever Draw.io Integration started first (both registered the `drawio` file system scheme), so diagrams, the chat and the AI tools seemed to hang. Draw.AI now uses its own scheme.
+
+### Added
+
+- **Draw.AI: Use Draw.AI for Diagram Files** sets VS Code's editor associations for draw.io files to Draw.AI and reopens diagrams that are open in another draw.io editor. Draw.AI offers it when Draw.io Integration is also enabled, and reports older Draw.AI builds that would block it from starting
+- The AI tools say when a diagram is open in Draw.io Integration instead of reporting that no diagram is open
 
 ## [0.2.0]
 
