@@ -56,6 +56,32 @@ export class MapperService {
 			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	}
 
+	/**
+	 * After Save As: the records of the diagram's maps belong to the new file. In
+	 * another folder they are copied there (the old file keeps its own); in the same
+	 * folder they are re-associated with the new name.
+	 */
+	public adoptRecords(from: { cwd: string; diagram?: string }, to: { cwd: string; diagram: string }): number {
+		const oldName = from.diagram ? path.basename(from.diagram) : undefined;
+		const newName = path.basename(to.diagram);
+		let names: string[] = [];
+		try {
+			names = fs.readdirSync(mapsDir(from.cwd)).filter((n) => n.endsWith(".json"));
+		} catch {
+			return 0;
+		}
+		let n = 0;
+		for (const name of names) {
+			const r = loadRecord(from.cwd, name.replace(/\.json$/, ""));
+			if (!r || (r.diagram ?? undefined) !== oldName) continue;
+			if (path.resolve(from.cwd) !== path.resolve(to.cwd) && loadRecord(to.cwd, r.id)) continue; // already there
+			r.diagram = newName;
+			saveRecord(to.cwd, r);
+			n++;
+		}
+		return n;
+	}
+
 	public record(id: string | undefined): MapRecord {
 		const r = id ? loadRecord(this.cwd, id) : undefined;
 		if (r) return r;

@@ -43,6 +43,8 @@ function drawioLocalStorage(): Record<string, string> {
 export class DiagramWindow {
 	public static readonly all = new Set<DiagramWindow>();
 	private static byEditor = new Map<number, DiagramWindow>();
+	/** The diagram window used last, even while another app (a terminal) has focus. */
+	private static lastFocused: DiagramWindow | undefined;
 	private static byChat = new Map<number, DiagramWindow>();
 
 	public readonly id = `w${nextId++}`;
@@ -99,7 +101,10 @@ export class DiagramWindow {
 
 	public static focused(): DiagramWindow | undefined {
 		const win = BaseWindow.getFocusedWindow();
-		return [...DiagramWindow.all].find((w) => w.win === win) ?? [...DiagramWindow.all].pop();
+		const front = [...DiagramWindow.all].find((w) => w.win === win);
+		if (front) return front;
+		const last = DiagramWindow.lastFocused;
+		return last && DiagramWindow.all.has(last) ? last : [...DiagramWindow.all].pop();
 	}
 
 	public static installIpc(): void {
@@ -138,6 +143,7 @@ export class DiagramWindow {
 		DiagramWindow.byEditor.set(this.editorView.webContents.id, this);
 		DiagramWindow.byChat.set(this.chatView.webContents.id, this);
 		DiagramWindow.all.add(this);
+		DiagramWindow.lastFocused = this;
 
 		for (const wc of [this.editorView.webContents, this.chatView.webContents]) {
 			wc.setWindowOpenHandler(({ url }) => {
@@ -223,7 +229,10 @@ export class DiagramWindow {
 		this.win.on("resize", () => this.layout());
 		this.win.on("close", (e) => this.onClose(e));
 		this.win.on("closed", () => this.dispose());
-		this.win.on("focus", () => this.chat.postState());
+		this.win.on("focus", () => {
+			DiagramWindow.lastFocused = this;
+			this.chat.postState();
+		});
 		this.layout();
 		this.updateTitle();
 	}
@@ -497,7 +506,14 @@ export class DiagramWindow {
 		if (r.canceled || !r.filePath) return false;
 		const ok = await this.writeTo(r.filePath);
 		if (ok) {
+			const from = { cwd: this.cwd(), diagram: this.file };
 			this.file = r.filePath;
+			// The maps' records follow the diagram to its new name and folder.
+			try {
+				this.maps.adoptRecords(from, { cwd: this.cwd(), diagram: r.filePath });
+			} catch (e) {
+				console.warn("Could not carry the map records over:", e);
+			}
 			app.addRecentDocument(r.filePath);
 			this.updateTitle();
 			this.chat.postState();
@@ -600,6 +616,7 @@ export class DiagramWindow {
 		this.mcp.dispose();
 		this.client.dispose();
 		DiagramWindow.all.delete(this);
+		if (DiagramWindow.lastFocused === this) DiagramWindow.lastFocused = undefined;
 		for (const [k, v] of DiagramWindow.byEditor) if (v === this) DiagramWindow.byEditor.delete(k);
 		for (const [k, v] of DiagramWindow.byChat) if (v === this) DiagramWindow.byChat.delete(k);
 		if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.close();
