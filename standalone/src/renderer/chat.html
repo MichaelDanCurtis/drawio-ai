@@ -65,6 +65,13 @@
 	.permission .detail { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8; white-space: pre-wrap; max-height: 8em; overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 4px 6px; border-radius: 4px; }
 	.permission .options { display: flex; gap: 6px; flex-wrap: wrap; }
 	.permission .outcome { opacity: .75; }
+	.permission .options button.allow-all { margin-left: auto; }
+	/* Approved by "Allow all": one dimmed line. */
+	.permission.auto { border: 0; padding: 0 8px; flex-direction: row; gap: 8px; opacity: .6; font-size: 11px; }
+	.permission.auto .title { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.permission.auto .options { display: none; }
+	.chip.allow-all { cursor: pointer; background: transparent; font: inherit; font-size: 11px; color: #d97706; border-color: #d97706; }
+	.chip.allow-all:hover { background: rgba(217,119,6,.12); }
 	:root { --accent: #a855f7; --radius: 6px; }
 	* { box-sizing: border-box; }
 	body { margin: 0; padding: 0; font: var(--vscode-font-size) var(--vscode-font-family); color: var(--vscode-foreground); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -149,6 +156,7 @@
 		<select id="provider" title="Coding agent"></select>
 		<select id="model" title="Model or mode"></select>
 		<span class="spacer"></span>
+		<button id="allowAllChip" class="chip allow-all hidden" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">⚡ Allow all ✕</button>
 		<button id="newChat" class="tb" title="New chat (starts a new agent session)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
 	</header>
 	<div id="context">
@@ -282,12 +290,13 @@
 			lastThought = el;
 			lastAssistant = null;
 		} else if (item.kind === "permission") {
-			el.className = "permission";
+			el.className = "permission" + (item.auto ? " auto" : "");
 			const title = document.createElement("div");
 			title.className = "title";
-			title.textContent = "⚑ " + item.title;
+			title.textContent = (item.auto ? "⚡ " : "⚑ ") + item.title;
+			if (item.detail && item.auto) title.title = item.detail;
 			el.appendChild(title);
-			if (item.detail) {
+			if (item.detail && !item.auto) {
 				const d = document.createElement("div");
 				d.className = "detail";
 				d.textContent = item.detail;
@@ -335,6 +344,14 @@
 			b.title = opt.kind.replace("_", " ");
 			b.addEventListener("click", () => vscode.postMessage({ type: "permissionReply", id: item.id, optionId: opt.optionId }));
 			p.opts.appendChild(b);
+		}
+		if ((item.options || []).some((o) => o.kind === "allow_once" || o.kind === "allow_always")) {
+			const all = document.createElement("button");
+			all.className = "allow-all";
+			all.textContent = "Allow all";
+			all.title = "Allow this and everything else the agent asks for in this chat, until New Chat or you turn it off (⚡ chip at the top)";
+			all.addEventListener("click", () => vscode.postMessage({ type: "allowAll", on: true }));
+			p.opts.appendChild(all);
 		}
 	}
 	function appendThought(text) {
@@ -395,6 +412,7 @@
 		status.className = state.agentState || "";
 		status.title = state.agentInfo || state.modelsError || "";
 		renderReview(state.review);
+		$("allowAllChip").classList.toggle("hidden", !state.allowAll);
 		setBusy(state.busy);
 	}
 
@@ -506,6 +524,7 @@
 	$("send").addEventListener("click", () => send());
 	$("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
 	$("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
+	$("allowAllChip").addEventListener("click", () => vscode.postMessage({ type: "allowAll", on: false }));
 	$("lasso").addEventListener("click", () => vscode.postMessage({ type: "lasso" }));
 	$("askInDiagram").addEventListener("click", () => vscode.postMessage({ type: "askInDiagram" }));
 	$("markup").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.markup" }));

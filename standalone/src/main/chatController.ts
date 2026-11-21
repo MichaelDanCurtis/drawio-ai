@@ -18,7 +18,7 @@ type TranscriptItem =
 	| { kind: "tool"; id: string; summary: string; status: "running" | "ok" | "error" }
 	| { kind: "note"; text: string }
 	| { kind: "error"; text: string; action?: { title: string; command: string } }
-	| { kind: "permission"; id: string; title: string; detail?: string; options: acp.PermissionOption[]; outcome?: string };
+	| { kind: "permission"; id: string; title: string; detail?: string; options: acp.PermissionOption[]; outcome?: string; auto?: boolean };
 
 interface ImageData {
 	mimeType: string;
@@ -62,6 +62,10 @@ export class ChatController {
 	private assistant: { kind: "assistant"; text: string } | undefined;
 	private thought: { kind: "thought"; text: string } | undefined;
 	private permissions = new Map<string, (outcome: acp.RequestPermissionOutcome) => void>();
+	/** Options of the requests waiting for an answer, to approve them all at once. */
+	private permissionOptions = new Map<string, acp.PermissionOption[]>();
+	/** "Allow all": approve every request in this chat until New Chat, switching agents, or turning it off. */
+	private allowAll = false;
 	private nextPermission = 1;
 	private toolSummaries: { name: string; result: ToolResult }[] = [];
 	/** This window's agent; the saved setting is only the default for new windows. */
@@ -132,6 +136,9 @@ export class ChatController {
 				break;
 			case "pickModel":
 				await this.pickModel(String(msg.modelId ?? ""));
+				break;
+			case "allowAll":
+				this.setAllowAll(!!msg.on);
 				break;
 			case "permissionReply": {
 				const resolve = this.permissions.get(msg.id);
@@ -220,6 +227,7 @@ export class ChatController {
 		this.sessionError = undefined;
 		this.authMethods = [];
 		this.firstPrompt = true;
+		this.allowAll = false;
 		for (const resolve of this.permissions.values()) resolve({ outcome: "cancelled" });
 	}
 
@@ -490,6 +498,24 @@ export class ChatController {
 		return s.result.summary;
 	}
 
+	/** Turns "Allow all" on (approving what is waiting now) or off. */
+	public setAllowAll(on: boolean): void {
+		if (on === this.allowAll) return;
+		this.allowAll = on;
+		if (on) {
+			for (const [id, options] of [...this.permissionOptions]) {
+				const allow = allowOption(options);
+				if (allow) this.permissions.get(id)?.({ outcome: "selected", optionId: allow.optionId });
+			}
+		}
+		this.push({ kind: "note", text: on ? "Allow all is on: the agent's requests in this chat are approved without asking. Turn it off from the chip at the top." : "Allow all is off: the agent asks again." });
+		this.postState();
+	}
+
+	public get allowingAll(): boolean {
+		return this.allowAll;
+	}
+
 	private requestPermission(req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionOutcome> {
 		const id = `p${this.nextPermission++}`;
 		const item: Extract<TranscriptItem, { kind: "permission" }> = {
@@ -499,10 +525,10 @@ export class ChatController {
 			detail: describeInput(req.toolCall.rawInput),
 			options: req.options,
 		};
-		if (this.autoApprove) {
-			const allow = req.options.find((o) => o.kind === "allow_once") ?? req.options.find((o) => o.kind.startsWith("allow"));
+		if (this.autoApprove || this.allowAll) {
+			const allow = allowOption(req.options);
 			if (allow) {
-				this.push({ ...item, outcome: `Auto-approved (test mode): ${allow.name}` });
+				this.push({ ...item, auto: this.allowAll, outcome: this.allowAll ? `✓ ${allow.name} (Allow all is on)` : `Auto-approved (test mode): ${allow.name}` });
 				return Promise.resolve({ outcome: "selected", optionId: allow.optionId });
 			}
 		}
@@ -511,12 +537,14 @@ export class ChatController {
 			const finish = (outcome: acp.RequestPermissionOutcome) => {
 				if (!this.permissions.has(id)) return;
 				this.permissions.delete(id);
+				this.permissionOptions.delete(id);
 				const chosen = outcome.outcome === "selected" ? req.options.find((o) => o.optionId === outcome.optionId) : undefined;
 				item.outcome = chosen ? `${chosen.kind.startsWith("allow") ? "✓" : "✕"} ${chosen.name}` : "Cancelled";
 				this.post({ type: "permissionResolved", id, outcome: item.outcome });
 				resolve(outcome);
 			};
 			this.permissions.set(id, finish);
+			this.permissionOptions.set(id, req.options);
 			signal.addEventListener("abort", () => finish({ outcome: "cancelled" }), { once: true });
 		});
 	}
@@ -598,6 +626,7 @@ export class ChatController {
 					? `Starting ${agentDef(this.agentId).label}${status?.viaNpx ? " (fetching the ACP adapter with npx)" : ""}…`
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
+				allowAll: this.allowAll,
 			},
 		});
 	}
@@ -609,6 +638,11 @@ function firstPromptNote(fileName: string | undefined): string {
 		"Read and change it ONLY with the drawio_* tools of the \"draw-ai\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
 		"Reply with a brief summary of what you changed.",
 	].join("\n");
+}
+
+/** The option that allows this one request (not the agent's own "always" rules), else any allow. */
+function allowOption(options: acp.PermissionOption[]): acp.PermissionOption | undefined {
+	return options.find((o) => o.kind === "allow_once") ?? options.find((o) => o.kind.startsWith("allow"));
 }
 
 function toolStatus(s: acp.ToolCallStatus | null | undefined): "running" | "ok" | "error" {

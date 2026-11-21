@@ -18,6 +18,8 @@ export interface E2eConfig {
 	timeoutMs?: number;
 	/** Answer permission requests by clicking the first "allow" button in the chat panel (instead of auto-approving in code). */
 	clickPermissions?: boolean;
+	/** Answer the first permission request by clicking "Allow all" in the chat panel. */
+	clickAllowAll?: boolean;
 	/** JavaScript to run in the editor before the screenshots (e.g. open a menu). */
 	editorScript?: string;
 	/** Measure editor responsiveness and editor→app traffic instead of the normal checks. */
@@ -101,7 +103,13 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 			await runMap(w, config, log);
 		} else if (config.agent) {
 			let clicker: NodeJS.Timeout | undefined;
-			if (config.clickPermissions) {
+			if (config.clickAllowAll) {
+				clicker = setInterval(() => {
+					void w.chatView.webContents
+						.executeJavaScript(`(() => { const b = document.querySelector(".permission .options button.allow-all"); if (b) { b.click(); return true; } return false; })()`)
+						.then((clicked) => clicked && console.log("[e2e] clicked Allow all"));
+				}, 400);
+			} else if (config.clickPermissions) {
 				// Through the real UI: the permission card the user would see.
 				clicker = setInterval(() => {
 					void w.chatView.webContents
@@ -130,6 +138,8 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 			const items = w.chat.items;
 			log("toolCalls", items.filter((i) => i.kind === "tool").map((i: any) => `${i.status}: ${i.summary}`));
 			log("permissions", items.filter((i) => i.kind === "permission").map((i: any) => `${i.title} -> ${i.outcome}`));
+			log("allowAllOn", w.chat.allowingAll);
+			log("allowAllChipVisible", await w.chatView.webContents.executeJavaScript(`!document.getElementById("allowAllChip").classList.contains("hidden")`));
 			log("reply", items.filter((i) => i.kind === "assistant").map((i: any) => i.text).join("\n").slice(0, 2000));
 			log("errors", items.filter((i) => i.kind === "error").map((i: any) => i.text));
 			fs.writeFileSync(path.join(config.out, "transcript.json"), JSON.stringify(items, null, 2));

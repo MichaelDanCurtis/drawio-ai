@@ -54,7 +54,10 @@ installed and look signed in; when one is not, the chat says what to run (and of
   `src/renderer/chat.html`). Pick the agent and its model or mode at the top. Agent
   replies, thoughts, tool calls and plans stream in; when the agent asks for
   permission (to run a tool, edit a file, ...) the chat shows the agent's options
-  (allow once / always / reject) and waits for you.
+  (allow once / always / reject) and waits for you. **Allow all** on a request approves it and everything
+  else the agent asks for in that chat (shown as one-line ⚡ entries) until New Chat,
+  switching agents, or a click on the ⚡ Allow all chip at the top; also under the
+  **Agent** menu.
 - **Review**: the agent's edits appear as pending changes; **Accept** keeps them,
   **Reject** reverts them (also under the **Agent** menu).
 - **File menu** (both the app menu and draw.io's own File menu in the editor): New,
