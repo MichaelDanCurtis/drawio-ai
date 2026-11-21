@@ -12,6 +12,13 @@ export interface VsdxExport {
 	warnings: string[];
 }
 
+export interface PdfExport {
+	data: BufferImpl;
+	pages: number;
+	/** Pages that were left out because they are empty. */
+	warnings: string[];
+}
+
 export type DiagramImportFormat = AiImportDiagramAction["format"];
 
 export interface DiagramImport {
@@ -229,6 +236,21 @@ export class CustomizedDrawioClient extends DrawioClient<
 			throw new Error("Invalid Response");
 		}
 		return response.dataUrl || undefined;
+	}
+
+	/** Exports the diagram as a PDF, one PDF page per draw.io page (or only the visible one). */
+	public async exportPdf(options: { currentPageOnly?: boolean; title?: string } = {}): Promise<PdfExport> {
+		const response = await this.aiRequest(
+			{ action: "aiExportPdf", currentPageOnly: !!options.currentPageOnly, title: options.title },
+			120_000
+		);
+		if (response.event !== "aiExportPdf") {
+			throw new Error("Invalid Response");
+		}
+		if (response.error || !response.data) {
+			throw new Error(`PDF export failed: ${response.error ?? "no data"}`);
+		}
+		return { data: BufferImpl.from(response.data, "base64"), pages: response.pages, warnings: response.warnings };
 	}
 
 	/** Exports the diagram as a Microsoft Visio (.vsdx) file. */

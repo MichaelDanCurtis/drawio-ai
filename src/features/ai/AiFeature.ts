@@ -2,18 +2,16 @@ import * as vscode from "vscode";
 import { Disposable } from "@hediet/std/disposable";
 import { autorun } from "mobx";
 import type { DrawioEditor, DrawioEditorService } from "../../DrawioEditorService";
-import { getAiSettings, SECRET_KEYS } from "./aiSettings";
-import { ChatViewProvider, DEFAULT_IMAGE_PROMPT } from "./ChatViewProvider";
+import { getAiSettings } from "./aiSettings";
 import { analyze, codeRefs, DiagramKind, detectKind, Entity, formatAnalysis, SourceFile } from "./codeAnalysis";
 import { registerChatParticipant, registerLanguageModelTools } from "./copilotIntegration";
 import { DiagramAgent } from "./DiagramAgent";
 import { DiagramToolbox } from "./DiagramToolbox";
 import { DiagramWorkspace } from "./DiagramWorkspace";
-import { ProviderRegistry } from "./providers/ProviderRegistry";
+import { VsCodeLmClient } from "./providers/VsCodeLmProvider";
 import { readImage } from "./images";
 import { formatIssues, LintIssue } from "./lint";
 import type { ImageData } from "./providers/types";
-import { describeTemplate } from "./templates/profile";
 import { CreateTemplateArgs, TemplateService } from "./templates/TemplateService";
 import { path } from "../../utils/path";
 import { linkData, splitLines } from "./codeLinks";
@@ -22,9 +20,8 @@ import { McpService } from "./McpService";
 import { AgentConnector, ConnectArgs } from "./agentConnect";
 import { exportDiagramToWorkspace } from "./exportDiagram";
 import { importForAgent } from "../importDiagram";
-import { configuredSurface, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat } from "./nativeChat";
-import type { SendExtras } from "./ChatViewProvider";
-import type { SelectionContext } from "./systemPrompt";
+import { nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, SendExtras, sendToNativeChat } from "./nativeChat";
+import { DEFAULT_IMAGE_PROMPT, SelectionContext } from "./systemPrompt";
 
 const CODE_GLOB = /\.(tsx?|jsx?|mjs|cjs|py|java|cs|kt|go|sql|prisma|tf|ya?ml)$/i;
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "out", "build", ".venv", "venv", "__pycache__", "target", "bin", "obj", ".next", ".terraform", "coverage", ".drawio-ai"]);
@@ -50,7 +47,6 @@ interface FromImageArgs {
 export class AiFeature {
 	public readonly dispose = Disposable.fn();
 
-	private readonly registry = new ProviderRegistry(this.context.secrets);
 	private readonly templates = new TemplateService();
 	private readonly codeLinks: CodeLinkService = new CodeLinkService(
 		() => this.editorService.openedEditors,
@@ -75,16 +71,6 @@ export class AiFeature {
 		new DiagramWorkspace(this.editorService, () => this.targetEditor())
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
-	private readonly chatView = new ChatViewProvider(
-		this.context,
-		this.registry,
-		this.agent,
-		() => this.targetEditor(),
-		async (editor) => {
-			const t = await this.templates.active(editor?.uri);
-			return t ? { name: t.manifest.name, prompt: describeTemplate(t) } : undefined;
-		}
-	);
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -93,11 +79,6 @@ export class AiFeature {
 		const track = (d: vscode.Disposable | vscode.Disposable[]) =>
 			(Array.isArray(d) ? d : [d]).forEach((x) => this.dispose.track(x));
 
-		track(
-			vscode.window.registerWebviewViewProvider(ChatViewProvider.viewId, this.chatView, {
-				webviewOptions: { retainContextWhenHidden: true },
-			})
-		);
 		track(
 			registerChatParticipant({
 				agent: this.agent,
@@ -131,25 +112,11 @@ export class AiFeature {
 		track(connector);
 		track(vscode.commands.registerCommand("drawio-ai.connectAgents", (args?: ConnectArgs) => connector.connect(args)));
 		track(vscode.commands.registerCommand("drawio-ai.disconnectAgents", (args?: ConnectArgs) => connector.disconnect(args)));
-		track(this.templates.onDidChange(() => void this.chatView.refreshTemplate()));
-		track(
-			vscode.workspace.onDidChangeConfiguration((e) => {
-				if (e.affectsConfiguration("drawio-ai.template")) void this.chatView.refreshTemplate();
-			})
-		);
-		const watcher = vscode.workspace.createFileSystemWatcher("**/.drawio-ai/templates/**");
-		track([
-			watcher,
-			watcher.onDidCreate(() => void this.chatView.refreshTemplate()),
-			watcher.onDidDelete(() => void this.chatView.refreshTemplate()),
-			watcher.onDidChange(() => void this.chatView.refreshTemplate()),
-		]);
 
 		this.dispose.track({
 			dispose: autorun(() => {
 				void this.editorService.lastActiveDrawioEditor;
 				void this.editorService.activeDrawioEditor;
-				this.chatView.onActiveDiagramChanged();
 				this.onTargetReviewChanged();
 			}),
 		});
@@ -162,8 +129,6 @@ export class AiFeature {
 
 		track([
 			vscode.commands.registerCommand("drawio-ai.openChat", () => this.openChat()),
-			vscode.commands.registerCommand("drawio-ai.openChatPanel", () => this.chatView.reveal()),
-			vscode.commands.registerCommand("drawio-ai.newChat", () => this.chatView.newChat()),
 			vscode.commands.registerCommand("drawio-ai.askAboutSelection", () => {
 				const editor = this.targetEditor();
 				if (editor) {
@@ -180,10 +145,6 @@ export class AiFeature {
 					editor.drawioClient.aiSetLassoMode(true);
 				}
 			}),
-			vscode.commands.registerCommand("drawio-ai.selectModel", () =>
-				this.chatView.pickProviderAndModel()
-			),
-			vscode.commands.registerCommand("drawio-ai.setApiKey", () => this.setApiKey()),
 			vscode.commands.registerCommand("drawio-ai.acceptChanges", () =>
 				this.targetEditor()?.drawioClient.aiResolveReview("accept")
 			),
@@ -218,69 +179,55 @@ export class AiFeature {
 		]);
 	}
 
-	// ----- chat surfaces -----
-
-	/**
-	 * Whether requests go to VS Code's own chat (Draw.AI agent) rather than the Draw.AI
-	 * panel. "auto" keeps people who use the panel with their own API keys on the panel.
-	 */
-	private async useNativeChat(): Promise<boolean> {
-		const surface = configuredSurface();
-		if (surface === "panel" || !(await nativeChatAvailable())) {
-			return false;
-		}
-		return surface === "native" || this.chatView.usesVsCodeModels();
-	}
-
-	/** The first request that goes to VS Code's chat on "auto" says so, with a way back. */
-	private async noticeNativeChat(): Promise<void> {
-		const key = "drawio-ai.nativeChatNoticeShown";
-		if (configuredSurface() !== "auto" || this.context.globalState.get(key)) {
-			return;
-		}
-		await this.context.globalState.update(key, true);
-		const choice = await vscode.window.showInformationMessage(
-			"Draw.AI requests from the diagram now open in VS Code's chat, on the Draw.AI agent.",
-			"Use Draw.AI Panel"
-		);
-		if (choice) {
-			await vscode.workspace.getConfiguration("drawio-ai").update("chatSurface", "panel", vscode.ConfigurationTarget.Global);
-		}
-	}
+	// ----- chat -----
 
 	private async openChat(): Promise<void> {
-		if (await this.useNativeChat()) {
+		if (await this.ensureChatAvailable()) {
 			await openNativeChat();
-		} else {
-			await this.chatView.reveal();
 		}
+	}
+
+	/** Says what is missing when VS Code's chat has no model to answer with. */
+	private async ensureChatAvailable(): Promise<boolean> {
+		if (await nativeChatAvailable()) {
+			return true;
+		}
+		const connect = "Connect Claude Code / Codex…";
+		// Not awaited: the notification stays until it is dismissed.
+		void vscode.window
+			.showWarningMessage(
+				"Draw.AI works in VS Code's chat, which has no language model right now. Sign in to GitHub Copilot (or another chat model extension) and make sure AI features are on (setting chat.disableAIFeatures). You can also edit diagrams from Claude Code or Codex.",
+				connect
+			)
+			.then((choice) => {
+				if (choice === connect) {
+					void vscode.commands.executeCommand("drawio-ai.connectAgents");
+				}
+			});
+		return false;
 	}
 
 	/**
 	 * Every request made from the diagram (Alt+K, lasso, markup, Convert image, lint
-	 * fixes, Diagram from Code/Image, code link fixes) goes through here, to the chat
-	 * surface the user prefers (drawio-ai.chatSurface).
+	 * fixes, Diagram from Code/Image, code link fixes) goes through here, to `@drawio`
+	 * in VS Code's chat. Returns whether the request was sent.
 	 */
-	private async ask(text: string, selection: SelectionContext | undefined, extras: SendExtras): Promise<"native" | "panel"> {
-		if (await this.useNativeChat()) {
-			try {
-				await sendToNativeChat(this.context.globalStorageUri, text, selection, extras);
-				void this.noticeNativeChat();
-				return "native";
-			} catch (e) {
-				// Never lose a request: the panel works without VS Code's chat.
-				console.error("Draw.AI: could not open VS Code's chat, using the Draw.AI panel", e);
-			}
+	private async ask(text: string, selection: SelectionContext | undefined, extras: SendExtras): Promise<boolean> {
+		if (!(await this.ensureChatAvailable())) {
+			return false;
 		}
-		await this.chatView.reveal();
-		await this.chatView.send(text, selection, extras);
-		return "panel";
+		await sendToNativeChat(this.context.globalStorageUri, text, selection, extras);
+		return true;
 	}
 
 	// ----- design templates -----
 
 	private async draftRules(prompt: string, images: ImageData[]): Promise<string> {
-		const client = await this.chatView.currentClient();
+		const models = await vscode.lm.selectChatModels({ vendor: "copilot" }).then((m) => (m.length ? m : vscode.lm.selectChatModels()));
+		if (models.length === 0) {
+			throw new Error("no chat model is available in VS Code (sign in to GitHub Copilot or another chat model extension)");
+		}
+		const client = new VsCodeLmClient(models[0]);
 		const usable = client.model.vision ? images : [];
 		const cts = new vscode.CancellationTokenSource();
 		let text = "";
@@ -472,18 +419,18 @@ export class AiFeature {
 		const label = targets.length === 1 ? targets[0].path.split("/").pop()! : `${targets.length} items`;
 		const editor = await this.diagramTarget(vscode.Uri.joinPath(root, `${label.replace(/\.[^.]+$/, "")}-${kind}.drawio`), args);
 		if (!editor) return;
-		const surface = await this.ask(
+		const sent = await this.ask(
 			`Create a ${kind === "erd" ? "database ERD" : kind === "classes" ? "class diagram" : kind === "infrastructure" ? "infrastructure diagram" : "module dependency diagram"} of ${label} from the attached code analysis. Place it in empty space on the page.`,
 			{ cellIds: [] },
 			{ editor, attachments: [{ name: `code analysis of ${label} (${files.length} files, ${analysis.entities.length} entities)`, text }] }
 		);
 		const refs = codeRefs(analysis);
-		if (surface === "panel") {
-			// The panel returns once the AI is done drawing.
-			await this.linkShapesToCode(editor, refs, root, files).catch((e) => console.error("Draw.AI: linking shapes failed", e));
-		} else {
-			// VS Code's chat only accepted the request: link the shapes as the agent draws them.
+		if (sent) {
+			// VS Code's chat only accepted the request: link the shapes as the model draws them.
 			this.linkCodeWhileDrawing(editor, refs, root, files);
+		} else {
+			// Without a chat model, still link the shapes already on the page.
+			await this.linkShapesToCode(editor, refs, root, files).catch((e) => console.error("Draw.AI: linking shapes failed", e));
 		}
 	}
 
@@ -597,7 +544,6 @@ export class AiFeature {
 	private onTargetReviewChanged(): void {
 		const pending = !!this.targetEditor()?.drawioClient.pendingReview;
 		void vscode.commands.executeCommand("setContext", "drawio-ai.reviewPending", pending);
-		this.chatView.onActiveDiagramChanged();
 	}
 
 	/** The diagram the AI acts on: the focused one, else the one used most recently. */
@@ -627,14 +573,10 @@ export class AiFeature {
 	private hookEditor(editor: DrawioEditor): void {
 		let lastLasso: { cellIds: string[]; region?: AiRect } | undefined;
 		const subs = [
-			editor.drawioClient.onSelectedCellsChanged.sub(() => {
-				if (editor === this.targetEditor()) this.chatView.onActiveDiagramChanged();
-			}),
 			editor.drawioClient.onAiReview.sub(() => {
 				if (editor === this.targetEditor()) this.onTargetReviewChanged();
 			}),
 			editor.drawioClient.onAiLasso.sub((evt) => {
-				this.chatView.setLassoActive(evt.lassoModeEnabled);
 				if (!evt.lassoModeEnabled && (evt.cellIds.length > 0 || evt.region)) {
 					lastLasso = { cellIds: evt.cellIds, region: evt.region };
 				}
@@ -661,34 +603,6 @@ export class AiFeature {
 		];
 		subs.push(this.codeLinks.hook(editor));
 		editor.webviewPanel.onDidDispose(() => subs.forEach((s) => s.dispose()));
-	}
-
-	private async setApiKey(): Promise<void> {
-		const pick = await vscode.window.showQuickPick(
-			[
-				{ label: "Anthropic", key: SECRET_KEYS.anthropic },
-				{
-					label: "OpenAI-compatible",
-					description: "OpenAI, Azure OpenAI, OpenRouter, …",
-					key: SECRET_KEYS.openai,
-				},
-			],
-			{ title: "Set API key for" }
-		);
-		if (!pick) return;
-		const value = await vscode.window.showInputBox({
-			title: `${pick.label} API key`,
-			prompt: "Stored in VS Code's secret storage. Leave empty to remove.",
-			password: true,
-			ignoreFocusOut: true,
-		});
-		if (value === undefined) return;
-		if (value.trim()) {
-			await this.context.secrets.store(pick.key, value.trim());
-		} else {
-			await this.context.secrets.delete(pick.key);
-		}
-		await this.chatView.refreshModels();
 	}
 }
 

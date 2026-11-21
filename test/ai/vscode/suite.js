@@ -78,7 +78,7 @@ async function runSteps() {
 			assert.ok(names.includes(n), `tool ${n} not registered`);
 		}
 		const commands = await vscode.commands.getCommands(true);
-		for (const c of ["drawio-ai.openChat", "drawio-ai.askAboutSelection", "drawio-ai.lassoSelect", "drawio-ai.setApiKey", "drawio-ai.connectAgents", "drawio-ai.disconnectAgents"]) {
+		for (const c of ["drawio-ai.openChat", "drawio-ai.askAboutSelection", "drawio-ai.lassoSelect", "drawio-ai.exportPdf", "drawio-ai.connectAgents", "drawio-ai.disconnectAgents"]) {
 			assert.ok(commands.includes(c), `command ${c} missing`);
 		}
 		await vscode.commands.executeCommand("drawio-ai.openChat");
@@ -293,7 +293,9 @@ async function runSteps() {
 		await vscode.window.tabGroups.close(tabs);
 		await vscode.commands.executeCommand("vscode.openWith", file, "drawio-ai-text");
 		const commands = await vscode.commands.getCommands(true);
-		assert.ok(commands.includes("drawio-ai.openChatPanel"));
+		for (const gone of ["drawio-ai.openChatPanel", "drawio-ai.newChat", "drawio-ai.selectModel", "drawio-ai.setApiKey"]) {
+			assert.ok(!commands.includes(gone), `${gone} should be gone with the chat panel`);
+		}
 		assert.match(await invoke("drawio_get_attachment", { id: "../../secrets" }), /not an attachment id/);
 	});
 

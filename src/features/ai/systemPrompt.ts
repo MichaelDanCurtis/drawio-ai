@@ -84,3 +84,7 @@ export function describeContext(
 	}
 	return parts.join("\n");
 }
+
+/** The request for turning an attached sketch or screenshot into a diagram. */
+export const DEFAULT_IMAGE_PROMPT =
+	"Recreate the attached sketch/screenshot as an editable diagram: same shapes, labels, connections and overall layout, using proper draw.io shapes (search the shape libraries for recognisable icons). Place it in empty space on the page, then render it to compare with the original.";

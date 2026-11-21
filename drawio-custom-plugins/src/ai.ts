@@ -1,5 +1,6 @@
 import { sendEvent } from "./vscode";
 import { exportVsdx } from "./vsdx/VsdxExport";
+import { exportPdf } from "./pdf/PdfExport";
 import { importDiagram } from "./import/importDiagram";
 
 const W = window as any;
@@ -1937,6 +1938,15 @@ Draw.loadPlugin((ui: any) => {
 		}
 	}
 
+	async function exportPdfFile(action: AiExportPdfAction): Promise<AiExportPdfEvent> {
+		try {
+			const result = await exportPdf(ui, { currentPageOnly: action.currentPageOnly, title: action.title });
+			return { event: "aiExportPdf", message: action, pages: result.pages, warnings: result.warnings, data: toBase64(result.data) };
+		} catch (e: any) {
+			return { event: "aiExportPdf", message: action, data: "", pages: 0, warnings: [], error: String(e?.message ?? e) };
+		}
+	}
+
 	// ---------------------------------------------------------------------
 	// Importing files from other tools (Visio, Gliffy, GraphML, Lucidchart)
 	// ---------------------------------------------------------------------
@@ -2827,6 +2837,9 @@ Draw.loadPlugin((ui: any) => {
 				break;
 			case "aiExportVsdx":
 				sendEvent(await exportVisio(data));
+				break;
+			case "aiExportPdf":
+				sendEvent(await exportPdfFile(data));
 				break;
 			case "aiImportDiagram":
 				sendEvent(await importFile(data));

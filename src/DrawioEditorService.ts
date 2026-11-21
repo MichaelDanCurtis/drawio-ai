@@ -4,6 +4,7 @@ import { autorun, computed, observable, ObservableSet } from "mobx";
 import { extname } from "path";
 import {
 	commands,
+	env,
 	ProgressLocation,
 	QuickPickItem, QuickPickItemKind, StatusBarAlignment,
 	TextDocument,
@@ -99,11 +100,23 @@ export class DrawioEditorService {
 
 		this.dispose.track(
 			registerFailableCommand("drawio-ai.export", () => {
-				const activeDrawioEditor = this.activeDrawioEditor;
+				// Also from VS Code's chat, where the diagram is not the active editor.
+				const activeDrawioEditor = this.activeDrawioEditor ?? this.lastActiveDrawioEditor;
 				if (!activeDrawioEditor) {
 					return;
 				}
 				return activeDrawioEditor.handleExportCommand();
+			})
+		);
+
+		this.dispose.track(
+			registerFailableCommand("drawio-ai.exportPdf", () => {
+				const editor = this.activeDrawioEditor ?? this.lastActiveDrawioEditor;
+				if (!editor) {
+					window.showInformationMessage("Open a draw.io diagram to export it to PDF.");
+					return;
+				}
+				return editor.exportToPdf();
 			})
 		);
 
@@ -283,6 +296,8 @@ export class DrawioEditor {
 				this.handleExportCommand().catch(showError);
 			} else if (command === "exportVisio") {
 				this.exportToVisio().catch(showError);
+			} else if (command === "exportPdf") {
+				this.exportToPdf().catch(showError);
 			} else if (command === "importDiagram") {
 				commands.executeCommand("drawio-ai.importDiagram");
 			} else if (command === "save") {
@@ -346,6 +361,9 @@ export class DrawioEditor {
 		if (targetExtension === ".vsdx") {
 			return this.exportToVisio();
 		}
+		if (targetExtension === ".pdf") {
+			return this.exportToPdf();
+		}
 		// Exports the page that is visible in the editor
 		const buffer = await this.drawioClient.export(targetExtension, true);
 		const targetUri = await window.showSaveDialog({
@@ -379,6 +397,35 @@ export class DrawioEditor {
 		} else {
 			window.showInformationMessage(`Exported ${pages} to ${name}.`);
 		}
+	}
+
+	/** Exports every page to a PDF file chosen by the user, one PDF page per diagram page. */
+	public async exportToPdf(): Promise<void> {
+		const targetUri = await window.showSaveDialog({
+			defaultUri: this.getUriWithExtension(".pdf"),
+			filters: { PDF: ["pdf"] },
+		});
+		if (!targetUri) {
+			return;
+		}
+		const title = this.uri.path.split("/").pop()?.replace(/\.(drawio|dio)(\.(svg|png))?$/i, "");
+		const result = await window.withProgress(
+			{ location: ProgressLocation.Notification, title: "Exporting to PDF…" },
+			() => this.drawioClient.exportPdf({ title })
+		);
+		await workspace.fs.writeFile(targetUri, result.data);
+		const name = targetUri.path.split("/").pop();
+		const pages = `${result.pages} page${result.pages === 1 ? "" : "s"}`;
+		const message = `Exported ${pages} to ${name}.`;
+		const open = "Open";
+		const shown = result.warnings.length > 0
+			? window.showWarningMessage(`${message} ${result.warnings.join(" ")}`, open)
+			: window.showInformationMessage(message, open);
+		void shown.then((choice) => {
+			if (choice === open) {
+				void env.openExternal(targetUri);
+			}
+		});
 	}
 
 	public async handleConvertCommand(): Promise<void> {
@@ -419,6 +466,10 @@ export class DrawioEditor {
 			{
 				label: ".drawio",
 				description: "Exports the diagram to a drawio file",
+			},
+			{
+				label: ".pdf",
+				description: "Exports all pages to a PDF file",
 			},
 			{
 				label: ".vsdx",

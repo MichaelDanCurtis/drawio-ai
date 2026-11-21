@@ -62,7 +62,8 @@ Module._resolveFilename = function (request, ...rest) {
 require.cache.vscode = { id: "vscode", filename: "vscode", loaded: true, exports: vscodeStub };
 
 const src = (p) => path.resolve(root, "src/features/ai", p);
-const { NATIVE_AGENT, configuredSurface, nativeChatAvailable, pruneAttachments, readAttachment, sendToNativeChat } = require(src("nativeChat.ts"));
+const { NATIVE_AGENT, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat, splitDiagramRequest } = require(src("nativeChat.ts"));
+const { diagramButtons, startButtons, followups } = require(src("copilotIntegration.ts"));
 const { TOOL_SCHEMAS } = require(src("toolSchemas.ts"));
 const { SYSTEM_PROMPT, NATIVE_AGENT_NOTES } = require(src("systemPrompt.ts"));
 const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
@@ -73,7 +74,7 @@ const frontmatter = (text) => {
 	return m[1];
 };
 
-test("the Draw.AI agent: contributed, named like the chat mode we open, with every drawio tool by extension id", () => {
+test("the Draw.AI agent: contributed, named Draw.AI, with every drawio tool by extension id", () => {
 	assert.deepEqual(pkg.contributes.chatAgents, [{ path: "./media/chat/draw-ai.agent.md" }]);
 	const text = fs.readFileSync(path.join(root, "media/chat/draw-ai.agent.md"), "utf8");
 	const head = frontmatter(text);
@@ -97,33 +98,27 @@ test("the scoped instructions apply to every draw.io file type", () => {
 	}
 });
 
-test("chat surface: auto by default; VS Code's chat only with agent mode, AI features, a recent VS Code and a model", async () => {
-	delete settings.chatSurface;
-	assert.equal(configuredSurface(), "auto");
-	settings.chatSurface = "panel";
-	assert.equal(configuredSurface(), "panel");
-	settings.chatSurface = "bogus";
-	assert.equal(configuredSurface(), "auto");
-	delete settings.chatSurface;
-
+test("VS Code's chat is used when AI features are on and some extension provides a model", async () => {
 	assert.equal(await nativeChatAvailable(), true);
 	models = [];
 	assert.equal(await nativeChatAvailable(), false, "no chat model");
 	models = [{ id: "copilot" }];
-	settings["agent.enabled"] = false;
-	assert.equal(await nativeChatAvailable(), false, "agent mode disabled (e.g. by policy)");
-	delete settings["agent.enabled"];
 	settings.disableAIFeatures = true;
 	assert.equal(await nativeChatAvailable(), false, "AI features disabled");
 	delete settings.disableAIFeatures;
-	vscodeStub.version = "1.141.9";
-	assert.equal(await nativeChatAvailable(), false, "VS Code too old to open the chat on an agent by name");
-	vscodeStub.version = "1.142.0-insider";
+	// Agent mode is not needed: @drawio works in Ask mode.
+	settings["agent.enabled"] = false;
 	assert.equal(await nativeChatAvailable(), true);
-	vscodeStub.version = "1.150.0";
+	delete settings["agent.enabled"];
 });
 
-test("a lasso request opens VS Code's chat on the Draw.AI agent; images and texts are named, not attached", async () => {
+test("Open Draw.AI in Chat types @drawio into VS Code's chat without sending", async () => {
+	commands.length = 0;
+	await openNativeChat();
+	assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "ask", query: "@drawio ", isPartialQuery: true }]]);
+});
+
+test("a lasso request is sent to @drawio in VS Code's chat; images and texts are named, not attached", async () => {
 	commands.length = 0;
 	files.clear();
 	const editor = { uri: new Uri("/ws/docs/arch.drawio"), drawioClient: { currentSelection: ["x"] } };
@@ -142,15 +137,21 @@ test("a lasso request opens VS Code's chat on the Draw.AI agent; images and text
 	const [id, args] = commands[0];
 	assert.equal(id, "workbench.action.chat.open");
 	assert.deepEqual(Object.keys(args).sort(), ["isPartialQuery", "mode", "query"]);
-	assert.equal(args.mode, NATIVE_AGENT);
+	assert.equal(args.mode, "ask");
 	assert.equal(args.isPartialQuery, false);
-	assert.match(args.query, /^make these blue\n---\nOpen diagram: arch\.drawio\nThe user circled \(lasso-selected\) 2 item\(s\) with ids: api, db\./);
+	assert.match(args.query, /^@drawio make these blue\n---\nOpen diagram: arch\.drawio\nThe user circled \(lasso-selected\) 2 item\(s\) with ids: api, db\./);
 	const ids = [...args.query.matchAll(/"(\d+-[a-z0-9]+\/\d+\.\w+)"/g)].map((m) => m[1]);
 	assert.equal(ids.length, 2, "the non-image is dropped; the image and the text are named");
 	assert.match(args.query, /drawio_get_attachment/);
 	assert.match(args.query, /\(image 1\)/);
 	assert.match(args.query, /\(code analysis of src \(3 files\)\)/);
 	assert.equal(r.query, args.query);
+
+	// The participant sees the prompt without "@drawio" and splits off the context.
+	const sent = splitDiagramRequest(args.query.replace(/^@drawio /, ""));
+	assert.equal(sent.text, "make these blue");
+	assert.match(sent.context, /^Open diagram: arch\.drawio\nThe user circled/);
+	assert.match(sent.context, /drawio_get_attachment/);
 
 	const image = await readAttachment(new Uri("/storage"), ids[0]);
 	assert.deepEqual(image.image, { mimeType: "image/png", base64: png });
@@ -203,4 +204,42 @@ test("the toolbox reports each applied batch, so code links can follow what the 
 	sub.dispose();
 	await toolbox.invoke("drawio_apply_operations", { ops: [{ op: "addShape", label: "C" }] });
 	assert.equal(seen.length, 1);
+});
+
+test("a prompt typed in the chat has no diagram context, even with a --- line", () => {
+	assert.deepEqual(splitDiagramRequest("add a cache"), { text: "add a cache" });
+	assert.deepEqual(splitDiagramRequest("first\n---\nsecond"), { text: "first\n---\nsecond" });
+});
+
+test("@drawio answers end with buttons; keep/revert only while changes are pending", () => {
+	const buttons = (pending) => {
+		const out = [];
+		diagramButtons({ button: (b) => out.push(b) }, pending);
+		return out;
+	};
+	const commandsOf = (list) => list.map((b) => b.command);
+	const declared = new Set(pkg.contributes.commands.map((c) => c.command));
+
+	const idle = buttons(false);
+	assert.deepEqual(commandsOf(idle), ["drawio-ai.lassoSelect", "drawio-ai.markup", "drawio-ai.reviewDiagram", "drawio-ai.exportPdf", "drawio-ai.export"]);
+	const pending = buttons(true);
+	assert.deepEqual(commandsOf(pending).slice(0, 2), ["drawio-ai.acceptChanges", "drawio-ai.rejectChanges"]);
+	assert.equal(pending.length, idle.length + 2);
+
+	const start = [];
+	startButtons({ button: (b) => start.push(b) });
+	for (const b of [...pending, ...start]) {
+		assert.ok(declared.has(b.command), `${b.command} is not a declared command`);
+		assert.ok(b.title && !b.title.includes("$("), `plain title for ${b.command}`);
+	}
+});
+
+test("follow-ups use @drawio's slash commands and skip the one just used", () => {
+	const declared = new Set(pkg.contributes.chatParticipants[0].commands.map((c) => c.name));
+	const all = followups({ metadata: { diagram: true } });
+	assert.ok(all.length >= 3);
+	for (const f of all) assert.ok(declared.has(f.command), `unknown command /${f.command}`);
+	assert.ok(!followups({ metadata: { diagram: true, command: "layout" } }).some((f) => f.command === "layout"));
+	assert.deepEqual(followups({ metadata: { diagram: false } }), []);
+	assert.deepEqual(followups({}), []);
 });

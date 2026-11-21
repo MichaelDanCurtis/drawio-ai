@@ -357,16 +357,16 @@ export const TOOL_SCHEMAS: ToolSchema[] = [
 		displayName: "Export Draw.io Diagram",
 		writesFiles: true,
 		description:
-			"Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true, and then only after the user confirms; never replaces a diagram. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
+			"Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. pdf = every page (or currentPageOnly), one PDF page each, rendered at print resolution. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true, and then only after the user confirms; never replaces a diagram. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
 		inputSchema: {
 			type: "object",
 			properties: {
-				format: { type: "string", enum: ["vsdx", "svg", "png", "drawio"] },
+				format: { type: "string", enum: ["vsdx", "pdf", "svg", "png", "drawio"] },
 				path: {
 					type: "string",
 					description: "Workspace-relative output path, e.g. \"docs/architecture.vsdx\". Default: next to the diagram, same name with the format's extension.",
 				},
-				currentPageOnly: { type: "boolean", description: "[vsdx] Only the page shown in the editor. Default false (all pages)." },
+				currentPageOnly: { type: "boolean", description: "[vsdx, pdf] Only the page shown in the editor. Default false (all pages)." },
 				overwrite: { type: "boolean", description: "Replace an existing export; the user is asked to confirm. Default false." },
 			},
 			required: ["format"],

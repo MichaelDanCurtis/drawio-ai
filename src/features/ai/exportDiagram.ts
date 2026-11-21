@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import type { DrawioEditor } from "../../DrawioEditorService";
 
-export const EXPORT_FORMATS = ["vsdx", "svg", "png", "drawio"] as const;
+export const EXPORT_FORMATS = ["vsdx", "pdf", "svg", "png", "drawio"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
 
 export interface ExportRequest {
 	format: string;
 	/** Workspace-relative path; defaults to the diagram's name with the format's extension. */
 	path?: string;
-	/** vsdx only: export just the page shown in the editor. */
+	/** vsdx and pdf: export just the page shown in the editor. */
 	currentPageOnly?: boolean;
 	/** Replace an existing export. The user still has to confirm. */
 	overwrite?: boolean;
@@ -61,6 +61,10 @@ export async function exportDiagramToWorkspace(
 		data = result.data;
 		const { pages, shapes, connectors, images, warnings } = result;
 		details = { pages, shapes, connectors, images, warnings };
+	} else if (format === "pdf") {
+		const result = await editor.drawioClient.exportPdf({ currentPageOnly: !!request.currentPageOnly });
+		data = result.data;
+		details = { pages: result.pages, warnings: result.warnings };
 	} else if (format === "drawio") {
 		data = new TextEncoder().encode(await editor.drawioClient.getXml());
 	} else {

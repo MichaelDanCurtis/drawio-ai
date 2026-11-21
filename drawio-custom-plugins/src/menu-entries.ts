@@ -20,6 +20,12 @@ Draw.loadPlugin((ui) => {
 		sendEvent({ event: "invokeCommand", command: "exportVisio" });
 	});
 
+	const exportPdfActionName = "vscode.exportPdf";
+	mxResources.parse(`${exportPdfActionName}=Export as PDF...`);
+	ui.actions.addAction(exportPdfActionName, () => {
+		sendEvent({ event: "invokeCommand", command: "exportPdf" });
+	});
+
 	const importDiagramActionName = "vscode.importDiagram";
 	mxResources.parse(`${importDiagramActionName}=Open from Another Tool (Visio, Gliffy, yEd, Lucidchart)...`);
 	ui.actions.addAction(importDiagramActionName, () => {
@@ -54,6 +60,7 @@ Draw.loadPlugin((ui) => {
 				importActionName,
 				importDiagramActionName,
 				exportActionName,
+				exportPdfActionName,
 				exportVisioActionName,
 				convertActionName,
 			],
