@@ -97,13 +97,72 @@ to your agent to review, complete or dig into.
   Mapper to have the agent add review notes (exposure, single points of failure,
   design issues) with the collected facts.
 
+### Map insights
+
+Every map is also saved as a record next to the diagram, in `.drawai/maps/<id>.json`
+(what was mapped, the graph, findings, descriptions, tours, the git commit it was made
+at; never passwords or tokens). The chat's **Map ▾** menu, and the **Map** menu, work
+on the maps of the page shown:
+
+- **Health findings.** Mapping also runs checks (exposed databases and ports, public
+  buckets, missing encryption or backups, wide-open security groups, unpinned or
+  over-privileged GitHub Actions, secrets in config, tables without primary keys, ...),
+  drawn as red/amber/blue **!** badges on the *Health* layer. **Map ▾ → Findings**
+  (the button shows ⚠ and the count) lists them with the evidence and a suggested fix:
+  *Show on map*, *Fix with agent* (the agent proposes the change; it never changes live
+  resources itself), or *Dismiss* (hidden until the finding changes). Each list ends
+  with what was checked, so an empty list means something.
+- **Plain-English descriptions.** **Describe the map** has the agent write one or two
+  sentences per shape, from evidence (who uses it, what it uses, its code), for
+  everyone or for developers. They become the shapes' tooltips. Descriptions are
+  checked before they are saved: unknown shapes, placeholders, and jargon (for the
+  "everyone" audience) are sent back to the agent. Also an option in the Mapper.
+- **Recent changes.** Files changed in git since the map was made (committed and
+  not), mapped onto its shapes with green badges on the *Changes* layer, with the
+  commits.
+- **Refresh.** Maps the same thing again onto a new page and tags what is new or
+  changed; descriptions and tours of shapes that still exist carry over. Maps that need
+  a password are refreshed from the Mapper.
+- **Tours.** **Build a tour** has the agent write a guided walk through the map (type
+  a focus first, e.g. "how an order is paid"). Play it with **Map → Play Tour**
+  (Cmd/Ctrl+Shift+T) or the ▶ button in presentation mode: each step zooms to its
+  shapes, highlights them and shows the caption; arrow keys or space to move, Esc to
+  stop.
+- **Ask the map.** Type a question, then **Map ▾ → Ask the map**: the agent looks it
+  up on the maps and answers with a new page holding only the shapes involved,
+  numbered in order, with its answer.
+
+The agents reach the maps through MCP tools on each window's server: lookups
+(`mapper_maps`, `mapper_find`, `mapper_show`, `mapper_path`, `mapper_findings`,
+`mapper_worksheet`) and `mapper_run`, `mapper_set_descriptions`,
+`mapper_recent_changes`, `mapper_refresh`, `mapper_set_tour`, `mapper_answer`.
+
+### Use the maps from Claude Code and Codex
+
+While the app runs, it serves the same diagram and Mapper tools to coding agents
+anywhere on this computer. **Agent → Connect Claude Code / Codex to Draw.AI…** registers
+a `draw-ai-desktop` MCP server in both (user scope, with `claude mcp add` and `codex mcp
+add`); **Disconnect** removes it. Then, in a terminal session, an agent can ask the map
+before grepping ("what talks to orders-db?", "map this repo and describe it"). Every
+tool takes an optional `file`: the diagram to work on, opened if needed; without it, the
+diagram used last. `drawio_list_diagrams` lists the open ones.
+
+The app writes its address and a per-launch token to `~/.drawio-ai/desktop.json`
+(readable only by you) and a launcher, `~/.drawio-ai/bin/draw-ai-desktop-mcp`, that the
+agents start as a stdio MCP server; the launcher reads that file on every request, so a
+connected agent keeps working across app restarts. To register it by hand:
+
+```bash
+claude mcp add --scope user draw-ai-desktop -- ~/.drawio-ai/bin/draw-ai-desktop-mcp
+```
+
 ## Presentation mode
 
 **View → Presentation Mode** (F5, or Cmd/Ctrl+Shift+Enter) shows only the diagram, full
 screen and read-only. Drag with either mouse button to move around, scroll or pinch to
 zoom, F to fit. Pages are dots in the bottom left: click one, or use Tab / Shift+Tab or
 the arrow keys. Esc returns to the editor. Presenting never edits or marks the diagram
-as changed.
+as changed. Pages with a map tour show ▶ next to the dots to play it.
 
 ## How it works
 
