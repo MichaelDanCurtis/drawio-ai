@@ -189,6 +189,10 @@ test("drawio_export: writes the Visio file, reports what was exported, never ove
 				calls.push(o);
 				return { data: Buffer.from("PK-vsdx"), pages: 2, shapes: 9, connectors: 3, images: 1, warnings: [] };
 			},
+			exportPdf: async (o) => {
+				calls.push({ pdf: o });
+				return { data: Buffer.from("%PDF-"), pages: 2, warnings: ['Page "Blank" is empty and was left out.'] };
+			},
 			getXml: async () => "<mxfile/>",
 			export: async (ext) => Buffer.from(`image ${ext}`),
 		},
@@ -227,7 +231,11 @@ test("drawio_export: writes the Visio file, reports what was exported, never ove
 	assert.equal(files.get("/ws/backup/arch.drawio").toString(), "<mxfile/>");
 	await exportDiagramToWorkspace(editor, { format: "png", path: "img/arch" });
 	assert.equal(files.get("/ws/img/arch.png").toString(), "image .png");
-	await assert.rejects(exportDiagramToWorkspace(editor, { format: "pdf" }), /format must be one of: vsdx, svg, png, drawio/);
+	const pdf = await exportDiagramToWorkspace(editor, { format: "pdf", path: "out/arch", currentPageOnly: true });
+	assert.deepEqual(JSON.parse(pdf.text), { path: "out/arch.pdf", format: "pdf", bytes: 5, pages: 2, warnings: ['Page "Blank" is empty and was left out.'] });
+	assert.deepEqual(calls.at(-1), { pdf: { currentPageOnly: true } });
+	assert.equal(files.get("/ws/out/arch.pdf").toString(), "%PDF-");
+	await assert.rejects(exportDiagramToWorkspace(editor, { format: "jpg" }), /format must be one of: vsdx, pdf, svg, png, drawio/);
 });
 
 test("drawio_export: a file or link that appears while exporting is not written over or through", async () => {

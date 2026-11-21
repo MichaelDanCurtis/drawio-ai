@@ -4,11 +4,11 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
-    | AiPagesAction;
+    | AiPagesAction | AiExportPdfAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent;
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent;
 
 // ---------------------------------------------------------------------------
 // AI protocol
@@ -230,6 +230,24 @@ declare interface AiExportVsdxEvent {
     error?: string;
 }
 
+declare interface AiExportPdfAction {
+    action: "aiExportPdf";
+    /** Only the page that is visible in the editor; otherwise every page. */
+    currentPageOnly: boolean;
+    /** Document title stored in the PDF. */
+    title?: string;
+}
+
+declare interface AiExportPdfEvent {
+    event: "aiExportPdf";
+    message: AiExportPdfAction;
+    /** Base64 of the PDF; empty when the export failed. */
+    data: string;
+    pages: number;
+    warnings: string[];
+    error?: string;
+}
+
 declare interface AiImportDiagramAction {
     action: "aiImportDiagram";
     /** "csv" builds the diagram in the editor, which must be empty, and empties it again. */
@@ -335,7 +353,7 @@ declare interface AiLassoEvent {
 
 declare interface InvokeCommandEvent {
     event: "invokeCommand";
-    command: "export" | "exportVisio" | "importDiagram" | "save" | "convert";
+    command: "export" | "exportVisio" | "exportPdf" | "importDiagram" | "save" | "convert";
 }
 
 declare interface FocusChangedEvent {

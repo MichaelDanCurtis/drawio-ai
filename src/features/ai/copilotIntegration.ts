@@ -7,6 +7,7 @@ import { VsCodeLmClient } from "./providers/VsCodeLmProvider";
 import { describeContext, SelectionContext } from "./systemPrompt";
 import { getAiSettings } from "./aiSettings";
 import { TOOL_SCHEMAS } from "./toolSchemas";
+import { splitDiagramRequest } from "./nativeChat";
 
 const COMMAND_PROMPTS: Record<string, string> = {
 	layout:
@@ -34,20 +35,27 @@ export interface ParticipantDeps {
 		| undefined;
 }
 
-/** `@drawio` in Copilot Chat, driven by whichever model the user picked in the chat UI. */
+/** What a `@drawio` answer reports back, for its follow-up suggestions. */
+interface DrawioChatResult extends vscode.ChatResult {
+	metadata?: { diagram: boolean; command?: string };
+}
+
+/** `@drawio` in VS Code's chat, driven by whichever model the user picked in the chat UI. */
 export function registerChatParticipant(deps: ParticipantDeps): vscode.Disposable {
 	const participant = vscode.chat.createChatParticipant(
 		"drawio-ai.participant",
-		async (request, context, response, token) => {
+		async (request, context, response, token): Promise<DrawioChatResult> => {
 			const diagram = deps.getDiagram();
 			if (!diagram) {
-				response.markdown("Open a draw.io diagram (`.drawio`, `.drawio.svg`, `.drawio.png`) first, then ask again.");
-				response.button({ command: "drawio-ai.newDiagram", title: "New Diagram" });
-				return;
+				response.markdown("Open a draw.io diagram (`.drawio`, `.drawio.svg`, `.drawio.png`) first, or start one:");
+				startButtons(response);
+				return { metadata: { diagram: false } };
 			}
 
+			// Requests sent from the diagram (Alt+K, lasso, markup…) describe their selection themselves.
+			const sent = splitDiagramRequest(request.prompt);
 			const prefix = request.command ? COMMAND_PROMPTS[request.command] : undefined;
-			const userText = [prefix, request.prompt].filter(Boolean).join("\n") || "Continue.";
+			const userText = [prefix, sent.text].filter(Boolean).join("\n") || "Continue.";
 
 			const images = await imagesFromReferences(request.references);
 			diagram.setBusy(true, `${request.model.name} is editing…`);
@@ -56,7 +64,7 @@ export function registerChatParticipant(deps: ParticipantDeps): vscode.Disposabl
 					client: new VsCodeLmClient(request.model),
 					history: historyFromContext(context),
 					userText,
-					context: describeContext(diagram.fileName, diagram.selection),
+					context: sent.context ?? describeContext(diagram.fileName, diagram.selection),
 					systemExtra: await diagram.systemExtra(),
 					images,
 					maxRounds: getAiSettings().maxToolRounds,
@@ -70,18 +78,53 @@ export function registerChatParticipant(deps: ParticipantDeps): vscode.Disposabl
 				if (error) {
 					response.markdown(`\n\n**Error:** ${String((error as any)?.message ?? error)}`);
 				}
-				if (diagram.reviewPending()) {
-					response.button({ command: "drawio-ai.acceptChanges", title: "Accept Changes" });
-					response.button({ command: "drawio-ai.rejectChanges", title: "Reject Changes" });
-				}
 			} finally {
 				diagram.setBusy(false);
 			}
-			return {};
+			diagramButtons(response, diagram.reviewPending());
+			return { metadata: { diagram: true, command: request.command } };
 		}
 	);
 	participant.iconPath = new vscode.ThemeIcon("sparkle");
+	participant.followupProvider = {
+		provideFollowups: (result: DrawioChatResult) => followups(result),
+	};
 	return participant;
+}
+
+/** The buttons under every answer about an open diagram. */
+export function diagramButtons(response: Pick<vscode.ChatResponseStream, "button">, reviewPending: boolean): void {
+	if (reviewPending) {
+		response.button({ command: "drawio-ai.acceptChanges", title: "Keep Changes" });
+		response.button({ command: "drawio-ai.rejectChanges", title: "Revert Changes" });
+	}
+	response.button({ command: "drawio-ai.lassoSelect", title: "Lasso Select", tooltip: "Circle shapes in the diagram, then say what to change" });
+	response.button({ command: "drawio-ai.markup", title: "Mark Up", tooltip: "Draw on the diagram, then send the marks" });
+	response.button({ command: "drawio-ai.reviewDiagram", title: "Review", tooltip: "Check for problems and template violations" });
+	response.button({ command: "drawio-ai.exportPdf", title: "Export PDF" });
+	response.button({ command: "drawio-ai.export", title: "Export…", tooltip: "SVG, PNG, Visio and more" });
+}
+
+/** The buttons when no diagram is open. */
+export function startButtons(response: Pick<vscode.ChatResponseStream, "button">): void {
+	response.button({ command: "drawio-ai.newDiagram", title: "New Diagram" });
+	response.button({ command: "drawio-ai.diagramFromCode", title: "Diagram from Code…" });
+	response.button({ command: "drawio-ai.diagramFromImage", title: "Diagram from Sketch…" });
+	response.button({ command: "drawio-ai.importDiagram", title: "Import (Visio, Gliffy…)" });
+}
+
+/** Suggested next requests, shown as chips under the answer. */
+export function followups(result: DrawioChatResult): vscode.ChatFollowup[] {
+	if (!result.metadata?.diagram) {
+		return [];
+	}
+	const all: vscode.ChatFollowup[] = [
+		{ prompt: "", command: "layout", label: "Tidy up the layout" },
+		{ prompt: "", command: "style", label: "Make the style consistent" },
+		{ prompt: "", command: "review", label: "Review and fix problems" },
+		{ prompt: "", command: "explain", label: "Explain this diagram" },
+	];
+	return all.filter((f) => f.command !== result.metadata?.command);
 }
 
 function progressLabel(tool: string): string {

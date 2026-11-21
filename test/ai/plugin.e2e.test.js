@@ -936,6 +936,91 @@ function readImported(xml) {
 	}, xml);
 }
 
+// ---------------------------------------------------------------------------
+// PDF export
+// ---------------------------------------------------------------------------
+
+/** The pages of a PDF from exportPdf: MediaBox size and the inflated RGB pixels of its image. */
+function pdfPages(buffer) {
+	const zlib = require("zlib");
+	const text = buffer.toString("latin1");
+	assert.ok(text.startsWith("%PDF-1.4\n") && text.endsWith("%%EOF\n"), "PDF header and trailer");
+	const boxes = [...text.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
+	const images = [...text.matchAll(/\/Width (\d+) \/Height (\d+) [^>]*\/Filter \/FlateDecode \/Length (\d+) >>\nstream\n/g)].map((m) => {
+		const start = m.index + m[0].length;
+		const pixels = zlib.inflateSync(buffer.subarray(start, start + Number(m[3])));
+		return { width: Number(m[1]), height: Number(m[2]), pixels };
+	});
+	assert.equal(images.length, boxes.length);
+	return boxes.map((box, i) => ({ box, ...images[i] }));
+}
+
+/** Share of pixels that are clearly not white (drawn shapes and text). */
+function inkRatio({ pixels }) {
+	let ink = 0;
+	for (let i = 0; i < pixels.length; i += 3) {
+		if (pixels[i] < 200 || pixels[i + 1] < 200 || pixels[i + 2] < 200) ink++;
+	}
+	return ink / (pixels.length / 3);
+}
+
+test("PDF export: one page per diagram page, rendered at print resolution, without touching the editor", async () => {
+	await loadFixture(visioFixture);
+	const before = await page.evaluate(() => ({
+		page: editorUi.currentPage.getId(),
+		xml: mxUtils.getXml(editorUi.editor.getGraphXml()),
+		undo: editorUi.editor.undoManager.history.length,
+	}));
+	const r = await request({ action: "aiExportPdf", currentPageOnly: false, title: "Fixture" });
+	assert.equal(r.error, undefined);
+	assert.equal(r.pages, 2);
+	const pdf = Buffer.from(r.data, "base64");
+	assert.match(pdf.toString("latin1"), /\/Title \(Fixture\)/);
+	const pages = pdfPages(pdf);
+	assert.equal(pages.length, 2);
+	for (const p of pages) {
+		// Page size follows the diagram (px * 0.75 pt) and the image is ~3x that.
+		assert.ok(p.box[0] > 50 && p.box[1] > 20, `page size ${p.box}`);
+		assert.ok(Math.abs(p.width / (p.box[0] / 0.75) - 3) < 0.2, `resolution ${p.width} px for ${p.box[0]} pt`);
+		assert.equal(p.pixels.length, p.width * p.height * 3);
+		const ink = inkRatio(p);
+		assert.ok(ink > 0.005 && ink < 0.9, `page is neither blank nor solid (${ink})`);
+	}
+	const after = await page.evaluate(() => ({
+		page: editorUi.currentPage.getId(),
+		xml: mxUtils.getXml(editorUi.editor.getGraphXml()),
+		undo: editorUi.editor.undoManager.history.length,
+	}));
+	assert.deepEqual(after, before);
+});
+
+test("PDF export: only the current page, on a white background", async () => {
+	await loadFixture(visioFixture);
+	await page.evaluate(() => editorUi.selectPage(editorUi.pages[1]));
+	const all = pdfPages(Buffer.from((await request({ action: "aiExportPdf", currentPageOnly: false })).data, "base64"));
+	const r = await request({ action: "aiExportPdf", currentPageOnly: true });
+	assert.equal(r.pages, 1);
+	const [only] = pdfPages(Buffer.from(r.data, "base64"));
+	assert.deepEqual(only.box, all[1].box);
+	// Corner pixel is the white page background.
+	assert.deepEqual([...only.pixels.subarray(0, 3)], [255, 255, 255]);
+});
+
+test("PDF export: an empty diagram is an error, empty pages are left out", async () => {
+	inbox.length = 0;
+	await send({ action: "load", xml: "", autosave: 1 });
+	await page.waitForFunction(() => editorUi.editor.graph.model.getChildCount(editorUi.editor.graph.getDefaultParent()) === 0);
+	const empty = await request({ action: "aiExportPdf", currentPageOnly: false });
+	assert.match(empty.error, /empty/);
+	assert.equal(empty.data, "");
+
+	const xml = visioFixture.replace("</mxfile>", '<diagram id="blank" name="Blank"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>');
+	await loadFixture(xml);
+	const r = await request({ action: "aiExportPdf", currentPageOnly: false });
+	assert.equal(r.pages, 2);
+	assert.deepEqual(r.warnings, ['Page "Blank" is empty and was left out.']);
+});
+
 test("import: a Visio drawing, read with draw.io's own importer, leaves the open diagram alone", async () => {
 	page.on("request", recordRequest);
 	await loadFixture(visioFixture);

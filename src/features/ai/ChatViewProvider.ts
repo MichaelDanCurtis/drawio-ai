@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { DEFAULT_IMAGE_PROMPT } from "./systemPrompt";
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { getAiSettings } from "./aiSettings";
 import type { DiagramAgent } from "./DiagramAgent";
@@ -8,6 +9,7 @@ import { describeContext, SelectionContext } from "./systemPrompt";
 import html from "./chatView.html";
 import { MAX_IMAGES, MAX_PICKED_IMAGE_BASE64, readImage, sanitizeImages } from "./images";
 import { ChatStore, TranscriptItem } from "./chatStore";
+import type { SendExtras } from "./nativeChat";
 
 interface Conversation {
 	messages: ChatMessage[];
@@ -22,13 +24,7 @@ interface Conversation {
 
 const MODEL_STATE_KEY = "drawio-ai.selectedModel";
 
-export interface SendExtras {
-	images?: ImageData[];
-	/** Large hidden inputs (e.g. code analysis); the transcript only shows `name`. */
-	attachments?: { name: string; text: string }[];
-	/** Target diagram; defaults to the active one. */
-	editor?: DrawioEditor;
-}
+export type { SendExtras };
 
 export interface TemplateInfo {
 	name: string;
@@ -423,8 +419,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 	}
 }
 
-export const DEFAULT_IMAGE_PROMPT =
-	"Recreate the attached sketch/screenshot as an editable diagram: same shapes, labels, connections and overall layout, using proper draw.io shapes (search the shape libraries for recognisable icons). Place it in empty space on the page, then render it to compare with the original.";
+export { DEFAULT_IMAGE_PROMPT };
 
 function newConversation(): Conversation {
 	return { messages: [], transcript: [], version: ++versionCounter };

@@ -71,10 +71,7 @@
 				"drawio-ai.customLibraries",
 				"drawio-ai.plugins",
 				"drawio-ai.offline",
-				"drawio-ai.online-url",
-				"drawio-ai.anthropic.baseUrl",
-				"drawio-ai.openai.baseUrl",
-				"drawio-ai.openai.authHeader"
+				"drawio-ai.online-url"
 			]
 		}
 	},
@@ -153,24 +150,6 @@
 				"priority": "option"
 			}
 		],
-		"viewsContainers": {
-			"activitybar": [
-				{
-					"id": "drawio-ai",
-					"title": "Draw.AI",
-					"icon": "media/drawio-ai.svg"
-				}
-			]
-		},
-		"views": {
-			"drawio-ai": [
-				{
-					"type": "webview",
-					"id": "drawio-ai.chatView",
-					"name": "Chat"
-				}
-			]
-		},
 		"chatParticipants": [
 			{
 				"id": "drawio-ai.participant",
@@ -846,7 +825,7 @@
 					"diagram"
 				],
 				"userDescription": "Export Draw.io Diagram",
-				"modelDescription": "Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true, and then only after the user confirms; never replaces a diagram. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
+				"modelDescription": "Export the open diagram to a file in the workspace, when the user asks for a file. vsdx = Microsoft Visio, all pages (or currentPageOnly): shapes stay editable Visio shapes with their text, connectors stay glued, custom data becomes Shape Data. pdf = every page (or currentPageOnly), one PDF page each, rendered at print resolution. svg/png = the current page, with the diagram embedded so draw.io can still edit it. drawio = a copy of the file. Never replaces an existing file unless overwrite is true, and then only after the user confirms; never replaces a diagram. Returns the path written and, for vsdx, what was exported and anything that did not carry over.",
 				"inputSchema": {
 					"type": "object",
 					"properties": {
@@ -854,6 +833,7 @@
 							"type": "string",
 							"enum": [
 								"vsdx",
+								"pdf",
 								"svg",
 								"png",
 								"drawio"
@@ -865,7 +845,7 @@
 						},
 						"currentPageOnly": {
 							"type": "boolean",
-							"description": "[vsdx] Only the page shown in the editor. Default false (all pages)."
+							"description": "[vsdx, pdf] Only the page shown in the editor. Default false (all pages)."
 						},
 						"overwrite": {
 							"type": "boolean",
@@ -1040,18 +1020,13 @@
 		"commands": [
 			{
 				"command": "drawio-ai.openChat",
-				"title": "Open AI Chat",
+				"title": "Open Draw.AI in Chat",
 				"category": "Draw.AI",
 				"icon": "$(sparkle)"
 			},
 			{
 				"command": "drawio-ai.useForDiagrams",
 				"title": "Use Draw.AI for Diagram Files",
-				"category": "Draw.AI"
-			},
-			{
-				"command": "drawio-ai.openChatPanel",
-				"title": "Open Draw.AI Chat Panel",
 				"category": "Draw.AI"
 			},
 			{
@@ -1127,21 +1102,6 @@
 				"category": "Draw.AI"
 			},
 			{
-				"command": "drawio-ai.newChat",
-				"title": "New AI Chat",
-				"category": "Draw.AI"
-			},
-			{
-				"command": "drawio-ai.selectModel",
-				"title": "Select AI Provider and Model",
-				"category": "Draw.AI"
-			},
-			{
-				"command": "drawio-ai.setApiKey",
-				"title": "Set API Key",
-				"category": "Draw.AI"
-			},
-			{
 				"command": "drawio-ai.convert",
 				"title": "Convert To...",
 				"category": "Draw.io"
@@ -1149,6 +1109,11 @@
 			{
 				"command": "drawio-ai.export",
 				"title": "Export To...",
+				"category": "Draw.io"
+			},
+			{
+				"command": "drawio-ai.exportPdf",
+				"title": "Export to PDF...",
 				"category": "Draw.io"
 			},
 			{
@@ -1295,36 +1260,6 @@
 				"title": "AI",
 				"order": 5,
 				"properties": {
-					"drawio-ai.chatSurface": {
-						"type": "string",
-						"enum": [
-							"auto",
-							"native",
-							"panel"
-						],
-						"enumDescriptions": [
-							"VS Code's chat when it can run the Draw.AI agent and the Draw.AI panel uses VS Code's models (Copilot, ...); otherwise the panel, so your own API keys keep being used.",
-							"VS Code's chat on the Draw.AI agent whenever it can run it (needs a chat model and agent mode, VS Code 1.142 or later); otherwise the panel.",
-							"Always the Draw.AI chat panel, with its own providers (Copilot, Anthropic or OpenAI-compatible keys), saved chats per diagram and review strip."
-						],
-						"default": "auto",
-						"markdownDescription": "Where requests from the diagram go: Ask AI (`Alt+K`), the lasso, markup, Convert image to diagram, lint fixes, Diagram from Code/Image and code link fixes. The diagram's buttons and menus work the same either way."
-					},
-					"drawio-ai.provider": {
-						"type": "string",
-						"enum": [
-							"vscode-lm",
-							"anthropic",
-							"openai"
-						],
-						"enumDescriptions": [
-							"Models from VS Code's Language Model API (GitHub Copilot, ...). No API key needed.",
-							"Anthropic API with your own key.",
-							"Any OpenAI-compatible Chat Completions API (OpenAI, Azure OpenAI, OpenRouter, Ollama, ...)."
-						],
-						"default": "vscode-lm",
-						"description": "Default AI provider for the Draw.AI chat panel. (The @drawio chat participant always uses the model selected in Copilot Chat.)"
-					},
 					"drawio-ai.maxToolRounds": {
 						"type": "number",
 						"default": 16,
@@ -1362,11 +1297,6 @@
 						"default": true,
 						"markdownDescription": "Watch code-linked shapes and badge the ones whose code moved, changed or disappeared (click a badge for fixes). Links made by **Diagram from Code…** and **Link Code with Selected Node** remember a fingerprint of the code; older links are only checked for missing files and lines."
 					},
-					"drawio-ai.persistChat": {
-						"type": "boolean",
-						"default": true,
-						"markdownDescription": "Remember the Draw.AI chat panel conversation for each diagram and restore it when you reopen the diagram. Conversations are stored in VS Code's extension storage for this workspace (never in the repository); images and large tool results are left out."
-					},
 					"drawio-ai.reviewChanges": {
 						"type": "boolean",
 						"default": true,
@@ -1387,47 +1317,6 @@
 						"default": 400,
 						"minimum": 20,
 						"description": "Maximum number of cells sent to the model when it reads the diagram."
-					},
-					"drawio-ai.anthropic.baseUrl": {
-						"type": "string",
-						"default": "https://api.anthropic.com",
-						"scope": "machine-overridable",
-						"description": "Anthropic API base URL."
-					},
-					"drawio-ai.anthropic.model": {
-						"type": "string",
-						"default": "",
-						"description": "Anthropic model id. Empty = newest model returned by the API (or pick one in the chat panel)."
-					},
-					"drawio-ai.anthropic.maxTokens": {
-						"type": "number",
-						"default": 8192,
-						"description": "max_tokens for Anthropic responses. Large diagram edits need room for tool-call JSON."
-					},
-					"drawio-ai.openai.baseUrl": {
-						"type": "string",
-						"default": "https://api.openai.com/v1",
-						"scope": "machine-overridable",
-						"markdownDescription": "Base URL of an OpenAI-compatible API (must serve `/chat/completions`). Examples: `https://YOUR-RESOURCE.openai.azure.com/openai/v1`, `https://openrouter.ai/api/v1`, `http://localhost:11434/v1`."
-					},
-					"drawio-ai.openai.model": {
-						"type": "string",
-						"default": "",
-						"description": "Model (or Azure deployment) name. Can also be picked in the chat panel."
-					},
-					"drawio-ai.openai.authHeader": {
-						"type": "string",
-						"enum": [
-							"bearer",
-							"api-key"
-						],
-						"default": "bearer",
-						"description": "How to send the key: 'Authorization: Bearer' (OpenAI, OpenRouter) or 'api-key' header (Azure OpenAI)."
-					},
-					"drawio-ai.openai.supportsImages": {
-						"type": "boolean",
-						"default": true,
-						"description": "Whether the selected model accepts images (enables the render-and-check tool)."
 					}
 				}
 			},
@@ -1824,11 +1713,6 @@
 					"command": "drawio-ai.selectTemplate",
 					"when": "drawio-ai.active",
 					"group": "drawio-ai@1"
-				},
-				{
-					"command": "drawio-ai.openChatPanel",
-					"when": "drawio-ai.active",
-					"group": "drawio-ai@2"
 				}
 			],
 			"explorer/context": [
@@ -1903,7 +1787,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"

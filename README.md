@@ -7,9 +7,8 @@
 ## Getting Started
 
 1. Open or create a diagram: any `.drawio`, `.drawio.svg` or `.drawio.png` file, or **Draw.io: New Draw.io Diagram**.
-2. Open the chat: the ✦ button in the editor title bar, or **Draw.AI: Open AI Chat**. With GitHub Copilot (or another chat model provider) this is VS Code's own chat, switched to the **Draw.AI** agent; with your own API keys, or without a chat model, it is the Draw.AI chat panel.
-3. Pick a model. GitHub Copilot models work as soon as you are signed in to Copilot. For Anthropic or any OpenAI-compatible endpoint (OpenAI, Azure OpenAI, OpenRouter, a local server), run **Draw.AI: Set API Key** and use the Draw.AI chat panel (**Draw.AI: Open Draw.AI Chat Panel**, or `drawio-ai.chatSurface` set to `panel`).
-4. Describe a change. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
+2. Open the chat: the ✦ button in the editor title bar, or **Draw.AI: Open Draw.AI in Chat**. This is VS Code's own chat with `@drawio` typed in. It uses the model you pick in the chat (GitHub Copilot, or any other chat model extension).
+3. Describe a change. Every answer ends with buttons: **Keep Changes** / **Revert Changes** while AI edits are pending, **Lasso Select**, **Mark Up**, **Review**, **Export PDF** and **Export…**, plus suggestions such as *Tidy up the layout*. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
 
 In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts the lasso, `Alt+M` starts markup.
 
@@ -17,49 +16,44 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 
 | Surface | How |
 | --- | --- |
-| VS Code chat, **Draw.AI** agent | Pick **Draw.AI** in the chat's agent picker (VS Code 1.142 or later). It has the diagram tools and Draw.AI's instructions. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here when the panel uses Copilot; images and code analyses travel with the request |
+| VS Code chat, `@drawio` | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch`. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here, with the selection described; images and code analyses travel with the request. Answers end with action buttons |
+| VS Code chat, **Draw.AI** agent | Pick **Draw.AI** in the chat's agent picker (VS Code 1.142 or later). It has the diagram tools and Draw.AI's instructions |
 | VS Code chat, Agent mode | The `drawio_*` tools appear under Draw.AI in **Configure Tools** (reference one with `#drawio-…`). Instructions shipped with the extension tell the agent to change `.drawio` files with these tools, not by rewriting their XML |
-| VS Code chat, Ask mode | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch` |
-| Draw.AI chat panel | The **Draw.AI** view; works with Copilot, Anthropic and OpenAI-compatible models, keeps a chat per diagram |
 | Claude Code and Codex | **Draw.AI: Connect Claude Code / Codex…** installs Draw.AI's plugin (skills and the `drawio_*` tools); see [below](#claude-code-and-codex) |
 | Other agents | Cursor and other MCP clients through **Draw.AI: Set Up MCP Server for External Agents…** |
 
-The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the review bar, design templates) work the same whichever chat you use; `drawio-ai.chatSurface` only decides where their requests go. Pick a design template with **Draw.AI: Select Design Template…** (also in the diagram's `…` menu) or the ◆ chip in the panel; the Draw.AI agent reads it with `drawio_get_template`.
+The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the review bar, design templates) work the same whichever chat you use. Pick a design template with **Draw.AI: Select Design Template…** (also in the diagram's `…` menu); the AI reads it with `drawio_get_template`.
 
 ## AI Features
 
 -   **Scope edits to part of the diagram**: select cells, or use the lasso (`Draw.AI: Lasso Select for AI`) to circle a region, then ask about just that.
--   **Review before apply**: AI edits appear immediately but are held as pending changes: added cells are outlined green, changed ones amber, and removed ones are shown as red ghosts. Keep or revert them all from the review bar in the editor, the strip in the chat panel, the `@drawio` response buttons, or the `Draw.AI: Accept AI Changes` / `Reject AI Changes` commands. You can also keep or revert a single cell from its context menu. Pending changes stay with their page while you look at another one: the review bar counts what waits on other pages, and accepting or rejecting everything covers every page. The changes on one page are one undo step. Turn this off with `drawio-ai.reviewChanges`.
+-   **Review before apply**: AI edits appear immediately but are held as pending changes: added cells are outlined green, changed ones amber, and removed ones are shown as red ghosts. Keep or revert them all from the review bar in the editor, the `@drawio` answer buttons, or the `Draw.AI: Accept AI Changes` / `Reject AI Changes` commands. You can also keep or revert a single cell from its context menu. Pending changes stay with their page while you look at another one: the review bar counts what waits on other pages, and accepting or rejecting everything covers every page. The changes on one page are one undo step. Turn this off with `drawio-ai.reviewChanges`.
 -   **Pages and layers**: the AI lists, adds, renames, duplicates, reorders, deletes and switches pages (`drawio_pages`), reads any page without leaving the one you are on, and adds, renames, hides, locks and fills layers. Page changes are part of the review: rejecting removes the pages the AI added (unless you have drawn on them) and undoes its renames and moves. Deleting a page with your content on it always asks you first. Each page change is one undo step.
--   **Mark up the diagram** (`Alt+M`, **✎ Markup** in the chat panel, or the context menu): draw arrows (connect / flow / move), scribble strike-throughs (remove), and pin notes to shapes or empty spots, then **Send to AI**. All marks become one request; they are overlays and never touch the diagram itself.
--   **Sketch or screenshot → diagram**: paste, drop or attach (🖼) images in the chat panel, attach them to `@drawio /sketch` in Copilot Chat, right-click an image file → **Diagram from Sketch or Screenshot…**, or right-click an image inside a diagram → **✦ Convert image to diagram**. The AI rebuilds it with real, editable shapes (needs a model with vision).
+-   **Mark up the diagram** (`Alt+M`, **Mark Up** under a `@drawio` answer, or the context menu): draw arrows (connect / flow / move), scribble strike-throughs (remove), and pin notes to shapes or empty spots, then **Send to AI**. All marks become one request; they are overlays and never touch the diagram itself.
+-   **Sketch or screenshot → diagram**: attach them to `@drawio /sketch` in VS Code's chat, right-click an image file → **Diagram from Sketch or Screenshot…**, or right-click an image inside a diagram → **✦ Convert image to diagram**. The AI rebuilds it with real, editable shapes (needs a model with vision).
 -   **Code → diagram**: right-click a folder or source file → **Draw.AI: Diagram from Code…** and pick module dependencies, a class diagram, a database ERD or an infrastructure diagram. Supports TypeScript/JavaScript, Python, Java, C#, Kotlin, Go, SQL DDL, Prisma, Terraform, docker-compose and Kubernetes YAML. Generated shapes are code-linked: with Code Link enabled, double-click one to jump to its source.
--   **Review / lint** (`Draw.AI: Review Diagram (Lint)`, **✓ Review** in the chat panel, or `@drawio /review`): finds dangling or duplicate connectors, overlaps, almost-aligned shapes, unlabeled or disconnected shapes, tiny text and design-template violations. Moving through the list highlights the shapes; pick the issues to fix and the AI fixes them as pending changes.
--   **Design templates**: `Draw.AI: Create Design Template…` turns example diagrams (`.drawio`, `.drawio.svg`), shape libraries (`.xml`), style guides (Markdown, text, Word `.docx`, PDF) and reference images into a template. Its palette, fonts, shape per role and connector style are extracted, and you choose what lint enforces. The template lives in the repository (`.drawio-ai/templates/<id>/template.json`, an editable `rules.md`, and copies of the sources), so it is shared through git. The AI follows the active template and flags anything that breaks it. Switch templates with `Draw.AI: Select Design Template…` or the ◆ chip in the chat panel (setting `drawio-ai.template`; a repository with a single template uses it automatically).
--   **Saved chats**: each diagram keeps its chat panel conversation across VS Code restarts. **New AI Chat** starts over.
+-   **Review / lint** (`Draw.AI: Review Diagram (Lint)`, **Review** under a `@drawio` answer, or `@drawio /review`): finds dangling or duplicate connectors, overlaps, almost-aligned shapes, unlabeled or disconnected shapes, tiny text and design-template violations. Moving through the list highlights the shapes; pick the issues to fix and the AI fixes them as pending changes.
+-   **Design templates**: `Draw.AI: Create Design Template…` turns example diagrams (`.drawio`, `.drawio.svg`), shape libraries (`.xml`), style guides (Markdown, text, Word `.docx`, PDF) and reference images into a template. Its palette, fonts, shape per role and connector style are extracted, and you choose what lint enforces. The template lives in the repository (`.drawio-ai/templates/<id>/template.json`, an editable `rules.md`, and copies of the sources), so it is shared through git. The AI follows the active template and flags anything that breaks it. Switch templates with `Draw.AI: Select Design Template…` (setting `drawio-ai.template`; a repository with a single template uses it automatically).
 -   **Live code links**: shapes linked to code (by **Diagram from Code…** or **Link Code with Selected Node**) remember what the code looked like. When it moves, changes or disappears, the shape gets a badge; click it to re-point the link, let the AI update the shape, open the code or remove the link. **Draw.AI: Check Code Links** lists every stale link, and the AI can refresh code-derived diagrams with the `drawio_code_links` tool.
--   **Export from chat**: ask for a Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace (never through symbolic links), asks you before replacing an earlier export, and never replaces a diagram.
+-   **Export to PDF**: **Draw.io: Export to PDF…**, **File → Export as PDF…** in the diagram, `.pdf` in **Draw.io: Export To...**, or **Export PDF** under a `@drawio` answer. Every page becomes one PDF page the size of its content, rendered at print resolution (about 300 dpi) inside VS Code; nothing is uploaded.
+-   **Export from chat**: ask for a PDF, Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace (never through symbolic links), asks you before replacing an earlier export, and never replaces a diagram.
 -   **Import from chat**: ask the AI to open a Visio, Gliffy, yEd, Lucidchart, Miro or draw.io CSV file ("open docs/network.vsdx") and it converts it into a new `.drawio` file with the `drawio_import` tool, then tells you what did not carry over. It only reads files inside the workspace and never replaces a file.
 -   **External agents (MCP)**: turn on the local MCP server and Claude Code, Codex, Cursor and other MCP clients can read and edit your diagrams with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
 
 ## Privacy
 
--   Nothing is sent anywhere until you ask the AI something. Then the relevant diagram content, plus any images or code analysis you attach, goes to the model provider you picked.
--   API keys are kept in VS Code's secret storage.
--   Saved chats stay on your machine in VS Code's extension storage (`drawio-ai.persistChat`). Design templates are plain files in your repository.
+-   Nothing is sent anywhere until you ask the AI something. Then the relevant diagram content, plus any images or code analysis you attach, goes to the model you picked in VS Code's chat.
+-   Design templates are plain files in your repository.
 -   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, a session token that only works while that window runs, its folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`). The long-lived token you copy for hand-configured clients never goes there.
 -   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
--   Exports and imports, including Visio files, are made inside VS Code. Nothing is uploaded.
+-   Exports and imports, including PDF and Visio files, are made inside VS Code. Nothing is uploaded.
 
 ## Main Settings
 
 | Setting | Default | |
 | --- | --- | --- |
-| `drawio-ai.chatSurface` | `auto` | Where requests from the diagram go: VS Code's chat (Draw.AI agent) when the panel uses Copilot, otherwise the panel; or always `native` / `panel` |
-| `drawio-ai.provider` | `vscode-lm` | Default provider for the chat panel |
 | `drawio-ai.reviewChanges` | `true` | Hold AI edits as pending changes |
 | `drawio-ai.template` | (auto) | Active design template id, or `none` |
-| `drawio-ai.persistChat` | `true` | Restore chat panel conversations per diagram |
 | `drawio-ai.checkCodeLinks` | `true` | Badge shapes whose linked code changed |
 | `drawio-ai.mcp.enabled` / `.port` | `false` / `47821` | Local MCP server for external agents |
 | `drawio-ai.mcp.discovery` | `true` | Let connected Claude Code / Codex find each VS Code window without a copied token |
