@@ -84,7 +84,7 @@
 				"zip"
 			],
 			"icon": "build/icon.png",
-			"identity": null,
+			"identity": "-",
 			"hardenedRuntime": false
 		},
 		"win": {
