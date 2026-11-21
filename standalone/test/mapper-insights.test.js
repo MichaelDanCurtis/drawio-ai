@@ -150,3 +150,26 @@ test("MCP tools: unique names, schemas, and read-only flags on the lookups", () 
 	for (const n of ["mapper_maps", "mapper_find", "mapper_show", "mapper_path", "mapper_findings", "mapper_worksheet"]) assert.equal(ro[n], true, n);
 	for (const n of ["mapper_run", "mapper_set_descriptions", "mapper_refresh", "mapper_answer"]) assert.equal(ro[n], false, n);
 });
+
+test("Save As: the map records follow the diagram (copied to a new folder, re-associated in the same one)", () => {
+	const { MapperService } = require("../src/main/mapper/service");
+	const a = fs.mkdtempSync(path.join(os.tmpdir(), "maps-a-"));
+	const b = fs.mkdtempSync(path.join(os.tmpdir(), "maps-b-"));
+	let cwd = a, diagram;
+	const service = new MapperService({ client: null, cwd: () => cwd, diagram: () => diagram, context: () => ({}) });
+	const untitled = store.createRecord({ recipe, input: {}, result: result() });
+	store.saveRecord(a, untitled);
+	const other = { ...store.createRecord({ recipe, input: {}, result: result() }), diagram: "other.drawio" };
+	store.saveRecord(a, other);
+	// untitled (in Documents) → b/shop.drawio: copied, the other diagram's map stays behind
+	assert.equal(service.adoptRecords({ cwd: a }, { cwd: b, diagram: path.join(b, "shop.drawio") }), 1);
+	cwd = b;
+	diagram = path.join(b, "shop.drawio");
+	assert.deepEqual(service.records().map((r) => r.id), [untitled.id]);
+	assert.equal(store.loadRecord(a, untitled.id).diagram, undefined);
+	// same folder, new name: re-associated
+	assert.equal(service.adoptRecords({ cwd: b, diagram }, { cwd: b, diagram: path.join(b, "shop-v2.drawio") }), 1);
+	diagram = path.join(b, "shop-v2.drawio");
+	assert.equal(service.records()[0].id, untitled.id);
+	assert.equal(store.loadRecord(b, untitled.id).diagram, "shop-v2.drawio");
+});

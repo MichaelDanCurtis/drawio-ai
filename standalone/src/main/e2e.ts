@@ -118,7 +118,7 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 				// Through the real UI: the permission card the user would see.
 				clicker = setInterval(() => {
 					void w.chatView.webContents
-						.executeJavaScript(`(() => { const b = document.querySelector(".permission .options button.primary") || document.querySelector(".permission .options button"); if (b) { b.click(); return b.textContent; } return null; })()`)
+						.executeJavaScript(`(() => { const b = document.querySelector(".permission .options button.btn-primary") || document.querySelector(".permission .options button"); if (b) { b.click(); return b.textContent; } return null; })()`)
 						.then((clicked) => clicked && console.log(`[e2e] clicked permission button: ${clicked}`));
 				}, 500);
 			} else {

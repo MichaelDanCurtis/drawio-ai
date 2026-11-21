@@ -164,6 +164,25 @@ zoom, F to fit. Pages are dots in the bottom left: click one, or use Tab / Shift
 the arrow keys. Esc returns to the editor. Presenting never edits or marks the diagram
 as changed. Pages with a map tour show ▶ next to the dots to play it.
 
+## Look
+
+The app's own pages (the chat, the Mapper, the presentation overlay) and draw.io's
+chrome use one design language: warm paper and ink in light mode, OLED black in dark,
+Space Grotesk with Space Mono caps labels, flat hairline cards, an ink primary button,
+and one signal red for the single thing that needs you (a permission request, the
+findings count, the current tour step). Depth comes from dots: a live dot field behind
+the chat and Mapper heads that leans away from the pointer and ripples when you switch
+agents or start a new chat, and a 3D dot object (stacked diagram layers) while the chat
+is empty. Motion is short and ease-out only: messages, menus, cards and tour captions
+rise in. Under *reduce motion* nothing moves.
+
+- Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
+  skill), served at `/ui/`. The fonts are self-hosted from `@fontsource` packages
+  (`build.mjs` copies them).
+- draw.io's chrome: `src/renderer/theme.js`, a draw.io plugin that only changes
+  draw.io's theme variables, its UI font and its primary buttons, never diagrams.
+- `DRAWAI_THEME=light|dark` forces the appearance (for checks and screenshots).
+
 ## How it works
 
 ```
@@ -201,6 +220,20 @@ Electron main process                          agent subprocess (cwd = diagram f
   in the way of mouse events such as hover.
 - Shared code is imported read-only from `../src`; `vscode` imports resolve to a
   small shim (`src/main/vscode-shim.ts`).
+
+## Build a release
+
+```bash
+yarn dist:mac
+```
+
+builds `dist/Draw.AI-<version>-arm64.dmg` and a `.zip` with electron-builder (`yarn dist`
+for the current platform). The draw.io webapp and the examples ship as resources. Agents
+run the stdio MCP proxy from `app.asar.unpacked`. The macOS build is not signed yet:
+set `build.mac.identity` (and notarization) in `package.json` once a Developer ID
+certificate is available. `node scripts/e2e.mjs --app
+dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI` runs the end-to-end check against
+the packaged app.
 
 ## Settings
 

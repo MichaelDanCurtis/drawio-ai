@@ -60,14 +60,20 @@ export class StaticServer {
 			.replace("$$lang$$", JSON.stringify("en"))
 			.replace("$$simpleLabels$$", "false")
 			.replace("$$chrome$$", JSON.stringify("1"))
-			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/presentation.js`]))
+			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/presentation.js`]))
 			.replace("$$localStorage$$", JSON.stringify(o.localStorage))
 			.replace("$$additionalCode$$", "[]");
 	}
 
 	private handle(req: http.IncomingMessage, res: http.ServerResponse): void {
 		const url = new URL(req.url ?? "/", "http://x");
-		const p = decodeURIComponent(url.pathname);
+		let p: string;
+		try {
+			p = decodeURIComponent(url.pathname);
+		} catch {
+			return void res.writeHead(400).end();
+		}
+		if (p.includes("\0")) return void res.writeHead(400).end();
 		const page = /^\/editor\/([\w-]+)\.html$/.exec(p);
 		if (page) {
 			const o = this.pages.get(page[1]);
@@ -85,8 +91,13 @@ export class StaticServer {
 			return void res.end(html);
 		}
 		let file: string | undefined;
-		if (["/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/presentation.js"].includes(p)) {
+		if (["/plugin/theme.js", "/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/presentation.js"].includes(p)) {
 			file = path.join(paths.out, path.basename(p));
+		} else if (p.startsWith("/ui/")) {
+			// the app's own look: theme CSS, the dot modules, fonts (see build.mjs)
+			const ui = path.join(paths.out, "ui");
+			file = path.join(ui, p.slice("/ui/".length));
+			if (!file.startsWith(ui + path.sep)) return void res.writeHead(403).end();
 		} else if (p.startsWith("/webapp/")) {
 			file = path.join(paths.webapp, p.slice("/webapp/".length));
 			if (!file.startsWith(paths.webapp + path.sep)) return void res.writeHead(403).end();

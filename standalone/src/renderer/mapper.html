@@ -2,110 +2,83 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; style-src 'nonce-$$nonce$$'; script-src 'nonce-$$nonce$$';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; font-src $$cspSource$$; style-src 'nonce-$$nonce$$' $$cspSource$$; script-src 'nonce-$$nonce$$' $$cspSource$$;">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Map Something</title>
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
 <style nonce="$$nonce$$">
-	:root {
-		color-scheme: light dark;
-		--font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-		--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-		--fg: #1f2328;
-		--muted: #6b7280;
-		--error: #c62828;
-		--warn: #9a6700;
-		--ok: #1a7f37;
-		--border: #e2e2e6;
-		--bg: #ffffff;
-		--panel: #f7f7f9;
-		--card: #ffffff;
-		--hover: rgba(0,0,0,.05);
-		--accent: #7c3aed;
-		--accent-fg: #ffffff;
-		--accent-soft: rgba(124,58,237,.10);
-		--input: #ffffff;
-		--input-border: #d0d0d7;
-	}
-	@media (prefers-color-scheme: dark) {
-		:root {
-			--fg: #e4e4e7;
-			--muted: #9ca3af;
-			--error: #f48771;
-			--warn: #d29922;
-			--ok: #3fb950;
-			--border: #2f2f35;
-			--bg: #1e1e22;
-			--panel: #232328;
-			--card: #2a2a30;
-			--hover: rgba(255,255,255,.06);
-			--accent-soft: rgba(167,139,250,.16);
-			--input: #2a2a30;
-			--input-border: #3c3c44;
-		}
-	}
-	* { box-sizing: border-box; }
-	html, body { height: 100%; margin: 0; }
-	body { font: 13px/1.45 var(--font); color: var(--fg); background: var(--bg); display: flex; flex-direction: column; }
-	header { padding: 14px 18px 10px; border-bottom: 1px solid var(--border); }
-	header h1 { font-size: 16px; margin: 0 0 2px; }
-	header p { margin: 0; color: var(--muted); font-size: 12px; }
-	main { flex: 1; display: grid; grid-template-columns: 180px 270px 1fr; min-height: 0; }
-	nav, #recipes { border-right: 1px solid var(--border); overflow: auto; padding: 10px 8px; background: var(--panel); }
-	#recipes { background: var(--bg); }
-	.cat { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
-	.cat:hover { background: var(--hover); }
-	.cat.active { background: var(--accent-soft); font-weight: 600; }
-	.cat .ico { width: 22px; text-align: center; font-size: 16px; }
-	.cat small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.3; }
-	.recipe { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--card); color: inherit; font: inherit; padding: 9px 11px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
-	.recipe:hover { border-color: var(--accent); }
-	.recipe.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-	.recipe b { display: block; margin-bottom: 2px; }
-	.recipe span { color: var(--muted); font-size: 12px; }
-	.badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); margin-left: 6px; vertical-align: 1px; font-weight: 600; }
-	@media (prefers-color-scheme: dark) { .badge { color: #c4b5fd; } }
-	#form { overflow: auto; padding: 16px 20px; }
-	#form h2 { font-size: 15px; margin: 0 0 4px; }
-	#form .desc { color: var(--muted); margin: 0 0 14px; }
-	.field { margin-bottom: 12px; }
-	.field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 12px; }
-	.field .help { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
-	.row { display: flex; gap: 6px; }
-	input[type=text], input[type=password], select, textarea { width: 100%; font: inherit; color: var(--fg); background: var(--input); border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 8px; }
-	textarea { min-height: 64px; resize: vertical; font-family: var(--mono); font-size: 12px; }
-	input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-	.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400 !important; }
-	.check input { margin-top: 2px; }
-	button.btn { font: inherit; border-radius: 6px; padding: 6px 14px; border: 1px solid var(--input-border); background: var(--card); color: var(--fg); cursor: pointer; white-space: nowrap; }
-	button.btn:hover { background: var(--hover); }
-	button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
-	button.primary:hover { filter: brightness(1.08); background: var(--accent); }
-	button:disabled { opacity: .5; cursor: default; }
-	.actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
-	.actions .spacer { flex: 1; }
-	#log { margin-top: 12px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: pre-wrap; max-height: 160px; overflow: auto; }
-	#result { margin-top: 12px; padding: 10px 12px; border-radius: 8px; display: none; }
-	#result.ok { display: block; background: rgba(26,127,55,.08); border: 1px solid rgba(26,127,55,.35); }
-	#result.err { display: block; background: rgba(198,40,40,.07); border: 1px solid rgba(198,40,40,.35); color: var(--error); }
+	body { display: flex; flex-direction: column; }
+	.head { position: relative; isolation: isolate; flex: none; padding: 22px 24px 16px; border-bottom: 1px solid var(--border); }
+	.head > :not(.backdrop) { position: relative; z-index: 1; }
+	.head .backdrop { height: 100%; }
+	.head .label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+	.head h1 { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 6px; }
+	.head p { margin: 0; color: var(--muted); max-width: 640px; }
+	main { flex: 1; display: grid; grid-template-columns: 196px 290px 1fr; min-height: 0; }
+	nav, #recipes { border-right: 1px solid var(--border); overflow: auto; padding: 12px 10px; }
+	nav { display: flex; flex-direction: column; gap: 2px; }
+	#recipes { background: var(--surface-2); }
+	.cat { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 1px solid transparent; background: none; color: var(--ink-2); font: inherit; padding: 8px 10px; border-radius: var(--radius); cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+	.cat:hover { background: var(--surface-3); color: var(--ink); }
+	.cat.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
+	.cat .ico { width: 34px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--surface-3); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--ink-2); }
+	.cat.active .ico { background: var(--accent); color: var(--accent-ink); }
+	.cat small { display: block; color: var(--faint); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.5; }
+	.recipe { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface); color: inherit; font: inherit; padding: 10px 12px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; animation: rise var(--dur) var(--ease-enter) backwards; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+	.recipe:nth-child(2) { animation-delay: 30ms; } .recipe:nth-child(3) { animation-delay: 60ms; } .recipe:nth-child(4) { animation-delay: 90ms; } .recipe:nth-child(n + 5) { animation-delay: 120ms; }
+	#recipes.settled .recipe { animation: none; }
+	.recipe:hover { border-color: var(--control-line); }
+	.recipe.active { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+	.recipe b { display: flex; align-items: center; gap: 8px; font-weight: 500; margin-bottom: 3px; }
+	.recipe > span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+	.badge { display: inline-flex; padding: 1px 7px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 9.5px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
+	#form { overflow: auto; padding: 20px 24px 24px; }
+	#form h2 { font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; margin: 0 0 4px; }
+	#form .desc { color: var(--muted); margin: 0 0 18px; max-width: 620px; }
+	.field { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; max-width: 620px; }
+	.field > label:not(.check) { font-family: var(--font-mono); font-size: var(--text-label); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--muted); }
+	.field .help { color: var(--faint); font-size: 12px; }
+	.row { display: flex; gap: 6px; align-items: center; }
+	input[type=text], input[type=password], select, textarea { width: 100%; min-height: 34px; padding: 6px 10px; }
+	textarea { min-height: 72px; resize: vertical; font-family: var(--font-mono); font-size: 12px; }
+	.check { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); cursor: pointer; transition: border-color var(--dur-fast) var(--ease-out); }
+	.check:hover { border-color: var(--control-line); }
+	.check:has(input:checked) { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+	.check input { margin-top: 3px; }
+	.actions { display: flex; gap: 8px; align-items: center; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); max-width: 620px; }
+	.safety { display: inline-flex; align-items: center; gap: 10px; font-size: 12px; color: var(--muted); }
+	#log { margin-top: 14px; font-family: var(--font-mono); font-size: 11px; color: var(--muted); white-space: pre-wrap; max-height: 170px; overflow: auto; max-width: 620px; }
+	#log:empty { display: none; }
+	#log:not(:empty) { padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
+	#result { margin-top: 14px; padding: 10px 12px; border-radius: 12px; display: none; max-width: 620px; animation: rise var(--dur) var(--ease-enter); }
+	#result.ok { display: block; background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); }
+	#result.err { display: block; background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--danger); white-space: pre-wrap; }
 	#result ul { margin: 6px 0 0; padding-left: 18px; color: var(--warn); }
-	.empty { color: var(--muted); padding: 30px 10px; text-align: center; }
-	.safety { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
-	.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
-	@keyframes spin { to { transform: rotate(360deg); } }
-	.hidden { display: none !important; }
-	.err-text { color: var(--error); }
+	.empty { color: var(--faint); padding: 30px 10px; text-align: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+	.err-text { color: var(--danger) !important; }
 </style>
 </head>
 <body>
-<header>
+<header class="head" data-dot-host>
+	<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
+	<span class="label"><span class="brandmark" aria-hidden="true"><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i></i><i data-on></i><i data-on></i><i></i><i></i><i data-signal></i><i></i><i></i><i></i></span>Mapper · read-only</span>
 	<h1>Map something</h1>
-	<p>Collects facts read-only (nothing in your systems is changed), draws them as a map you can keep or revert, and can hand it to your coding agent to complete or dig deeper.</p>
+	<p>Collects facts read-only (nothing in your systems is changed), draws them as a map you can keep or revert, checks its health, and can hand it to your coding agent to complete or dig deeper.</p>
 </header>
 <main>
 	<nav id="cats"></nav>
 	<section id="recipes"><div class="empty">Pick what to map.</div></section>
 	<section id="form"><div class="empty">Choose a map on the left.</div></section>
 </main>
+<script type="module" nonce="$$nonce$$">
+	import { mountDotField } from "/ui/dots.js";
+	const field = mountDotField(document.getElementById("field"), { density: 0.45 });
+	window.drawaiPulse = (x = 0.8, y = 0.4) => field?.pulse(x, y);
+</script>
 <script nonce="$$nonce$$">
 (() => {
 	const host = window.drawaiMapper;
@@ -122,8 +95,8 @@
 		for (const kid of kids.flat()) if (kid !== undefined && kid !== null) e.append(kid);
 		return e;
 	};
-	const ICONS = { software: "🧩", database: "🗄️", azure: "🔷", aws: "🟧", gcp: "🌈", ml: "🧠" };
-	const state = { catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, running: false };
+	const ICONS = { software: "SW", database: "DB", azure: "AZ", aws: "AWS", gcp: "GCP", ml: "ML" };
+	const state = { animateRecipes: true, animateForm: true, catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, running: false };
 
 	const recipes = () => (state.catalog?.recipes ?? []).filter((r) => r.category === state.category);
 	const recipe = () => state.catalog?.recipes.find((r) => r.id === state.recipeId);
@@ -145,7 +118,7 @@
 				return el(
 					"button",
 					{ class: "cat" + (c.id === state.category ? " active" : ""), title: c.description, onclick: () => selectCategory(c.id) },
-					el("span", { class: "ico", text: ICONS[c.id] ?? "◇" }),
+					el("span", { class: "ico", text: ICONS[c.id] ?? "··" }),
 					el("span", {}, el("span", { text: c.title }), el("small", { text: count ? `${count} map${count === 1 ? "" : "s"}` : "coming soon" }))
 				);
 			})
@@ -155,6 +128,8 @@
 	function renderRecipes() {
 		const list = recipes();
 		const box = $("recipes");
+		box.classList.toggle("settled", !state.animateRecipes);
+		state.animateRecipes = false;
 		if (!list.length) {
 			box.replaceChildren(el("div", { class: "empty", text: "Nothing here yet." }));
 			return;
@@ -268,6 +243,8 @@
 		const focus = document.activeElement;
 		const keepFocus = focus && box.contains(focus) && (focus.tagName === "INPUT" || focus.tagName === "TEXTAREA");
 		if (keepFocus) return; // don't re-render under the user's typing
+		box.classList.toggle("page", !!state.animateForm);
+		state.animateForm = false;
 		const describe = el("input", { type: "checkbox", id: "describe" });
 		describe.checked = !!state.describe;
 		describe.addEventListener("change", (e) => (state.describe = e.target.checked));
@@ -304,7 +281,7 @@
 				el("span", { id: "status", class: "safety", text: "Read-only: inventory, catalog and file reads only." }),
 				el("span", { class: "spacer" }),
 				el("button", { class: "btn", id: "cancel", text: state.running ? "Stop" : "Close", onclick: () => host.post({ type: state.running ? "cancel" : "close" }) }),
-				el("button", { class: "btn primary", id: "run", text: state.running ? "Mapping…" : "Map it", disabled: state.running, onclick: run })
+				el("button", { class: "btn btn-primary", id: "run", text: state.running ? "Mapping…" : "Map it", disabled: state.running, onclick: run })
 			),
 			el("div", { id: "result" }),
 			el("div", { id: "log" })
@@ -320,6 +297,7 @@
 	}
 
 	function selectCategory(id) {
+		if (id !== state.category) { state.animateRecipes = true; window.drawaiPulse?.(); }
 		state.category = id;
 		const first = recipes()[0];
 		if (first && !recipes().some((r) => r.id === state.recipeId)) selectRecipe(first.id, true);
@@ -329,6 +307,7 @@
 	}
 
 	function selectRecipe(id, quiet) {
+		if (id !== state.recipeId) state.animateForm = true;
 		state.recipeId = id;
 		const r = recipe();
 		state.values = r ? initialValues(r) : {};
@@ -373,7 +352,7 @@
 			case "running":
 				state.running = true;
 				renderForm();
-				$("status").replaceChildren(el("span", { class: "spin" }), "Mapping…");
+				$("status").replaceChildren(el("span", { class: "dot-loader", "aria-hidden": "true" }, el("i"), el("i"), el("i"), el("i"), el("i")), "Mapping…");
 				break;
 			case "progress": {
 				const log = $("log");
@@ -387,6 +366,7 @@
 				state.running = false;
 				renderForm();
 				setResult("ok", "✓ " + msg.summary, msg.warnings);
+				window.drawaiPulse?.(0.5, 0.5);
 				break;
 			case "failed":
 				state.running = false;

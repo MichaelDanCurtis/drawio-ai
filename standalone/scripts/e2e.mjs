@@ -2,6 +2,7 @@
 //   yarn e2e                                   editor + MCP endpoint + exports, no agent
 //   yarn e2e --agent claude|gemini|codex|copilot|kimi  also one prompt through that agent over ACP
 //   yarn e2e --agent codex --prompt "…" --file ../examples/use-cases/cloud-architecture.drawio
+//   node scripts/e2e.mjs --app dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI   the packaged app
 // The diagram is copied to a temp folder first; results land in <temp>/out.
 import { spawnSync } from "child_process";
 import { copyFileSync, mkdtempSync, readFileSync } from "fs";
@@ -40,8 +41,9 @@ const config = {
 		  }
 		: undefined,
 };
-const electron = createRequire(import.meta.url)("electron");
-const r = spawnSync(electron, [join(here, "..")], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config) } });
+const packaged = arg("app");
+const electron = packaged ? resolve(packaged) : createRequire(import.meta.url)("electron");
+const r = spawnSync(electron, packaged ? [] : [join(here, "..")], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config) } });
 console.log(`\nResults in ${config.out}`);
 try {
 	const s = JSON.parse(readFileSync(join(config.out, "summary.json"), "utf8"));

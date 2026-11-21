@@ -1,0 +1,119 @@
+/*
+ * Motion (WP17). Short, percussive, ease-out only: no spring, no bounce.
+ * Only transform and opacity animate, plus the one dot canvas in the shell.
+ *
+ * - A page enters with a short fade-and-rise; its first few blocks follow
+ *   one --stagger apart. `backwards` fill: once in, nothing stays transformed,
+ *   so sticky headers and fixed drawers are unaffected.
+ * - Dense tables never animate, apart from row hover and state changes.
+ * - prefers-reduced-motion: no entrances, no loops; the dots stand still.
+ */
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes slide {
+  from {
+    transform: translateX(24px);
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes ring {
+  50% {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 6%, transparent);
+  }
+}
+
+@keyframes sweep {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The loader: five dots light in turn, like a segmented hardware readout. */
+@keyframes dot-step {
+  0%,
+  100% {
+    opacity: 0.18;
+  }
+
+  20% {
+    opacity: 1;
+  }
+}
+
+.page > * {
+  animation: page-in var(--dur-slow) var(--ease-enter) backwards;
+}
+
+.page > :nth-child(2) {
+  animation-delay: calc(var(--stagger) * 1);
+}
+
+.page > :nth-child(3) {
+  animation-delay: calc(var(--stagger) * 2);
+}
+
+.page > :nth-child(4) {
+  animation-delay: calc(var(--stagger) * 3);
+}
+
+.page > :nth-child(5) {
+  animation-delay: calc(var(--stagger) * 4);
+}
+
+.page > :nth-child(n + 6) {
+  animation-delay: calc(var(--stagger) * 5);
+}
+
+/* A page inside Settings sits in a .page already: it fades only. */
+.page .page > * {
+  animation-name: fade-in;
+  animation-delay: 0ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}
