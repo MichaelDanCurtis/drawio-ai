@@ -8,6 +8,7 @@ import { ChatController } from "./chatController";
 import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram } from "./exporter";
 import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
 import { mappedSelection } from "./mapper/draw";
+import { diagramContent } from "./xmlContent";
 import { digDeeperRequest } from "./mapper/recipes/common";
 import { recipeById } from "./mapper/registry";
 import { MapperDialog } from "./mapperDialog";
@@ -62,6 +63,8 @@ export class DiagramWindow {
 	private chatVisible = true;
 	/** Presentation mode: only the diagram, read-only, full screen. */
 	public presenting = false;
+	/** The diagram's content when presenting started: view-only changes while presenting are not edits. */
+	private presentBaseline: string | undefined;
 	private enteredFullScreen = false;
 	private closing = false;
 	public readonly mapper: MapperDialog;
@@ -284,9 +287,11 @@ export class DiagramWindow {
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
 		});
-		// Presenting only views the diagram; draw.io still auto-saves page view state when pages change.
-		c.onChange.sub(() => {
-			if (!this.presenting) this.setDirty(true);
+		// Presenting only views the diagram, but draw.io still auto-saves page view state when pages
+		// change: that is not an edit. Anything else (an agent or the Mapper still working) is.
+		c.onChange.sub(({ newXml }) => {
+			if (this.presenting && this.presentBaseline !== undefined && diagramContent(newXml) === this.presentBaseline) return;
+			this.setDirty(true);
 		});
 		c.onSave.sub(() => void this.save());
 		c.onSelectedCellsChanged.sub(() => {
@@ -386,6 +391,8 @@ export class DiagramWindow {
 	public setPresenting(on: boolean): void {
 		if (on === this.presenting || (on && !this.loaded)) return;
 		this.presenting = on;
+		this.presentBaseline = undefined;
+		if (on) void this.client.getXml().then((xml) => this.presenting && (this.presentBaseline = diagramContent(xml)));
 		if (on) {
 			this.enteredFullScreen = !this.win.isFullScreen();
 			// Test runs stay windowed (full screen moves the window to its own Space).

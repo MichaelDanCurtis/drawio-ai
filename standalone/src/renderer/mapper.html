@@ -177,8 +177,9 @@
 		for (const f of r.fields) {
 			if (saved[f.id] !== undefined && !f.secret && f.type !== "password") v[f.id] = saved[f.id];
 			else if (f.default !== undefined) v[f.id] = f.default;
-			else if (f.type === "folder" && f.id === "folder") v[f.id] = state.cwd;
-			else if (f.type === "checkbox") v[f.id] = "";
+			// Only a required folder starts as the diagram's folder: an optional one is one source among others.
+			else if (f.type === "folder" && f.id === "folder" && f.required) v[f.id] = state.cwd;
+			else if (f.type === "checkbox") v[f.id] = "false";
 			else v[f.id] = "";
 		}
 		return v;
@@ -207,7 +208,8 @@
 				control.value = state.values[f.id] ?? "";
 				break;
 			case "checkbox": {
-				const cb = el("input", { type: "checkbox", onchange: (e) => set(e.target.checked ? "true" : "") });
+				// Unticked is an explicit "false", so a checkbox that defaults to on can be turned off.
+				const cb = el("input", { type: "checkbox", onchange: (e) => set(e.target.checked ? "true" : "false") });
 				cb.checked = state.values[f.id] === "true";
 				return el("div", { class: "field" }, el("label", { class: "check" }, cb, el("span", {}, f.label, f.help ? el("div", { class: "help", text: f.help }) : null)));
 			}

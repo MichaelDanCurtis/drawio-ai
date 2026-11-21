@@ -4,6 +4,7 @@ import * as path from "path";
 import { AgentId } from "./agents";
 import { DiagramWindow } from "./diagramWindow";
 import { exportDiagram } from "./exporter";
+import { diagramContent } from "./xmlContent";
 import { settings } from "./settings";
 import type { StaticServer } from "./staticServer";
 
@@ -313,12 +314,7 @@ async function runPresent(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 	await shot("present-final.png");
 	await key("Escape");
 	await pause(1200);
-	// Page view state (scroll position, view defaults draw.io writes when a page is visited) may differ; content may not.
-	// Attribute order is not content either (draw.io re-serializes a page it visits).
-	const viewless = (x: string) =>
-		x
-			.replace(/<mxGraphModel[^>]*>/g, "<mxGraphModel>")
-			.replace(/<([\w:]+)((?:\s+[\w:-]+="[^"]*")+)\s*(\/?)>/g, (_m, tag: string, attrs: string, close: string) => `<${tag} ${attrs.trim().match(/[\w:-]+="[^"]*"/g)!.sort().join(" ")}${close}>`);
+	const viewless = diagramContent;
 	const xmlAfter = await w.client.getXml();
 	log("diagramUnchanged", viewless(xmlAfter) === viewless(xmlBefore));
 	log("markedEdited", (w as any).dirty);
@@ -331,4 +327,12 @@ async function runPresent(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 	}
 	log("afterEscape", { hostPresenting: w.presenting, plugin: await state() });
 	await shot("after-present.png");
+	// A real edit while presenting (an agent or the Mapper still working) must still count.
+	w.setPresenting(true);
+	await pause(1200);
+	await w.client.aiApplyOps([{ op: "addShape", label: "edited while presenting", x: 10, y: 10, width: 120, height: 40 }], { selectResult: false, flash: false, atomic: true, review: false });
+	await pause(1500);
+	log("editWhilePresentingMarkedEdited", (w as any).dirty);
+	w.setPresenting(false);
+	await pause(600);
 }

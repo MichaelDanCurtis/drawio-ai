@@ -329,6 +329,9 @@ export async function mapHubModel(rawId: string, o: HubOptions = {}): Promise<Mo
 
 export async function collectModel(input: MapInput, ctx: Pick<CollectContext, "progress" | "signal">, hubBase?: string): Promise<ModelResult> {
 	const local = (input.file || input.folder || "").trim();
+	if (local && input.hfModel?.trim()) {
+		throw new MapperError("Choose either a local model (folder or file) or a Hugging Face model id, not both.");
+	}
 	if (local) {
 		ctx.progress(`Reading ${local}…`);
 		return mapLocalModel(local);

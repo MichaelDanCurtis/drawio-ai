@@ -251,3 +251,24 @@ test("dig deeper names the mapped folder so relative paths can be found", () => 
 	const text = digDeeperRequest("jobs", [{ label: "build", data: { mapRoot: "/repo", file: ".github/workflows/ci.yml" } }], "");
 	assert.match(text, /made from "\/repo"; paths in the shapes' data are relative to it/);
 });
+
+test("diagram content ignores page view state and attribute order, not edits", () => {
+	const { diagramContent } = require("../src/main/xmlContent");
+	const a = '<mxfile><diagram id="p" name="P"><mxGraphModel dx="1" dy="2" grid="1"><root><mxCell id="0"/><mxCell id="x" value="A" vertex="1" parent="0"/></root></mxGraphModel></diagram></mxfile>';
+	const b = '<mxfile><diagram name="P" id="p"><mxGraphModel grid="0" page="0"><root><mxCell id="0"/><mxCell parent="0" vertex="1" value="A" id="x"/></root></mxGraphModel></diagram></mxfile>';
+	const edited = b.replace('value="A"', 'value="B"');
+	assert.equal(diagramContent(a), diagramContent(b));
+	assert.notEqual(diagramContent(a), diagramContent(edited));
+});
+
+test("Model architecture: a local model and a Hub id together are refused, not silently resolved", async () => {
+	const { collectModel } = require("../src/main/mapper/recipes/ml/model");
+	await assert.rejects(collectModel({ folder: "/tmp", hfModel: "gpt2" }, { progress: () => {}, signal: new AbortController().signal }), /either a local model .* or a Hugging Face model id, not both/);
+});
+
+test("database schema: an unticked Include views (explicit false) leaves views out", () => {
+	const { isOn } = require("../src/main/mapper/recipes/database/connection");
+	assert.equal(isOn("false", true), false);
+	assert.equal(isOn(undefined, true), true);
+	assert.equal(isOn("true", false), true);
+});
