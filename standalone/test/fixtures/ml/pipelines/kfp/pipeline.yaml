@@ -1,0 +1,184 @@
+# PIPELINE DEFINITION
+# Name: churn-training
+components:
+  comp-preprocess:
+    executorLabel: exec-preprocess
+    inputDefinitions:
+      parameters:
+        source_uri:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        train_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+        test_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+  comp-train:
+    executorLabel: exec-train
+    inputDefinitions:
+      artifacts:
+        train_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+      parameters:
+        learning_rate:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-evaluate:
+    executorLabel: exec-evaluate
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+        test_data:
+          artifactType:
+            schemaTitle: system.Dataset
+            schemaVersion: 0.0.1
+    outputDefinitions:
+      artifacts:
+        metrics:
+          artifactType:
+            schemaTitle: system.ClassificationMetrics
+            schemaVersion: 0.0.1
+      parameters:
+        auc:
+          parameterType: NUMBER_DOUBLE
+  comp-condition-1:
+    dag:
+      tasks:
+        deploy:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-deploy
+          inputs:
+            artifacts:
+              model:
+                componentInputArtifact: pipelinechannel--train-model
+          taskInfo:
+            name: deploy
+    inputDefinitions:
+      artifacts:
+        pipelinechannel--train-model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+  comp-deploy:
+    executorLabel: exec-deploy
+    inputDefinitions:
+      artifacts:
+        model:
+          artifactType:
+            schemaTitle: system.Model
+            schemaVersion: 0.0.1
+deploymentSpec:
+  executors:
+    exec-preprocess:
+      container:
+        image: python:3.11
+        command: [sh, -c, "pip install pandas && python3 -m kfp.dsl.executor_main"]
+        args: [--executor_input, "{{$}}", --function_to_execute, preprocess]
+    exec-train:
+      container:
+        image: gcr.io/my-project/trainer:1.4
+        command: [python, train.py]
+        resources:
+          cpuLimit: 4.0
+          memoryLimit: 16G
+    exec-evaluate:
+      container:
+        image: python:3.11
+    exec-deploy:
+      container:
+        image: gcr.io/my-project/deployer:latest
+pipelineInfo:
+  name: churn-training
+root:
+  dag:
+    tasks:
+      preprocess:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-preprocess
+        inputs:
+          parameters:
+            source_uri:
+              componentInputParameter: source_uri
+        taskInfo:
+          name: preprocess
+      train:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train
+        dependentTasks: [preprocess]
+        inputs:
+          artifacts:
+            train_data:
+              taskOutputArtifact:
+                outputArtifactKey: train_data
+                producerTask: preprocess
+          parameters:
+            learning_rate:
+              runtimeValue:
+                constant: 0.05
+        taskInfo:
+          name: train
+      evaluate:
+        cachingOptions:
+          enableCache: false
+        componentRef:
+          name: comp-evaluate
+        dependentTasks: [preprocess, train]
+        inputs:
+          artifacts:
+            model:
+              taskOutputArtifact:
+                outputArtifactKey: model
+                producerTask: train
+            test_data:
+              taskOutputArtifact:
+                outputArtifactKey: test_data
+                producerTask: preprocess
+        taskInfo:
+          name: evaluate
+      condition-1:
+        componentRef:
+          name: comp-condition-1
+        dependentTasks: [evaluate, train]
+        inputs:
+          artifacts:
+            pipelinechannel--train-model:
+              taskOutputArtifact:
+                outputArtifactKey: model
+                producerTask: train
+          parameters:
+            pipelinechannel--evaluate-auc:
+              taskOutputParameter:
+                outputParameterKey: auc
+                producerTask: evaluate
+        taskInfo:
+          name: condition-1
+        triggerPolicy:
+          condition: inputs.parameter_values['pipelinechannel--evaluate-auc'] > 0.8
+  inputDefinitions:
+    parameters:
+      source_uri:
+        defaultValue: gs://my-bucket/churn.csv
+        isOptional: true
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.7.0

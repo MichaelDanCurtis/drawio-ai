@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; style-src 'nonce-$$nonce$$'; script-src 'nonce-$$nonce$$';">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Map Something</title>
+<style nonce="$$nonce$$">
+	:root {
+		color-scheme: light dark;
+		--font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+		--mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+		--fg: #1f2328;
+		--muted: #6b7280;
+		--error: #c62828;
+		--warn: #9a6700;
+		--ok: #1a7f37;
+		--border: #e2e2e6;
+		--bg: #ffffff;
+		--panel: #f7f7f9;
+		--card: #ffffff;
+		--hover: rgba(0,0,0,.05);
+		--accent: #7c3aed;
+		--accent-fg: #ffffff;
+		--accent-soft: rgba(124,58,237,.10);
+		--input: #ffffff;
+		--input-border: #d0d0d7;
+	}
+	@media (prefers-color-scheme: dark) {
+		:root {
+			--fg: #e4e4e7;
+			--muted: #9ca3af;
+			--error: #f48771;
+			--warn: #d29922;
+			--ok: #3fb950;
+			--border: #2f2f35;
+			--bg: #1e1e22;
+			--panel: #232328;
+			--card: #2a2a30;
+			--hover: rgba(255,255,255,.06);
+			--accent-soft: rgba(167,139,250,.16);
+			--input: #2a2a30;
+			--input-border: #3c3c44;
+		}
+	}
+	* { box-sizing: border-box; }
+	html, body { height: 100%; margin: 0; }
+	body { font: 13px/1.45 var(--font); color: var(--fg); background: var(--bg); display: flex; flex-direction: column; }
+	header { padding: 14px 18px 10px; border-bottom: 1px solid var(--border); }
+	header h1 { font-size: 16px; margin: 0 0 2px; }
+	header p { margin: 0; color: var(--muted); font-size: 12px; }
+	main { flex: 1; display: grid; grid-template-columns: 180px 270px 1fr; min-height: 0; }
+	nav, #recipes { border-right: 1px solid var(--border); overflow: auto; padding: 10px 8px; background: var(--panel); }
+	#recipes { background: var(--bg); }
+	.cat { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; background: none; color: inherit; font: inherit; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+	.cat:hover { background: var(--hover); }
+	.cat.active { background: var(--accent-soft); font-weight: 600; }
+	.cat .ico { width: 22px; text-align: center; font-size: 16px; }
+	.cat small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; line-height: 1.3; }
+	.recipe { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--card); color: inherit; font: inherit; padding: 9px 11px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+	.recipe:hover { border-color: var(--accent); }
+	.recipe.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+	.recipe b { display: block; margin-bottom: 2px; }
+	.recipe span { color: var(--muted); font-size: 12px; }
+	.badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); margin-left: 6px; vertical-align: 1px; font-weight: 600; }
+	@media (prefers-color-scheme: dark) { .badge { color: #c4b5fd; } }
+	#form { overflow: auto; padding: 16px 20px; }
+	#form h2 { font-size: 15px; margin: 0 0 4px; }
+	#form .desc { color: var(--muted); margin: 0 0 14px; }
+	.field { margin-bottom: 12px; }
+	.field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 12px; }
+	.field .help { color: var(--muted); font-size: 11.5px; margin-top: 3px; }
+	.row { display: flex; gap: 6px; }
+	input[type=text], input[type=password], select, textarea { width: 100%; font: inherit; color: var(--fg); background: var(--input); border: 1px solid var(--input-border); border-radius: 6px; padding: 6px 8px; }
+	textarea { min-height: 64px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+	input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+	.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400 !important; }
+	.check input { margin-top: 2px; }
+	button.btn { font: inherit; border-radius: 6px; padding: 6px 14px; border: 1px solid var(--input-border); background: var(--card); color: var(--fg); cursor: pointer; white-space: nowrap; }
+	button.btn:hover { background: var(--hover); }
+	button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+	button.primary:hover { filter: brightness(1.08); background: var(--accent); }
+	button:disabled { opacity: .5; cursor: default; }
+	.actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+	.actions .spacer { flex: 1; }
+	#log { margin-top: 12px; font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: pre-wrap; max-height: 160px; overflow: auto; }
+	#result { margin-top: 12px; padding: 10px 12px; border-radius: 8px; display: none; }
+	#result.ok { display: block; background: rgba(26,127,55,.08); border: 1px solid rgba(26,127,55,.35); }
+	#result.err { display: block; background: rgba(198,40,40,.07); border: 1px solid rgba(198,40,40,.35); color: var(--error); }
+	#result ul { margin: 6px 0 0; padding-left: 18px; color: var(--warn); }
+	.empty { color: var(--muted); padding: 30px 10px; text-align: center; }
+	.safety { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+	.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--muted); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+	@keyframes spin { to { transform: rotate(360deg); } }
+	.hidden { display: none !important; }
+	.err-text { color: var(--error); }
+</style>
+</head>
+<body>
+<header>
+	<h1>Map something</h1>
+	<p>Collects facts read-only (nothing in your systems is changed), draws them as a map you can keep or revert, and can hand it to your coding agent to complete or dig deeper.</p>
+</header>
+<main>
+	<nav id="cats"></nav>
+	<section id="recipes"><div class="empty">Pick what to map.</div></section>
+	<section id="form"><div class="empty">Choose a map on the left.</div></section>
+</main>
+<script nonce="$$nonce$$">
+(() => {
+	const host = window.drawaiMapper;
+	const $ = (id) => document.getElementById(id);
+	const el = (tag, attrs = {}, ...kids) => {
+		const e = document.createElement(tag);
+		for (const [k, v] of Object.entries(attrs)) {
+			if (v === undefined || v === null || v === false) continue;
+			if (k === "class") e.className = v;
+			else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+			else if (k === "text") e.textContent = v;
+			else e.setAttribute(k, v === true ? "" : v);
+		}
+		for (const kid of kids.flat()) if (kid !== undefined && kid !== null) e.append(kid);
+		return e;
+	};
+	const ICONS = { software: "🧩", database: "🗄️", azure: "🔷", aws: "🟧", gcp: "🌈", ml: "🧠" };
+	const state = { catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, running: false };
+
+	const recipes = () => (state.catalog?.recipes ?? []).filter((r) => r.category === state.category);
+	const recipe = () => state.catalog?.recipes.find((r) => r.id === state.recipeId);
+
+	/** A field shows when its condition holds and the field it depends on shows too. */
+	function visible(r, f, depth = 0) {
+		if (!f.showIf) return true;
+		const other = r.fields.find((x) => x.id === f.showIf.field);
+		if (other && depth < 10 && !visible(r, other, depth + 1)) return false;
+		const v = state.values[f.showIf.field] ?? other?.default ?? "";
+		return f.showIf.values.includes(String(v));
+	}
+
+	function renderCats() {
+		const nav = $("cats");
+		nav.replaceChildren(
+			...state.catalog.categories.map((c) => {
+				const count = state.catalog.recipes.filter((r) => r.category === c.id).length;
+				return el(
+					"button",
+					{ class: "cat" + (c.id === state.category ? " active" : ""), title: c.description, onclick: () => selectCategory(c.id) },
+					el("span", { class: "ico", text: ICONS[c.id] ?? "◇" }),
+					el("span", {}, el("span", { text: c.title }), el("small", { text: count ? `${count} map${count === 1 ? "" : "s"}` : "coming soon" }))
+				);
+			})
+		);
+	}
+
+	function renderRecipes() {
+		const list = recipes();
+		const box = $("recipes");
+		if (!list.length) {
+			box.replaceChildren(el("div", { class: "empty", text: "Nothing here yet." }));
+			return;
+		}
+		box.replaceChildren(
+			...list.map((r) =>
+				el(
+					"button",
+					{ class: "recipe" + (r.id === state.recipeId ? " active" : ""), onclick: () => selectRecipe(r.id) },
+					el("b", {}, r.title, r.mode === "agent" ? el("span", { class: "badge", text: "with agent" }) : null),
+					el("span", { text: r.description })
+				)
+			)
+		);
+	}
+
+	function initialValues(r) {
+		const saved = state.saved[r.id] ?? {};
+		const v = {};
+		for (const f of r.fields) {
+			if (saved[f.id] !== undefined && !f.secret && f.type !== "password") v[f.id] = saved[f.id];
+			else if (f.default !== undefined) v[f.id] = f.default;
+			// Only a required folder starts as the diagram's folder: an optional one is one source among others.
+			else if (f.type === "folder" && f.id === "folder" && f.required) v[f.id] = state.cwd;
+			else if (f.type === "checkbox") v[f.id] = "false";
+			else v[f.id] = "";
+		}
+		return v;
+	}
+
+	function loadOptions(r, f) {
+		const key = r.id + "/" + f.id;
+		state.loading[key] = true;
+		state.optionErrors[key] = undefined;
+		host.post({ type: "loadOptions", recipeId: r.id, fieldId: f.id, input: { ...state.values } });
+		renderForm();
+	}
+
+	function fieldEl(r, f) {
+		const key = r.id + "/" + f.id;
+		const set = (value) => {
+			state.values[f.id] = value;
+			// Selects other fields depend on (subscription → resource groups) reload them.
+			if (f.type === "select") for (const g of r.fields) if (g.dynamic && g.id !== f.id && r.fields.indexOf(g) > r.fields.indexOf(f)) loadOptions(r, g);
+			if (r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
+		};
+		let control;
+		switch (f.type) {
+			case "textarea":
+				control = el("textarea", { placeholder: f.placeholder, oninput: (e) => (state.values[f.id] = e.target.value) });
+				control.value = state.values[f.id] ?? "";
+				break;
+			case "checkbox": {
+				// Unticked is an explicit "false", so a checkbox that defaults to on can be turned off.
+				const cb = el("input", { type: "checkbox", onchange: (e) => set(e.target.checked ? "true" : "false") });
+				cb.checked = state.values[f.id] === "true";
+				return el("div", { class: "field" }, el("label", { class: "check" }, cb, el("span", {}, f.label, f.help ? el("div", { class: "help", text: f.help }) : null)));
+			}
+			case "select": {
+				const opts = f.dynamic ? state.options[key] ?? [] : f.options ?? [];
+				const sel = el("select", { onchange: (e) => set(e.target.value) });
+				if (f.dynamic && state.loading[key]) sel.append(el("option", { value: "", text: "Loading…" }));
+				else if (!opts.length) sel.append(el("option", { value: "", text: f.dynamic ? "(none found — refresh or type in settings)" : "" }));
+				for (const o of opts) sel.append(el("option", { value: o.value, text: o.label }));
+				if (opts.length && !opts.some((o) => o.value === state.values[f.id])) state.values[f.id] = opts[0].value;
+				sel.value = state.values[f.id] ?? "";
+				control = f.dynamic
+					? el("div", { class: "row" }, sel, el("button", { class: "btn", title: "Reload", onclick: () => loadOptions(r, f), text: "↻" }))
+					: sel;
+				if (f.dynamic && state.options[key] === undefined && !state.loading[key]) setTimeout(() => loadOptions(r, f));
+				break;
+			}
+			case "folder":
+			case "file": {
+				const input = el("input", { type: "text", placeholder: f.placeholder ?? (f.type === "folder" ? "Folder…" : "File…"), oninput: (e) => (state.values[f.id] = e.target.value) });
+				input.value = state.values[f.id] ?? "";
+				control = el("div", { class: "row" }, input, el("button", { class: "btn", text: "Choose…", onclick: () => host.post({ type: "pick", fieldId: f.id, kind: f.type, current: state.values[f.id] }) }));
+				break;
+			}
+			default: {
+				const input = el("input", {
+					type: f.type === "password" || f.secret ? "password" : "text",
+					placeholder: f.placeholder,
+					autocomplete: "off",
+					spellcheck: "false",
+					oninput: (e) => (state.values[f.id] = e.target.value),
+				});
+				input.value = state.values[f.id] ?? "";
+				control = input;
+			}
+		}
+		const err = state.optionErrors[key];
+		return el(
+			"div",
+			{ class: "field" },
+			el("label", {}, f.label, f.required ? " *" : ""),
+			control,
+			f.help ? el("div", { class: "help", text: f.help }) : null,
+			err ? el("div", { class: "help err-text", text: err }) : null,
+			f.secret || f.type === "password" ? el("div", { class: "help", text: "Used for this run only; never stored or sent to the agent." }) : null
+		);
+	}
+
+	function renderForm() {
+		const r = recipe();
+		const box = $("form");
+		if (!r) {
+			box.replaceChildren(el("div", { class: "empty", text: "Choose a map on the left." }));
+			return;
+		}
+		const focus = document.activeElement;
+		const keepFocus = focus && box.contains(focus) && (focus.tagName === "INPUT" || focus.tagName === "TEXTAREA");
+		if (keepFocus) return; // don't re-render under the user's typing
+		const askAgent = el("input", { type: "checkbox", id: "askAgent" });
+		askAgent.checked = r.mode === "agent" || !!state.askAgent;
+		askAgent.disabled = r.mode === "agent" || !r.canAskAgent;
+		askAgent.addEventListener("change", (e) => (state.askAgent = e.target.checked));
+		box.replaceChildren(
+			el("h2", { text: r.title }),
+			el("p", { class: "desc", text: r.description }),
+			...r.fields.filter((f) => visible(r, f)).map((f) => fieldEl(r, f)),
+			r.canAskAgent || r.mode === "agent"
+				? el(
+						"div",
+						{ class: "field" },
+						el(
+							"label",
+							{ class: "check" },
+							askAgent,
+							el("span", {}, r.mode === "agent" ? "The agent completes this map in the chat" : "Then ask the agent to review and annotate the map", el("div", { class: "help", text: "It works in the chat, read-only; you approve anything it wants to run." }))
+						)
+				  )
+				: null,
+			el(
+				"div",
+				{ class: "actions" },
+				el("span", { id: "status", class: "safety", text: "Read-only: inventory, catalog and file reads only." }),
+				el("span", { class: "spacer" }),
+				el("button", { class: "btn", id: "cancel", text: state.running ? "Stop" : "Close", onclick: () => host.post({ type: state.running ? "cancel" : "close" }) }),
+				el("button", { class: "btn primary", id: "run", text: state.running ? "Mapping…" : "Map it", disabled: state.running, onclick: run })
+			),
+			el("div", { id: "result" }),
+			el("div", { id: "log" })
+		);
+	}
+
+	function run() {
+		const r = recipe();
+		if (!r) return;
+		const input = {};
+		for (const f of r.fields) if (visible(r, f)) input[f.id] = String(state.values[f.id] ?? "");
+		host.post({ type: "run", recipeId: r.id, input, askAgent: r.mode === "agent" || !!state.askAgent });
+	}
+
+	function selectCategory(id) {
+		state.category = id;
+		const first = recipes()[0];
+		if (first && !recipes().some((r) => r.id === state.recipeId)) selectRecipe(first.id, true);
+		renderCats();
+		renderRecipes();
+		renderForm();
+	}
+
+	function selectRecipe(id, quiet) {
+		state.recipeId = id;
+		const r = recipe();
+		state.values = r ? initialValues(r) : {};
+		state.askAgent = false;
+		if (!quiet) {
+			renderRecipes();
+			renderForm();
+		}
+	}
+
+	function setResult(kind, text, warnings) {
+		const box = $("result");
+		if (!box) return;
+		box.className = kind;
+		box.replaceChildren(el("div", { text }), warnings?.length ? el("ul", {}, ...warnings.slice(0, 20).map((w) => el("li", { text: w }))) : null);
+	}
+
+	host.onMessage((msg) => {
+		switch (msg.type) {
+			case "catalog":
+				state.catalog = msg.catalog;
+				state.saved = msg.saved ?? {};
+				state.cwd = msg.cwd ?? "";
+				renderCats();
+				selectCategory(state.catalog.categories.some((c) => c.id === state.category) ? state.category : "software");
+				break;
+			case "selectCategory":
+				selectCategory(msg.category);
+				break;
+			case "options": {
+				const key = msg.recipeId + "/" + msg.fieldId;
+				state.loading[key] = false;
+				state.options[key] = msg.options ?? [];
+				state.optionErrors[key] = msg.error;
+				if (msg.recipeId === state.recipeId) renderForm();
+				break;
+			}
+			case "picked":
+				state.values[msg.fieldId] = msg.path;
+				renderForm();
+				break;
+			case "running":
+				state.running = true;
+				renderForm();
+				$("status").replaceChildren(el("span", { class: "spin" }), "Mapping…");
+				break;
+			case "progress": {
+				const log = $("log");
+				if (log) {
+					log.textContent += (log.textContent ? "\n" : "") + msg.text;
+					log.scrollTop = log.scrollHeight;
+				}
+				break;
+			}
+			case "done":
+				state.running = false;
+				renderForm();
+				setResult("ok", "✓ " + msg.summary, msg.warnings);
+				break;
+			case "failed":
+				state.running = false;
+				renderForm();
+				setResult("err", msg.message + (msg.hint ? "\n" + msg.hint : ""));
+				break;
+		}
+	});
+	host.post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

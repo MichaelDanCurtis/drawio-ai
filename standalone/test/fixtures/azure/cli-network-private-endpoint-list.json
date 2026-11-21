@@ -1,0 +1,88 @@
+[
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql",
+  "name": "pe-sql",
+  "type": "Microsoft.Network/privateEndpoints",
+  "location": "westeurope",
+  "resourceGroup": "rg-data",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "subnet": {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+  },
+  "networkInterfaces": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001"
+   }
+  ],
+  "privateLinkServiceConnections": [
+   {
+    "name": "pe-sql-conn",
+    "properties": {
+     "privateLinkServiceId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-prod",
+     "groupIds": [
+      "sqlServer"
+     ],
+     "privateLinkServiceConnectionState": {
+      "status": "Approved"
+     }
+    }
+   }
+  ],
+  "customDnsConfigs": [
+   {
+    "fqdn": "sql-prod.privatelink",
+    "ipAddresses": [
+     "10.1.4.4"
+    ]
+   }
+  ]
+ },
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob",
+  "name": "pe-stblob",
+  "type": "Microsoft.Network/privateEndpoints",
+  "location": "westeurope",
+  "resourceGroup": "rg-data",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "subnet": {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+  },
+  "networkInterfaces": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002"
+   }
+  ],
+  "privateLinkServiceConnections": [
+   {
+    "name": "pe-stblob-conn",
+    "properties": {
+     "privateLinkServiceId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stproddata",
+     "groupIds": [
+      "blob"
+     ],
+     "privateLinkServiceConnectionState": {
+      "status": "Approved"
+     }
+    }
+   }
+  ],
+  "customDnsConfigs": [
+   {
+    "fqdn": "stproddata.privatelink",
+    "ipAddresses": [
+     "10.1.4.5"
+    ]
+   }
+  ]
+ }
+]

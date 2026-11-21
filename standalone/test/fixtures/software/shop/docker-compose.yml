@@ -1,0 +1,41 @@
+services:
+  orders:
+    build: ./services/orders
+    ports: ["8080:8080"]
+    environment:
+      DATABASE_URL: postgres://app:s3cr3tP4ssw0rd@db:5432/orders
+      REDIS_URL: redis://:r3disPassXYZ@cache:6379/0
+      KAFKA_BROKERS: kafka:9092
+      INVENTORY_URL: http://inventory:8000
+      STRIPE_API_KEY: fake_stripe_key_FAKEfake1234567890abcdef
+      JWT_SECRET: jwt-super-secret-do-not-leak
+    depends_on: [db, cache, kafka]
+  inventory:
+    build:
+      context: ./services/inventory
+    env_file: [.env.example]
+    environment:
+      - MONGO_URL=mongodb://inv:m0ngoPassQQ@mongo:27017/inventory
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      mongo:
+        condition: service_healthy
+  web:
+    image: nginx:1.27
+    ports: ["80:80"]
+    depends_on: [orders]
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: supersecret123
+      POSTGRES_DB: orders
+  cache:
+    image: redis:7-alpine
+  kafka:
+    image: bitnami/kafka:3.7
+    environment:
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+  zookeeper:
+    image: bitnami/zookeeper:3.9
+  mongo:
+    image: mongo:7

@@ -18,7 +18,7 @@ type TranscriptItem =
 	| { kind: "tool"; id: string; summary: string; status: "running" | "ok" | "error" }
 	| { kind: "note"; text: string }
 	| { kind: "error"; text: string; action?: { title: string; command: string } }
-	| { kind: "permission"; id: string; title: string; detail?: string; options: acp.PermissionOption[]; outcome?: string };
+	| { kind: "permission"; id: string; title: string; detail?: string; options: acp.PermissionOption[]; outcome?: string; auto?: boolean };
 
 interface ImageData {
 	mimeType: string;
@@ -33,6 +33,10 @@ export interface ChatHost {
 	cwd(): string;
 	/** The diagram is loaded and the Draw.AI plugin is ready. */
 	ready(): boolean;
+	/** Mapper: open its dialog, and the number of mapped shapes in the selection. */
+	openMapper?(): void;
+	mappedSelectionCount?(): number;
+	digDeeper?(question: string): void;
 }
 
 const MAX_IMAGES = 4;
@@ -58,8 +62,16 @@ export class ChatController {
 	private assistant: { kind: "assistant"; text: string } | undefined;
 	private thought: { kind: "thought"; text: string } | undefined;
 	private permissions = new Map<string, (outcome: acp.RequestPermissionOutcome) => void>();
+	/** Options of the requests waiting for an answer, to approve them all at once. */
+	private permissionOptions = new Map<string, acp.PermissionOption[]>();
+	/** "Allow all": approve every request in this chat until New Chat, switching agents, or turning it off. */
+	private allowAll = false;
 	private nextPermission = 1;
 	private toolSummaries: { name: string; result: ToolResult }[] = [];
+	/** This window's agent; the saved setting is only the default for new windows. */
+	private agent: AgentId = settings().agent;
+	/** Stop was pressed during the current turn (possibly before the agent finished starting). */
+	private turnCancelled = false;
 	/** Tests: answer permission requests automatically. */
 	public autoApprove = false;
 	/** Tests: called whenever a prompt turn ends. */
@@ -79,7 +91,7 @@ export class ChatController {
 	}
 
 	public get agentId(): AgentId {
-		return settings().agent;
+		return this.agent;
 	}
 
 	public attach(view: WebContents): void {
@@ -125,6 +137,9 @@ export class ChatController {
 			case "pickModel":
 				await this.pickModel(String(msg.modelId ?? ""));
 				break;
+			case "allowAll":
+				this.setAllowAll(!!msg.on);
+				break;
 			case "permissionReply": {
 				const resolve = this.permissions.get(msg.id);
 				if (resolve) resolve(msg.optionId ? { outcome: "selected", optionId: String(msg.optionId) } : { outcome: "cancelled" });
@@ -144,6 +159,12 @@ export class ChatController {
 			}
 			case "command":
 				await this.command(String(msg.command ?? ""));
+				break;
+			case "openMapper":
+				this.host.openMapper?.();
+				break;
+			case "digDeeper":
+				this.host.digDeeper?.(String(msg.text ?? ""));
 				break;
 		}
 	}
@@ -192,6 +213,7 @@ export class ChatController {
 		if (!this.statuses.some((s) => s.id === id)) return;
 		this.stop();
 		this.resetSession();
+		this.agent = id;
 		updateSettings({ agent: id });
 		if (this.transcript.length) this.push({ kind: "note", text: `Switched to ${agentDef(id).label}: a new conversation starts.` });
 		this.postState();
@@ -205,6 +227,7 @@ export class ChatController {
 		this.sessionError = undefined;
 		this.authMethods = [];
 		this.firstPrompt = true;
+		this.allowAll = false;
 		for (const resolve of this.permissions.values()) resolve({ outcome: "cancelled" });
 	}
 
@@ -311,7 +334,8 @@ export class ChatController {
 
 	// ----- prompting -----
 
-	public async send(text: string, origin?: SelectionContext, images: ImageData[] = []): Promise<void> {
+	/** `shown` replaces the request in the transcript (e.g. a Mapper request with its facts). */
+	public async send(text: string, origin?: SelectionContext, images: ImageData[] = [], shown?: string): Promise<void> {
 		const client = this.host.client();
 		if (this.busy) {
 			this.push({ kind: "error", text: "Still working on the previous request — press Stop first." });
@@ -328,13 +352,14 @@ export class ChatController {
 				: selection.region
 				? "◌ empty area"
 				: undefined;
-		this.push({ kind: "user", text, scope, attachments: images.length ? [`🖼 ${images.length} image${images.length === 1 ? "" : "s"}`] : undefined });
+		this.push({ kind: "user", text: shown ?? text, scope, attachments: images.length ? [`🖼 ${images.length} image${images.length === 1 ? "" : "s"}`] : undefined });
 		if (!client || !this.host.ready()) {
 			this.push({ kind: "error", text: "The diagram is still loading. Try again in a moment." });
 			return;
 		}
 
 		this.setBusy(true);
+		this.turnCancelled = false;
 		let stop: string | undefined;
 		let error: string | undefined;
 		try {
@@ -347,6 +372,12 @@ export class ChatController {
 				return;
 			}
 			if (!session?.info) return;
+			if (this.turnCancelled) {
+				// Stop was pressed while the agent was still starting: never send the request.
+				stop = "cancelled";
+				this.push({ kind: "error", text: "Stopped." });
+				return;
+			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
 			const context = describeContext(this.host.fileName(), selection);
 			const preamble = this.firstPrompt ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
@@ -380,6 +411,7 @@ export class ChatController {
 
 	public stop(): void {
 		if (!this.busy) return;
+		this.turnCancelled = true;
 		this.session?.cancel();
 		for (const resolve of this.permissions.values()) resolve({ outcome: "cancelled" });
 	}
@@ -466,6 +498,24 @@ export class ChatController {
 		return s.result.summary;
 	}
 
+	/** Turns "Allow all" on (approving what is waiting now) or off. */
+	public setAllowAll(on: boolean): void {
+		if (on === this.allowAll) return;
+		this.allowAll = on;
+		if (on) {
+			for (const [id, options] of [...this.permissionOptions]) {
+				const allow = allowOption(options);
+				if (allow) this.permissions.get(id)?.({ outcome: "selected", optionId: allow.optionId });
+			}
+		}
+		this.push({ kind: "note", text: on ? "Allow all is on: the agent's requests in this chat are approved without asking. Turn it off from the chip at the top." : "Allow all is off: the agent asks again." });
+		this.postState();
+	}
+
+	public get allowingAll(): boolean {
+		return this.allowAll;
+	}
+
 	private requestPermission(req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionOutcome> {
 		const id = `p${this.nextPermission++}`;
 		const item: Extract<TranscriptItem, { kind: "permission" }> = {
@@ -475,10 +525,10 @@ export class ChatController {
 			detail: describeInput(req.toolCall.rawInput),
 			options: req.options,
 		};
-		if (this.autoApprove) {
-			const allow = req.options.find((o) => o.kind === "allow_once") ?? req.options.find((o) => o.kind.startsWith("allow"));
+		if (this.autoApprove || this.allowAll) {
+			const allow = allowOption(req.options);
 			if (allow) {
-				this.push({ ...item, outcome: `Auto-approved (test mode): ${allow.name}` });
+				this.push({ ...item, auto: this.allowAll, outcome: this.allowAll ? `✓ ${allow.name} (Allow all is on)` : `Auto-approved (test mode): ${allow.name}` });
 				return Promise.resolve({ outcome: "selected", optionId: allow.optionId });
 			}
 		}
@@ -487,12 +537,14 @@ export class ChatController {
 			const finish = (outcome: acp.RequestPermissionOutcome) => {
 				if (!this.permissions.has(id)) return;
 				this.permissions.delete(id);
+				this.permissionOptions.delete(id);
 				const chosen = outcome.outcome === "selected" ? req.options.find((o) => o.optionId === outcome.optionId) : undefined;
 				item.outcome = chosen ? `${chosen.kind.startsWith("allow") ? "✓" : "✕"} ${chosen.name}` : "Cancelled";
 				this.post({ type: "permissionResolved", id, outcome: item.outcome });
 				resolve(outcome);
 			};
 			this.permissions.set(id, finish);
+			this.permissionOptions.set(id, req.options);
 			signal.addEventListener("abort", () => finish({ outcome: "cancelled" }), { once: true });
 		});
 	}
@@ -555,6 +607,7 @@ export class ChatController {
 			state: {
 				file: this.host.fileName() ?? "Untitled diagram",
 				selectionCount: client?.currentSelection.length ?? 0,
+				mappedSelection: this.host.mappedSelectionCount?.() ?? 0,
 				lassoActive: this.lassoActive,
 				busy: this.busy,
 				transcript: this.transcript,
@@ -566,12 +619,14 @@ export class ChatController {
 				modelId,
 				modelsLoading: starting,
 				modelsError: this.sessionError ?? (!starting && !info && status?.problem ? status.problem.split("\n")[0] : undefined),
+				agentState: info ? "ready" : starting ? "starting" : this.sessionError || status?.problem ? "problem" : "",
 				agentInfo: info
 					? `${info.agentName} · ACP session ready · Draw.AI tools over MCP (${info.mcpTransport})${status?.viaNpx ? " · adapter via npx" : ""}`
 					: starting
 					? `Starting ${agentDef(this.agentId).label}${status?.viaNpx ? " (fetching the ACP adapter with npx)" : ""}…`
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
+				allowAll: this.allowAll,
 			},
 		});
 	}
@@ -580,9 +635,14 @@ export class ChatController {
 function firstPromptNote(fileName: string | undefined): string {
 	return [
 		`You are working inside the Draw.AI desktop app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
-		"Read and change it ONLY with the drawio_* tools of the \"draw-ai\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk, and do not run shell commands for diagram work.",
+		"Read and change it ONLY with the drawio_* tools of the \"draw-ai\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
 		"Reply with a brief summary of what you changed.",
 	].join("\n");
+}
+
+/** The option that allows this one request (not the agent's own "always" rules), else any allow. */
+function allowOption(options: acp.PermissionOption[]): acp.PermissionOption | undefined {
+	return options.find((o) => o.kind === "allow_once") ?? options.find((o) => o.kind.startsWith("allow"));
 }
 
 function toolStatus(s: acp.ToolCallStatus | null | undefined): "running" | "ok" | "error" {

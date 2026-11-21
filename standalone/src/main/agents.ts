@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { settings } from "./settings";
 
-export type AgentId = "gemini" | "claude" | "codex";
+export type AgentId = "gemini" | "claude" | "codex" | "copilot" | "kimi";
 
 export interface AgentDef {
 	id: AgentId;
@@ -75,7 +75,52 @@ export const AGENTS: AgentDef[] = [
 		signIn: "codex login",
 		hasCredentials: (env) => !!env.OPENAI_API_KEY || !!env.CODEX_API_KEY || exists(env.CODEX_HOME ?? path.join(home, ".codex"), "auth.json"),
 	},
+	{
+		id: "copilot",
+		label: "GitHub Copilot",
+		cli: ["copilot"],
+		// GitHub Copilot CLI speaks ACP itself.
+		acp: { command: "copilot", args: ["--acp"] },
+		install: "npm install -g @github/copilot",
+		signIn: "copilot  (then /login)",
+		hasCredentials: (env) =>
+			!!env.COPILOT_GITHUB_TOKEN ||
+			!!env.GH_TOKEN ||
+			!!env.GITHUB_TOKEN ||
+			fileMentions(path.join(home, ".copilot", "config.json"), /logged_in_users|last_logged_in_user/) ||
+			exists(home, ".config", "github-copilot", "apps.json"),
+	},
+	{
+		id: "kimi",
+		label: "Kimi",
+		cli: ["kimi"],
+		// Moonshot's Kimi Code CLI speaks ACP with its `acp` subcommand.
+		acp: { command: "kimi", args: ["acp"] },
+		install: "Install Kimi Code CLI from https://moonshotai.github.io/kimi-code/",
+		signIn: "kimi login",
+		hasCredentials: (env) =>
+			!!env.KIMI_API_KEY ||
+			!!env.MOONSHOT_API_KEY ||
+			hasFiles(path.join(home, ".kimi-code", "credentials")) ||
+			hasFiles(path.join(home, ".kimi", "credentials")),
+	},
 ];
+
+function fileMentions(file: string, pattern: RegExp): boolean {
+	try {
+		return pattern.test(fs.readFileSync(file, "utf8"));
+	} catch {
+		return false;
+	}
+}
+
+function hasFiles(dir: string): boolean {
+	try {
+		return fs.readdirSync(dir).length > 0;
+	} catch {
+		return false;
+	}
+}
 
 function hasOauthAccount(file: string): boolean {
 	try {

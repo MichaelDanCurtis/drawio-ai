@@ -1,0 +1,289 @@
+[
+ {
+  "kind": "compute#instance",
+  "id": "1000009",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instances/web-1",
+  "name": "web-1",
+  "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+  "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/machineTypes/e2-standard-2",
+  "status": "RUNNING",
+  "tags": {
+   "items": [
+    "web",
+    "ssh"
+   ],
+   "fingerprint": "abc="
+  },
+  "labels": {
+   "env": "prod",
+   "tier": "web"
+  },
+  "networkInterfaces": [
+   {
+    "name": "nic0",
+    "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+    "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+    "networkIP": "10.10.0.2",
+    "accessConfigs": [
+     {
+      "kind": "compute#accessConfig",
+      "name": "External NAT",
+      "type": "ONE_TO_ONE_NAT",
+      "natIP": "34.123.0.10",
+      "networkTier": "PREMIUM"
+     }
+    ]
+   }
+  ],
+  "disks": [
+   {
+    "boot": true,
+    "autoDelete": true,
+    "deviceName": "web-1",
+    "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/disks/web-1",
+    "mode": "READ_WRITE",
+    "type": "PERSISTENT"
+   }
+  ],
+  "serviceAccounts": [
+   {
+    "email": "123456789012-compute@developer.gserviceaccount.com",
+    "scopes": [
+     "https://www.googleapis.com/auth/cloud-platform"
+    ]
+   }
+  ],
+  "metadata": {
+   "kind": "compute#metadata",
+   "items": [
+    {
+     "key": "startup-script",
+     "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+    },
+    {
+     "key": "ssh-keys",
+     "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+    }
+   ]
+  },
+  "shieldedInstanceConfig": {
+   "enableSecureBoot": false,
+   "enableVtpm": true,
+   "enableIntegrityMonitoring": true
+  },
+  "scheduling": {
+   "preemptible": false,
+   "automaticRestart": true,
+   "onHostMaintenance": "MIGRATE",
+   "provisioningModel": "STANDARD"
+  }
+ },
+ {
+  "kind": "compute#instance",
+  "id": "1000011",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/instances/web-2",
+  "name": "web-2",
+  "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b",
+  "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/machineTypes/e2-standard-2",
+  "status": "RUNNING",
+  "tags": {
+   "items": [
+    "web"
+   ],
+   "fingerprint": "abc="
+  },
+  "labels": {
+   "env": "prod",
+   "tier": "web"
+  },
+  "networkInterfaces": [
+   {
+    "name": "nic0",
+    "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+    "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+    "networkIP": "10.10.0.3"
+   }
+  ],
+  "disks": [
+   {
+    "boot": true,
+    "autoDelete": true,
+    "deviceName": "web-2",
+    "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/disks/web-2",
+    "mode": "READ_WRITE",
+    "type": "PERSISTENT"
+   }
+  ],
+  "serviceAccounts": [
+   {
+    "email": "123456789012-compute@developer.gserviceaccount.com",
+    "scopes": [
+     "https://www.googleapis.com/auth/cloud-platform"
+    ]
+   }
+  ],
+  "metadata": {
+   "kind": "compute#metadata",
+   "items": [
+    {
+     "key": "startup-script",
+     "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+    },
+    {
+     "key": "ssh-keys",
+     "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+    }
+   ]
+  },
+  "shieldedInstanceConfig": {
+   "enableSecureBoot": false,
+   "enableVtpm": true,
+   "enableIntegrityMonitoring": true
+  },
+  "scheduling": {
+   "preemptible": false,
+   "automaticRestart": true,
+   "onHostMaintenance": "MIGRATE",
+   "provisioningModel": "STANDARD"
+  }
+ },
+ {
+  "kind": "compute#instance",
+  "id": "1000013",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/instances/batch-eu-1",
+  "name": "batch-eu-1",
+  "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b",
+  "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/machineTypes/e2-standard-2",
+  "status": "RUNNING",
+  "tags": {
+   "items": [],
+   "fingerprint": "abc="
+  },
+  "labels": {
+   "env": "prod"
+  },
+  "networkInterfaces": [
+   {
+    "name": "nic0",
+    "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+    "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/europe-west1/subnetworks/subnet-eu",
+    "networkIP": "10.30.0.2"
+   }
+  ],
+  "disks": [
+   {
+    "boot": true,
+    "autoDelete": true,
+    "deviceName": "batch-eu-1",
+    "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/disks/batch-eu-1",
+    "mode": "READ_WRITE",
+    "type": "PERSISTENT"
+   }
+  ],
+  "serviceAccounts": [
+   {
+    "email": "123456789012-compute@developer.gserviceaccount.com",
+    "scopes": [
+     "https://www.googleapis.com/auth/cloud-platform"
+    ]
+   }
+  ],
+  "metadata": {
+   "kind": "compute#metadata",
+   "items": [
+    {
+     "key": "startup-script",
+     "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+    },
+    {
+     "key": "ssh-keys",
+     "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+    }
+   ]
+  },
+  "shieldedInstanceConfig": {
+   "enableSecureBoot": false,
+   "enableVtpm": true,
+   "enableIntegrityMonitoring": true
+  },
+  "scheduling": {
+   "preemptible": false,
+   "automaticRestart": true,
+   "onHostMaintenance": "MIGRATE",
+   "provisioningModel": "STANDARD"
+  }
+ },
+ {
+  "kind": "compute#instance",
+  "id": "1000015",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instances/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+  "name": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+  "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+  "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/machineTypes/e2-standard-2",
+  "status": "RUNNING",
+  "tags": {
+   "items": [
+    "gke-shop-cluster-1a2b3c4d-node"
+   ],
+   "fingerprint": "abc="
+  },
+  "labels": {
+   "goog-k8s-cluster-name": "shop-cluster",
+   "goog-k8s-node-pool-name": "default-pool"
+  },
+  "networkInterfaces": [
+   {
+    "name": "nic0",
+    "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+    "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+    "networkIP": "10.20.0.5"
+   }
+  ],
+  "disks": [
+   {
+    "boot": true,
+    "autoDelete": true,
+    "deviceName": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+    "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/disks/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+    "mode": "READ_WRITE",
+    "type": "PERSISTENT"
+   }
+  ],
+  "serviceAccounts": [
+   {
+    "email": "123456789012-compute@developer.gserviceaccount.com",
+    "scopes": [
+     "https://www.googleapis.com/auth/cloud-platform"
+    ]
+   }
+  ],
+  "metadata": {
+   "kind": "compute#metadata",
+   "items": [
+    {
+     "key": "startup-script",
+     "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+    },
+    {
+     "key": "ssh-keys",
+     "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+    }
+   ]
+  },
+  "shieldedInstanceConfig": {
+   "enableSecureBoot": false,
+   "enableVtpm": true,
+   "enableIntegrityMonitoring": true
+  },
+  "scheduling": {
+   "preemptible": false,
+   "automaticRestart": true,
+   "onHostMaintenance": "MIGRATE",
+   "provisioningModel": "STANDARD"
+  }
+ }
+]

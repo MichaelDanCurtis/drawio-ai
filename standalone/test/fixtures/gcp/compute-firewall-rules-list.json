@@ -1,0 +1,81 @@
+[
+ {
+  "kind": "compute#firewall",
+  "id": "1000006",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/firewalls/allow-ssh-anywhere",
+  "name": "allow-ssh-anywhere",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "priority": 1000,
+  "direction": "INGRESS",
+  "sourceRanges": [
+   "0.0.0.0/0"
+  ],
+  "allowed": [
+   {
+    "IPProtocol": "tcp",
+    "ports": [
+     "22"
+    ]
+   }
+  ],
+  "targetTags": [
+   "ssh"
+  ],
+  "disabled": false,
+  "logConfig": {
+   "enable": false
+  }
+ },
+ {
+  "kind": "compute#firewall",
+  "id": "1000007",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/firewalls/allow-web",
+  "name": "allow-web",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "priority": 1000,
+  "direction": "INGRESS",
+  "sourceRanges": [
+   "0.0.0.0/0"
+  ],
+  "allowed": [
+   {
+    "IPProtocol": "tcp",
+    "ports": [
+     "80",
+     "443"
+    ]
+   }
+  ],
+  "targetTags": [
+   "web"
+  ],
+  "disabled": false,
+  "logConfig": {
+   "enable": false
+  }
+ },
+ {
+  "kind": "compute#firewall",
+  "id": "1000008",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/firewalls/allow-internal",
+  "name": "allow-internal",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "priority": 1000,
+  "direction": "INGRESS",
+  "sourceRanges": [
+   "10.0.0.0/8"
+  ],
+  "allowed": [
+   {
+    "IPProtocol": "all"
+   }
+  ],
+  "disabled": false,
+  "logConfig": {
+   "enable": false
+  }
+ }
+]

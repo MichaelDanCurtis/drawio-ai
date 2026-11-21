@@ -1,0 +1,48 @@
+[
+ {
+  "kind": "compute#network",
+  "id": "1000000",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "name": "vpc-prod",
+  "autoCreateSubnetworks": false,
+  "routingConfig": {
+   "routingMode": "REGIONAL"
+  },
+  "peerings": [
+   {
+    "name": "prod-to-shared",
+    "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-shared",
+    "state": "ACTIVE",
+    "exportCustomRoutes": false
+   },
+   {
+    "name": "servicenetworking-googleapis-com",
+    "network": "https://www.googleapis.com/compute/v1/projects/a1b2c3-tp/global/networks/servicenetworking",
+    "state": "ACTIVE"
+   }
+  ],
+  "subnetworks": [],
+  "networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL"
+ },
+ {
+  "kind": "compute#network",
+  "id": "1000001",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-shared",
+  "name": "vpc-shared",
+  "autoCreateSubnetworks": false,
+  "routingConfig": {
+   "routingMode": "REGIONAL"
+  },
+  "peerings": [
+   {
+    "name": "shared-to-prod",
+    "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+    "state": "ACTIVE"
+   }
+  ],
+  "subnetworks": [],
+  "networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL"
+ }
+]

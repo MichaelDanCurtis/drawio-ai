@@ -1,0 +1,356 @@
+{
+	"engine": "sqlite",
+	"info": {
+		"database": "shop.db",
+		"version": "3.53.4"
+	},
+	"tables": [
+		{
+			"name": "addresses",
+			"type": "table"
+		},
+		{
+			"name": "customer_profiles",
+			"type": "table"
+		},
+		{
+			"name": "customers",
+			"type": "table"
+		},
+		{
+			"name": "employees",
+			"type": "table"
+		},
+		{
+			"name": "order_items",
+			"type": "table"
+		},
+		{
+			"name": "order_totals",
+			"type": "view"
+		},
+		{
+			"name": "orders",
+			"type": "table"
+		},
+		{
+			"name": "products",
+			"type": "table"
+		}
+	],
+	"columns": [
+		{
+			"table": "addresses",
+			"cid": 0,
+			"name": "id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 1
+		},
+		{
+			"table": "addresses",
+			"cid": 1,
+			"name": "customer_id",
+			"type": "INTEGER",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "addresses",
+			"cid": 2,
+			"name": "line1",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "addresses",
+			"cid": 3,
+			"name": "city",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "customer_profiles",
+			"cid": 0,
+			"name": "customer_id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 1
+		},
+		{
+			"table": "customer_profiles",
+			"cid": 1,
+			"name": "bio",
+			"type": "TEXT",
+			"not_null": 0,
+			"pk": 0
+		},
+		{
+			"table": "customers",
+			"cid": 0,
+			"name": "id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 1
+		},
+		{
+			"table": "customers",
+			"cid": 1,
+			"name": "email",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "customers",
+			"cid": 2,
+			"name": "name",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "customers",
+			"cid": 3,
+			"name": "created_at",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "employees",
+			"cid": 0,
+			"name": "id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 1
+		},
+		{
+			"table": "employees",
+			"cid": 1,
+			"name": "name",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "employees",
+			"cid": 2,
+			"name": "manager_id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 0
+		},
+		{
+			"table": "order_items",
+			"cid": 0,
+			"name": "order_id",
+			"type": "INTEGER",
+			"not_null": 1,
+			"pk": 1
+		},
+		{
+			"table": "order_items",
+			"cid": 1,
+			"name": "product_id",
+			"type": "INTEGER",
+			"not_null": 1,
+			"pk": 2
+		},
+		{
+			"table": "order_items",
+			"cid": 2,
+			"name": "quantity",
+			"type": "INTEGER",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "order_totals",
+			"cid": 0,
+			"name": "order_id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 0
+		},
+		{
+			"table": "order_totals",
+			"cid": 1,
+			"name": "total",
+			"type": "",
+			"not_null": 0,
+			"pk": 0
+		},
+		{
+			"table": "orders",
+			"cid": 0,
+			"name": "id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 1
+		},
+		{
+			"table": "orders",
+			"cid": 1,
+			"name": "customer_id",
+			"type": "INTEGER",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "orders",
+			"cid": 2,
+			"name": "shipping_address_id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 0
+		},
+		{
+			"table": "orders",
+			"cid": 3,
+			"name": "status",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "orders",
+			"cid": 4,
+			"name": "placed_at",
+			"type": "TEXT",
+			"not_null": 0,
+			"pk": 0
+		},
+		{
+			"table": "products",
+			"cid": 0,
+			"name": "id",
+			"type": "INTEGER",
+			"not_null": 0,
+			"pk": 1
+		},
+		{
+			"table": "products",
+			"cid": 1,
+			"name": "sku",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "products",
+			"cid": 2,
+			"name": "name",
+			"type": "TEXT",
+			"not_null": 1,
+			"pk": 0
+		},
+		{
+			"table": "products",
+			"cid": 3,
+			"name": "price",
+			"type": "NUMERIC(10,2)",
+			"not_null": 1,
+			"pk": 0
+		}
+	],
+	"foreignKeys": [
+		{
+			"table": "addresses",
+			"id": 0,
+			"seq": 0,
+			"ref_table": "customers",
+			"col": "customer_id",
+			"ref_col": "id"
+		},
+		{
+			"table": "customer_profiles",
+			"id": 0,
+			"seq": 0,
+			"ref_table": "customers",
+			"col": "customer_id",
+			"ref_col": "id"
+		},
+		{
+			"table": "employees",
+			"id": 0,
+			"seq": 0,
+			"ref_table": "employees",
+			"col": "manager_id",
+			"ref_col": "id"
+		},
+		{
+			"table": "order_items",
+			"id": 0,
+			"seq": 0,
+			"ref_table": "products",
+			"col": "product_id",
+			"ref_col": null
+		},
+		{
+			"table": "order_items",
+			"id": 1,
+			"seq": 0,
+			"ref_table": "orders",
+			"col": "order_id",
+			"ref_col": "id"
+		},
+		{
+			"table": "orders",
+			"id": 0,
+			"seq": 0,
+			"ref_table": "addresses",
+			"col": "shipping_address_id",
+			"ref_col": "id"
+		},
+		{
+			"table": "orders",
+			"id": 1,
+			"seq": 0,
+			"ref_table": "customers",
+			"col": "customer_id",
+			"ref_col": "id"
+		}
+	],
+	"indexes": [
+		{
+			"table": "customers",
+			"name": "sqlite_autoindex_customers_1",
+			"is_unique": 1,
+			"origin": "u",
+			"columns": [
+				"email"
+			]
+		},
+		{
+			"table": "order_items",
+			"name": "sqlite_autoindex_order_items_1",
+			"is_unique": 1,
+			"origin": "pk",
+			"columns": [
+				"order_id",
+				"product_id"
+			]
+		},
+		{
+			"table": "orders",
+			"name": "orders_status_idx",
+			"is_unique": 0,
+			"origin": "c",
+			"columns": [
+				"status"
+			]
+		},
+		{
+			"table": "products",
+			"name": "sqlite_autoindex_products_1",
+			"is_unique": 1,
+			"origin": "u",
+			"columns": [
+				"sku"
+			]
+		}
+	]
+}

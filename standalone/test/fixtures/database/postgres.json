@@ -1,0 +1,696 @@
+{
+	"engine": "postgres",
+	"info": {
+		"database": "shop",
+		"version": "16.16",
+		"requestedSchemas": [],
+		"skippedSchemas": [
+			"auth"
+		]
+	},
+	"tables": [
+		{
+			"schema": "billing",
+			"name": "invoices",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "addresses",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "customer_profiles",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "customers",
+			"kind": "r",
+			"comment": "People who buy things",
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "employees",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "order_items",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "order_totals",
+			"kind": "v",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "orders",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"schema": "public",
+			"name": "products",
+			"kind": "r",
+			"comment": null,
+			"row_estimate": null
+		}
+	],
+	"columns": [
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "id",
+			"position": 1,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "order_id",
+			"position": 2,
+			"type": "bigint",
+			"nullable": false
+		},
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "amount",
+			"position": 3,
+			"type": "numeric(12,2)",
+			"nullable": false
+		},
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "issued_on",
+			"position": 4,
+			"type": "date",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "id",
+			"position": 1,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "customer_id",
+			"position": 2,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "line1",
+			"position": 3,
+			"type": "text",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "city",
+			"position": 4,
+			"type": "text",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "customer_profiles",
+			"name": "customer_id",
+			"position": 1,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "customer_profiles",
+			"name": "bio",
+			"position": 2,
+			"type": "text",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "id",
+			"position": 1,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "email",
+			"position": 2,
+			"type": "character varying(255)",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "name",
+			"position": 3,
+			"type": "text",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "auth_user_id",
+			"position": 4,
+			"type": "uuid",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "created_at",
+			"position": 5,
+			"type": "timestamp with time zone",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "employees",
+			"name": "id",
+			"position": 1,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "employees",
+			"name": "name",
+			"position": 2,
+			"type": "text",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "employees",
+			"name": "manager_id",
+			"position": 3,
+			"type": "integer",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "order_id",
+			"position": 1,
+			"type": "bigint",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "product_id",
+			"position": 2,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "quantity",
+			"position": 3,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "order_totals",
+			"name": "order_id",
+			"position": 1,
+			"type": "bigint",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "order_totals",
+			"name": "total",
+			"position": 2,
+			"type": "numeric",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "id",
+			"position": 1,
+			"type": "bigint",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "customer_id",
+			"position": 2,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "shipping_address_id",
+			"position": 3,
+			"type": "integer",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "status",
+			"position": 4,
+			"type": "text",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "placed_at",
+			"position": 5,
+			"type": "timestamp with time zone",
+			"nullable": true
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "id",
+			"position": 1,
+			"type": "integer",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "sku",
+			"position": 2,
+			"type": "character varying(32)",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "name",
+			"position": 3,
+			"type": "text",
+			"nullable": false
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "price",
+			"position": 4,
+			"type": "numeric(10,2)",
+			"nullable": false
+		}
+	],
+	"constraints": [
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "invoices_order_id_fkey",
+			"type": "f",
+			"columns": [
+				"order_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "orders",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "invoices_pkey",
+			"type": "p",
+			"columns": [
+				"id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "addresses_customer_id_fkey",
+			"type": "f",
+			"columns": [
+				"customer_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "customers",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "addresses_pkey",
+			"type": "p",
+			"columns": [
+				"id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "customer_profiles",
+			"name": "customer_profiles_customer_id_fkey",
+			"type": "f",
+			"columns": [
+				"customer_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "customers",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "customer_profiles",
+			"name": "customer_profiles_pkey",
+			"type": "p",
+			"columns": [
+				"customer_id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "customers_auth_user_id_fkey",
+			"type": "f",
+			"columns": [
+				"auth_user_id"
+			],
+			"ref_schema": "auth",
+			"ref_table": "users",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "customers_email_key",
+			"type": "u",
+			"columns": [
+				"email"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "customers_pkey",
+			"type": "p",
+			"columns": [
+				"id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "employees",
+			"name": "employees_manager_id_fkey",
+			"type": "f",
+			"columns": [
+				"manager_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "employees",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "employees",
+			"name": "employees_pkey",
+			"type": "p",
+			"columns": [
+				"id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "order_items_order_id_fkey",
+			"type": "f",
+			"columns": [
+				"order_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "orders",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "order_items_pkey",
+			"type": "p",
+			"columns": [
+				"order_id",
+				"product_id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "order_items_product_id_fkey",
+			"type": "f",
+			"columns": [
+				"product_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "products",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "orders_customer_id_fkey",
+			"type": "f",
+			"columns": [
+				"customer_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "customers",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "orders_pkey",
+			"type": "p",
+			"columns": [
+				"id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "orders_shipping_address_id_fkey",
+			"type": "f",
+			"columns": [
+				"shipping_address_id"
+			],
+			"ref_schema": "public",
+			"ref_table": "addresses",
+			"ref_columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "products_pkey",
+			"type": "p",
+			"columns": [
+				"id"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "products_sku_key",
+			"type": "u",
+			"columns": [
+				"sku"
+			],
+			"ref_schema": null,
+			"ref_table": null,
+			"ref_columns": []
+		}
+	],
+	"indexes": [
+		{
+			"schema": "billing",
+			"table": "invoices",
+			"name": "invoices_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "addresses",
+			"name": "addresses_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "customer_profiles",
+			"name": "customer_profiles_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"customer_id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "customers_email_key",
+			"is_unique": true,
+			"is_primary": false,
+			"columns": [
+				"email"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "customers",
+			"name": "customers_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "employees",
+			"name": "employees_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "order_items",
+			"name": "order_items_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"order_id",
+				"product_id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "orders_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "orders",
+			"name": "orders_status_idx",
+			"is_unique": false,
+			"is_primary": false,
+			"columns": [
+				"status"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "products_pkey",
+			"is_unique": true,
+			"is_primary": true,
+			"columns": [
+				"id"
+			]
+		},
+		{
+			"schema": "public",
+			"table": "products",
+			"name": "products_sku_key",
+			"is_unique": true,
+			"is_primary": false,
+			"columns": [
+				"sku"
+			]
+		}
+	]
+}

@@ -16,13 +16,24 @@
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^2.8.0",
 		"@hediet/std": "^0.6.0",
-		"js-sha256": "^1.1.0"
+		"js-sha256": "^1.1.0",
+		"js-yaml": "^5.5.0",
+		"mongodb": "^7.9.1",
+		"mssql": "^12.8.0",
+		"mysql2": "^3.24.6",
+		"oracledb": "^26.0.0",
+		"pg": "^8.23.1"
 	},
 	"devDependencies": {
+		"@types/js-yaml": "^4.0.9",
+		"@types/mssql": "^12.3.0",
 		"@types/node": "^26.6.6",
+		"@types/oracledb": "^26.0.1",
+		"@types/pg": "^8.23.1",
 		"@types/vscode": "1.105.0",
 		"electron": "^45.4.1",
 		"esbuild": "^0.28.2",
+		"fast-xml-parser": "^5.12.1",
 		"mithril": "^2.0.4",
 		"mobx": "^5",
 		"typescript": "^5.7.3"

@@ -1,0 +1,42 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    { "kind": "Deployment", "metadata": { "name": "web", "namespace": "shop" },
+      "spec": { "replicas": 2, "template": { "metadata": { "labels": { "app": "web" } }, "spec": { "containers": [
+        { "name": "web", "image": "ghcr.io/acme/web:2.0",
+          "env": [
+            { "name": "DATABASE_URL", "value": "postgres://app:k8sPassLeak99@db:5432/shop" },
+            { "name": "CACHE_HOST", "value": "cache.shop.svc.cluster.local:6379" },
+            { "name": "API_TOKEN", "value": "tok-k8s-should-not-leak" }
+          ],
+          "envFrom": [{ "configMapRef": { "name": "web-config" } }] } ] } } },
+      "status": { "readyReplicas": 1 } },
+    { "kind": "ReplicaSet", "metadata": { "name": "web-6d4f", "namespace": "shop", "ownerReferences": [{ "kind": "Deployment", "name": "web", "controller": true }] } },
+    { "kind": "Pod", "metadata": { "name": "web-6d4f-a", "namespace": "shop", "labels": { "app": "web" }, "ownerReferences": [{ "kind": "ReplicaSet", "name": "web-6d4f", "controller": true }] },
+      "status": { "phase": "Running", "containerStatuses": [{ "restartCount": 3 }] } },
+    { "kind": "Pod", "metadata": { "name": "web-6d4f-b", "namespace": "shop", "labels": { "app": "web" }, "ownerReferences": [{ "kind": "ReplicaSet", "name": "web-6d4f", "controller": true }] },
+      "status": { "phase": "Pending" } },
+    { "kind": "StatefulSet", "metadata": { "name": "db", "namespace": "shop" },
+      "spec": { "replicas": 1, "template": { "metadata": { "labels": { "app": "db" } }, "spec": { "containers": [{ "name": "pg", "image": "postgres:16" }] } } },
+      "status": { "readyReplicas": 1 } },
+    { "kind": "Pod", "metadata": { "name": "db-0", "namespace": "shop", "labels": { "app": "db" }, "ownerReferences": [{ "kind": "StatefulSet", "name": "db", "controller": true }] }, "status": { "phase": "Running" } },
+    { "kind": "Deployment", "metadata": { "name": "cache", "namespace": "shop" },
+      "spec": { "replicas": 1, "template": { "metadata": { "labels": { "app": "cache" } }, "spec": { "containers": [{ "name": "redis", "image": "redis:7" }] } } },
+      "status": { "readyReplicas": 1 } },
+    { "kind": "CronJob", "metadata": { "name": "nightly", "namespace": "shop" },
+      "spec": { "schedule": "0 2 * * *", "jobTemplate": { "spec": { "template": { "spec": { "containers": [{ "name": "job", "image": "ghcr.io/acme/web:2.0" }] } } } } } },
+    { "kind": "Job", "metadata": { "name": "nightly-123", "namespace": "shop", "ownerReferences": [{ "kind": "CronJob", "name": "nightly", "controller": true }] } },
+    { "kind": "Pod", "metadata": { "name": "nightly-123-x", "namespace": "shop", "ownerReferences": [{ "kind": "Job", "name": "nightly-123", "controller": true }] }, "status": { "phase": "Succeeded" } },
+    { "kind": "Service", "metadata": { "name": "web", "namespace": "shop" }, "spec": { "type": "ClusterIP", "selector": { "app": "web" }, "ports": [{ "port": 80, "targetPort": 8080 }] } },
+    { "kind": "Service", "metadata": { "name": "db", "namespace": "shop" }, "spec": { "selector": { "app": "db" }, "ports": [{ "port": 5432 }] } },
+    { "kind": "Service", "metadata": { "name": "cache", "namespace": "shop" }, "spec": { "selector": { "app": "cache" }, "ports": [{ "port": 6379 }] } },
+    { "kind": "Service", "metadata": { "name": "kubernetes", "namespace": "default" }, "spec": { "ports": [{ "port": 443 }] } },
+    { "kind": "Ingress", "metadata": { "name": "shop", "namespace": "shop" },
+      "spec": { "ingressClassName": "nginx", "rules": [{ "host": "shop.example.org", "http": { "paths": [{ "path": "/", "backend": { "service": { "name": "web", "port": { "number": 80 } } } }] } }] } },
+    { "kind": "ConfigMap", "metadata": { "name": "web-config", "namespace": "shop" }, "data": { "LOG_LEVEL": "info" } },
+    { "kind": "Deployment", "metadata": { "name": "coredns", "namespace": "kube-system" },
+      "spec": { "replicas": 2, "template": { "metadata": { "labels": { "k8s-app": "kube-dns" } }, "spec": { "containers": [{ "name": "coredns", "image": "coredns:1.11" }] } } },
+      "status": { "readyReplicas": 2 } }
+  ]
+}

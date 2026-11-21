@@ -1,0 +1,337 @@
+{
+	"_comment": "Representative aws CLI v2 JSON answers for a made-up account (111122223333). Keys: '[region|]service op[|id argument]'. '$error' is what the CLI prints on stderr with exit code 254.",
+	"sts get-caller-identity": { "UserId": "AIDAEXAMPLEUSERID", "Account": "111122223333", "Arn": "arn:aws:iam::111122223333:user/mapper-readonly" },
+	"configure list": { "$text": "NAME       : VALUE                    : TYPE             : LOCATION\nprofile    : example                  : manual           : --profile\nregion     : us-east-1                : config-file      : ~/.aws/config\n" },
+	"configure list-profiles": { "$text": "default\nexample\n" },
+	"ec2 describe-regions": { "Regions": [{ "RegionName": "us-east-1", "OptInStatus": "opt-in-not-required" }, { "RegionName": "eu-west-3", "OptInStatus": "opt-in-not-required" }] },
+	"eu-west-3|ec2 describe-vpcs": { "$error": "\nAn error occurred (OptInRequired) when calling the DescribeVpcs operation: You are not subscribed to this service. Please go to http://aws.amazon.com to subscribe.\n" },
+
+	"us-east-1|ec2 describe-vpcs": {
+		"Vpcs": [
+			{ "VpcId": "vpc-0a1", "CidrBlock": "10.0.0.0/16", "IsDefault": false, "State": "available", "Tags": [{ "Key": "Name", "Value": "prod" }] },
+			{ "VpcId": "vpc-def", "CidrBlock": "172.31.0.0/16", "IsDefault": true, "State": "available" }
+		]
+	},
+	"us-east-1|ec2 describe-subnets": {
+		"Subnets": [
+			{ "SubnetId": "subnet-pub-a", "VpcId": "vpc-0a1", "AvailabilityZone": "us-east-1a", "CidrBlock": "10.0.0.0/24", "MapPublicIpOnLaunch": true, "Tags": [{ "Key": "Name", "Value": "public-a" }] },
+			{ "SubnetId": "subnet-pub-b", "VpcId": "vpc-0a1", "AvailabilityZone": "us-east-1b", "CidrBlock": "10.0.1.0/24", "MapPublicIpOnLaunch": true, "Tags": [{ "Key": "Name", "Value": "public-b" }] },
+			{ "SubnetId": "subnet-priv-a", "VpcId": "vpc-0a1", "AvailabilityZone": "us-east-1a", "CidrBlock": "10.0.10.0/24", "MapPublicIpOnLaunch": false, "Tags": [{ "Key": "Name", "Value": "app-a" }] },
+			{ "SubnetId": "subnet-priv-b", "VpcId": "vpc-0a1", "AvailabilityZone": "us-east-1b", "CidrBlock": "10.0.11.0/24", "MapPublicIpOnLaunch": false, "Tags": [{ "Key": "Name", "Value": "app-b" }] },
+			{ "SubnetId": "subnet-data-a", "VpcId": "vpc-0a1", "AvailabilityZone": "us-east-1a", "CidrBlock": "10.0.20.0/24", "MapPublicIpOnLaunch": false, "Tags": [{ "Key": "Name", "Value": "data-a" }] },
+			{ "SubnetId": "subnet-data-b", "VpcId": "vpc-0a1", "AvailabilityZone": "us-east-1b", "CidrBlock": "10.0.21.0/24", "MapPublicIpOnLaunch": false, "Tags": [{ "Key": "Name", "Value": "data-b" }] },
+			{ "SubnetId": "subnet-def-a", "VpcId": "vpc-def", "AvailabilityZone": "us-east-1a", "CidrBlock": "172.31.0.0/20", "MapPublicIpOnLaunch": true }
+		]
+	},
+	"us-east-1|ec2 describe-route-tables": {
+		"RouteTables": [
+			{
+				"RouteTableId": "rtb-pub",
+				"VpcId": "vpc-0a1",
+				"Associations": [{ "Main": false, "SubnetId": "subnet-pub-a" }, { "Main": false, "SubnetId": "subnet-pub-b" }],
+				"Routes": [{ "DestinationCidrBlock": "10.0.0.0/16", "GatewayId": "local", "State": "active" }, { "DestinationCidrBlock": "0.0.0.0/0", "GatewayId": "igw-1", "State": "active" }]
+			},
+			{
+				"RouteTableId": "rtb-main",
+				"VpcId": "vpc-0a1",
+				"Associations": [{ "Main": true, "RouteTableId": "rtb-main" }],
+				"Routes": [
+					{ "DestinationCidrBlock": "10.0.0.0/16", "GatewayId": "local", "State": "active" },
+					{ "DestinationCidrBlock": "0.0.0.0/0", "NatGatewayId": "nat-1", "State": "active" },
+					{ "DestinationCidrBlock": "10.50.0.0/16", "VpcPeeringConnectionId": "pcx-1", "State": "active" }
+				]
+			},
+			{
+				"RouteTableId": "rtb-data",
+				"VpcId": "vpc-0a1",
+				"Associations": [{ "Main": false, "SubnetId": "subnet-data-a" }, { "Main": false, "SubnetId": "subnet-data-b" }],
+				"Routes": [{ "DestinationCidrBlock": "10.0.0.0/16", "GatewayId": "local", "State": "active" }]
+			},
+			{
+				"RouteTableId": "rtb-def",
+				"VpcId": "vpc-def",
+				"Associations": [{ "Main": true }],
+				"Routes": [{ "DestinationCidrBlock": "172.31.0.0/16", "GatewayId": "local" }, { "DestinationCidrBlock": "0.0.0.0/0", "GatewayId": "igw-def" }]
+			}
+		]
+	},
+	"us-east-1|ec2 describe-internet-gateways": {
+		"InternetGateways": [
+			{ "InternetGatewayId": "igw-1", "Attachments": [{ "VpcId": "vpc-0a1", "State": "available" }] },
+			{ "InternetGatewayId": "igw-def", "Attachments": [{ "VpcId": "vpc-def", "State": "available" }] }
+		]
+	},
+	"us-east-1|ec2 describe-nat-gateways": {
+		"NatGateways": [{ "NatGatewayId": "nat-1", "SubnetId": "subnet-pub-a", "VpcId": "vpc-0a1", "State": "available", "ConnectivityType": "public", "NatGatewayAddresses": [{ "PublicIp": "198.51.100.7" }] }]
+	},
+	"us-east-1|ec2 describe-vpc-endpoints": {
+		"VpcEndpoints": [{ "VpcEndpointId": "vpce-s3", "VpcId": "vpc-0a1", "ServiceName": "com.amazonaws.us-east-1.s3", "VpcEndpointType": "Gateway", "RouteTableIds": ["rtb-main"] }]
+	},
+	"us-east-1|ec2 describe-vpc-peering-connections": {
+		"VpcPeeringConnections": [
+			{
+				"VpcPeeringConnectionId": "pcx-1",
+				"RequesterVpcInfo": { "VpcId": "vpc-0a1", "OwnerId": "111122223333", "Region": "us-east-1" },
+				"AccepterVpcInfo": { "VpcId": "vpc-shared", "OwnerId": "444455556666", "Region": "us-west-2" },
+				"Status": { "Code": "active" }
+			}
+		]
+	},
+	"us-east-1|ec2 describe-transit-gateways": { "TransitGateways": [{ "TransitGatewayId": "tgw-1", "TransitGatewayArn": "arn:aws:ec2:us-east-1:111122223333:transit-gateway/tgw-1", "State": "available", "OwnerId": "111122223333" }] },
+	"us-east-1|ec2 describe-transit-gateway-attachments": {
+		"TransitGatewayAttachments": [
+			{ "TransitGatewayAttachmentId": "tgw-attach-vpc", "TransitGatewayId": "tgw-1", "ResourceType": "vpc", "ResourceId": "vpc-0a1", "State": "available" },
+			{ "TransitGatewayAttachmentId": "tgw-attach-vpn", "TransitGatewayId": "tgw-1", "ResourceType": "vpn", "ResourceId": "vpn-0ff1ce", "State": "available" }
+		]
+	},
+	"us-east-1|ec2 describe-security-groups": {
+		"SecurityGroups": [
+			{ "GroupId": "sg-alb", "GroupName": "alb", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{ "CidrIp": "0.0.0.0/0" }], "UserIdGroupPairs": [] }] },
+			{ "GroupId": "sg-web", "GroupName": "web", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "IpRanges": [], "UserIdGroupPairs": [{ "GroupId": "sg-alb" }, { "GroupId": "sg-web" }] }] },
+			{ "GroupId": "sg-db", "GroupName": "db", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432, "IpRanges": [], "UserIdGroupPairs": [{ "GroupId": "sg-web" }, { "GroupId": "sg-lambda" }] }] },
+			{ "GroupId": "sg-lambda", "GroupName": "lambda", "VpcId": "vpc-0a1", "IpPermissions": [] },
+			{ "GroupId": "sg-cache", "GroupName": "cache", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 6379, "ToPort": 6379, "UserIdGroupPairs": [{ "GroupId": "sg-web" }] }] },
+			{ "GroupId": "sg-bastion", "GroupName": "bastion", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{ "CidrIp": "0.0.0.0/0" }] }] },
+			{ "GroupId": "sg-def", "GroupName": "default", "VpcId": "vpc-def", "IpPermissions": [{ "IpProtocol": "-1", "UserIdGroupPairs": [{ "GroupId": "sg-def" }] }] }
+		]
+	},
+	"us-east-1|ec2 describe-instances": {
+		"Reservations": [
+			{
+				"Instances": [
+					{ "InstanceId": "i-web1", "InstanceType": "t3.small", "State": { "Name": "running" }, "SubnetId": "subnet-priv-a", "VpcId": "vpc-0a1", "PrivateIpAddress": "10.0.10.11", "Placement": { "AvailabilityZone": "us-east-1a" }, "SecurityGroups": [{ "GroupId": "sg-web", "GroupName": "web" }], "Tags": [{ "Key": "Name", "Value": "web-1" }, { "Key": "aws:autoscaling:groupName", "Value": "web-asg" }] },
+					{ "InstanceId": "i-web2", "InstanceType": "t3.small", "State": { "Name": "running" }, "SubnetId": "subnet-priv-b", "VpcId": "vpc-0a1", "PrivateIpAddress": "10.0.11.12", "Placement": { "AvailabilityZone": "us-east-1b" }, "SecurityGroups": [{ "GroupId": "sg-web", "GroupName": "web" }], "Tags": [{ "Key": "Name", "Value": "web-2" }] }
+				]
+			},
+			{
+				"Instances": [
+					{ "InstanceId": "i-bastion", "InstanceType": "t3.micro", "State": { "Name": "running" }, "SubnetId": "subnet-pub-a", "VpcId": "vpc-0a1", "PrivateIpAddress": "10.0.0.5", "PublicIpAddress": "203.0.113.10", "Placement": { "AvailabilityZone": "us-east-1a" }, "SecurityGroups": [{ "GroupId": "sg-bastion" }], "Tags": [{ "Key": "Name", "Value": "bastion" }] },
+					{ "InstanceId": "i-gone", "InstanceType": "t3.micro", "State": { "Name": "terminated" }, "Tags": [{ "Key": "Name", "Value": "old" }] }
+				]
+			}
+		]
+	},
+	"us-east-1|elbv2 describe-load-balancers": {
+		"LoadBalancers": [
+			{
+				"LoadBalancerArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/web-alb/50dc6c495c0c9188",
+				"DNSName": "web-alb-123456789.us-east-1.elb.amazonaws.com",
+				"LoadBalancerName": "web-alb",
+				"Scheme": "internet-facing",
+				"VpcId": "vpc-0a1",
+				"Type": "application",
+				"AvailabilityZones": [{ "ZoneName": "us-east-1a", "SubnetId": "subnet-pub-a" }, { "ZoneName": "us-east-1b", "SubnetId": "subnet-pub-b" }],
+				"SecurityGroups": ["sg-alb"]
+			}
+		]
+	},
+	"us-east-1|elbv2 describe-target-groups": {
+		"TargetGroups": [
+			{ "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/web-tg/aaa", "TargetGroupName": "web-tg", "Protocol": "HTTP", "Port": 80, "VpcId": "vpc-0a1", "TargetType": "instance", "LoadBalancerArns": ["arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/web-alb/50dc6c495c0c9188"] },
+			{ "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/api-tg/bbb", "TargetGroupName": "api-tg", "Protocol": "HTTP", "Port": 8080, "VpcId": "vpc-0a1", "TargetType": "ip", "LoadBalancerArns": ["arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/web-alb/50dc6c495c0c9188"] },
+			{ "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/fn-tg/ccc", "TargetGroupName": "fn-tg", "TargetType": "lambda", "LoadBalancerArns": ["arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/web-alb/50dc6c495c0c9188"] },
+			{ "TargetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/unused/ddd", "TargetGroupName": "unused", "TargetType": "instance", "LoadBalancerArns": [] }
+		]
+	},
+	"us-east-1|elbv2 describe-target-health|arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/web-tg/aaa": {
+		"TargetHealthDescriptions": [
+			{ "Target": { "Id": "i-web1", "Port": 80 }, "TargetHealth": { "State": "healthy" } },
+			{ "Target": { "Id": "i-web2", "Port": 80 }, "TargetHealth": { "State": "healthy" } }
+		]
+	},
+	"us-east-1|elbv2 describe-target-health|arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/api-tg/bbb": {
+		"TargetHealthDescriptions": [
+			{ "Target": { "Id": "10.0.10.201", "Port": 8080 }, "TargetHealth": { "State": "healthy" } },
+			{ "Target": { "Id": "10.0.11.202", "Port": 8080 }, "TargetHealth": { "State": "healthy" } }
+		]
+	},
+	"us-east-1|elbv2 describe-target-health|arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/fn-tg/ccc": {
+		"TargetHealthDescriptions": [{ "Target": { "Id": "arn:aws:lambda:us-east-1:111122223333:function:thumbnailer" }, "TargetHealth": { "State": "unavailable" } }]
+	},
+	"us-east-1|elb describe-load-balancers": { "$error": "\nAn error occurred (AccessDenied) when calling the DescribeLoadBalancers operation: User is not authorized to perform: elasticloadbalancing:DescribeLoadBalancers\n" },
+	"us-east-1|rds describe-db-instances": {
+		"DBInstances": [
+			{
+				"DBInstanceIdentifier": "orders-db-1",
+				"DBInstanceArn": "arn:aws:rds:us-east-1:111122223333:db:orders-db-1",
+				"DBInstanceClass": "db.r6g.large",
+				"Engine": "aurora-postgresql",
+				"EngineVersion": "15.4",
+				"AvailabilityZone": "us-east-1a",
+				"MultiAZ": false,
+				"PubliclyAccessible": false,
+				"StorageEncrypted": true,
+				"DBClusterIdentifier": "orders",
+				"MasterUsername": "admin_should_not_matter",
+				"Endpoint": { "Address": "orders-db-1.example.us-east-1.rds.amazonaws.com", "Port": 5432 },
+				"VpcSecurityGroups": [{ "VpcSecurityGroupId": "sg-db", "Status": "active" }],
+				"DBSubnetGroup": { "DBSubnetGroupName": "data", "VpcId": "vpc-0a1", "Subnets": [{ "SubnetIdentifier": "subnet-data-a", "SubnetAvailabilityZone": { "Name": "us-east-1a" } }, { "SubnetIdentifier": "subnet-data-b", "SubnetAvailabilityZone": { "Name": "us-east-1b" } }] }
+			},
+			{
+				"DBInstanceIdentifier": "orders-db-2",
+				"DBInstanceArn": "arn:aws:rds:us-east-1:111122223333:db:orders-db-2",
+				"DBInstanceClass": "db.r6g.large",
+				"Engine": "aurora-postgresql",
+				"EngineVersion": "15.4",
+				"AvailabilityZone": "us-east-1b",
+				"MultiAZ": false,
+				"PubliclyAccessible": false,
+				"StorageEncrypted": true,
+				"DBClusterIdentifier": "orders",
+				"VpcSecurityGroups": [{ "VpcSecurityGroupId": "sg-db", "Status": "active" }],
+				"DBSubnetGroup": { "DBSubnetGroupName": "data", "VpcId": "vpc-0a1", "Subnets": [{ "SubnetIdentifier": "subnet-data-a", "SubnetAvailabilityZone": { "Name": "us-east-1a" } }, { "SubnetIdentifier": "subnet-data-b", "SubnetAvailabilityZone": { "Name": "us-east-1b" } }] }
+			},
+			{
+				"DBInstanceIdentifier": "legacy-db",
+				"DBInstanceArn": "arn:aws:rds:us-east-1:111122223333:db:legacy-db",
+				"DBInstanceClass": "db.t3.medium",
+				"Engine": "postgres",
+				"EngineVersion": "13.12",
+				"AvailabilityZone": "us-east-1a",
+				"MultiAZ": false,
+				"PubliclyAccessible": false,
+				"StorageEncrypted": false,
+				"VpcSecurityGroups": [{ "VpcSecurityGroupId": "sg-db", "Status": "active" }],
+				"DBSubnetGroup": { "DBSubnetGroupName": "data", "VpcId": "vpc-0a1", "Subnets": [{ "SubnetIdentifier": "subnet-data-a", "SubnetAvailabilityZone": { "Name": "us-east-1a" } }, { "SubnetIdentifier": "subnet-data-b", "SubnetAvailabilityZone": { "Name": "us-east-1b" } }] }
+			}
+		]
+	},
+	"us-east-1|rds describe-db-clusters": {
+		"DBClusters": [
+			{
+				"DBClusterIdentifier": "orders",
+				"DBClusterArn": "arn:aws:rds:us-east-1:111122223333:cluster:orders",
+				"Engine": "aurora-postgresql",
+				"EngineVersion": "15.4",
+				"MultiAZ": true,
+				"StorageEncrypted": true,
+				"DBSubnetGroup": "data",
+				"VpcSecurityGroups": [{ "VpcSecurityGroupId": "sg-db", "Status": "active" }],
+				"DBClusterMembers": [{ "DBInstanceIdentifier": "orders-db-1", "IsClusterWriter": true }, { "DBInstanceIdentifier": "orders-db-2", "IsClusterWriter": false }]
+			}
+		]
+	},
+	"us-east-1|lambda list-functions": [
+		{
+			"FunctionName": "orders-worker",
+			"FunctionArn": "arn:aws:lambda:us-east-1:111122223333:function:orders-worker",
+			"Runtime": "nodejs20.x",
+			"MemorySize": 512,
+			"Timeout": 30,
+			"Environment": { "Variables": { "DB_PASSWORD": "SUPER_SECRET_VALUE" } },
+			"VpcConfig": { "SubnetIds": ["subnet-priv-a", "subnet-priv-b"], "SecurityGroupIds": ["sg-lambda"], "VpcId": "vpc-0a1" }
+		},
+		{
+			"FunctionName": "thumbnailer",
+			"FunctionArn": "arn:aws:lambda:us-east-1:111122223333:function:thumbnailer",
+			"Runtime": "python3.12",
+			"MemorySize": 1024,
+			"Timeout": 60,
+			"VpcConfig": { "SubnetIds": [], "SecurityGroupIds": [], "VpcId": "" }
+		}
+	],
+	"us-east-1|lambda list-event-source-mappings": {
+		"EventSourceMappings": [
+			{ "UUID": "esm-1", "EventSourceArn": "arn:aws:sqs:us-east-1:111122223333:orders-queue", "FunctionArn": "arn:aws:lambda:us-east-1:111122223333:function:orders-worker", "State": "Enabled" },
+			{ "UUID": "esm-2", "EventSourceArn": "arn:aws:dynamodb:us-east-1:111122223333:table/orders/stream/2024-01-01T00:00:00.000", "FunctionArn": "arn:aws:lambda:us-east-1:111122223333:function:thumbnailer", "State": "Enabled" },
+			{ "UUID": "esm-3", "EventSourceArn": "arn:aws:kinesis:us-east-1:111122223333:stream/clicks", "FunctionArn": "arn:aws:lambda:us-east-1:111122223333:function:thumbnailer:live", "State": "Disabled" }
+		]
+	},
+	"us-east-1|ecs list-clusters": { "clusterArns": ["arn:aws:ecs:us-east-1:111122223333:cluster/apps"] },
+	"us-east-1|ecs describe-clusters": { "clusters": [{ "clusterArn": "arn:aws:ecs:us-east-1:111122223333:cluster/apps", "clusterName": "apps", "status": "ACTIVE", "runningTasksCount": 2, "activeServicesCount": 1 }] },
+	"us-east-1|ecs list-services|arn:aws:ecs:us-east-1:111122223333:cluster/apps": { "serviceArns": ["arn:aws:ecs:us-east-1:111122223333:service/apps/api"] },
+	"us-east-1|ecs describe-services|arn:aws:ecs:us-east-1:111122223333:cluster/apps": {
+		"services": [
+			{
+				"serviceArn": "arn:aws:ecs:us-east-1:111122223333:service/apps/api",
+				"serviceName": "api",
+				"launchType": "FARGATE",
+				"desiredCount": 2,
+				"runningCount": 2,
+				"taskDefinition": "arn:aws:ecs:us-east-1:111122223333:task-definition/api:7",
+				"loadBalancers": [{ "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:111122223333:targetgroup/api-tg/bbb", "containerName": "api", "containerPort": 8080 }],
+				"networkConfiguration": { "awsvpcConfiguration": { "subnets": ["subnet-priv-a", "subnet-priv-b"], "securityGroups": ["sg-web"], "assignPublicIp": "DISABLED" } }
+			}
+		]
+	},
+	"us-east-1|eks list-clusters": { "clusters": ["platform"] },
+	"us-east-1|eks describe-cluster|platform": {
+		"cluster": {
+			"name": "platform",
+			"arn": "arn:aws:eks:us-east-1:111122223333:cluster/platform",
+			"version": "1.30",
+			"status": "ACTIVE",
+			"certificateAuthority": { "data": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCg==" },
+			"resourcesVpcConfig": { "vpcId": "vpc-0a1", "subnetIds": ["subnet-priv-a", "subnet-priv-b"], "clusterSecurityGroupId": "sg-eks", "endpointPublicAccess": true, "endpointPrivateAccess": true, "publicAccessCidrs": ["0.0.0.0/0"] }
+		}
+	},
+	"us-east-1|dynamodb list-tables": { "TableNames": ["orders", "sessions"] },
+	"us-east-1|sqs list-queues": { "QueueUrls": ["https://sqs.us-east-1.amazonaws.com/111122223333/orders-queue", "https://sqs.us-east-1.amazonaws.com/111122223333/orders-dlq"] },
+	"us-east-1|sns list-topics": { "Topics": [{ "TopicArn": "arn:aws:sns:us-east-1:111122223333:order-events" }] },
+	"us-east-1|sns list-subscriptions": {
+		"Subscriptions": [
+			{ "SubscriptionArn": "arn:aws:sns:us-east-1:111122223333:order-events:s1", "Protocol": "sqs", "Endpoint": "arn:aws:sqs:us-east-1:111122223333:orders-queue", "TopicArn": "arn:aws:sns:us-east-1:111122223333:order-events" },
+			{ "SubscriptionArn": "arn:aws:sns:us-east-1:111122223333:order-events:s2", "Protocol": "lambda", "Endpoint": "arn:aws:lambda:us-east-1:111122223333:function:thumbnailer:prod", "TopicArn": "arn:aws:sns:us-east-1:111122223333:order-events" },
+			{ "SubscriptionArn": "arn:aws:sns:us-east-1:111122223333:order-events:s3", "Protocol": "email", "Endpoint": "ops-oncall@example.com", "TopicArn": "arn:aws:sns:us-east-1:111122223333:order-events" }
+		]
+	},
+	"us-east-1|apigateway get-rest-apis": { "items": [{ "id": "a1b2c3", "name": "orders-api", "endpointConfiguration": { "types": ["REGIONAL"] } }] },
+	"us-east-1|apigateway get-resources|a1b2c3": {
+		"items": [
+			{ "id": "r0", "path": "/" },
+			{
+				"id": "r1",
+				"path": "/orders",
+				"resourceMethods": {
+					"POST": { "httpMethod": "POST", "methodIntegration": { "type": "AWS_PROXY", "uri": "arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:111122223333:function:orders-worker/invocations" } },
+					"OPTIONS": { "httpMethod": "OPTIONS", "methodIntegration": { "type": "MOCK" } }
+				}
+			}
+		]
+	},
+	"us-east-1|apigatewayv2 get-apis": { "Items": [{ "ApiId": "h7t7p", "Name": "public-http", "ProtocolType": "HTTP", "ApiEndpoint": "https://h7t7p.execute-api.us-east-1.amazonaws.com" }] },
+	"us-east-1|apigatewayv2 get-integrations|h7t7p": {
+		"Items": [
+			{ "IntegrationId": "int1", "IntegrationType": "AWS_PROXY", "IntegrationUri": "arn:aws:lambda:us-east-1:111122223333:function:thumbnailer" },
+			{ "IntegrationId": "int2", "IntegrationType": "HTTP_PROXY", "ConnectionType": "VPC_LINK", "IntegrationUri": "arn:aws:elasticloadbalancing:us-east-1:111122223333:listener/app/web-alb/50dc6c495c0c9188/9f1a2b3c" }
+		]
+	},
+	"us-east-1|elasticache describe-cache-clusters": {
+		"CacheClusters": [
+			{ "CacheClusterId": "sessions-cache-001", "ARN": "arn:aws:elasticache:us-east-1:111122223333:cluster:sessions-cache-001", "Engine": "redis", "EngineVersion": "7.1", "CacheNodeType": "cache.t4g.small", "CacheSubnetGroupName": "data-cache", "PreferredAvailabilityZone": "us-east-1b", "ReplicationGroupId": "sessions-cache", "SecurityGroups": [{ "SecurityGroupId": "sg-cache", "Status": "active" }], "AtRestEncryptionEnabled": false, "TransitEncryptionEnabled": false, "AuthTokenEnabled": false }
+		]
+	},
+	"us-east-1|elasticache describe-cache-subnet-groups": {
+		"CacheSubnetGroups": [{ "CacheSubnetGroupName": "data-cache", "VpcId": "vpc-0a1", "Subnets": [{ "SubnetIdentifier": "subnet-data-a", "SubnetAvailabilityZone": { "Name": "us-east-1a" } }, { "SubnetIdentifier": "subnet-data-b", "SubnetAvailabilityZone": { "Name": "us-east-1b" } }] }]
+	},
+	"s3api list-buckets": {
+		"Buckets": [
+			{ "Name": "example-assets", "CreationDate": "2023-04-01T10:00:00+00:00", "BucketRegion": "us-east-1" },
+			{ "Name": "example-logs-eu", "CreationDate": "2023-04-01T10:00:00+00:00" }
+		],
+		"Owner": { "DisplayName": "example-owner", "ID": "abc123" }
+	},
+	"s3api get-bucket-location|example-logs-eu": { "LocationConstraint": "eu-west-1" },
+	"cloudfront list-distributions": {
+		"DistributionList": {
+			"Items": [
+				{
+					"Id": "E2EXAMPLE",
+					"ARN": "arn:aws:cloudfront::111122223333:distribution/E2EXAMPLE",
+					"DomainName": "d111111abcdef8.cloudfront.net",
+					"Aliases": { "Quantity": 1, "Items": ["www.example.com"] },
+					"Enabled": true,
+					"WebACLId": "",
+					"Origins": {
+						"Quantity": 3,
+						"Items": [
+							{ "Id": "assets", "DomainName": "example-assets.s3.us-east-1.amazonaws.com", "S3OriginConfig": { "OriginAccessIdentity": "" } },
+							{ "Id": "web", "DomainName": "web-alb-123456789.us-east-1.elb.amazonaws.com", "CustomOriginConfig": { "HTTPPort": 80, "HTTPSPort": 443 } },
+							{ "Id": "partner", "DomainName": "api.partner.example", "CustomOriginConfig": { "HTTPPort": 80, "HTTPSPort": 443 } }
+						]
+					}
+				}
+			]
+		}
+	}
+}

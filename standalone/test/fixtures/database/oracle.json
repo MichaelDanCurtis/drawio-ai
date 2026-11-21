@@ -1,0 +1,697 @@
+{
+	"engine": "oracle",
+	"info": {
+		"database": "FREEPDB1",
+		"version": "23.26.4.0.0"
+	},
+	"tables": [
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": "People who buy things"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMER_PROFILES",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_TOTALS",
+			"kind": "VIEW",
+			"num_rows": null,
+			"comments": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"kind": "TABLE",
+			"num_rows": null,
+			"comments": null
+		}
+	],
+	"columns": [
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"column_name": "ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"column_name": "CUSTOMER_ID",
+			"column_id": 2,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"column_name": "LINE1",
+			"column_id": 3,
+			"data_type": "VARCHAR2",
+			"data_length": 200,
+			"char_length": 200,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"column_name": "CITY",
+			"column_id": 4,
+			"data_type": "VARCHAR2",
+			"data_length": 100,
+			"char_length": 100,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"column_name": "ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"column_name": "EMAIL",
+			"column_id": 2,
+			"data_type": "VARCHAR2",
+			"data_length": 1020,
+			"char_length": 255,
+			"char_used": "C",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"column_name": "NAME",
+			"column_id": 3,
+			"data_type": "VARCHAR2",
+			"data_length": 100,
+			"char_length": 100,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"column_name": "CREATED_AT",
+			"column_id": 4,
+			"data_type": "TIMESTAMP(6)",
+			"data_length": 11,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": null,
+			"data_scale": 6,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMER_PROFILES",
+			"column_name": "CUSTOMER_ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMER_PROFILES",
+			"column_name": "BIO",
+			"column_id": 2,
+			"data_type": "CLOB",
+			"data_length": 4000,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "Y"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"column_name": "ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"column_name": "NAME",
+			"column_id": 2,
+			"data_type": "VARCHAR2",
+			"data_length": 100,
+			"char_length": 100,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"column_name": "MANAGER_ID",
+			"column_id": 3,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "Y"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"column_name": "ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 19,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"column_name": "CUSTOMER_ID",
+			"column_id": 2,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"column_name": "SHIPPING_ADDRESS_ID",
+			"column_id": 3,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "Y"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"column_name": "STATUS",
+			"column_id": 4,
+			"data_type": "VARCHAR2",
+			"data_length": 20,
+			"char_length": 20,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"column_name": "PLACED_AT",
+			"column_id": 5,
+			"data_type": "DATE",
+			"data_length": 7,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "Y"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"column_name": "ORDER_ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 19,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"column_name": "PRODUCT_ID",
+			"column_id": 2,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"column_name": "QUANTITY",
+			"column_id": 3,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 5,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_TOTALS",
+			"column_name": "ORDER_ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 19,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_TOTALS",
+			"column_name": "TOTAL",
+			"column_id": 2,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "Y"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"column_name": "ID",
+			"column_id": 1,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 0,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"column_name": "SKU",
+			"column_id": 2,
+			"data_type": "VARCHAR2",
+			"data_length": 32,
+			"char_length": 32,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"column_name": "NAME",
+			"column_id": 3,
+			"data_type": "VARCHAR2",
+			"data_length": 200,
+			"char_length": 200,
+			"char_used": "B",
+			"data_precision": null,
+			"data_scale": null,
+			"nullable": "N"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"column_name": "PRICE",
+			"column_id": 4,
+			"data_type": "NUMBER",
+			"data_length": 22,
+			"char_length": 0,
+			"char_used": null,
+			"data_precision": 10,
+			"data_scale": 2,
+			"nullable": "N"
+		}
+	],
+	"constraints": [
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"constraint_name": "SYS_C008934",
+			"constraint_type": "P",
+			"column_name": "ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"constraint_name": "SYS_C008935",
+			"constraint_type": "R",
+			"column_name": "CUSTOMER_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "CUSTOMERS",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"constraint_name": "SYS_C008927",
+			"constraint_type": "P",
+			"column_name": "ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"constraint_name": "SYS_C008928",
+			"constraint_type": "U",
+			"column_name": "EMAIL",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMER_PROFILES",
+			"constraint_name": "SYS_C008929",
+			"constraint_type": "P",
+			"column_name": "CUSTOMER_ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "CUSTOMER_PROFILES",
+			"constraint_name": "SYS_C008930",
+			"constraint_type": "R",
+			"column_name": "CUSTOMER_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "CUSTOMERS",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"constraint_name": "SYS_C008953",
+			"constraint_type": "P",
+			"column_name": "ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"constraint_name": "SYS_C008954",
+			"constraint_type": "R",
+			"column_name": "MANAGER_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "EMPLOYEES",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"constraint_name": "SYS_C008943",
+			"constraint_type": "P",
+			"column_name": "ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"constraint_name": "SYS_C008944",
+			"constraint_type": "R",
+			"column_name": "CUSTOMER_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "CUSTOMERS",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDERS",
+			"constraint_name": "SYS_C008945",
+			"constraint_type": "R",
+			"column_name": "SHIPPING_ADDRESS_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "ADDRESSES",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"constraint_name": "ORDER_ITEMS_PK",
+			"constraint_type": "P",
+			"column_name": "ORDER_ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"constraint_name": "ORDER_ITEMS_PK",
+			"constraint_type": "P",
+			"column_name": "PRODUCT_ID",
+			"position": 2,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"constraint_name": "SYS_C008950",
+			"constraint_type": "R",
+			"column_name": "ORDER_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "ORDERS",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"constraint_name": "SYS_C008951",
+			"constraint_type": "R",
+			"column_name": "PRODUCT_ID",
+			"position": 1,
+			"r_owner": "SHOP",
+			"r_table_name": "PRODUCTS",
+			"r_column_name": "ID"
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"constraint_name": "SYS_C008939",
+			"constraint_type": "P",
+			"column_name": "ID",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		},
+		{
+			"owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"constraint_name": "SYS_C008940",
+			"constraint_type": "U",
+			"column_name": "SKU",
+			"position": 1,
+			"r_owner": null,
+			"r_table_name": null,
+			"r_column_name": null
+		}
+	],
+	"indexes": [
+		{
+			"table_owner": "SHOP",
+			"table_name": "ADDRESSES",
+			"index_name": "SYS_C008934",
+			"uniqueness": "UNIQUE",
+			"column_name": "ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"index_name": "SYS_C008927",
+			"uniqueness": "UNIQUE",
+			"column_name": "ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "CUSTOMERS",
+			"index_name": "SYS_C008928",
+			"uniqueness": "UNIQUE",
+			"column_name": "EMAIL",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "CUSTOMER_PROFILES",
+			"index_name": "SYS_C008929",
+			"uniqueness": "UNIQUE",
+			"column_name": "CUSTOMER_ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "EMPLOYEES",
+			"index_name": "SYS_C008953",
+			"uniqueness": "UNIQUE",
+			"column_name": "ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "ORDERS",
+			"index_name": "ORDERS_STATUS_IDX",
+			"uniqueness": "NONUNIQUE",
+			"column_name": "STATUS",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "ORDERS",
+			"index_name": "SYS_C008943",
+			"uniqueness": "UNIQUE",
+			"column_name": "ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"index_name": "ORDER_ITEMS_PK",
+			"uniqueness": "UNIQUE",
+			"column_name": "ORDER_ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "ORDER_ITEMS",
+			"index_name": "ORDER_ITEMS_PK",
+			"uniqueness": "UNIQUE",
+			"column_name": "PRODUCT_ID",
+			"column_position": 2
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"index_name": "SYS_C008939",
+			"uniqueness": "UNIQUE",
+			"column_name": "ID",
+			"column_position": 1
+		},
+		{
+			"table_owner": "SHOP",
+			"table_name": "PRODUCTS",
+			"index_name": "SYS_C008940",
+			"uniqueness": "UNIQUE",
+			"column_name": "SKU",
+			"column_position": 1
+		}
+	]
+}

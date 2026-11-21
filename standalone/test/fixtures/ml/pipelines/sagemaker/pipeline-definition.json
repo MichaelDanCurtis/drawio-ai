@@ -1,0 +1,78 @@
+{
+  "Version": "2020-12-01",
+  "Metadata": {},
+  "Parameters": [
+    {"Name": "InputDataUrl", "Type": "String", "DefaultValue": "s3://my-bucket/abalone/abalone.csv"},
+    {"Name": "ProcessingInstanceType", "Type": "String", "DefaultValue": "ml.m5.xlarge"},
+    {"Name": "ModelApprovalStatus", "Type": "String", "DefaultValue": "PendingManualApproval"},
+    {"Name": "MseThreshold", "Type": "Float", "DefaultValue": 6.0}
+  ],
+  "PipelineExperimentConfig": {"ExperimentName": {"Get": "Execution.PipelineName"}, "TrialName": {"Get": "Execution.PipelineExecutionId"}},
+  "Steps": [
+    {
+      "Name": "AbaloneProcess",
+      "Type": "Processing",
+      "Arguments": {
+        "ProcessingResources": {"ClusterConfig": {"InstanceType": {"Get": "Parameters.ProcessingInstanceType"}, "InstanceCount": 1, "VolumeSizeInGB": 30}},
+        "AppSpecification": {"ImageUri": "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-scikit-learn:1.2-1-cpu-py3", "ContainerEntrypoint": ["python3", "/opt/ml/processing/input/code/preprocessing.py"]},
+        "RoleArn": "arn:aws:iam::123456789012:role/SageMakerRole",
+        "ProcessingInputs": [
+          {"InputName": "input-1", "AppManaged": false, "S3Input": {"S3Uri": {"Get": "Parameters.InputDataUrl"}, "LocalPath": "/opt/ml/processing/input", "S3DataType": "S3Prefix", "S3InputMode": "File"}},
+          {"InputName": "code", "AppManaged": false, "S3Input": {"S3Uri": "s3://my-bucket/code/preprocessing.py", "LocalPath": "/opt/ml/processing/input/code", "S3DataType": "S3Prefix", "S3InputMode": "File"}}
+        ],
+        "ProcessingOutputConfig": {"Outputs": [
+          {"OutputName": "train", "AppManaged": false, "S3Output": {"S3Uri": "s3://my-bucket/abalone/train", "LocalPath": "/opt/ml/processing/train", "S3UploadMode": "EndOfJob"}},
+          {"OutputName": "validation", "AppManaged": false, "S3Output": {"S3Uri": "s3://my-bucket/abalone/validation", "LocalPath": "/opt/ml/processing/validation", "S3UploadMode": "EndOfJob"}},
+          {"OutputName": "test", "AppManaged": false, "S3Output": {"S3Uri": "s3://my-bucket/abalone/test", "LocalPath": "/opt/ml/processing/test", "S3UploadMode": "EndOfJob"}}
+        ]}
+      }
+    },
+    {
+      "Name": "AbaloneTrain",
+      "Type": "Training",
+      "Arguments": {
+        "AlgorithmSpecification": {"TrainingImage": "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-xgboost:1.7-1", "TrainingInputMode": "File"},
+        "OutputDataConfig": {"S3OutputPath": "s3://my-bucket/abalone/model"},
+        "ResourceConfig": {"InstanceCount": 1, "InstanceType": "ml.m5.xlarge", "VolumeSizeInGB": 30},
+        "HyperParameters": {"objective": "reg:linear", "num_round": "50"},
+        "InputDataConfig": [
+          {"DataSource": {"S3DataSource": {"S3DataType": "S3Prefix", "S3Uri": {"Get": "Steps.AbaloneProcess.ProcessingOutputConfig.Outputs['train'].S3Output.S3Uri"}}}, "ChannelName": "train"},
+          {"DataSource": {"S3DataSource": {"S3DataType": "S3Prefix", "S3Uri": {"Get": "Steps.AbaloneProcess.ProcessingOutputConfig.Outputs['validation'].S3Output.S3Uri"}}}, "ChannelName": "validation"}
+        ]
+      }
+    },
+    {
+      "Name": "AbaloneEval",
+      "Type": "Processing",
+      "Arguments": {
+        "ProcessingResources": {"ClusterConfig": {"InstanceType": "ml.m5.xlarge", "InstanceCount": 1, "VolumeSizeInGB": 30}},
+        "AppSpecification": {"ImageUri": "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-xgboost:1.7-1", "ContainerEntrypoint": ["python3", "/opt/ml/processing/input/code/evaluation.py"]},
+        "ProcessingInputs": [
+          {"InputName": "input-1", "S3Input": {"S3Uri": {"Get": "Steps.AbaloneTrain.ModelArtifacts.S3ModelArtifacts"}, "LocalPath": "/opt/ml/processing/model"}},
+          {"InputName": "input-2", "S3Input": {"S3Uri": {"Get": "Steps.AbaloneProcess.ProcessingOutputConfig.Outputs['test'].S3Output.S3Uri"}, "LocalPath": "/opt/ml/processing/test"}}
+        ],
+        "ProcessingOutputConfig": {"Outputs": [{"OutputName": "evaluation", "S3Output": {"S3Uri": "s3://my-bucket/abalone/evaluation", "LocalPath": "/opt/ml/processing/evaluation"}}]}
+      },
+      "PropertyFiles": [{"PropertyFileName": "EvaluationReport", "OutputName": "evaluation", "FilePath": "evaluation.json"}]
+    },
+    {
+      "Name": "AbaloneMSECond",
+      "Type": "Condition",
+      "Arguments": {
+        "Conditions": [{"Type": "LessThanOrEqualTo", "LeftValue": {"Std:JsonGet": {"PropertyFile": {"Get": "Steps.AbaloneEval.PropertyFiles.EvaluationReport"}, "Path": "regression_metrics.mse.value"}}, "RightValue": {"Get": "Parameters.MseThreshold"}}],
+        "IfSteps": [
+          {
+            "Name": "AbaloneRegisterModel",
+            "Type": "RegisterModel",
+            "Arguments": {
+              "ModelPackageGroupName": "AbaloneModelPackageGroup",
+              "ModelApprovalStatus": {"Get": "Parameters.ModelApprovalStatus"},
+              "InferenceSpecification": {"Containers": [{"Image": "683313688378.dkr.ecr.us-east-1.amazonaws.com/sagemaker-xgboost:1.7-1", "ModelDataUrl": {"Get": "Steps.AbaloneTrain.ModelArtifacts.S3ModelArtifacts"}}], "SupportedContentTypes": ["text/csv"], "SupportedResponseMIMETypes": ["text/csv"]}
+            }
+          }
+        ],
+        "ElseSteps": [{"Name": "AbaloneMSEFail", "Type": "Fail", "Arguments": {"ErrorMessage": "MSE above threshold"}}]
+      }
+    }
+  ]
+}

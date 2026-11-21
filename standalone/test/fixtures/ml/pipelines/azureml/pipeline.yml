@@ -1,0 +1,43 @@
+$schema: https://azuremlschemas.azureedge.net/latest/pipelineJob.schema.json
+type: pipeline
+display_name: nyc-taxi-training
+experiment_name: nyc-taxi
+settings:
+  default_compute: azureml:cpu-cluster
+inputs:
+  raw_data:
+    type: uri_folder
+    path: azureml:nyc_taxi_raw@latest
+  test_split_ratio: 0.2
+outputs:
+  trained_model:
+    type: mlflow_model
+jobs:
+  prep_job:
+    type: command
+    component: ./prep.yml
+    inputs:
+      raw_data: ${{parent.inputs.raw_data}}
+    outputs:
+      prep_data:
+  train_job:
+    type: command
+    code: ./src
+    command: python train.py --training_data ${{inputs.training_data}} --model_output ${{outputs.model_output}}
+    environment: azureml:AzureML-sklearn-1.0-ubuntu20.04-py38-cpu@latest
+    inputs:
+      training_data: ${{parent.jobs.prep_job.outputs.prep_data}}
+      test_split_ratio: ${{parent.inputs.test_split_ratio}}
+    outputs:
+      model_output: ${{parent.outputs.trained_model}}
+  score_job:
+    type: command
+    code: ./src
+    command: python score.py --model ${{inputs.model}} --test ${{inputs.test_data}} --score ${{outputs.score_report}}
+    environment: azureml:AzureML-sklearn-1.0-ubuntu20.04-py38-cpu@latest
+    inputs:
+      model: ${{parent.jobs.train_job.outputs.model_output}}
+      test_data: ${{parent.jobs.prep_job.outputs.prep_data}}
+    outputs:
+      score_report:
+        type: uri_folder

@@ -1,0 +1,32 @@
+{
+ "count": 5,
+ "data": [
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network",
+   "name": "rg-network",
+   "location": "westeurope"
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app",
+   "name": "rg-app",
+   "location": "westeurope"
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data",
+   "name": "rg-data",
+   "location": "westeurope"
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope",
+   "name": "MC_rg-app_aks-prod_westeurope",
+   "location": "westeurope"
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-empty",
+   "name": "rg-empty",
+   "location": "westeurope"
+  }
+ ],
+ "skip_token": null,
+ "total_records": 5
+}

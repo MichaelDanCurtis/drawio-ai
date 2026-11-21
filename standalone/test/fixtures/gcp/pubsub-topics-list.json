@@ -1,0 +1,10 @@
+[
+ {
+  "name": "projects/acme-shop-prod/topics/orders",
+  "messageStoragePolicy": {
+   "allowedPersistenceRegions": [
+    "us-central1"
+   ]
+  }
+ }
+]

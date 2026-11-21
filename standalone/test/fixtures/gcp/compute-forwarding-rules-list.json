@@ -1,0 +1,15 @@
+[
+ {
+  "kind": "compute#forwardingRule",
+  "id": "1000022",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/forwardingRules/web-lb-fr",
+  "name": "web-lb-fr",
+  "IPAddress": "34.149.0.20",
+  "IPProtocol": "TCP",
+  "portRange": "443-443",
+  "target": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/targetHttpsProxies/web-lb-https",
+  "loadBalancingScheme": "EXTERNAL_MANAGED",
+  "networkTier": "PREMIUM"
+ }
+]

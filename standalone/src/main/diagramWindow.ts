@@ -1,11 +1,17 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
+import { app, BaseWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
 import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
-import { exportDiagram, EXPORT_FORMATS, ExportFormat } from "./exporter";
+import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram } from "./exporter";
+import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
+import { mappedSelection } from "./mapper/draw";
+import { diagramContent } from "./xmlContent";
+import { digDeeperRequest } from "./mapper/recipes/common";
+import { recipeById } from "./mapper/registry";
+import { MapperDialog } from "./mapperDialog";
 import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { settings, updateSettings } from "./settings";
@@ -36,7 +42,11 @@ export class DiagramWindow {
 	private static byChat = new Map<number, DiagramWindow>();
 
 	public readonly id = `w${nextId++}`;
-	public readonly win: BrowserWindow;
+	/**
+	 * A BaseWindow, not a BrowserWindow: a BrowserWindow's own (here empty) page sits in
+	 * front of its child views on macOS and gets in the way of mouse events, e.g. hover.
+	 */
+	public readonly win: BaseWindow;
 	public readonly editorView: WebContentsView;
 	public readonly chatView: WebContentsView;
 	public readonly client: CustomizedDrawioClient;
@@ -44,14 +54,29 @@ export class DiagramWindow {
 	public readonly toolbox: DiagramToolbox;
 	private readonly mcp: WindowMcpServer;
 	private messageHandler: ((msg: unknown) => void) | undefined;
+	/** Diagnostics: messages from the editor, counted by event. */
+	public traffic: Map<string, number> | undefined;
 	public file: string | undefined;
 	private dirty = false;
 	private loaded = false;
 	private loadedWaiters: (() => void)[] = [];
 	private chatVisible = true;
+	/** Presentation mode: only the diagram, read-only, full screen. */
+	public presenting = false;
+	/** The diagram's content when presenting started: view-only changes while presenting are not edits. */
+	private presentBaseline: string | undefined;
+	private enteredFullScreen = false;
 	private closing = false;
+	public readonly mapper: MapperDialog;
+	/** Mapped shapes in the selection (for Dig Deeper), refreshed when the selection changes. */
+	private mapped: { recipe: string; label: string; data: Record<string, string> }[] = [];
+	private mappedTimer: NodeJS.Timeout | undefined;
+	/** Content for a new, unsaved window (an imported diagram), and the name to suggest when saving it. */
+	private initial: { xml: string; name: string } | undefined;
+	/** App-level commands the in-editor File menu can run. Set by main.ts. */
+	public static appCommands: { newDiagram(): void; open(): void } = { newDiagram: () => undefined, open: () => undefined };
 
-	public static async open(server: StaticServer, file?: string): Promise<DiagramWindow> {
+	public static async open(server: StaticServer, file?: string, initial?: { xml: string; name: string }): Promise<DiagramWindow> {
 		if (file) {
 			const existing = [...DiagramWindow.all].find((w) => w.file === file);
 			if (existing) {
@@ -60,23 +85,31 @@ export class DiagramWindow {
 			}
 		}
 		const w = new DiagramWindow(server, file);
+		w.initial = initial;
 		await w.start(server);
 		return w;
 	}
 
 	public static focused(): DiagramWindow | undefined {
-		const win = BrowserWindow.getFocusedWindow();
+		const win = BaseWindow.getFocusedWindow();
 		return [...DiagramWindow.all].find((w) => w.win === win) ?? [...DiagramWindow.all].pop();
 	}
 
 	public static installIpc(): void {
-		ipcMain.on("drawio:toHost", (e, msg) => DiagramWindow.byEditor.get(e.sender.id)?.messageHandler?.(msg));
+		ipcMain.on("drawio:toHost", (e, msg) => {
+			const w = DiagramWindow.byEditor.get(e.sender.id);
+			if (w?.traffic) {
+				const ev = /"event":"([^"]+)"/.exec(String(msg))?.[1] ?? "?";
+				w.traffic.set(ev, (w.traffic.get(ev) ?? 0) + 1);
+			}
+			w?.messageHandler?.(msg);
+		});
 		ipcMain.on("chat:toHost", (e, msg) => void DiagramWindow.byChat.get(e.sender.id)?.chat.onMessage(msg));
 	}
 
-	private constructor(server: StaticServer, file: string | undefined) {
+	private constructor(private readonly server: StaticServer, file: string | undefined) {
 		this.file = file;
-		this.win = new BrowserWindow({
+		this.win = new BaseWindow({
 			width: 1500,
 			height: 950,
 			minWidth: 800,
@@ -142,10 +175,26 @@ export class DiagramWindow {
 			{
 				client: () => this.client,
 				fileName: () => this.fileName(),
-				cwd: () => (this.file ? path.dirname(this.file) : app.getPath("documents")),
+				cwd: () => this.cwd(),
 				ready: () => this.loaded,
+				openMapper: () => this.mapper.open(),
+				mappedSelectionCount: () => this.mapped.length,
+				digDeeper: (question) => void this.digDeeper(question),
 			},
 			this.mcp
+		);
+		this.mapper = new MapperDialog(
+			{
+				win: this.win,
+				client: this.client,
+				cwd: () => this.cwd(),
+				ready: () => this.loaded,
+				askAgent: (text, shown) => void this.chat.send(text, { cellIds: [] }, [], shown),
+				showChat: () => {
+					if (!this.chatVisible) this.toggleChat();
+				},
+			},
+			server
 		);
 		this.chat.attach(this.chatView.webContents);
 		this.wireEditorEvents();
@@ -162,6 +211,7 @@ export class DiagramWindow {
 		await this.mcp.start();
 		const dark = nativeTheme.shouldUseDarkColors;
 		this.win.show();
+		this.editorView.webContents.focus();
 		void this.editorView.webContents.loadURL(server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() }));
 		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
 		void dark;
@@ -172,6 +222,42 @@ export class DiagramWindow {
 		if (!this.loaded) return undefined;
 		const p = this.file ?? path.join(app.getPath("documents"), "Untitled.drawio");
 		return { drawioClient: this.client, uri: { path: p, fsPath: p, scheme: "file", toString: () => `file://${encodeURI(p)}` } };
+	}
+
+	/** Folder the agent and the Mapper work in: the diagram's folder. */
+	public cwd(): string {
+		return this.file ? path.dirname(this.file) : app.getPath("documents");
+	}
+
+	private refreshMapped(): void {
+		clearTimeout(this.mappedTimer);
+		this.mappedTimer = setTimeout(async () => {
+			const before = this.mapped.length;
+			try {
+				this.mapped = this.loaded ? await mappedSelection(this.client) : [];
+			} catch {
+				this.mapped = [];
+			}
+			if (this.mapped.length !== before) this.chat.postState();
+		}, 150);
+	}
+
+	/** Asks the agent to investigate the selected mapped shapes further (read-only). */
+	public async digDeeper(question: string): Promise<void> {
+		const shapes = this.loaded ? await mappedSelection(this.client).catch(() => []) : [];
+		if (shapes.length === 0) {
+			void dialog.showMessageBox(this.win, { type: "info", message: "Select shapes on a map first", detail: "Dig Deeper works on shapes the Mapper drew: select one or more, then ask what you want to know." });
+			return;
+		}
+		// The recipe most of the selection comes from decides how to dig.
+		const counts = new Map<string, number>();
+		for (const s of shapes) counts.set(s.recipe, (counts.get(s.recipe) ?? 0) + 1);
+		const recipeId = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+		const recipe = recipeById(recipeId);
+		const data = shapes.map((s) => ({ label: s.label, data: Object.fromEntries(Object.entries(s.data).filter(([k]) => k !== "mapper")) }));
+		const text = recipe?.digDeeper ? recipe.digDeeper(data, question) : digDeeperRequest("mapped items", data, question);
+		if (!this.chatVisible) this.toggleChat();
+		await this.chat.send(text, { cellIds: this.client.currentSelection }, [], `🔎 Dig deeper into ${shapes.length} shape${shapes.length === 1 ? "" : "s"}${question.trim() ? `: ${question.trim()}` : ""}`);
 	}
 
 	public fileName(): string | undefined {
@@ -190,20 +276,28 @@ export class DiagramWindow {
 				if (this.file && /\.png$/i.test(this.file)) {
 					await c.loadPngWithEmbeddedXml(fs.readFileSync(this.file));
 				} else {
-					await c.loadXmlLike(this.file ? fs.readFileSync(this.file, "utf8") : "");
+					await c.loadXmlLike(this.file ? fs.readFileSync(this.file, "utf8") : this.initial?.xml ?? "");
 				}
 			} catch (e: any) {
 				dialog.showErrorBox("Could not open the diagram", String(e?.message ?? e));
 			}
 			await c.whenLoaded(30_000);
 			this.loaded = true;
-			this.setDirty(false);
+			this.setDirty(!!this.initial && !this.file);
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
 		});
-		c.onChange.sub(() => this.setDirty(true));
+		// Presenting only views the diagram, but draw.io still auto-saves page view state when pages
+		// change: that is not an edit. Anything else (an agent or the Mapper still working) is.
+		c.onChange.sub(({ newXml }) => {
+			if (this.presenting && this.presentBaseline !== undefined && diagramContent(newXml) === this.presentBaseline) return;
+			this.setDirty(true);
+		});
 		c.onSave.sub(() => void this.save());
-		c.onSelectedCellsChanged.sub(() => this.chat.postState());
+		c.onSelectedCellsChanged.sub(() => {
+			this.chat.postState();
+			this.refreshMapped();
+		});
 		c.onAiReview.sub(() => this.chat.postState());
 		let lastLasso: { cellIds: string[] } | undefined;
 		c.onAiLasso.sub((evt) => {
@@ -222,8 +316,10 @@ export class DiagramWindow {
 		});
 		c.onInvokeCommand.sub(({ command }) => {
 			if (command === "save") void this.save();
-			else if (command === "export") void this.exportInteractive("pdf");
+			else if (command === "export") void this.exportAny();
 			else if (command === "exportVisio") void this.exportInteractive("vsdx");
+			else if (command === "convert") void this.saveAs();
+			else if (command === "importDiagram") void this.importFromOtherTool();
 		});
 		c.onUnknownMessage.sub(({ message }) => {
 			const m = message as any;
@@ -231,20 +327,89 @@ export class DiagramWindow {
 				localStorage = m.newLocalStorage;
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "desktopCommand") {
+				this.runDesktopCommand(String(m.command));
 			} else if (m?.event === "openLink" && typeof m.url === "string" && /^https?:/.test(m.url)) {
 				void shell.openExternal(m.url);
 			}
 		});
 	}
 
+	/** Commands from the in-editor File menu (src/renderer/desktop-menu.js). */
+	public runDesktopCommand(command: string): void {
+		switch (command) {
+			case "new": return DiagramWindow.appCommands.newDiagram();
+			case "open": return DiagramWindow.appCommands.open();
+			case "saveAs": return void this.saveAs();
+			case "exportPdf": return void this.exportInteractive("pdf");
+			case "export": return void this.exportAny();
+			case "importDiagram": return void this.importFromOtherTool();
+			case "print": return void this.print();
+			case "exitPresentation": return this.setPresenting(false);
+		}
+	}
+
+	public async print(): Promise<void> {
+		try {
+			const r = await printDiagram(this.client, this.fileName() ?? "Untitled");
+			if (!r.printed && r.error && !/cancel/i.test(r.error)) dialog.showErrorBox("Could not print", r.error);
+		} catch (e: any) {
+			dialog.showErrorBox("Could not print", String(e?.message ?? e));
+		}
+	}
+
+	/** Converts a Visio/Gliffy/yEd/Lucidchart/Miro file with draw.io and opens it in a new window. */
+	public async importFromOtherTool(): Promise<void> {
+		const r = await dialog.showOpenDialog(this.win, { title: "Open from Another Tool", properties: ["openFile"], filters: IMPORT_FILTERS });
+		const source = r.filePaths[0];
+		if (!source) return;
+		try {
+			const bytes = fs.readFileSync(source);
+			const format = detectImportFormat(path.basename(source), bytes);
+			const result = await this.client.importDiagram(format, path.basename(source), bytes);
+			const name = path.basename(source).replace(/\.[^.]+$/, "") + ".drawio";
+			await DiagramWindow.open(this.server, undefined, { xml: result.xml, name: path.join(path.dirname(source), name) });
+			if (result.warnings.length) {
+				void dialog.showMessageBox({ type: "info", message: `Imported ${path.basename(source)}`, detail: `Some things did not carry over:\n- ${result.warnings.slice(0, 12).join("\n- ")}` });
+			}
+		} catch (e: any) {
+			dialog.showErrorBox("Could not open the file", String(e?.message ?? e));
+		}
+	}
+
 	// ----- layout -----
 
 	private layout(): void {
 		const { width, height } = this.win.getContentBounds();
-		const chatWidth = this.chatVisible ? Math.min(Math.max(280, settings().chatWidth), Math.floor(width * 0.6)) : 0;
+		const chatWidth = this.chatVisible && !this.presenting ? Math.min(Math.max(280, settings().chatWidth), Math.floor(width * 0.6)) : 0;
 		this.editorView.setBounds({ x: 0, y: 0, width: width - chatWidth, height });
 		this.chatView.setBounds({ x: width - chatWidth, y: 0, width: chatWidth, height });
-		this.chatView.setVisible(this.chatVisible);
+		this.chatView.setVisible(this.chatVisible && !this.presenting);
+	}
+
+	/** Shows only the diagram, read-only and full screen, with page dots; Esc leaves. */
+	public setPresenting(on: boolean): void {
+		if (on === this.presenting || (on && !this.loaded)) return;
+		this.presenting = on;
+		this.presentBaseline = undefined;
+		if (on) void this.client.getXml().then((xml) => this.presenting && (this.presentBaseline = diagramContent(xml)));
+		if (on) {
+			this.enteredFullScreen = !this.win.isFullScreen();
+			// Test runs stay windowed (full screen moves the window to its own Space).
+			if (this.enteredFullScreen && !process.env.DRAWAI_E2E) this.win.setFullScreen(true);
+		} else if (this.enteredFullScreen) {
+			this.enteredFullScreen = false;
+			this.win.setFullScreen(false);
+		}
+		this.layout();
+		if (!this.editorView.webContents.isDestroyed()) {
+			this.editorView.webContents.send("drawio:toWebview", JSON.stringify({ action: "desktopPresentation", enabled: on }));
+			if (on) this.editorView.webContents.focus();
+		}
+	}
+
+	public togglePresentation(): void {
+		this.setPresenting(!this.presenting);
 	}
 
 	public toggleChat(): void {
@@ -278,7 +443,7 @@ export class DiagramWindow {
 
 	public async saveAs(): Promise<boolean> {
 		const r = await dialog.showSaveDialog(this.win, {
-			defaultPath: this.file ?? path.join(app.getPath("documents"), "Untitled.drawio"),
+			defaultPath: this.file ?? this.initial?.name ?? path.join(app.getPath("documents"), "Untitled.drawio"),
 			filters: [
 				{ name: "draw.io", extensions: ["drawio"] },
 				{ name: "Editable SVG (.drawio.svg)", extensions: ["drawio.svg"] },
@@ -306,6 +471,27 @@ export class DiagramWindow {
 		} catch (e: any) {
 			dialog.showErrorBox("Could not save", String(e?.message ?? e));
 			return false;
+		}
+	}
+
+	/** One Save dialog with every export format; the chosen extension decides the format. */
+	public async exportAny(): Promise<void> {
+		const base = (this.file ? path.basename(this.file) : "Untitled.drawio").replace(/\.(drawio|dio)(\.(svg|png))?$|\.(xml|svg|png)$/i, "");
+		const dir = this.file ? path.dirname(this.file) : app.getPath("documents");
+		const r = await dialog.showSaveDialog(this.win, {
+			title: "Export",
+			defaultPath: path.join(dir, `${base}.pdf`),
+			filters: EXPORT_FORMATS.map((f) => ({ name: f.label, extensions: [f.ext] })),
+		});
+		if (r.canceled || !r.filePath) return;
+		const lower = r.filePath.toLowerCase();
+		const f = [...EXPORT_FORMATS].sort((a, b) => b.ext.length - a.ext.length).find((x) => lower.endsWith(`.${x.ext}`)) ?? EXPORT_FORMATS.find((x) => lower.endsWith(`.${x.ext.split(".").pop()}`));
+		if (!f) return void dialog.showErrorBox("Export failed", `Pick one of: ${EXPORT_FORMATS.map((x) => `.${x.ext}`).join(", ")}`);
+		try {
+			await exportDiagram(this.client, f.format, r.filePath);
+			shell.showItemInFolder(r.filePath);
+		} catch (e: any) {
+			dialog.showErrorBox("Export failed", String(e?.message ?? e));
 		}
 	}
 
@@ -363,6 +549,8 @@ export class DiagramWindow {
 	}
 
 	private dispose(): void {
+		clearTimeout(this.mappedTimer);
+		this.mapper.close();
 		this.chat.dispose();
 		this.mcp.dispose();
 		this.client.dispose();

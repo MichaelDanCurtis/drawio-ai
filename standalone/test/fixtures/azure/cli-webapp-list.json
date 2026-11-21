@@ -1,0 +1,41 @@
+[
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-api",
+  "name": "app-api",
+  "type": "Microsoft.Web/sites",
+  "location": "westeurope",
+  "resourceGroup": "rg-app",
+  "kind": "app,linux",
+  "sku": null,
+  "tags": {},
+  "identity": {
+   "type": "UserAssigned",
+   "userAssignedIdentities": {
+    "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app": {
+     "principalId": "55555555-0000-4000-8000-000000000000",
+     "clientId": "66666666-0000-4000-8000-000000000000"
+    }
+   }
+  },
+  "managedBy": "",
+  "zones": null,
+  "state": "Running",
+  "defaultHostName": "app-api.azurewebsites.net",
+  "serverFarmId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/serverfarms/plan-web",
+  "httpsOnly": true,
+  "publicNetworkAccess": "Enabled",
+  "virtualNetworkSubnetId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appint",
+  "vnetRouteAllEnabled": true,
+  "siteConfig": {
+   "minTlsVersion": "1.2",
+   "ftpsState": "FtpsOnly",
+   "connectionStrings": [
+    {
+     "name": "Orders",
+     "connectionString": "Server=tcp:sql-prod.database.windows.net;Password=Sup3rS3cret!",
+     "type": "SQLAzure"
+    }
+   ]
+  }
+ }
+]

@@ -1,0 +1,26 @@
+[
+ {
+  "createTime": "2025-06-01T10:00:00.000Z",
+  "lifecycleState": "ACTIVE",
+  "name": "Acme Shop (prod)",
+  "parent": {
+   "id": "222222222222",
+   "type": "organization"
+  },
+  "projectId": "acme-shop-prod",
+  "projectNumber": "123456789012"
+ },
+ {
+  "createTime": "2025-06-01T10:00:00.000Z",
+  "lifecycleState": "ACTIVE",
+  "name": "acme-sandbox",
+  "projectId": "acme-sandbox",
+  "projectNumber": "999999999999"
+ },
+ {
+  "lifecycleState": "DELETE_REQUESTED",
+  "name": "old",
+  "projectId": "acme-old",
+  "projectNumber": "888"
+ }
+]

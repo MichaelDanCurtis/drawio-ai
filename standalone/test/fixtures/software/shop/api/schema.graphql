@@ -1,0 +1,28 @@
+"""The shop schema"""
+type Query {
+  order(id: ID!): Order
+  orders(
+    first: Int = 10
+    status: OrderStatus
+  ): [Order!]!
+}
+
+type Mutation {
+  createOrder(input: OrderInput!): Order! # creates
+}
+
+type Order implements Node {
+  id: ID!
+  status: OrderStatus!
+  items: [OrderItem!]!
+  customer: Customer
+}
+
+type OrderItem { sku: String! quantity: Int! }
+type Customer { id: ID! name: String }
+interface Node { id: ID! }
+enum OrderStatus { PENDING PAID CANCELLED }
+input OrderInput { items: [OrderItemInput!]! }
+input OrderItemInput { sku: String!, quantity: Int! }
+union SearchResult = Order | Customer
+scalar DateTime

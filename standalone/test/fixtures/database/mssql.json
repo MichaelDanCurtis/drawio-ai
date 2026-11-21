@@ -1,0 +1,627 @@
+{
+	"engine": "mssql",
+	"info": {
+		"database": "shop",
+		"version": "15.0.2000.1574",
+		"azure": false
+	},
+	"tables": [
+		{
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customer_profiles",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "employees",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_totals",
+			"type": "V",
+			"comment": null,
+			"row_estimate": null
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		},
+		{
+			"table_schema": "sales",
+			"table_name": "invoices",
+			"type": "U",
+			"comment": null,
+			"row_estimate": "0"
+		}
+	],
+	"columns": [
+		{
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"column_name": "id",
+			"position": 1,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": true
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"column_name": "customer_id",
+			"position": 2,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"column_name": "line1",
+			"position": 3,
+			"type": "nvarchar",
+			"max_length": 400,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"column_name": "city",
+			"position": 4,
+			"type": "nvarchar",
+			"max_length": 200,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customer_profiles",
+			"column_name": "customer_id",
+			"position": 1,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customer_profiles",
+			"column_name": "bio",
+			"position": 2,
+			"type": "nvarchar",
+			"max_length": -1,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": true,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"column_name": "id",
+			"position": 1,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": true
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"column_name": "email",
+			"position": 2,
+			"type": "nvarchar",
+			"max_length": 510,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"column_name": "name",
+			"position": 3,
+			"type": "nvarchar",
+			"max_length": 200,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"column_name": "created_at",
+			"position": 4,
+			"type": "datetime2",
+			"max_length": 8,
+			"precision": 27,
+			"scale": 7,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "employees",
+			"column_name": "id",
+			"position": 1,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": true
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "employees",
+			"column_name": "name",
+			"position": 2,
+			"type": "nvarchar",
+			"max_length": 200,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "employees",
+			"column_name": "manager_id",
+			"position": 3,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": true,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"column_name": "order_id",
+			"position": 1,
+			"type": "bigint",
+			"max_length": 8,
+			"precision": 19,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"column_name": "product_id",
+			"position": 2,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"column_name": "quantity",
+			"position": 3,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_totals",
+			"column_name": "order_id",
+			"position": 1,
+			"type": "bigint",
+			"max_length": 8,
+			"precision": 19,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_totals",
+			"column_name": "total",
+			"position": 2,
+			"type": "decimal",
+			"max_length": 17,
+			"precision": 38,
+			"scale": 2,
+			"is_nullable": true,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "id",
+			"position": 1,
+			"type": "bigint",
+			"max_length": 8,
+			"precision": 19,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": true
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "customer_id",
+			"position": 2,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "shipping_address_id",
+			"position": 3,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": true,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "status",
+			"position": 4,
+			"type": "varchar",
+			"max_length": 20,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "placed_at",
+			"position": 5,
+			"type": "datetime2",
+			"max_length": 8,
+			"precision": 27,
+			"scale": 7,
+			"is_nullable": true,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"column_name": "id",
+			"position": 1,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": true
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"column_name": "sku",
+			"position": 2,
+			"type": "varchar",
+			"max_length": 32,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"column_name": "name",
+			"position": 3,
+			"type": "nvarchar",
+			"max_length": 400,
+			"precision": 0,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"column_name": "price",
+			"position": 4,
+			"type": "decimal",
+			"max_length": 9,
+			"precision": 10,
+			"scale": 2,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "sales",
+			"table_name": "invoices",
+			"column_name": "id",
+			"position": 1,
+			"type": "int",
+			"max_length": 4,
+			"precision": 10,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": true
+		},
+		{
+			"table_schema": "sales",
+			"table_name": "invoices",
+			"column_name": "order_id",
+			"position": 2,
+			"type": "bigint",
+			"max_length": 8,
+			"precision": 19,
+			"scale": 0,
+			"is_nullable": false,
+			"is_identity": false
+		},
+		{
+			"table_schema": "sales",
+			"table_name": "invoices",
+			"column_name": "amount",
+			"position": 3,
+			"type": "decimal",
+			"max_length": 9,
+			"precision": 12,
+			"scale": 2,
+			"is_nullable": false,
+			"is_identity": false
+		}
+	],
+	"indexes": [
+		{
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"index_name": "PK__addresse__3213E83F7A8231E6",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customer_profiles",
+			"index_name": "PK__customer__CD65CB8546AE05E7",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "customer_id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"index_name": "PK__customer__3213E83FA0EC0F8D",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "customers",
+			"index_name": "UQ__customer__AB6E6164246B79B3",
+			"is_primary_key": false,
+			"is_unique": true,
+			"column_name": "email",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "employees",
+			"index_name": "PK__employee__3213E83F590AAC66",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"index_name": "PK__order_it__022945F690CC3F94",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "order_id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"index_name": "PK__order_it__022945F690CC3F94",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "product_id",
+			"position": 2
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"index_name": "orders_status_idx",
+			"is_primary_key": false,
+			"is_unique": false,
+			"column_name": "status",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"index_name": "PK__orders__3213E83F8EED46DA",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"index_name": "PK__products__3213E83F69E1629F",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "id",
+			"position": 1
+		},
+		{
+			"table_schema": "dbo",
+			"table_name": "products",
+			"index_name": "UQ__products__DDDF4BE7EC1DE3EA",
+			"is_primary_key": false,
+			"is_unique": true,
+			"column_name": "sku",
+			"position": 1
+		},
+		{
+			"table_schema": "sales",
+			"table_name": "invoices",
+			"index_name": "PK__invoices__3213E83F60822F2E",
+			"is_primary_key": true,
+			"is_unique": true,
+			"column_name": "id",
+			"position": 1
+		}
+	],
+	"foreignKeys": [
+		{
+			"fk_name": "FK__addresses__custo__3E52440B",
+			"table_schema": "dbo",
+			"table_name": "addresses",
+			"column_name": "customer_id",
+			"ref_schema": "dbo",
+			"ref_table": "customers",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__customer___custo__3B75D760",
+			"table_schema": "dbo",
+			"table_name": "customer_profiles",
+			"column_name": "customer_id",
+			"ref_schema": "dbo",
+			"ref_table": "customers",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__employees__manag__4CA06362",
+			"table_schema": "dbo",
+			"table_name": "employees",
+			"column_name": "manager_id",
+			"ref_schema": "dbo",
+			"ref_table": "employees",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__order_ite__order__48CFD27E",
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"column_name": "order_id",
+			"ref_schema": "dbo",
+			"ref_table": "orders",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__order_ite__produ__49C3F6B7",
+			"table_schema": "dbo",
+			"table_name": "order_items",
+			"column_name": "product_id",
+			"ref_schema": "dbo",
+			"ref_table": "products",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__orders__customer__440B1D61",
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "customer_id",
+			"ref_schema": "dbo",
+			"ref_table": "customers",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__orders__shipping__44FF419A",
+			"table_schema": "dbo",
+			"table_name": "orders",
+			"column_name": "shipping_address_id",
+			"ref_schema": "dbo",
+			"ref_table": "addresses",
+			"ref_column": "id",
+			"position": 1
+		},
+		{
+			"fk_name": "FK__invoices__order___5070F446",
+			"table_schema": "sales",
+			"table_name": "invoices",
+			"column_name": "order_id",
+			"ref_schema": "dbo",
+			"ref_table": "orders",
+			"ref_column": "id",
+			"position": 1
+		}
+	]
+}

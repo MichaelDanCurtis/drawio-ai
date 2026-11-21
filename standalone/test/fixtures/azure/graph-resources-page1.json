@@ -1,0 +1,901 @@
+{
+ "count": 20,
+ "data": [
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub",
+   "name": "vnet-hub",
+   "type": "Microsoft.Network/virtualNetworks",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "provisioningState": "Succeeded",
+    "addressSpace": {
+     "addressPrefixes": [
+      "10.0.0.0/16"
+     ]
+    },
+    "subnets": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub/subnets/AzureBastionSubnet",
+      "name": "AzureBastionSubnet",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.0.0.0/26",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled",
+       "ipConfigurations": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/bastionHosts/bas-hub/bastionHostIpConfigurations/IpConf"
+        }
+       ]
+      }
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub/subnets/GatewaySubnet",
+      "name": "GatewaySubnet",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.0.1.0/27",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled"
+      }
+     }
+    ],
+    "virtualNetworkPeerings": [
+     {
+      "id": "x/virtualNetworkPeerings/hub-to-spoke",
+      "name": "hub-to-spoke",
+      "properties": {
+       "peeringState": "Connected",
+       "peeringSyncLevel": "FullyInSync",
+       "remoteVirtualNetwork": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke"
+       },
+       "allowVirtualNetworkAccess": true,
+       "allowForwardedTraffic": true,
+       "useRemoteGateways": false
+      }
+     }
+    ],
+    "enableDdosProtection": false
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke",
+   "name": "vnet-spoke",
+   "type": "Microsoft.Network/virtualNetworks",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "provisioningState": "Succeeded",
+    "addressSpace": {
+     "addressPrefixes": [
+      "10.1.0.0/16"
+     ]
+    },
+    "subnets": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web",
+      "name": "snet-web",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.1.1.0/24",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled",
+       "networkSecurityGroup": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/networkSecurityGroups/nsg-web"
+       },
+       "ipConfigurations": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01/ipConfigurations/ipconfig1"
+        },
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02/ipConfigurations/ipconfig1"
+        }
+       ]
+      }
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-aks",
+      "name": "snet-aks",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.1.2.0/23",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled",
+       "ipConfigurations": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss/virtualMachines/0/networkInterfaces/aks-system-12345678-vmss/ipConfigurations/ipconfig1"
+        },
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss/virtualMachines/1/networkInterfaces/aks-system-12345678-vmss/ipConfigurations/ipconfig1"
+        },
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss/virtualMachines/2/networkInterfaces/aks-system-12345678-vmss/ipConfigurations/ipconfig1"
+        }
+       ]
+      }
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe",
+      "name": "snet-pe",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.1.4.0/24",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled",
+       "privateEndpoints": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql"
+        },
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob"
+        }
+       ],
+       "ipConfigurations": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001/ipConfigurations/privateEndpointIpConfig.1"
+        },
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002/ipConfigurations/privateEndpointIpConfig.1"
+        }
+       ]
+      }
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appint",
+      "name": "snet-appint",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.1.5.0/24",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled",
+       "delegations": [
+        {
+         "name": "delegation",
+         "properties": {
+          "serviceName": "Microsoft.Web/serverFarms",
+          "actions": [
+           "Microsoft.Network/virtualNetworks/subnets/action"
+          ]
+         }
+        }
+       ],
+       "serviceAssociationLinks": [
+        {
+         "name": "AppServiceLink",
+         "properties": {
+          "linkedResourceType": "Microsoft.Web/serverfarms",
+          "link": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/serverfarms/plan-web"
+         }
+        }
+       ],
+       "serviceEndpoints": [
+        {
+         "service": "Microsoft.KeyVault",
+         "locations": [
+          "*"
+         ]
+        }
+       ]
+      }
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appgw",
+      "name": "snet-appgw",
+      "type": "Microsoft.Network/virtualNetworks/subnets",
+      "etag": "W/\"1\"",
+      "properties": {
+       "provisioningState": "Succeeded",
+       "addressPrefix": "10.1.6.0/24",
+       "privateEndpointNetworkPolicies": "Disabled",
+       "privateLinkServiceNetworkPolicies": "Enabled",
+       "applicationGatewayIPConfigurations": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/gatewayIPConfigurations/appGatewayIpConfig"
+        }
+       ]
+      }
+     }
+    ],
+    "virtualNetworkPeerings": [
+     {
+      "id": "x/virtualNetworkPeerings/spoke-to-hub",
+      "name": "spoke-to-hub",
+      "properties": {
+       "peeringState": "Connected",
+       "peeringSyncLevel": "FullyInSync",
+       "remoteVirtualNetwork": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub"
+       },
+       "allowVirtualNetworkAccess": true,
+       "allowForwardedTraffic": true,
+       "useRemoteGateways": false
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/networkSecurityGroups/nsg-web",
+   "name": "nsg-web",
+   "type": "Microsoft.Network/networkSecurityGroups",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "securityRules": [
+     {
+      "name": "allow-https",
+      "properties": {
+       "protocol": "Tcp",
+       "sourcePortRange": "*",
+       "destinationPortRange": "443",
+       "sourceAddressPrefix": "Internet",
+       "destinationAddressPrefix": "*",
+       "access": "Allow",
+       "priority": 100,
+       "direction": "Inbound"
+      }
+     },
+     {
+      "name": "allow-ssh-any",
+      "properties": {
+       "protocol": "Tcp",
+       "sourcePortRange": "*",
+       "destinationPortRange": "22",
+       "sourceAddressPrefix": "*",
+       "destinationAddressPrefix": "*",
+       "access": "Allow",
+       "priority": 110,
+       "direction": "Inbound"
+      }
+     }
+    ],
+    "subnets": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web"
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/publicIPAddresses/pip-bastion",
+   "name": "pip-bastion",
+   "type": "Microsoft.Network/publicIPAddresses",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Standard",
+    "tier": "Regional"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "ipAddress": "203.0.113.10",
+    "publicIPAllocationMethod": "Static",
+    "ipConfiguration": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/bastionHosts/bas-hub/bastionHostIpConfigurations/IpConf"
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/publicIPAddresses/pip-agw",
+   "name": "pip-agw",
+   "type": "Microsoft.Network/publicIPAddresses",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Standard",
+    "tier": "Regional"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "ipAddress": "203.0.113.20",
+    "publicIPAllocationMethod": "Static",
+    "dnsSettings": {
+     "fqdn": "contoso-shop.westeurope.cloudapp.azure.com"
+    },
+    "ipConfiguration": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/frontendIPConfigurations/appGwPublicFrontendIp"
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/bastionHosts/bas-hub",
+   "name": "bas-hub",
+   "type": "Microsoft.Network/bastionHosts",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Basic"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/bastionHosts/bas-hub/bastionHostIpConfigurations/IpConf",
+      "name": "IpConf",
+      "properties": {
+       "subnet": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub/subnets/AzureBastionSubnet"
+       },
+       "publicIPAddress": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/publicIPAddresses/pip-bastion"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod",
+   "name": "agw-prod",
+   "type": "Microsoft.Network/applicationGateways",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "sku": {
+     "name": "Standard_v2",
+     "tier": "Standard_v2",
+     "capacity": 2
+    },
+    "gatewayIPConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/gatewayIPConfigurations/appGatewayIpConfig",
+      "properties": {
+       "subnet": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appgw"
+       }
+      }
+     }
+    ],
+    "frontendIPConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/frontendIPConfigurations/appGwPublicFrontendIp",
+      "properties": {
+       "publicIPAddress": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/publicIPAddresses/pip-agw"
+       }
+      }
+     }
+    ],
+    "backendAddressPools": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/backendAddressPools/web",
+      "properties": {
+       "backendIPConfigurations": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01/ipConfigurations/ipconfig1"
+        },
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02/ipConfigurations/ipconfig1"
+        }
+       ]
+      }
+     }
+    ],
+    "sslCertificates": [
+     {
+      "name": "shop-cert",
+      "properties": {
+       "publicCertData": "MIIB...",
+       "password": "Sup3rS3cret!"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/privateDnsZones/privatelink.database.windows.net",
+   "name": "privatelink.database.windows.net",
+   "type": "Microsoft.Network/privateDnsZones",
+   "location": "global",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "numberOfRecordSets": 2
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/privateDnsZones/privatelink.database.windows.net/virtualNetworkLinks/link-spoke",
+   "name": "link-spoke",
+   "type": "Microsoft.Network/privateDnsZones/virtualNetworkLinks",
+   "location": "global",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "virtualNetwork": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke"
+    },
+    "registrationEnabled": false
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/networkWatchers/NetworkWatcher_westeurope",
+   "name": "NetworkWatcher_westeurope",
+   "type": "Microsoft.Network/networkWatchers",
+   "location": "westeurope",
+   "resourceGroup": "rg-network",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {}
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+   "name": "vm-web-01",
+   "type": "Microsoft.Compute/virtualMachines",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": [
+    "1"
+   ],
+   "properties": {
+    "vmId": "00000000-0000-4000-8000-000000000001",
+    "hardwareProfile": {
+     "vmSize": "Standard_B2s"
+    },
+    "storageProfile": {
+     "imageReference": {
+      "publisher": "Canonical",
+      "offer": "0001-com-ubuntu-server-jammy",
+      "sku": "22_04-lts-gen2",
+      "version": "latest"
+     },
+     "osDisk": {
+      "osType": "Linux",
+      "name": "osdisk-web-01",
+      "managedDisk": {
+       "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/disks/osdisk-web-01"
+      }
+     }
+    },
+    "osProfile": {
+     "computerName": "vm-web-01",
+     "adminUsername": "azureuser",
+     "linuxConfiguration": {
+      "disablePasswordAuthentication": false
+     }
+    },
+    "networkProfile": {
+     "networkInterfaces": [
+      {
+       "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01"
+      }
+     ]
+    },
+    "diagnosticsProfile": {
+     "bootDiagnostics": {
+      "enabled": true
+     }
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01",
+   "name": "nic-web-01",
+   "type": "Microsoft.Network/networkInterfaces",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "virtualMachine": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01"
+    },
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01/ipConfigurations/ipconfig1",
+      "name": "ipconfig1",
+      "properties": {
+       "privateIPAddress": "10.1.1.4",
+       "privateIPAllocationMethod": "Dynamic",
+       "subnet": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web"
+       },
+       "primary": true,
+       "applicationGatewayBackendAddressPools": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/backendAddressPools/web"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/disks/osdisk-web-01",
+   "name": "osdisk-web-01",
+   "type": "Microsoft.Compute/disks",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Premium_LRS",
+    "tier": "Premium"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+   "zones": null,
+   "properties": {
+    "diskSizeGB": 30,
+    "osType": "Linux",
+    "diskState": "Attached"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01/extensions/AzureMonitorLinuxAgent",
+   "name": "AzureMonitorLinuxAgent",
+   "type": "Microsoft.Compute/virtualMachines/extensions",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "publisher": "Microsoft.Azure.Monitor",
+    "type": "AzureMonitorLinuxAgent",
+    "protectedSettings": {
+     "workspaceKey": "c2VjcmV0LXdvcmtzcGFjZS1rZXk="
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-02",
+   "name": "vm-web-02",
+   "type": "Microsoft.Compute/virtualMachines",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": [
+    "2"
+   ],
+   "properties": {
+    "vmId": "00000000-0000-4000-8000-000000000002",
+    "hardwareProfile": {
+     "vmSize": "Standard_B2s"
+    },
+    "storageProfile": {
+     "imageReference": {
+      "publisher": "Canonical",
+      "offer": "0001-com-ubuntu-server-jammy",
+      "sku": "22_04-lts-gen2",
+      "version": "latest"
+     },
+     "osDisk": {
+      "osType": "Linux",
+      "name": "osdisk-web-02",
+      "managedDisk": {
+       "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/disks/osdisk-web-02"
+      }
+     }
+    },
+    "osProfile": {
+     "computerName": "vm-web-02",
+     "adminUsername": "azureuser",
+     "linuxConfiguration": {
+      "disablePasswordAuthentication": false
+     }
+    },
+    "networkProfile": {
+     "networkInterfaces": [
+      {
+       "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02"
+      }
+     ]
+    },
+    "diagnosticsProfile": {
+     "bootDiagnostics": {
+      "enabled": true
+     }
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02",
+   "name": "nic-web-02",
+   "type": "Microsoft.Network/networkInterfaces",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "virtualMachine": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-02"
+    },
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02/ipConfigurations/ipconfig1",
+      "name": "ipconfig1",
+      "properties": {
+       "privateIPAddress": "10.1.1.5",
+       "privateIPAllocationMethod": "Dynamic",
+       "subnet": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web"
+       },
+       "primary": true,
+       "applicationGatewayBackendAddressPools": [
+        {
+         "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/backendAddressPools/web"
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/disks/osdisk-web-02",
+   "name": "osdisk-web-02",
+   "type": "Microsoft.Compute/disks",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Premium_LRS",
+    "tier": "Premium"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-02",
+   "zones": null,
+   "properties": {
+    "diskSizeGB": 30,
+    "osType": "Linux",
+    "diskState": "Attached"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-02/extensions/AzureMonitorLinuxAgent",
+   "name": "AzureMonitorLinuxAgent",
+   "type": "Microsoft.Compute/virtualMachines/extensions",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "publisher": "Microsoft.Azure.Monitor",
+    "type": "AzureMonitorLinuxAgent",
+    "protectedSettings": {
+     "workspaceKey": "c2VjcmV0LXdvcmtzcGFjZS1rZXk="
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.ContainerService/managedClusters/aks-prod",
+   "name": "aks-prod",
+   "type": "Microsoft.ContainerService/managedClusters",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Base",
+    "tier": "Free"
+   },
+   "tags": {},
+   "identity": {
+    "type": "SystemAssigned",
+    "principalId": "11111111-0000-4000-8000-000000000000",
+    "tenantId": "99999999-8888-7777-6666-555555555555"
+   },
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "kubernetesVersion": "1.30.4",
+    "dnsPrefix": "aks-prod",
+    "fqdn": "aks-prod-abc123.hcp.westeurope.azmk8s.io",
+    "agentPoolProfiles": [
+     {
+      "name": "system",
+      "count": 3,
+      "vmSize": "Standard_D4s_v5",
+      "mode": "System",
+      "osType": "Linux",
+      "vnetSubnetID": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-aks",
+      "availabilityZones": [
+       "1",
+       "2",
+       "3"
+      ]
+     }
+    ],
+    "nodeResourceGroup": "MC_rg-app_aks-prod_westeurope",
+    "enableRBAC": true,
+    "networkProfile": {
+     "networkPlugin": "azure",
+     "networkPolicy": "calico",
+     "outboundType": "loadBalancer",
+     "loadBalancerProfile": {
+      "effectiveOutboundIPs": [
+       {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/publicIPAddresses/kubernetes-outbound-ip",
+        "resourceGroup": "MC_rg-app_aks-prod_westeurope"
+       }
+      ]
+     }
+    },
+    "apiServerAccessProfile": {
+     "enablePrivateCluster": false
+    },
+    "addonProfiles": {
+     "omsagent": {
+      "enabled": true,
+      "config": {
+       "logAnalyticsWorkspaceResourceID": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.OperationalInsights/workspaces/law-prod"
+      }
+     }
+    },
+    "identityProfile": {
+     "kubeletidentity": {
+      "resourceId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.ManagedIdentity/userAssignedIdentities/aks-prod-agentpool",
+      "clientId": "22222222-0000-4000-8000-000000000000",
+      "objectId": "33333333-0000-4000-8000-000000000000"
+     }
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss",
+   "name": "aks-system-12345678-vmss",
+   "type": "Microsoft.Compute/virtualMachineScaleSets",
+   "location": "westeurope",
+   "resourceGroup": "mc_rg-app_aks-prod_westeurope",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Standard_D4s_v5",
+    "tier": "Standard",
+    "capacity": 3
+   },
+   "tags": {
+    "aks-managed-poolName": "system",
+    "aks-managed-orchestrator": "Kubernetes:1.30.4"
+   },
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "orchestrationMode": "Uniform",
+    "virtualMachineProfile": {
+     "storageProfile": {
+      "osDisk": {
+       "osType": "Linux"
+      }
+     },
+     "networkProfile": {
+      "networkInterfaceConfigurations": [
+       {
+        "name": "aks-system-12345678-vmss",
+        "properties": {
+         "primary": true,
+         "ipConfigurations": [
+          {
+           "name": "ipconfig1",
+           "properties": {
+            "subnet": {
+             "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-aks"
+            },
+            "loadBalancerBackendAddressPools": [
+             {
+              "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/loadBalancers/kubernetes/backendAddressPools/kubernetes"
+             }
+            ]
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "skip_token": "ew0KICAiJGlkIjogIjEiLA0KICAiTWF4Um93cyI6IDEwMDAsDQogICJSb3dzVG9Ta2lwIjogMTAwMA0KfQ==",
+ "total_records": 39
+}

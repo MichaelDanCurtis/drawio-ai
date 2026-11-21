@@ -1,0 +1,18 @@
+[
+ {
+  "kind": "compute#router",
+  "id": "1000024",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/routers/router-nat",
+  "name": "router-nat",
+  "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "nats": [
+   {
+    "name": "nat-us",
+    "natIpAllocateOption": "AUTO_ONLY",
+    "sourceSubnetworkIpRangesToNat": "ALL_SUBNETWORKS_ALL_IP_RANGES"
+   }
+  ]
+ }
+]

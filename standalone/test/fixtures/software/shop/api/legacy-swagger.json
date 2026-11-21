@@ -1,0 +1,23 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Legacy Inventory", "version": "0.9" },
+  "host": "inventory.internal",
+  "basePath": "/api",
+  "paths": {
+    "/items/{sku}": {
+      "get": {
+        "parameters": [{ "name": "sku", "in": "path", "required": true, "type": "string" }],
+        "responses": { "200": { "description": "ok", "schema": { "$ref": "#/definitions/Item" } } }
+      }
+    },
+    "/items": {
+      "put": {
+        "parameters": [{ "name": "item", "in": "body", "schema": { "$ref": "#/definitions/Item" } }],
+        "responses": { "204": { "description": "saved" } }
+      }
+    }
+  },
+  "definitions": {
+    "Item": { "type": "object", "properties": { "sku": { "type": "string" }, "stock": { "type": "integer" } } }
+  }
+}

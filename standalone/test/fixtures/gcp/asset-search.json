@@ -1,0 +1,2196 @@
+[
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/networks/vpc-prod",
+  "assetType": "compute.googleapis.com/Network",
+  "project": "projects/123456789012",
+  "displayName": "vpc-prod",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#network",
+     "id": "1000000",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "name": "vpc-prod",
+     "autoCreateSubnetworks": false,
+     "routingConfig": {
+      "routingMode": "REGIONAL"
+     },
+     "peerings": [
+      {
+       "name": "prod-to-shared",
+       "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-shared",
+       "state": "ACTIVE",
+       "exportCustomRoutes": false
+      },
+      {
+       "name": "servicenetworking-googleapis-com",
+       "network": "https://www.googleapis.com/compute/v1/projects/a1b2c3-tp/global/networks/servicenetworking",
+       "state": "ACTIVE"
+      }
+     ],
+     "subnetworks": [],
+     "networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/networks/vpc-shared",
+  "assetType": "compute.googleapis.com/Network",
+  "project": "projects/123456789012",
+  "displayName": "vpc-shared",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#network",
+     "id": "1000001",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-shared",
+     "name": "vpc-shared",
+     "autoCreateSubnetworks": false,
+     "routingConfig": {
+      "routingMode": "REGIONAL"
+     },
+     "peerings": [
+      {
+       "name": "shared-to-prod",
+       "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+       "state": "ACTIVE"
+      }
+     ],
+     "subnetworks": [],
+     "networkFirewallPolicyEnforcementOrder": "AFTER_CLASSIC_FIREWALL"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+  "assetType": "compute.googleapis.com/Subnetwork",
+  "project": "projects/123456789012",
+  "displayName": "subnet-web",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#subnetwork",
+     "id": "1000002",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+     "name": "subnet-web",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+     "ipCidrRange": "10.10.0.0/24",
+     "gatewayAddress": "10.10.0.1",
+     "stackType": "IPV4_ONLY",
+     "purpose": "PRIVATE",
+     "privateIpGoogleAccess": true
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+  "assetType": "compute.googleapis.com/Subnetwork",
+  "project": "projects/123456789012",
+  "displayName": "subnet-gke",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#subnetwork",
+     "id": "1000003",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+     "name": "subnet-gke",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+     "ipCidrRange": "10.20.0.0/20",
+     "gatewayAddress": "10.20.0.1",
+     "stackType": "IPV4_ONLY",
+     "purpose": "PRIVATE",
+     "privateIpGoogleAccess": true,
+     "secondaryIpRanges": [
+      {
+       "rangeName": "pods",
+       "ipCidrRange": "10.100.0.0/14"
+      },
+      {
+       "rangeName": "services",
+       "ipCidrRange": "10.104.0.0/20"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/regions/europe-west1/subnetworks/subnet-eu",
+  "assetType": "compute.googleapis.com/Subnetwork",
+  "project": "projects/123456789012",
+  "displayName": "subnet-eu",
+  "description": "",
+  "location": "europe-west1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#subnetwork",
+     "id": "1000004",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/europe-west1/subnetworks/subnet-eu",
+     "name": "subnet-eu",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/europe-west1",
+     "ipCidrRange": "10.30.0.0/24",
+     "gatewayAddress": "10.30.0.1",
+     "stackType": "IPV4_ONLY",
+     "purpose": "PRIVATE",
+     "privateIpGoogleAccess": false
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-shared",
+  "assetType": "compute.googleapis.com/Subnetwork",
+  "project": "projects/123456789012",
+  "displayName": "subnet-shared",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#subnetwork",
+     "id": "1000005",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-shared",
+     "name": "subnet-shared",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-shared",
+     "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+     "ipCidrRange": "10.40.0.0/24",
+     "gatewayAddress": "10.40.0.1",
+     "stackType": "IPV4_ONLY",
+     "purpose": "PRIVATE",
+     "privateIpGoogleAccess": false
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/firewalls/allow-ssh-anywhere",
+  "assetType": "compute.googleapis.com/Firewall",
+  "project": "projects/123456789012",
+  "displayName": "allow-ssh-anywhere",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#firewall",
+     "id": "1000006",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/firewalls/allow-ssh-anywhere",
+     "name": "allow-ssh-anywhere",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "priority": 1000,
+     "direction": "INGRESS",
+     "sourceRanges": [
+      "0.0.0.0/0"
+     ],
+     "allowed": [
+      {
+       "IPProtocol": "tcp",
+       "ports": [
+        "22"
+       ]
+      }
+     ],
+     "targetTags": [
+      "ssh"
+     ],
+     "disabled": false,
+     "logConfig": {
+      "enable": false
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/firewalls/allow-web",
+  "assetType": "compute.googleapis.com/Firewall",
+  "project": "projects/123456789012",
+  "displayName": "allow-web",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#firewall",
+     "id": "1000007",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/firewalls/allow-web",
+     "name": "allow-web",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "priority": 1000,
+     "direction": "INGRESS",
+     "sourceRanges": [
+      "0.0.0.0/0"
+     ],
+     "allowed": [
+      {
+       "IPProtocol": "tcp",
+       "ports": [
+        "80",
+        "443"
+       ]
+      }
+     ],
+     "targetTags": [
+      "web"
+     ],
+     "disabled": false,
+     "logConfig": {
+      "enable": false
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/firewalls/allow-internal",
+  "assetType": "compute.googleapis.com/Firewall",
+  "project": "projects/123456789012",
+  "displayName": "allow-internal",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#firewall",
+     "id": "1000008",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/firewalls/allow-internal",
+     "name": "allow-internal",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "priority": 1000,
+     "direction": "INGRESS",
+     "sourceRanges": [
+      "10.0.0.0/8"
+     ],
+     "allowed": [
+      {
+       "IPProtocol": "all"
+      }
+     ],
+     "disabled": false,
+     "logConfig": {
+      "enable": false
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-a/instances/web-1",
+  "assetType": "compute.googleapis.com/Instance",
+  "project": "projects/123456789012",
+  "displayName": "web-1",
+  "description": "",
+  "location": "us-central1-a",
+  "labels": {
+   "env": "prod",
+   "tier": "web"
+  },
+  "networkTags": [
+   "web",
+   "ssh"
+  ],
+  "additionalAttributes": {
+   "internalIPs": [
+    "10.10.0.2"
+   ],
+   "externalIPs": [
+    "34.123.0.10"
+   ],
+   "id": "1000009"
+  },
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNING",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#instance",
+     "id": "1000009",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instances/web-1",
+     "name": "web-1",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+     "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/machineTypes/e2-standard-2",
+     "status": "RUNNING",
+     "tags": {
+      "items": [
+       "web",
+       "ssh"
+      ],
+      "fingerprint": "abc="
+     },
+     "labels": {
+      "env": "prod",
+      "tier": "web"
+     },
+     "networkInterfaces": [
+      {
+       "name": "nic0",
+       "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+       "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+       "networkIP": "10.10.0.2",
+       "accessConfigs": [
+        {
+         "kind": "compute#accessConfig",
+         "name": "External NAT",
+         "type": "ONE_TO_ONE_NAT",
+         "natIP": "34.123.0.10",
+         "networkTier": "PREMIUM"
+        }
+       ]
+      }
+     ],
+     "disks": [
+      {
+       "boot": true,
+       "autoDelete": true,
+       "deviceName": "web-1",
+       "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/disks/web-1",
+       "mode": "READ_WRITE",
+       "type": "PERSISTENT"
+      }
+     ],
+     "serviceAccounts": [
+      {
+       "email": "123456789012-compute@developer.gserviceaccount.com",
+       "scopes": [
+        "https://www.googleapis.com/auth/cloud-platform"
+       ]
+      }
+     ],
+     "metadata": {
+      "kind": "compute#metadata",
+      "items": [
+       {
+        "key": "startup-script",
+        "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+       },
+       {
+        "key": "ssh-keys",
+        "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+       }
+      ]
+     },
+     "shieldedInstanceConfig": {
+      "enableSecureBoot": false,
+      "enableVtpm": true,
+      "enableIntegrityMonitoring": true
+     },
+     "scheduling": {
+      "preemptible": false,
+      "automaticRestart": true,
+      "onHostMaintenance": "MIGRATE",
+      "provisioningModel": "STANDARD"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-a/disks/web-1",
+  "assetType": "compute.googleapis.com/Disk",
+  "project": "projects/123456789012",
+  "displayName": "web-1",
+  "description": "",
+  "location": "us-central1-a",
+  "labels": {
+   "env": "prod",
+   "tier": "web"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "READY",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#disk",
+     "id": "1000010",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/disks/web-1",
+     "name": "web-1",
+     "sizeGb": "20",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+     "status": "READY",
+     "type": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/diskTypes/pd-balanced",
+     "users": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instances/web-1"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-b/instances/web-2",
+  "assetType": "compute.googleapis.com/Instance",
+  "project": "projects/123456789012",
+  "displayName": "web-2",
+  "description": "",
+  "location": "us-central1-b",
+  "labels": {
+   "env": "prod",
+   "tier": "web"
+  },
+  "networkTags": [
+   "web"
+  ],
+  "additionalAttributes": {
+   "internalIPs": [
+    "10.10.0.3"
+   ],
+   "externalIPs": [],
+   "id": "1000011"
+  },
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNING",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#instance",
+     "id": "1000011",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/instances/web-2",
+     "name": "web-2",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b",
+     "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/machineTypes/e2-standard-2",
+     "status": "RUNNING",
+     "tags": {
+      "items": [
+       "web"
+      ],
+      "fingerprint": "abc="
+     },
+     "labels": {
+      "env": "prod",
+      "tier": "web"
+     },
+     "networkInterfaces": [
+      {
+       "name": "nic0",
+       "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+       "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+       "networkIP": "10.10.0.3"
+      }
+     ],
+     "disks": [
+      {
+       "boot": true,
+       "autoDelete": true,
+       "deviceName": "web-2",
+       "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/disks/web-2",
+       "mode": "READ_WRITE",
+       "type": "PERSISTENT"
+      }
+     ],
+     "serviceAccounts": [
+      {
+       "email": "123456789012-compute@developer.gserviceaccount.com",
+       "scopes": [
+        "https://www.googleapis.com/auth/cloud-platform"
+       ]
+      }
+     ],
+     "metadata": {
+      "kind": "compute#metadata",
+      "items": [
+       {
+        "key": "startup-script",
+        "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+       },
+       {
+        "key": "ssh-keys",
+        "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+       }
+      ]
+     },
+     "shieldedInstanceConfig": {
+      "enableSecureBoot": false,
+      "enableVtpm": true,
+      "enableIntegrityMonitoring": true
+     },
+     "scheduling": {
+      "preemptible": false,
+      "automaticRestart": true,
+      "onHostMaintenance": "MIGRATE",
+      "provisioningModel": "STANDARD"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-b/disks/web-2",
+  "assetType": "compute.googleapis.com/Disk",
+  "project": "projects/123456789012",
+  "displayName": "web-2",
+  "description": "",
+  "location": "us-central1-b",
+  "labels": {
+   "env": "prod",
+   "tier": "web"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "READY",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#disk",
+     "id": "1000012",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/disks/web-2",
+     "name": "web-2",
+     "sizeGb": "20",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b",
+     "status": "READY",
+     "type": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/diskTypes/pd-balanced",
+     "users": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-b/instances/web-2"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/europe-west1-b/instances/batch-eu-1",
+  "assetType": "compute.googleapis.com/Instance",
+  "project": "projects/123456789012",
+  "displayName": "batch-eu-1",
+  "description": "",
+  "location": "europe-west1-b",
+  "labels": {
+   "env": "prod"
+  },
+  "networkTags": [],
+  "additionalAttributes": {
+   "internalIPs": [
+    "10.30.0.2"
+   ],
+   "externalIPs": [],
+   "id": "1000013"
+  },
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNING",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#instance",
+     "id": "1000013",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/instances/batch-eu-1",
+     "name": "batch-eu-1",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b",
+     "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/machineTypes/e2-standard-2",
+     "status": "RUNNING",
+     "tags": {
+      "items": [],
+      "fingerprint": "abc="
+     },
+     "labels": {
+      "env": "prod"
+     },
+     "networkInterfaces": [
+      {
+       "name": "nic0",
+       "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+       "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/europe-west1/subnetworks/subnet-eu",
+       "networkIP": "10.30.0.2"
+      }
+     ],
+     "disks": [
+      {
+       "boot": true,
+       "autoDelete": true,
+       "deviceName": "batch-eu-1",
+       "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/disks/batch-eu-1",
+       "mode": "READ_WRITE",
+       "type": "PERSISTENT"
+      }
+     ],
+     "serviceAccounts": [
+      {
+       "email": "123456789012-compute@developer.gserviceaccount.com",
+       "scopes": [
+        "https://www.googleapis.com/auth/cloud-platform"
+       ]
+      }
+     ],
+     "metadata": {
+      "kind": "compute#metadata",
+      "items": [
+       {
+        "key": "startup-script",
+        "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+       },
+       {
+        "key": "ssh-keys",
+        "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+       }
+      ]
+     },
+     "shieldedInstanceConfig": {
+      "enableSecureBoot": false,
+      "enableVtpm": true,
+      "enableIntegrityMonitoring": true
+     },
+     "scheduling": {
+      "preemptible": false,
+      "automaticRestart": true,
+      "onHostMaintenance": "MIGRATE",
+      "provisioningModel": "STANDARD"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/europe-west1-b/disks/batch-eu-1",
+  "assetType": "compute.googleapis.com/Disk",
+  "project": "projects/123456789012",
+  "displayName": "batch-eu-1",
+  "description": "",
+  "location": "europe-west1-b",
+  "labels": {
+   "env": "prod"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "READY",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#disk",
+     "id": "1000014",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/disks/batch-eu-1",
+     "name": "batch-eu-1",
+     "sizeGb": "20",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b",
+     "status": "READY",
+     "type": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/diskTypes/pd-balanced",
+     "users": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/europe-west1-b/instances/batch-eu-1"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-a/instances/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+  "assetType": "compute.googleapis.com/Instance",
+  "project": "projects/123456789012",
+  "displayName": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+  "description": "",
+  "location": "us-central1-a",
+  "labels": {
+   "goog-k8s-cluster-name": "shop-cluster",
+   "goog-k8s-node-pool-name": "default-pool"
+  },
+  "networkTags": [
+   "gke-shop-cluster-1a2b3c4d-node"
+  ],
+  "additionalAttributes": {
+   "internalIPs": [
+    "10.20.0.5"
+   ],
+   "externalIPs": [],
+   "id": "1000015"
+  },
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNING",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#instance",
+     "id": "1000015",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instances/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+     "name": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+     "machineType": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/machineTypes/e2-standard-2",
+     "status": "RUNNING",
+     "tags": {
+      "items": [
+       "gke-shop-cluster-1a2b3c4d-node"
+      ],
+      "fingerprint": "abc="
+     },
+     "labels": {
+      "goog-k8s-cluster-name": "shop-cluster",
+      "goog-k8s-node-pool-name": "default-pool"
+     },
+     "networkInterfaces": [
+      {
+       "name": "nic0",
+       "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+       "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+       "networkIP": "10.20.0.5"
+      }
+     ],
+     "disks": [
+      {
+       "boot": true,
+       "autoDelete": true,
+       "deviceName": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+       "source": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/disks/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+       "mode": "READ_WRITE",
+       "type": "PERSISTENT"
+      }
+     ],
+     "serviceAccounts": [
+      {
+       "email": "123456789012-compute@developer.gserviceaccount.com",
+       "scopes": [
+        "https://www.googleapis.com/auth/cloud-platform"
+       ]
+      }
+     ],
+     "metadata": {
+      "kind": "compute#metadata",
+      "items": [
+       {
+        "key": "startup-script",
+        "value": "#!/bin/bash\nexport DB_PASSWORD=Sup3rS3cret!\n./run.sh"
+       },
+       {
+        "key": "ssh-keys",
+        "value": "admin:ssh-rsa AAAAB3NzaC1yc2E...secretkeymaterial admin"
+       }
+      ]
+     },
+     "shieldedInstanceConfig": {
+      "enableSecureBoot": false,
+      "enableVtpm": true,
+      "enableIntegrityMonitoring": true
+     },
+     "scheduling": {
+      "preemptible": false,
+      "automaticRestart": true,
+      "onHostMaintenance": "MIGRATE",
+      "provisioningModel": "STANDARD"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-a/disks/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+  "assetType": "compute.googleapis.com/Disk",
+  "project": "projects/123456789012",
+  "displayName": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+  "description": "",
+  "location": "us-central1-a",
+  "labels": {
+   "goog-k8s-cluster-name": "shop-cluster",
+   "goog-k8s-node-pool-name": "default-pool"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "READY",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#disk",
+     "id": "1000016",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/disks/gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+     "name": "gke-shop-cluster-default-pool-1a2b3c4d-x7k2",
+     "sizeGb": "20",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+     "status": "READY",
+     "type": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/diskTypes/pd-balanced",
+     "users": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instances/gke-shop-cluster-default-pool-1a2b3c4d-x7k2"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/zones/us-central1-a/instanceGroups/web-ig",
+  "assetType": "compute.googleapis.com/InstanceGroup",
+  "project": "projects/123456789012",
+  "displayName": "web-ig",
+  "description": "",
+  "location": "us-central1-a",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#instanceGroup",
+     "id": "1000017",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instanceGroups/web-ig",
+     "name": "web-ig",
+     "zone": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "subnetwork": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+     "size": 2,
+     "namedPorts": [
+      {
+       "name": "http",
+       "port": 80
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/healthChecks/web-hc",
+  "assetType": "compute.googleapis.com/HealthCheck",
+  "project": "projects/123456789012",
+  "displayName": "web-hc",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#healthCheck",
+     "id": "1000018",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/healthChecks/web-hc",
+     "name": "web-hc",
+     "type": "HTTP",
+     "httpHealthCheck": {
+      "port": 80,
+      "requestPath": "/healthz"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/backendServices/web-backend",
+  "assetType": "compute.googleapis.com/BackendService",
+  "project": "projects/123456789012",
+  "displayName": "web-backend",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#backendService",
+     "id": "1000019",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/backendServices/web-backend",
+     "name": "web-backend",
+     "protocol": "HTTP",
+     "loadBalancingScheme": "EXTERNAL_MANAGED",
+     "backends": [
+      {
+       "group": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/zones/us-central1-a/instanceGroups/web-ig",
+       "balancingMode": "UTILIZATION"
+      }
+     ],
+     "healthChecks": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/healthChecks/web-hc"
+     ],
+     "securityPolicy": null
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/urlMaps/web-lb",
+  "assetType": "compute.googleapis.com/UrlMap",
+  "project": "projects/123456789012",
+  "displayName": "web-lb",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#urlMap",
+     "id": "1000020",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/urlMaps/web-lb",
+     "name": "web-lb",
+     "defaultService": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/backendServices/web-backend"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/targetHttpsProxies/web-lb-https",
+  "assetType": "compute.googleapis.com/TargetHttpsProxy",
+  "project": "projects/123456789012",
+  "displayName": "web-lb-https",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#targetHttpsProxy",
+     "id": "1000021",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/targetHttpsProxies/web-lb-https",
+     "name": "web-lb-https",
+     "urlMap": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/urlMaps/web-lb",
+     "sslCertificates": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/sslCertificates/shop-cert"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/forwardingRules/web-lb-fr",
+  "assetType": "compute.googleapis.com/GlobalForwardingRule",
+  "project": "projects/123456789012",
+  "displayName": "web-lb-fr",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#forwardingRule",
+     "id": "1000022",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/forwardingRules/web-lb-fr",
+     "name": "web-lb-fr",
+     "IPAddress": "34.149.0.20",
+     "IPProtocol": "TCP",
+     "portRange": "443-443",
+     "target": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/targetHttpsProxies/web-lb-https",
+     "loadBalancingScheme": "EXTERNAL_MANAGED",
+     "networkTier": "PREMIUM"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/addresses/web-lb-ip",
+  "assetType": "compute.googleapis.com/GlobalAddress",
+  "project": "projects/123456789012",
+  "displayName": "web-lb-ip",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "IN_USE",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#address",
+     "id": "1000023",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/addresses/web-lb-ip",
+     "name": "web-lb-ip",
+     "address": "34.149.0.20",
+     "addressType": "EXTERNAL",
+     "status": "IN_USE",
+     "users": [
+      "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/forwardingRules/web-lb-fr"
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/regions/us-central1/routers/router-nat",
+  "assetType": "compute.googleapis.com/Router",
+  "project": "projects/123456789012",
+  "displayName": "router-nat",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#router",
+     "id": "1000024",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/routers/router-nat",
+     "name": "router-nat",
+     "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "nats": [
+      {
+       "name": "nat-us",
+       "natIpAllocateOption": "AUTO_ONLY",
+       "sourceSubnetworkIpRangesToNat": "ALL_SUBNETWORKS_ALL_IP_RANGES"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "name": "//compute.googleapis.com/projects/acme-shop-prod/global/routes/default-route-0a1b2c3d",
+  "assetType": "compute.googleapis.com/Route",
+  "project": "projects/123456789012",
+  "displayName": "default-route-0a1b2c3d",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "compute#route",
+     "id": "1000025",
+     "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+     "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/routes/default-route-0a1b2c3d",
+     "name": "default-route-0a1b2c3d",
+     "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+     "destRange": "0.0.0.0/0",
+     "nextHopGateway": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/gateways/default-internet-gateway"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//serviceusage.googleapis.com/projects/123456789012/services/compute.googleapis.com",
+  "assetType": "serviceusage.googleapis.com/Service",
+  "project": "projects/123456789012",
+  "displayName": "compute.googleapis.com",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "ENABLED",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project"
+ },
+ {
+  "name": "//serviceusage.googleapis.com/projects/123456789012/services/run.googleapis.com",
+  "assetType": "serviceusage.googleapis.com/Service",
+  "project": "projects/123456789012",
+  "displayName": "run.googleapis.com",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "ENABLED",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project"
+ },
+ {
+  "name": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "assetType": "cloudresourcemanager.googleapis.com/Project",
+  "project": "projects/123456789012",
+  "displayName": "acme-shop-prod",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "ACTIVE",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "projectNumber": "123456789012",
+     "projectId": "acme-shop-prod",
+     "lifecycleState": "ACTIVE",
+     "name": "Acme Shop (prod)"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//iam.googleapis.com/projects/acme-shop-prod/serviceAccounts/111111111111111111111/keys/0123456789abcdef",
+  "assetType": "iam.googleapis.com/ServiceAccountKey",
+  "project": "projects/123456789012",
+  "displayName": "0123456789abcdef",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/acme-shop-prod/serviceAccounts/orders-api@acme-shop-prod.iam.gserviceaccount.com/keys/0123456789abcdef",
+     "keyType": "USER_MANAGED",
+     "privateKeyData": "LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tc2VjcmV0"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//container.googleapis.com/projects/acme-shop-prod/locations/us-central1/clusters/shop-cluster",
+  "assetType": "container.googleapis.com/Cluster",
+  "project": "projects/123456789012",
+  "displayName": "shop-cluster",
+  "description": "",
+  "location": "us-central1",
+  "labels": {
+   "env": "prod"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNING",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "shop-cluster",
+     "location": "us-central1",
+     "locations": [
+      "us-central1-a",
+      "us-central1-b",
+      "us-central1-c"
+     ],
+     "selfLink": "https://container.googleapis.com/v1/projects/acme-shop-prod/locations/us-central1/clusters/shop-cluster",
+     "network": "vpc-prod",
+     "subnetwork": "subnet-gke",
+     "networkConfig": {
+      "network": "projects/acme-shop-prod/global/networks/vpc-prod",
+      "subnetwork": "projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+      "datapathProvider": "ADVANCED_DATAPATH"
+     },
+     "currentMasterVersion": "1.30.5-gke.1014000",
+     "status": "RUNNING",
+     "endpoint": "34.30.0.40",
+     "privateClusterConfig": {
+      "enablePrivateNodes": true,
+      "enablePrivateEndpoint": false,
+      "masterIpv4CidrBlock": "172.16.0.0/28"
+     },
+     "masterAuthorizedNetworksConfig": {
+      "enabled": false
+     },
+     "masterAuth": {
+      "clusterCaCertificate": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t"
+     },
+     "workloadIdentityConfig": {
+      "workloadPool": "acme-shop-prod.svc.id.goog"
+     },
+     "nodePools": [
+      {
+       "name": "default-pool",
+       "config": {
+        "machineType": "e2-standard-4",
+        "diskSizeGb": 100,
+        "serviceAccount": "default"
+       },
+       "initialNodeCount": 1,
+       "autoscaling": {
+        "enabled": true,
+        "minNodeCount": 1,
+        "maxNodeCount": 3
+       },
+       "status": "RUNNING"
+      }
+     ],
+     "resourceLabels": {
+      "env": "prod"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//container.googleapis.com/projects/acme-shop-prod/locations/us-central1/clusters/shop-cluster/nodePools/default-pool",
+  "assetType": "container.googleapis.com/NodePool",
+  "project": "projects/123456789012",
+  "displayName": "default-pool",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNING",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "default-pool",
+     "config": {
+      "machineType": "e2-standard-4",
+      "diskSizeGb": 100,
+      "serviceAccount": "default"
+     },
+     "initialNodeCount": 1,
+     "autoscaling": {
+      "enabled": true,
+      "minNodeCount": 1,
+      "maxNodeCount": 3
+     },
+     "status": "RUNNING"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//run.googleapis.com/projects/acme-shop-prod/locations/us-central1/services/orders-api",
+  "assetType": "run.googleapis.com/Service",
+  "project": "projects/123456789012",
+  "displayName": "orders-api",
+  "description": "",
+  "location": "us-central1",
+  "labels": {
+   "cloud.googleapis.com/location": "us-central1"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "apiVersion": "serving.knative.dev/v1",
+     "kind": "Service",
+     "metadata": {
+      "name": "orders-api",
+      "namespace": "123456789012",
+      "selfLink": "/apis/serving.knative.dev/v1/namespaces/123456789012/services/orders-api",
+      "labels": {
+       "cloud.googleapis.com/location": "us-central1"
+      },
+      "annotations": {
+       "run.googleapis.com/ingress": "all",
+       "run.googleapis.com/ingress-status": "all",
+       "serving.knative.dev/creator": "deployer@acme.example"
+      }
+     },
+     "spec": {
+      "template": {
+       "metadata": {
+        "annotations": {
+         "autoscaling.knative.dev/maxScale": "10",
+         "run.googleapis.com/vpc-access-connector": "projects/acme-shop-prod/locations/us-central1/connectors/run-conn",
+         "run.googleapis.com/vpc-access-egress": "private-ranges-only",
+         "run.googleapis.com/cloudsql-instances": "acme-shop-prod:us-central1:orders-db"
+        }
+       },
+       "spec": {
+        "serviceAccountName": "orders-api@acme-shop-prod.iam.gserviceaccount.com",
+        "containers": [
+         {
+          "image": "us-central1-docker.pkg.dev/acme-shop-prod/apps/orders-api:1.4.2",
+          "env": [
+           {
+            "name": "DB_PASSWORD",
+            "value": "Sup3rS3cret!"
+           },
+           {
+            "name": "TOPIC",
+            "value": "projects/acme-shop-prod/topics/orders"
+           }
+          ],
+          "ports": [
+           {
+            "containerPort": 8080
+           }
+          ]
+         }
+        ]
+       }
+      },
+      "traffic": [
+       {
+        "percent": 100,
+        "latestRevision": true
+       }
+      ]
+     },
+     "status": {
+      "url": "https://orders-api-abcdefghij-uc.a.run.app",
+      "address": {
+       "url": "https://orders-api-abcdefghij-uc.a.run.app"
+      },
+      "conditions": [
+       {
+        "type": "Ready",
+        "status": "True"
+       }
+      ]
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//vpcaccess.googleapis.com/projects/acme-shop-prod/locations/us-central1/connectors/run-conn",
+  "assetType": "vpcaccess.googleapis.com/Connector",
+  "project": "projects/123456789012",
+  "displayName": "run-conn",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "READY",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/acme-shop-prod/locations/us-central1/connectors/run-conn",
+     "network": "vpc-prod",
+     "ipCidrRange": "10.8.0.0/28",
+     "state": "READY",
+     "minThroughput": 200,
+     "maxThroughput": 300
+    }
+   }
+  ]
+ },
+ {
+  "name": "//cloudfunctions.googleapis.com/projects/acme-shop-prod/locations/us-central1/functions/process-orders",
+  "assetType": "cloudfunctions.googleapis.com/Function",
+  "project": "projects/123456789012",
+  "displayName": "process-orders",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "ACTIVE",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v2",
+    "resource": {
+     "name": "projects/acme-shop-prod/locations/us-central1/functions/process-orders",
+     "environment": "GEN_2",
+     "state": "ACTIVE",
+     "buildConfig": {
+      "runtime": "python312",
+      "entryPoint": "handle",
+      "source": {
+       "storageSource": {
+        "bucket": "gcf-v2-sources-123456789012-us-central1",
+        "object": "process-orders/function-source.zip"
+       }
+      }
+     },
+     "serviceConfig": {
+      "service": "projects/acme-shop-prod/locations/us-central1/services/process-orders",
+      "uri": "https://process-orders-abcdefghij-uc.a.run.app",
+      "ingressSettings": "ALLOW_INTERNAL_ONLY",
+      "serviceAccountEmail": "123456789012-compute@developer.gserviceaccount.com",
+      "environmentVariables": {
+       "API_TOKEN": "tok_live_supersecret"
+      },
+      "availableMemory": "256M"
+     },
+     "eventTrigger": {
+      "trigger": "projects/acme-shop-prod/locations/us-central1/triggers/process-orders-123",
+      "eventType": "google.cloud.pubsub.topic.v1.messagePublished",
+      "pubsubTopic": "projects/acme-shop-prod/topics/orders",
+      "retryPolicy": "RETRY_POLICY_RETRY"
+     },
+     "url": "https://us-central1-acme-shop-prod.cloudfunctions.net/process-orders"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//run.googleapis.com/projects/acme-shop-prod/locations/us-central1/services/process-orders",
+  "assetType": "run.googleapis.com/Service",
+  "project": "projects/123456789012",
+  "displayName": "process-orders",
+  "description": "",
+  "location": "us-central1",
+  "labels": {
+   "goog-managed-by": "cloudfunctions"
+  },
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v2",
+    "resource": {
+     "name": "projects/acme-shop-prod/locations/us-central1/services/process-orders",
+     "uri": "https://process-orders-abcdefghij-uc.a.run.app",
+     "ingress": "INGRESS_TRAFFIC_INTERNAL_ONLY",
+     "template": {
+      "serviceAccount": "123456789012-compute@developer.gserviceaccount.com",
+      "containers": [
+       {
+        "image": "us-central1-docker.pkg.dev/acme-shop-prod/gcf-artifacts/process--orders:version_1",
+        "env": [
+         {
+          "name": "API_TOKEN",
+          "value": "tok_live_supersecret"
+         }
+        ]
+       }
+      ]
+     },
+     "labels": {
+      "goog-managed-by": "cloudfunctions"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//cloudsql.googleapis.com/projects/acme-shop-prod/instances/orders-db",
+  "assetType": "sqladmin.googleapis.com/Instance",
+  "project": "projects/123456789012",
+  "displayName": "orders-db",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "RUNNABLE",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1beta4",
+    "resource": {
+     "kind": "sql#instance",
+     "name": "orders-db",
+     "project": "acme-shop-prod",
+     "region": "us-central1",
+     "gceZone": "us-central1-a",
+     "databaseVersion": "POSTGRES_15",
+     "state": "RUNNABLE",
+     "connectionName": "acme-shop-prod:us-central1:orders-db",
+     "selfLink": "https://sqladmin.googleapis.com/sql/v1beta4/projects/acme-shop-prod/instances/orders-db",
+     "ipAddresses": [
+      {
+       "type": "PRIMARY",
+       "ipAddress": "34.66.0.50"
+      },
+      {
+       "type": "PRIVATE",
+       "ipAddress": "10.60.0.3"
+      }
+     ],
+     "settings": {
+      "tier": "db-custom-2-7680",
+      "availabilityType": "ZONAL",
+      "backupConfiguration": {
+       "enabled": true,
+       "pointInTimeRecoveryEnabled": true
+      },
+      "ipConfiguration": {
+       "ipv4Enabled": true,
+       "privateNetwork": "projects/acme-shop-prod/global/networks/vpc-prod",
+       "authorizedNetworks": [
+        {
+         "kind": "sql#aclEntry",
+         "name": "anywhere",
+         "value": "0.0.0.0/0"
+        }
+       ],
+       "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+      },
+      "userLabels": {
+       "env": "prod"
+      }
+     },
+     "rootPassword": "Sup3rS3cret!"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//redis.googleapis.com/projects/acme-shop-prod/locations/us-central1/instances/cache",
+  "assetType": "redis.googleapis.com/Instance",
+  "project": "projects/123456789012",
+  "displayName": "cache",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "READY",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/acme-shop-prod/locations/us-central1/instances/cache",
+     "tier": "STANDARD_HA",
+     "memorySizeGb": 5,
+     "authorizedNetwork": "projects/acme-shop-prod/global/networks/vpc-prod",
+     "host": "10.70.0.4",
+     "port": 6379,
+     "state": "READY",
+     "authEnabled": true,
+     "authString": "redis-auth-secret"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//storage.googleapis.com/acme-shop-assets",
+  "assetType": "storage.googleapis.com/Bucket",
+  "project": "projects/123456789012",
+  "displayName": "acme-shop-assets",
+  "description": "",
+  "location": "us",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "kind": "storage#bucket",
+     "name": "acme-shop-assets",
+     "location": "US",
+     "locationType": "multi-region",
+     "storageClass": "STANDARD",
+     "iamConfiguration": {
+      "uniformBucketLevelAccess": {
+       "enabled": true
+      },
+      "publicAccessPrevention": "inherited"
+     },
+     "versioning": {
+      "enabled": false
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//pubsub.googleapis.com/projects/acme-shop-prod/topics/orders",
+  "assetType": "pubsub.googleapis.com/Topic",
+  "project": "projects/123456789012",
+  "displayName": "orders",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/acme-shop-prod/topics/orders",
+     "messageStoragePolicy": {
+      "allowedPersistenceRegions": [
+       "us-central1"
+      ]
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//pubsub.googleapis.com/projects/acme-shop-prod/subscriptions/orders-push",
+  "assetType": "pubsub.googleapis.com/Subscription",
+  "project": "projects/123456789012",
+  "displayName": "orders-push",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "ACTIVE",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/acme-shop-prod/subscriptions/orders-push",
+     "topic": "projects/acme-shop-prod/topics/orders",
+     "pushConfig": {
+      "pushEndpoint": "https://orders-api-abcdefghij-uc.a.run.app/events",
+      "oidcToken": {
+       "serviceAccountEmail": "orders-api@acme-shop-prod.iam.gserviceaccount.com"
+      }
+     },
+     "ackDeadlineSeconds": 30,
+     "state": "ACTIVE"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//pubsub.googleapis.com/projects/acme-shop-prod/subscriptions/orders-audit",
+  "assetType": "pubsub.googleapis.com/Subscription",
+  "project": "projects/123456789012",
+  "displayName": "orders-audit",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "state": "ACTIVE",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/acme-shop-prod/subscriptions/orders-audit",
+     "topic": "projects/acme-shop-prod/topics/orders",
+     "pushConfig": {},
+     "ackDeadlineSeconds": 60,
+     "state": "ACTIVE"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//bigquery.googleapis.com/projects/acme-shop-prod/datasets/analytics",
+  "assetType": "bigquery.googleapis.com/Dataset",
+  "project": "projects/123456789012",
+  "displayName": "analytics",
+  "description": "",
+  "location": "us",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "datasetReference": {
+      "projectId": "acme-shop-prod",
+      "datasetId": "analytics"
+     },
+     "location": "US"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//bigquery.googleapis.com/projects/acme-shop-prod/datasets/analytics/tables/orders",
+  "assetType": "bigquery.googleapis.com/Table",
+  "project": "projects/123456789012",
+  "displayName": "orders",
+  "description": "",
+  "location": "us",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "tableReference": {
+      "projectId": "acme-shop-prod",
+      "datasetId": "analytics",
+      "tableId": "orders"
+     },
+     "type": "TABLE"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//secretmanager.googleapis.com/projects/123456789012/secrets/db-password",
+  "assetType": "secretmanager.googleapis.com/Secret",
+  "project": "projects/123456789012",
+  "displayName": "db-password",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "projects/123456789012/secrets/db-password",
+     "replication": {
+      "automatic": {}
+     }
+    }
+   }
+  ]
+ },
+ {
+  "name": "//iam.googleapis.com/projects/acme-shop-prod/serviceAccounts/111111111111111111111",
+  "assetType": "iam.googleapis.com/ServiceAccount",
+  "project": "projects/123456789012",
+  "displayName": "orders-api@acme-shop-prod.iam.gserviceaccount.com",
+  "description": "",
+  "location": "global",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {
+   "email": "orders-api@acme-shop-prod.iam.gserviceaccount.com"
+  },
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "email": "orders-api@acme-shop-prod.iam.gserviceaccount.com",
+     "name": "projects/acme-shop-prod/serviceAccounts/orders-api@acme-shop-prod.iam.gserviceaccount.com",
+     "displayName": "orders-api"
+    }
+   }
+  ]
+ },
+ {
+  "name": "//example.googleapis.com/projects/acme-shop-prod/locations/us-central1/widgets/w1",
+  "assetType": "example.googleapis.com/Widget",
+  "project": "projects/123456789012",
+  "displayName": "w1",
+  "description": "",
+  "location": "us-central1",
+  "labels": {},
+  "networkTags": [],
+  "additionalAttributes": {},
+  "createTime": "2025-06-01T10:00:00Z",
+  "updateTime": "2026-10-01T10:00:00Z",
+  "folders": [
+   "folders/111111111111"
+  ],
+  "organization": "organizations/222222222222",
+  "parentFullResourceName": "//cloudresourcemanager.googleapis.com/projects/acme-shop-prod",
+  "parentAssetType": "cloudresourcemanager.googleapis.com/Project",
+  "versionedResources": [
+   {
+    "version": "v1",
+    "resource": {
+     "name": "w1"
+    }
+   }
+  ]
+ }
+]

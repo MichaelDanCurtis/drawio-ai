@@ -1,0 +1,12 @@
+creation_timestamp: 1714000500000
+current_stage: Production
+description: ''
+last_updated_timestamp: 1714000500000
+name: churn-model
+run_id: ''
+run_link: ''
+source: runs:/0a1b2c3d4e5f60718293a4b5c6d7e8f9/model
+status: READY
+status_message: null
+user_id: null
+version: 2

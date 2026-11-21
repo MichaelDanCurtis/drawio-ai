@@ -1,0 +1,551 @@
+{
+ "count": 19,
+ "data": [
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.ManagedIdentity/userAssignedIdentities/aks-prod-agentpool",
+   "name": "aks-prod-agentpool",
+   "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+   "location": "westeurope",
+   "resourceGroup": "mc_rg-app_aks-prod_westeurope",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "principalId": "44444444-0000-4000-8000-000000000000",
+    "clientId": "22222222-0000-4000-8000-000000000000",
+    "tenantId": "99999999-8888-7777-6666-555555555555"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/publicIPAddresses/kubernetes-outbound-ip",
+   "name": "kubernetes-outbound-ip",
+   "type": "Microsoft.Network/publicIPAddresses",
+   "location": "westeurope",
+   "resourceGroup": "mc_rg-app_aks-prod_westeurope",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Standard"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "ipAddress": "203.0.113.30",
+    "publicIPAllocationMethod": "Static",
+    "ipConfiguration": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/loadBalancers/kubernetes/frontendIPConfigurations/outbound"
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/loadBalancers/kubernetes",
+   "name": "kubernetes",
+   "type": "Microsoft.Network/loadBalancers",
+   "location": "westeurope",
+   "resourceGroup": "mc_rg-app_aks-prod_westeurope",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": {
+    "name": "Standard"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "frontendIPConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/loadBalancers/kubernetes/frontendIPConfigurations/outbound",
+      "properties": {
+       "publicIPAddress": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/publicIPAddresses/kubernetes-outbound-ip"
+       }
+      }
+     }
+    ],
+    "backendAddressPools": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Network/loadBalancers/kubernetes/backendAddressPools/kubernetes"
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/serverfarms/plan-web",
+   "name": "plan-web",
+   "type": "Microsoft.Web/serverfarms",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "linux",
+   "sku": {
+    "name": "P1v3",
+    "tier": "PremiumV3",
+    "capacity": 1
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "numberOfWorkers": 1,
+    "reserved": true,
+    "zoneRedundant": false
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/sites/app-api",
+   "name": "app-api",
+   "type": "Microsoft.Web/sites",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "app,linux",
+   "sku": null,
+   "tags": {},
+   "identity": {
+    "type": "UserAssigned",
+    "userAssignedIdentities": {
+     "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app": {
+      "principalId": "55555555-0000-4000-8000-000000000000",
+      "clientId": "66666666-0000-4000-8000-000000000000"
+     }
+    }
+   },
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "state": "Running",
+    "defaultHostName": "app-api.azurewebsites.net",
+    "serverFarmId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/serverfarms/plan-web",
+    "httpsOnly": true,
+    "publicNetworkAccess": "Enabled",
+    "virtualNetworkSubnetId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appint",
+    "vnetRouteAllEnabled": true,
+    "siteConfig": {
+     "minTlsVersion": "1.2",
+     "ftpsState": "FtpsOnly",
+     "connectionStrings": [
+      {
+       "name": "Orders",
+       "connectionString": "Server=tcp:sql-prod.database.windows.net;Password=Sup3rS3cret!",
+       "type": "SQLAzure"
+      }
+     ]
+    }
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/sites/func-jobs",
+   "name": "func-jobs",
+   "type": "Microsoft.Web/sites",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "functionapp,linux",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "state": "Running",
+    "defaultHostName": "func-jobs.azurewebsites.net",
+    "serverFarmId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/serverfarms/plan-web",
+    "httpsOnly": false,
+    "publicNetworkAccess": "Enabled"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-app",
+   "name": "id-app",
+   "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "principalId": "55555555-0000-4000-8000-000000000000",
+    "clientId": "66666666-0000-4000-8000-000000000000",
+    "tenantId": "99999999-8888-7777-6666-555555555555"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.KeyVault/vaults/kv-app-prod",
+   "name": "kv-app-prod",
+   "type": "Microsoft.KeyVault/vaults",
+   "location": "westeurope",
+   "resourceGroup": "rg-app",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "tenantId": "99999999-8888-7777-6666-555555555555",
+    "sku": {
+     "family": "A",
+     "name": "standard"
+    },
+    "enableRbacAuthorization": true,
+    "enableSoftDelete": true,
+    "enablePurgeProtection": false,
+    "publicNetworkAccess": "Enabled",
+    "networkAcls": {
+     "bypass": "AzureServices",
+     "defaultAction": "Deny",
+     "ipRules": [],
+     "virtualNetworkRules": [
+      {
+       "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appint",
+       "ignoreMissingVnetServiceEndpoint": false
+      }
+     ]
+    },
+    "vaultUri": "https://kv-app-prod.vault.azure.net/"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-prod",
+   "name": "sql-prod",
+   "type": "Microsoft.Sql/servers",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "v12.0",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "version": "12.0",
+    "administratorLogin": "sqladmin",
+    "administratorLoginPassword": "Sup3rS3cret!",
+    "publicNetworkAccess": "Disabled",
+    "minimalTlsVersion": "1.2",
+    "fullyQualifiedDomainName": "sql-prod.database.windows.net",
+    "privateEndpointConnections": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-prod/privateEndpointConnections/pe-sql-conn",
+      "properties": {
+       "privateEndpoint": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql"
+       },
+       "privateLinkServiceConnectionState": {
+        "status": "Approved"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-prod/databases/orders",
+   "name": "orders",
+   "type": "Microsoft.Sql/servers/databases",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "v12.0,user",
+   "sku": {
+    "name": "GP_Gen5",
+    "tier": "GeneralPurpose",
+    "capacity": 2
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "currentServiceObjectiveName": "GP_Gen5_2",
+    "zoneRedundant": false,
+    "requestedBackupStorageRedundancy": "Geo"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-prod/databases/master",
+   "name": "master",
+   "type": "Microsoft.Sql/servers/databases",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "v12.0,system",
+   "sku": {
+    "name": "System",
+    "tier": "System"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {}
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stproddata",
+   "name": "stproddata",
+   "type": "Microsoft.Storage/storageAccounts",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "StorageV2",
+   "sku": {
+    "name": "Standard_GRS",
+    "tier": "Standard"
+   },
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "allowBlobPublicAccess": true,
+    "supportsHttpsTrafficOnly": true,
+    "minimumTlsVersion": "TLS1_2",
+    "networkAcls": {
+     "bypass": "AzureServices",
+     "defaultAction": "Allow",
+     "virtualNetworkRules": [],
+     "ipRules": []
+    },
+    "primaryEndpoints": {
+     "blob": "https://stproddata.blob.core.windows.net/"
+    },
+    "privateEndpointConnections": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stproddata/privateEndpointConnections/pe-stblob-conn",
+      "properties": {
+       "privateEndpoint": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql",
+   "name": "pe-sql",
+   "type": "Microsoft.Network/privateEndpoints",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "subnet": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+    },
+    "networkInterfaces": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001"
+     }
+    ],
+    "privateLinkServiceConnections": [
+     {
+      "name": "pe-sql-conn",
+      "properties": {
+       "privateLinkServiceId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Sql/servers/sql-prod",
+       "groupIds": [
+        "sqlServer"
+       ],
+       "privateLinkServiceConnectionState": {
+        "status": "Approved"
+       }
+      }
+     }
+    ],
+    "customDnsConfigs": [
+     {
+      "fqdn": "sql-prod.privatelink",
+      "ipAddresses": [
+       "10.1.4.4"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001",
+   "name": "pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001",
+   "type": "Microsoft.Network/networkInterfaces",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "privateEndpoint": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql"
+    },
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001/ipConfigurations/privateEndpointIpConfig.1",
+      "properties": {
+       "privateIPAddress": "10.1.4.4",
+       "subnet": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob",
+   "name": "pe-stblob",
+   "type": "Microsoft.Network/privateEndpoints",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "subnet": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+    },
+    "networkInterfaces": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002"
+     }
+    ],
+    "privateLinkServiceConnections": [
+     {
+      "name": "pe-stblob-conn",
+      "properties": {
+       "privateLinkServiceId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Storage/storageAccounts/stproddata",
+       "groupIds": [
+        "blob"
+       ],
+       "privateLinkServiceConnectionState": {
+        "status": "Approved"
+       }
+      }
+     }
+    ],
+    "customDnsConfigs": [
+     {
+      "fqdn": "stproddata.privatelink",
+      "ipAddresses": [
+       "10.1.4.5"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002",
+   "name": "pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002",
+   "type": "Microsoft.Network/networkInterfaces",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "privateEndpoint": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob"
+    },
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002/ipConfigurations/privateEndpointIpConfig.1",
+      "properties": {
+       "privateIPAddress": "10.1.4.5",
+       "subnet": {
+        "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.OperationalInsights/workspaces/law-prod",
+   "name": "law-prod",
+   "type": "Microsoft.OperationalInsights/workspaces",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "sku": {
+     "name": "PerGB2018"
+    },
+    "retentionInDays": 30,
+    "customerId": "77777777-0000-4000-8000-000000000000"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Insights/components/appi-api",
+   "name": "appi-api",
+   "type": "Microsoft.Insights/components",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "web",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "Application_Type": "web",
+    "WorkspaceResourceId": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.OperationalInsights/workspaces/law-prod",
+    "InstrumentationKey": "88888888-0000-4000-8000-000000000000",
+    "ConnectionString": "InstrumentationKey=88888888-0000-4000-8000-000000000000;IngestionEndpoint=https://westeurope-5.in.applicationinsights.azure.com/"
+   }
+  },
+  {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Contoso/widgets/widget-1",
+   "name": "widget-1",
+   "type": "Microsoft.Contoso/widgets",
+   "location": "westeurope",
+   "resourceGroup": "rg-data",
+   "subscriptionId": "00000000-1111-2222-3333-444444444444",
+   "kind": "",
+   "sku": null,
+   "tags": {},
+   "identity": null,
+   "managedBy": "",
+   "zones": null,
+   "properties": {
+    "color": "blue"
+   }
+  }
+ ],
+ "skip_token": null,
+ "total_records": 39
+}

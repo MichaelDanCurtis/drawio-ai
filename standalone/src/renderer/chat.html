@@ -11,51 +11,50 @@
 	thoughts get their own transcript items.
 -->
 <style nonce="$$nonce$$">
+	/* draw.io's own panel colours (webapp/styles/grapheditor.css), so the chat reads as part of the editor. */
 	:root {
 		color-scheme: light dark;
-		--vscode-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+		--vscode-font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
 		--vscode-font-size: 13px;
 		--vscode-editor-font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-		--vscode-foreground: #1f2328;
-		--vscode-descriptionForeground: #6b7280;
+		--panel: #f1f3f4;
+		--border: #dadada;
+		--text: #3f3f3f;
+		--strong: #1d1d1f;
+		--faint: #8e8e93;
+		--hover: #e2e2e2;
+		--field: #ffffff;
+		--field-border: #d2d2d7;
+		--vscode-foreground: var(--strong);
+		--vscode-descriptionForeground: var(--faint);
 		--vscode-errorForeground: #c62828;
-		--vscode-panel-border: #e2e2e6;
-		--vscode-sideBar-background: #f7f7f9;
-		--vscode-dropdown-background: #ffffff;
-		--vscode-dropdown-foreground: #1f2328;
-		--vscode-dropdown-border: #d0d0d7;
+		--vscode-panel-border: var(--border);
+		--vscode-sideBar-background: var(--panel);
 		--vscode-button-background: #7c3aed;
 		--vscode-button-foreground: #ffffff;
 		--vscode-button-hoverBackground: #6d28d9;
-		--vscode-button-secondaryBackground: #e9e9ee;
-		--vscode-button-secondaryForeground: #1f2328;
-		--vscode-button-secondaryHoverBackground: #dcdce3;
-		--vscode-icon-foreground: #424242;
-		--vscode-toolbar-hoverBackground: rgba(0,0,0,.07);
-		--vscode-input-background: #ffffff;
-		--vscode-input-foreground: #1f2328;
-		--vscode-input-border: #d0d0d7;
+		--vscode-button-secondaryBackground: var(--field);
+		--vscode-button-secondaryForeground: var(--text);
+		--vscode-button-secondaryHoverBackground: var(--hover);
+		--vscode-icon-foreground: var(--text);
+		--vscode-toolbar-hoverBackground: var(--hover);
+		--vscode-input-background: var(--field);
+		--vscode-input-foreground: var(--strong);
+		--vscode-input-border: var(--field-border);
 		--vscode-focusBorder: #7c3aed;
 		--vscode-textCodeBlock-background: rgba(0,0,0,.06);
 	}
 	@media (prefers-color-scheme: dark) {
 		:root {
-			--vscode-foreground: #e4e4e7;
-			--vscode-descriptionForeground: #9ca3af;
+			--panel: #1b1d1e;
+			--border: #333333;
+			--text: #c0c0c0;
+			--strong: #e5e5e7;
+			--faint: #7a7a7e;
+			--hover: #3a3a3c;
+			--field: #1c1c1e;
+			--field-border: #48484a;
 			--vscode-errorForeground: #f48771;
-			--vscode-panel-border: #2f2f35;
-			--vscode-sideBar-background: #1e1e22;
-			--vscode-dropdown-background: #2a2a30;
-			--vscode-dropdown-foreground: #e4e4e7;
-			--vscode-dropdown-border: #3c3c44;
-			--vscode-button-secondaryBackground: #34343c;
-			--vscode-button-secondaryForeground: #e4e4e7;
-			--vscode-button-secondaryHoverBackground: #40404a;
-			--vscode-icon-foreground: #c5c5c5;
-			--vscode-toolbar-hoverBackground: rgba(255,255,255,.08);
-			--vscode-input-background: #2a2a30;
-			--vscode-input-foreground: #e4e4e7;
-			--vscode-input-border: #3c3c44;
 			--vscode-textCodeBlock-background: rgba(255,255,255,.08);
 		}
 	}
@@ -66,15 +65,34 @@
 	.permission .detail { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .8; white-space: pre-wrap; max-height: 8em; overflow: auto; background: var(--vscode-textCodeBlock-background); padding: 4px 6px; border-radius: 4px; }
 	.permission .options { display: flex; gap: 6px; flex-wrap: wrap; }
 	.permission .outcome { opacity: .75; }
-	#agentInfo { font-size: 11px; opacity: .65; padding: 0 8px 4px; }
-	#agentInfo:empty { display: none; }
+	.permission .options button.allow-all { margin-left: auto; }
+	/* Approved by "Allow all": one dimmed line. */
+	.permission.auto { border: 0; padding: 0 8px; flex-direction: row; gap: 8px; opacity: .6; font-size: 11px; }
+	.permission.auto .title { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.permission.auto .options { display: none; }
+	.chip.allow-all { cursor: pointer; background: transparent; font: inherit; font-size: 11px; color: #d97706; border-color: #d97706; }
+	.chip.allow-all:hover { background: rgba(217,119,6,.12); }
 	:root { --accent: #a855f7; --radius: 6px; }
 	* { box-sizing: border-box; }
 	body { margin: 0; padding: 0; font: var(--vscode-font-size) var(--vscode-font-family); color: var(--vscode-foreground); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-	header { display: flex; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--vscode-panel-border); align-items: center; flex-wrap: wrap; }
-	select { background: var(--vscode-dropdown-background); color: var(--vscode-dropdown-foreground); border: 1px solid var(--vscode-dropdown-border); border-radius: 4px; padding: 2px 4px; min-width: 0; font: inherit; }
-	#provider { flex: 0 1 auto; max-width: 45%; }
-	#model { flex: 1 1 auto; }
+	/* Header and toolbar: flat, like draw.io's toolbar and format panel tabs. */
+	header, #context { display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text); flex: none; }
+	header { height: 40px; }
+	#context { height: 36px; }
+	select { appearance: none; -webkit-appearance: none; min-width: 0; font: inherit; font-size: 12px; color: var(--strong); background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%238e8e93' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 6px center; border: none; border-radius: 4px; padding: 5px 20px 5px 6px; cursor: pointer; text-overflow: ellipsis; }
+	select:hover, select:focus-visible { background-color: var(--hover); outline: none; }
+	#provider { flex: 0 1 auto; max-width: 48%; font-weight: 600; }
+	#model { flex: 1 1 auto; max-width: 52%; color: var(--text); }
+	.spacer { flex: 1 1 auto; }
+	#status { width: 8px; height: 8px; border-radius: 50%; flex: none; margin: 0 2px 0 4px; background: var(--faint); }
+	#status.ready { background: #3fb950; }
+	#status.starting { background: var(--accent); animation: pulse 1s infinite; }
+	#status.problem { background: #e5a50a; }
+	.tb { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 7px; background: transparent; color: var(--text); border-radius: 4px; white-space: nowrap; }
+	.tb svg { width: 15px; height: 15px; flex: none; }
+	.tb:hover { background: var(--hover); }
+	.tb.active { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); outline: none; }
+	#selection { margin-left: auto; }
 	button { font: inherit; cursor: pointer; border: none; border-radius: 4px; padding: 3px 8px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
 	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
 	button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
@@ -83,8 +101,6 @@
 	button.icon:hover { background: var(--vscode-toolbar-hoverBackground); }
 	button.active { outline: 1px solid var(--accent); color: var(--accent); }
 	button:disabled { opacity: .5; cursor: default; }
-	#context { display: flex; gap: 6px; padding: 6px 8px; align-items: center; font-size: 12px; border-bottom: 1px solid var(--vscode-panel-border); flex-wrap: wrap; }
-	#context .file { opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 60px; }
 	.chip { display: inline-flex; gap: 4px; align-items: center; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--accent); color: var(--accent); font-size: 11px; white-space: nowrap; }
 	.hidden { display: none !important; }
 	#messages { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
@@ -108,8 +124,11 @@
 	#empty { padding: 16px 8px; text-align: center; opacity: .9; }
 	#empty h3 { margin: 4px 0 8px; font-weight: 600; }
 	#empty p { opacity: .75; margin: 0 0 12px; font-size: 12px; }
-	.suggestions { display: flex; flex-direction: column; gap: 6px; }
-	.suggestions button { text-align: left; }
+	.suggestions { display: flex; flex-direction: column; gap: 2px; }
+	.suggestions button { text-align: left; background: transparent; color: var(--text); padding: 6px 8px; }
+	.suggestions button:hover { background: var(--hover); }
+	button:not(.primary):not(.tb):not(.icon) { border: 1px solid var(--field-border); }
+	.suggestions button, .att button { border: none !important; }
 	footer { border-top: 1px solid var(--vscode-panel-border); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
 	textarea { width: 100%; resize: none; min-height: 52px; max-height: 200px; font: inherit; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--radius); padding: 6px 8px; outline: none; }
 	textarea:focus { border-color: var(--vscode-focusBorder); }
@@ -133,23 +152,26 @@
 </head>
 <body>
 	<header>
+		<span id="status" title=""></span>
 		<select id="provider" title="Coding agent"></select>
 		<select id="model" title="Model or mode"></select>
-		<button id="newChat" class="icon" title="New chat (new agent session)">＋</button>
+		<span class="spacer"></span>
+		<button id="allowAllChip" class="chip allow-all hidden" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">⚡ Allow all ✕</button>
+		<button id="newChat" class="tb" title="New chat (starts a new agent session)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
 	</header>
-	<div id="agentInfo"></div>
 	<div id="context">
-		<span class="file" id="file">No diagram open</span>
+		<button id="lasso" class="tb" title="Lasso: draw around shapes in the diagram to select them (Alt+L)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.2 2"><ellipse cx="8" cy="7.5" rx="6" ry="4.8"/></svg>Lasso</button>
+		<button id="askInDiagram" class="tb" title="Ask about the selection right in the diagram (Alt+K)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5l1.6 4.2 4.4 1.6-4.4 1.6L8 13.1 6.4 8.9 2 7.3l4.4-1.6z"/></svg>Inline</button>
+		<button id="markup" class="tb" title="Markup: draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path d="M9 4l3 3"/></svg>Markup</button>
+		<button id="lint" class="tb" title="Review: ask the agent to check the diagram for problems and fix them"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8"/></svg>Review</button>
+		<button id="map" class="tb" title="Map software, a database, a cloud environment or an ML system into this diagram (read-only)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1.5 3.5l4-1.5 5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5z"/><path d="M5.5 2v10.5M10.5 3.5V14"/></svg>Map…</button>
+		<button id="digDeeper" class="tb hidden" title="Dig deeper: ask the agent to investigate the selected mapped shapes, read-only. Type a question in the box first to focus it."><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4L14 14"/></svg><span id="digDeeperLabel">Dig deeper</span></button>
 		<span class="chip hidden" id="selection"></span>
-		<button id="lasso" title="Draw around shapes in the diagram to select them (Alt+L in the diagram)">◌ Lasso</button>
-		<button id="askInDiagram" title="Open the inline prompt next to the selection (Alt+K in the diagram)">✦ Inline</button>
-		<button id="markup" title="Draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M in the diagram)">✎ Markup</button>
-		<button id="lint" title="Ask the agent to check the diagram for problems and fix them">✓ Review</button>
 	</div>
 	<div id="messages">
 		<div id="empty">
 			<h3>✦ Draw.AI</h3>
-			<p>Pick one of your coding agents above (Claude Code, Gemini CLI or Codex) and describe a change; it edits the diagram live through Draw.AI's tools. Select or lasso shapes to change only those. Paste or drop a sketch or screenshot to turn it into an editable diagram.</p>
+			<p>Pick one of your coding agents above (Claude Code, Gemini or Codex) and describe a change; it edits the diagram live through Draw.AI's tools. Select or lasso shapes to change only those. Paste or drop a sketch or screenshot to turn it into an editable diagram.</p>
 			<div class="suggestions">
 				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
 				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
@@ -268,12 +290,13 @@
 			lastThought = el;
 			lastAssistant = null;
 		} else if (item.kind === "permission") {
-			el.className = "permission";
+			el.className = "permission" + (item.auto ? " auto" : "");
 			const title = document.createElement("div");
 			title.className = "title";
-			title.textContent = "⚑ " + item.title;
+			title.textContent = (item.auto ? "⚡ " : "⚑ ") + item.title;
+			if (item.detail && item.auto) title.title = item.detail;
 			el.appendChild(title);
-			if (item.detail) {
+			if (item.detail && !item.auto) {
 				const d = document.createElement("div");
 				d.className = "detail";
 				d.textContent = item.detail;
@@ -322,6 +345,14 @@
 			b.addEventListener("click", () => vscode.postMessage({ type: "permissionReply", id: item.id, optionId: opt.optionId }));
 			p.opts.appendChild(b);
 		}
+		if ((item.options || []).some((o) => o.kind === "allow_once" || o.kind === "allow_always")) {
+			const all = document.createElement("button");
+			all.className = "allow-all";
+			all.textContent = "Allow all";
+			all.title = "Allow this and everything else the agent asks for in this chat, until New Chat or you turn it off (⚡ chip at the top)";
+			all.addEventListener("click", () => vscode.postMessage({ type: "allowAll", on: true }));
+			p.opts.appendChild(all);
+		}
 	}
 	function appendThought(text) {
 		if (!lastThought || lastThought !== messages.lastElementChild) addItem({ kind: "thought", text: "" });
@@ -369,15 +400,19 @@
 		else if (models.length === 0) models.push({ id: "", label: state.modelsLoading ? "Loading models…" : "No models" });
 		fillSelect($("model"), models, state.modelId);
 		$("model").title = state.modelsError || "Model";
-		$("file").textContent = state.file ? "📄 " + state.file : "No diagram open";
 		const sel = $("selection");
 		sel.classList.toggle("hidden", !state.selectionCount);
 		sel.textContent = "◉ " + state.selectionCount + " selected";
 		$("lasso").classList.toggle("active", !!state.lassoActive);
+		$("digDeeper").classList.toggle("hidden", !state.mappedSelection);
+		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
 		$("provider").title = state.providerTitle || "Coding agent";
-		$("agentInfo").textContent = state.agentInfo || "";
+		const status = $("status");
+		status.className = state.agentState || "";
+		status.title = state.agentInfo || state.modelsError || "";
 		renderReview(state.review);
+		$("allowAllChip").classList.toggle("hidden", !state.allowAll);
 		setBusy(state.busy);
 	}
 
@@ -489,11 +524,18 @@
 	$("send").addEventListener("click", () => send());
 	$("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
 	$("newChat").addEventListener("click", () => vscode.postMessage({ type: "newChat" }));
+	$("allowAllChip").addEventListener("click", () => vscode.postMessage({ type: "allowAll", on: false }));
 	$("lasso").addEventListener("click", () => vscode.postMessage({ type: "lasso" }));
 	$("askInDiagram").addEventListener("click", () => vscode.postMessage({ type: "askInDiagram" }));
 	$("markup").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.markup" }));
 	$("lint").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.reviewDiagram" }));
 	$("attach").addEventListener("click", () => vscode.postMessage({ type: "pickImage" }));
+	$("map").addEventListener("click", () => vscode.postMessage({ type: "openMapper" }));
+	$("digDeeper").addEventListener("click", () => {
+		const question = $("input").value.trim();
+		$("input").value = "";
+		vscode.postMessage({ type: "digDeeper", text: question });
+	});
 	input.addEventListener("paste", (e) => {
 		const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
 		if (files.length) { e.preventDefault(); addFiles(files); }

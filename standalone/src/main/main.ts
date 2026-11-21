@@ -1,15 +1,19 @@
-import { app, BrowserWindow, dialog, Menu, MenuItemConstructorOptions, session, shell } from "electron";
+import { app, dialog, Menu, MenuItemConstructorOptions, session, shell } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { AGENTS } from "./agents";
 import { DiagramWindow } from "./diagramWindow";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
+import { CATEGORIES } from "./mapper/types";
 import { paths } from "./paths";
 import { settingsPath, updateSettings } from "./settings";
 import { StaticServer } from "./staticServer";
 
 app.setName("Draw.AI");
+// Test runs get their own data folder: they must not touch the user's settings or
+// collide with a copy of the app that is already running.
+if (process.env.DRAWAI_E2E) app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
 const server = new StaticServer();
 const pendingFiles: string[] = [];
 let ready = false;
@@ -85,14 +89,15 @@ function buildMenu(): void {
 				{ type: "separator" },
 				{ label: "Save", accelerator: "CmdOrCtrl+S", click: () => void w()?.save() },
 				{ label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: () => void w()?.saveAs() },
+				{ type: "separator" },
+				{ label: "Export as PDF…", accelerator: "CmdOrCtrl+Shift+E", click: () => void w()?.exportInteractive("pdf") },
 				{
 					label: "Export As",
-					submenu: EXPORT_FORMATS.map((f) => ({
-						label: f.label,
-						accelerator: f.format === "pdf" ? "CmdOrCtrl+Shift+E" : undefined,
-						click: () => void w()?.exportInteractive(f.format),
-					})),
+					submenu: EXPORT_FORMATS.map((f) => ({ label: f.label, click: () => void w()?.exportInteractive(f.format) })),
 				},
+				{ label: "Open from Another Tool…", click: () => void w()?.importFromOtherTool() },
+				{ type: "separator" },
+				{ label: "Print…", accelerator: "CmdOrCtrl+P", click: () => void w()?.print() },
 				{ type: "separator" },
 				{ role: "close" },
 			],
@@ -101,6 +106,10 @@ function buildMenu(): void {
 		{
 			label: "View",
 			submenu: [
+				{ label: "Presentation Mode", accelerator: "F5", click: () => w()?.togglePresentation() },
+				// Same, for keyboards without easy F-keys (hidden; its shortcut still works).
+				{ label: "Presentation Mode", accelerator: "CmdOrCtrl+Shift+Enter", visible: false, acceleratorWorksWhenHidden: true, click: () => w()?.togglePresentation() },
+				{ type: "separator" },
 				{ label: "Toggle Chat", accelerator: "CmdOrCtrl+J", click: () => w()?.toggleChat() },
 				{ label: "Wider Chat", accelerator: "CmdOrCtrl+Alt+]", click: () => w()?.resizeChat(60) },
 				{ label: "Narrower Chat", accelerator: "CmdOrCtrl+Alt+[", click: () => w()?.resizeChat(-60) },
@@ -124,8 +133,21 @@ function buildMenu(): void {
 				{ label: "Stop", accelerator: "CmdOrCtrl+.", click: () => w()?.chat.stop() },
 				{ label: "Restart Agent", click: () => void w()?.chat.onMessage({ type: "command", command: "drawai.retry" }) },
 				{ type: "separator" },
+				{ label: "Allow All Requests in This Chat", click: () => w()?.chat.setAllowAll(true) },
+				{ label: "Ask Before Each Request", click: () => w()?.chat.setAllowAll(false) },
+				{ type: "separator" },
 				{ label: "Keep AI Changes", click: () => w()?.client.aiResolveReview("accept") },
 				{ label: "Revert AI Changes", click: () => w()?.client.aiResolveReview("reject") },
+			],
+		},
+		{
+			label: "Map",
+			submenu: [
+				{ label: "Map Something…", accelerator: "CmdOrCtrl+Shift+M", click: () => void withWindow((x) => x.mapper.open()) },
+				{ type: "separator" },
+				...CATEGORIES.map((c) => ({ label: `${c.title}…`, click: () => void withWindow((x) => x.mapper.open(c.id)) })),
+				{ type: "separator" },
+				{ label: "Dig Deeper into Selection", accelerator: "CmdOrCtrl+Shift+D", click: () => void w()?.digDeeper("") },
 			],
 		},
 		{ role: "windowMenu" },
@@ -135,6 +157,18 @@ function buildMenu(): void {
 		},
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Runs `action` on the focused window, opening a new diagram first when there is none. */
+async function withWindow(action: (w: DiagramWindow) => void): Promise<void> {
+	let w = DiagramWindow.focused();
+	if (!w) {
+		await openFile();
+		w = DiagramWindow.focused();
+	}
+	if (!w) return;
+	await w.whenLoaded();
+	action(w);
 }
 
 function openSettings(): void {
@@ -162,6 +196,7 @@ app.whenReady().then(async () => {
 	await server.start();
 	blockRemoteRequests();
 	DiagramWindow.installIpc();
+	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog() };
 	buildMenu();
 	ready = true;
 
@@ -176,7 +211,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("activate", () => {
-	if (ready && BrowserWindow.getAllWindows().length === 0) void openFile();
+	if (ready && DiagramWindow.all.size === 0) void openFile();
 });
 
 app.on("window-all-closed", () => {

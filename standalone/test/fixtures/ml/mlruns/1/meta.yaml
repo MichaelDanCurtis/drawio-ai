@@ -1,0 +1,6 @@
+artifact_location: file:///tmp/mlruns/1
+creation_time: 1714000000000
+experiment_id: '1'
+last_update_time: 1714100000000
+lifecycle_stage: active
+name: churn-classifier

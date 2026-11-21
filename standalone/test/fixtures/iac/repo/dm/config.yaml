@@ -1,0 +1,30 @@
+imports:
+  - path: vm-template.jinja
+resources:
+  - name: dm-net
+    type: compute.v1.network
+    properties:
+      autoCreateSubnetworks: false
+  - name: dm-subnet
+    type: compute.v1.subnetwork
+    properties:
+      ipCidrRange: 10.50.0.0/24
+      network: $(ref.dm-net.selfLink)
+      region: us-central1
+  - name: dm-fw
+    type: compute.v1.firewall
+    properties:
+      network: $(ref.dm-net.selfLink)
+      sourceRanges: ["0.0.0.0/0"]
+      allowed: [{ IPProtocol: tcp, ports: ["80"] }]
+  - name: dm-vm
+    type: compute.v1.instance
+    properties:
+      zone: us-central1-a
+      machineType: zones/us-central1-a/machineTypes/e2-small
+      networkInterfaces:
+        - subnetwork: $(ref.dm-subnet.selfLink)
+  - name: dm-bucket
+    type: storage.v1.bucket
+  - name: more-vms
+    type: vm-template.jinja

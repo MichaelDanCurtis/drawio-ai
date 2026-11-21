@@ -59,11 +59,8 @@ export async function exportDiagram(
 	return { bytes: data.length, note };
 }
 
-/**
- * True vector PDF: each page is exported as SVG by draw.io, laid out one per PDF
- * page (sized to the drawing) and printed with Chromium's printToPDF.
- */
-async function exportPdf(client: CustomizedDrawioClient, options: { currentPageOnly?: boolean }): Promise<{ data: Buffer; pages: number }> {
+/** One SVG per diagram page (all pages unless currentPageOnly), via draw.io's own export. */
+async function pageSvgs(client: CustomizedDrawioClient, options: { currentPageOnly?: boolean }): Promise<string[]> {
 	const svgs: string[] = [];
 	const listed = await client.aiPages({ op: "list" });
 	const pages = listed.pages ?? [];
@@ -80,30 +77,63 @@ async function exportPdf(client: CustomizedDrawioClient, options: { currentPageO
 			if (shown) await client.aiPages({ op: "select", page: shown.id });
 		}
 	}
+	return svgs.map((svg) => svg.replace(/^<\?xml[^>]*>\s*/, "").replace(/<!DOCTYPE[^>]*>\s*/i, ""));
+}
 
+/** Loads `html` in a hidden window and runs `fn` on it. */
+async function withHiddenPage<T>(html: string, offscreen: boolean, fn: (win: BrowserWindow) => Promise<T>): Promise<T> {
+	const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "drawai-print-")), "print.html");
+	fs.writeFileSync(tmp, html);
+	const win = new BrowserWindow({ show: false, webPreferences: { offscreen, javascript: false } });
+	try {
+		await win.loadFile(tmp);
+		return await fn(win);
+	} finally {
+		win.destroy();
+		fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
+	}
+}
+
+/**
+ * True vector PDF: each page is exported as SVG by draw.io, laid out one per PDF
+ * page (sized to the drawing) and printed with Chromium's printToPDF.
+ */
+async function exportPdf(client: CustomizedDrawioClient, options: { currentPageOnly?: boolean }): Promise<{ data: Buffer; pages: number }> {
+	const svgs = await pageSvgs(client, options);
 	const css: string[] = ["html,body{margin:0;padding:0;background:#fff}", "svg{display:block}"];
 	const body: string[] = [];
 	svgs.forEach((svg, i) => {
 		const { width, height } = svgSize(svg);
 		css.push(`@page p${i}{size:${width}px ${height}px;margin:0}`, `.p${i}{page:p${i};width:${width}px;height:${height}px;overflow:hidden;break-after:page}`);
-		body.push(`<div class="p${i}">${svg.replace(/^<\?xml[^>]*>\s*/, "").replace(/<!DOCTYPE[^>]*>\s*/i, "")}</div>`);
+		body.push(`<div class="p${i}">${svg}</div>`);
 	});
 	const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css.join("\n")}</style></head><body>${body.join("\n")}</body></html>`;
-	const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "drawai-pdf-")), "print.html");
-	fs.writeFileSync(tmp, html);
-	const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true, javascript: false } });
-	try {
-		await win.loadFile(tmp);
-		const data = await win.webContents.printToPDF({
-			printBackground: true,
-			preferCSSPageSize: true,
-			margins: { top: 0, bottom: 0, left: 0, right: 0 },
-		});
-		return { data, pages: svgs.length };
-	} finally {
-		win.destroy();
-		fs.rmSync(path.dirname(tmp), { recursive: true, force: true });
-	}
+	const data = await withHiddenPage(html, true, (win) =>
+		win.webContents.printToPDF({ printBackground: true, preferCSSPageSize: true, margins: { top: 0, bottom: 0, left: 0, right: 0 } })
+	);
+	return { data, pages: svgs.length };
+}
+
+/** Prints every page through the system print dialog, each drawing scaled to fit the paper. */
+export async function printDiagram(client: CustomizedDrawioClient, title: string): Promise<{ printed: boolean; error?: string }> {
+	const svgs = await pageSvgs(client, {});
+	const css = [
+		"@page{margin:12mm}",
+		"html,body{margin:0;padding:0;background:#fff}",
+		".page{height:100vh;display:flex;align-items:center;justify-content:center;break-after:page;overflow:hidden}",
+		".page:last-child{break-after:auto}",
+		".page svg{max-width:100%;max-height:100%;width:auto;height:auto}",
+	];
+	const body = svgs.map((svg) => {
+		const { width, height } = svgSize(svg);
+		// Keep the aspect ratio when the SVG is scaled down to the paper.
+		const sized = /viewBox=/.test(svg.slice(0, 400)) ? svg : svg.replace(/<svg\b/, `<svg viewBox="0 0 ${width} ${height}"`);
+		return `<div class="page">${sized}</div>`;
+	});
+	const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title.replace(/[<&]/g, "")}</title><style>${css.join("\n")}</style></head><body>${body.join("\n")}</body></html>`;
+	return withHiddenPage(html, false, (win) =>
+		new Promise((resolve) => win.webContents.print({ silent: false, printBackground: true }, (printed, error) => resolve({ printed, error: printed ? undefined : error })))
+	);
 }
 
 async function pageSvg(client: CustomizedDrawioClient): Promise<string> {
