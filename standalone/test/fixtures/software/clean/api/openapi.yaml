@@ -1,0 +1,21 @@
+openapi: 3.0.3
+info:
+  title: Catalog API
+  version: 1.0.0
+servers:
+  - url: https://catalog.acme-shop.com
+security:
+  - bearer: []
+paths:
+  /items:
+    get:
+      responses: { "200": { description: ok } }
+    post:
+      responses: { "201": { description: created } }
+  /health:
+    get:
+      security: []
+      responses: { "200": { description: ok } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }

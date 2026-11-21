@@ -1,4 +1,31 @@
 import { MapperError } from "../../types";
+import type { MapFinding, MapGraph } from "../../types";
+
+const SEVERITY_ORDER: Record<MapFinding["severity"], number> = { high: 0, medium: 1, low: 2, info: 3 };
+
+/** Findings whose shapes are on the map, one per id, most severe first. */
+export function keepOnMap(findings: MapFinding[], graph: MapGraph | undefined): MapFinding[] {
+	if (!graph) return [];
+	const ids = new Set(graph.nodes.map((n) => n.id));
+	const seen = new Set<string>();
+	const out: MapFinding[] = [];
+	for (const f of findings) {
+		const nodeIds = [...new Set(f.nodeIds.filter((id) => ids.has(id)))];
+		if (!nodeIds.length || seen.has(f.id)) continue;
+		seen.add(f.id);
+		out.push({ ...f, nodeIds });
+	}
+	return out.sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] || a.id.localeCompare(b.id));
+}
+
+/** "latest" or "none" when a container image reference floats (no tag, or :latest, and no digest); else undefined. */
+export function floatingImage(image: string): "latest" | "none" | undefined {
+	const ref = image.trim();
+	if (!ref || /@sha256:[0-9a-f]{16,}/i.test(ref)) return undefined;
+	const last = ref.split("/").pop() ?? ref;
+	if (!last.includes(":")) return "none";
+	return last.split(":").pop()!.toLowerCase() === "latest" ? "latest" : undefined;
+}
 
 /** Shapes shared by the ML maps. */
 export const ML_STYLES = {

@@ -49,14 +49,37 @@ export interface AwsInventory {
 	callerArn?: string;
 	profile?: string;
 	regions: AwsRegionInventory[];
-	/** S3 buckets with their region. */
-	buckets: { name: string; region?: string }[];
+	/** S3 buckets with their region and, when it could be read, their public-access settings. */
+	buckets: AwsBucket[];
+	/**
+	 * The account's S3 Block Public Access settings: null when none are set,
+	 * undefined when they could not be read.
+	 */
+	accountPublicAccessBlock?: S3PublicAccessBlock | null;
 	distributions: any[];
 	/** Service keys that were collected (network is always collected). */
 	services: string[];
 }
 
-export const AWS_SERVICES = ["ec2", "elb", "rds", "lambda", "ecs", "eks", "dynamodb", "sqs", "sns", "apigateway", "elasticache", "s3", "cloudfront"] as const;
+export interface S3PublicAccessBlock {
+	BlockPublicAcls?: boolean;
+	IgnorePublicAcls?: boolean;
+	BlockPublicPolicy?: boolean;
+	RestrictPublicBuckets?: boolean;
+}
+
+export interface AwsBucket {
+	name: string;
+	region?: string;
+	/** Block Public Access of the bucket: null when none is set, undefined when unknown. */
+	publicAccessBlock?: S3PublicAccessBlock | null;
+	/** get-bucket-policy-status IsPublic: false also when the bucket has no policy; undefined when unknown. */
+	policyIsPublic?: boolean;
+	/** Grantees of ACL grants to everyone (AllUsers / AuthenticatedUsers) with their permission; undefined when unknown. */
+	publicAclGrants?: string[];
+}
+
+export const AWS_SERVICES =["ec2", "elb", "rds", "lambda", "ecs", "eks", "dynamodb", "sqs", "sns", "apigateway", "elasticache", "s3", "cloudfront"] as const;
 export type AwsService = (typeof AWS_SERVICES)[number];
 
 export function emptyRegion(region: string): AwsRegionInventory {

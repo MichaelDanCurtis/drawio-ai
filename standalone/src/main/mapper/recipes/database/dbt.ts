@@ -7,7 +7,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, slug } from "../common";
 import { MapperError } from "../../types";
-import type { CollectResult, MapEdge, MapGraph, MapNode, Recipe } from "../../types";
+import type { CheckCoverage, CollectResult, MapEdge, MapFinding, MapGraph, MapNode, Recipe } from "../../types";
+import { keepOnMap } from "./findings";
 
 const BOX = "rounded=1;whiteSpace=wrap;html=1;fontSize=11;";
 export const DBT_STYLES: Record<string, string> = {
@@ -27,6 +28,12 @@ const EDGE = "edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endF
 const EXPOSURE_EDGE = "edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;dashed=1;strokeColor=#b85450;";
 
 const LINEAGE_TYPES = new Set(["model", "seed", "snapshot", "analysis"]);
+
+/** The project file a manifest entry was read from (relative to the project folder), if any. */
+const fileOf = (n: any): string[] | undefined => {
+	const f = typeof n?.original_file_path === "string" ? n.original_file_path.replace(/\\/g, "/").replace(/^\.\//, "") : "";
+	return f && !f.startsWith("/") && !f.split("/").includes("..") ? [f] : undefined;
+};
 
 /** Builds the lineage map from a parsed manifest (exported for tests). */
 export function manifestToGraph(manifest: any, opts: { now?: string } = {}): { graph: MapGraph; facts: string; counts: Record<string, number> } {
@@ -65,6 +72,7 @@ export function manifestToGraph(manifest: any, opts: { now?: string } = {}): { g
 			width: 170,
 			height: 60,
 			data: { uniqueId: id, resourceType: "source", schema: String(s.schema ?? ""), relation: String(s.identifier ?? s.name ?? ""), package: String(s.package_name ?? "") },
+			files: fileOf(s),
 		});
 		facts.push(`- source ${s.source_name}.${s.name} (${s.schema}.${s.identifier ?? s.name})${s.description ? `: ${String(s.description).slice(0, 200)}` : ""}`);
 	}
@@ -98,6 +106,7 @@ export function manifestToGraph(manifest: any, opts: { now?: string } = {}): { g
 				package: pkg,
 				...(t ? { tests: String(t) } : {}),
 			},
+			files: fileOf(n),
 		});
 		const cols = Object.keys(n.columns ?? {});
 		facts.push(
@@ -118,6 +127,7 @@ export function manifestToGraph(manifest: any, opts: { now?: string } = {}): { g
 			width: 170,
 			height: 52,
 			data: { uniqueId: id, resourceType: "exposure", type: String(e.type ?? ""), maturity: String(e.maturity ?? ""), ...(e.url ? { url: String(e.url) } : {}) },
+			files: fileOf(e),
 		});
 		facts.push(`- exposure ${e.name} (${e.type ?? ""}) depends on: ${(e.depends_on?.nodes ?? []).join(", ")}`);
 	}
@@ -137,6 +147,25 @@ export function manifestToGraph(manifest: any, opts: { now?: string } = {}): { g
 	];
 	if (total > 400) legend.push(`${total} nodes: ask the agent to dig deeper into one folder at a time.`);
 	return { graph: { title: `dbt · ${project}`, nodes, edges, direction: "right", legend }, facts: facts.join("\n"), counts };
+}
+
+/** Models without any dbt test (exported for tests). Ephemeral models are skipped: they are tested through their users. */
+export function dbtFindings(manifest: any, graph: MapGraph): { findings: MapFinding[]; checked: CheckCoverage[] } {
+	const tested = new Set<string>();
+	for (const n of Object.values<any>(manifest?.nodes ?? {})) if (n?.resource_type === "test") for (const d of n.depends_on?.nodes ?? []) tested.add(d);
+	const models = Object.values<any>(manifest?.nodes ?? {}).filter((n) => n?.resource_type === "model" && String(n.config?.materialized ?? "view") !== "ephemeral");
+	const findings: MapFinding[] = models
+		.filter((n) => !tested.has(String(n.unique_id)))
+		.map((n) => ({
+			id: `untested-model:${slug(String(n.unique_id))}`,
+			kind: "untested-model",
+			severity: "low" as const,
+			title: `${n.name} has no tests`,
+			detail: `${n.original_file_path ?? n.unique_id} (${n.config?.materialized ?? "view"}): no dbt test (unique, not_null, relationships…) depends on it in the manifest.`,
+			nodeIds: [slug(String(n.unique_id))],
+			fix: `Add tests for ${n.name}'s key columns in its schema YAML (at least unique and not_null on the primary key).`,
+		}));
+	return { findings: keepOnMap(findings, graph), checked: [{ check: "Models without tests", scanned: models.length, note: "non-ephemeral models in the manifest" }] };
 }
 
 export const dbtLineageRecipe: Recipe = {
@@ -162,8 +191,17 @@ export const dbtLineageRecipe: Recipe = {
 		}
 		const { graph, facts, counts } = manifestToGraph(manifest);
 		if (!graph.nodes.some((n) => !n.container)) return { summary: "The manifest has no sources, models or exposures.", warnings: [] };
+		// Only files that are in this project folder (a manifest copied from elsewhere names others).
+		for (const n of graph.nodes) {
+			if (!n.files) continue;
+			n.files = n.files.filter((f) => fs.existsSync(path.join(root, f)));
+			if (!n.files.length) delete n.files;
+		}
+		const { findings, checked } = dbtFindings(manifest, graph);
 		return {
 			graph,
+			findings,
+			checked,
 			facts,
 			summary: `${counts.model} model(s), ${counts.source} source(s), ${counts.seed + counts.snapshot} seed(s)/snapshot(s), ${counts.exposure} exposure(s)`,
 			warnings: [],

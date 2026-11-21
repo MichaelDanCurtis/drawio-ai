@@ -12,6 +12,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { readFiles, slug, type FoundFile } from "../common";
+import { hardcodedSecret, k8sObjectLine, keyLine, lineMatching, secretLine } from "./health";
 import {
 	type Address,
 	imageBase,
@@ -61,6 +62,8 @@ export interface ScanService {
 	entries: EntryPoint[];
 	/** A Dockerfile, compose service or k8s workload: something that runs. */
 	deployed: boolean;
+	/** Files it comes from (manifests, Dockerfiles, deployment files, code with connections or entry points). */
+	files: Set<string>;
 	/** Infra deployables that are really resources (compose db...) never become services. */
 }
 
@@ -78,6 +81,8 @@ export interface ScanResource {
 	evidence: string[];
 	/** Declared in compose / k8s (as opposed to inferred from code or config). */
 	declared: boolean;
+	/** Files that declare it or connect to it. */
+	files: Set<string>;
 }
 
 export interface ScanLink {
@@ -115,7 +120,29 @@ export interface SystemScan {
 	secretKeys: Set<string>;
 	/** Packages in the repository that did not turn out to be services. */
 	libraries: string[];
+	/** Raw material of the health findings (see health.ts). */
+	health: ScanHealth;
 }
+
+/** What the health checks need from the scan: locations and setting names, never values. */
+export interface ScanHealth {
+	credentials: { owner: string; file: string; line?: number; key: string; hint: string; what: "value" | "url-password"; source: "compose" | "k8s" | "config" }[];
+	settingsScanned: number;
+	plaintext: { owner: string; target: string; host: string; evidence: string }[];
+	externalScanned: number;
+	noHealthcheck: { owner: string; file: string; line?: number; name: string; source: "compose" | "k8s"; awaitedBy?: string }[];
+	healthScanned: number;
+	privileged: { owner: string; file: string; line?: number; name: string; what: string[] }[];
+	containersScanned: number;
+	/** Service id → where its code or manifest shows authentication. */
+	auth: Map<string, string>;
+}
+
+/** Signs that a service authenticates requests (middleware, decorators, guards, libraries). Deliberately broad. */
+const AUTH_HINT = /auth(?!or)|jwt|passport|login_required|permission_classes|PreAuthorize|@Secured|RolesAllowed|bearer|api[_-]?key|getServerSession|clerk|cognito|keycloak|firebase-admin|verifyIdToken|basicauth|oauth|oidc/i;
+
+/** The file part of an evidence string ("a/b.ts:12", "compose.yml (svc: KEY)"). */
+const fileOfEvidence = (evidence: string) => evidence.replace(/ \(.*$/s, "").replace(/:\d+$/, "");
 
 const CODE_RE = /\.(tsx?|jsx?|mjs|cjs|py|go|java|kt|cs|rb|php|rs|scala)$/i;
 const MANIFEST_RE = /(^|\/)(package\.json|pyproject\.toml|requirements[\w.-]*\.txt|setup\.py|Pipfile|go\.mod|pom\.xml|build\.gradle(\.kts)?|[^/]+\.csproj|Gemfile|Cargo\.toml|composer\.json)$/;
@@ -144,6 +171,7 @@ const lineAt = (text: string, index: number) => {
 	return n;
 };
 const dirOf = (rel: string) => (rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "");
+const reEsc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export interface ScanOptions {
 	includeTests?: boolean;
@@ -203,6 +231,11 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	const aliasOf = new Map<string, string>();
 	/** Published host port → service id (for localhost:PORT addresses). */
 	const portOwner = new Map<number, string>();
+	const health: ScanHealth = { credentials: [], settingsScanned: 0, plaintext: [], externalScanned: 0, noHealthcheck: [], healthScanned: 0, privileged: [], containersScanned: 0, auth: new Map() };
+	const externalSeen = new Set<string>();
+	/** Units whose Dockerfile declares a HEALTHCHECK. */
+	const dockerHealth = new Set<string>();
+	const filesOf = (id: string) => services.get(id)?.files ?? resources.get(id)?.files;
 
 	const addAlias = (id: string, alias: string | undefined) => {
 		if (!alias) return;
@@ -242,6 +275,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		}
 		const existing = units.get(dir);
 		if (existing) {
+			if (!SUBMODULE_RE.test(f.rel)) existing.files.add(f.rel);
 			if (!existing.runtime && runtime) existing.runtime = runtime;
 			if (existing.facets[0]?.source === "code" && runtime) existing.facets[0].label = `${dir || "."} (${existing.runtime})`;
 			collectLibs(existing.id, f);
@@ -260,6 +294,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 			envKeys: new Set(),
 			entries: [],
 			deployed: false,
+			files: new Set(SUBMODULE_RE.test(f.rel) ? [] : [f.rel]),
 		};
 		units.set(dir, unit);
 		services.set(unit.id, unit);
@@ -272,6 +307,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		for (const dep of manifestDependencies(f)) {
 			const hit = libraryTech(dep);
 			if (hit) manifestLibs.push({ owner, tech: hit.tech, how: `depends on ${hit.name}`, evidence: f.rel });
+			if (!health.auth.has(owner) && AUTH_HINT.test(dep)) health.auth.set(owner, `${f.rel} (depends on ${dep})`);
 		}
 	}
 	const unitFor = (rel: string): ScanService | undefined => {
@@ -284,7 +320,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	const rootUnit = (): ScanService => {
 		let u = units.get("");
 		if (!u) {
-			u = { id: `svc:${slug(norm(name) || "app")}`, name, aliases: new Set(), dir: "", facets: [], images: new Set(), ports: new Set(), envKeys: new Set(), entries: [], deployed: false };
+			u = { id: `svc:${slug(norm(name) || "app")}`, name, aliases: new Set(), dir: "", facets: [], images: new Set(), ports: new Set(), envKeys: new Set(), entries: [], deployed: false, files: new Set() };
 			units.set("", u);
 			services.set(u.id, u);
 			addAlias(u.id, name);
@@ -297,6 +333,8 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		const unit = units.get(dirOf(f.rel));
 		if (!unit) continue;
 		unit.deployed = true;
+		unit.files.add(f.rel);
+		if (/^\s*HEALTHCHECK\s+(?!NONE\b)/im.test(f.text)) dockerHealth.add(unit.id);
 		const exposedPorts = [...f.text.matchAll(/^\s*EXPOSE\s+([\d\s/a-z]+)/gim)].flatMap((m) => m[1].split(/\s+/).map((p) => parseInt(p, 10)).filter((p) => p > 0));
 		unit.facets.push({ source: "dockerfile", label: `Dockerfile${exposedPorts.length ? ` :${exposedPorts.join(",")}` : ""}`, file: f.rel });
 	}
@@ -304,7 +342,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	const newService = (svcName: string, facet: Facet): ScanService => {
 		let id = `svc:${slug(norm(svcName) || "service")}`;
 		for (let i = 2; services.has(id) || resources.has(id); i++) id = `svc:${slug(norm(svcName))}-${i}`;
-		const s: ScanService = { id, name: svcName, aliases: new Set(), facets: [facet], images: new Set(), ports: new Set(), envKeys: new Set(), entries: [], deployed: true };
+		const s: ScanService = { id, name: svcName, aliases: new Set(), facets: [facet], images: new Set(), ports: new Set(), envKeys: new Set(), entries: [], deployed: true, files: new Set([facet.file]) };
 		services.set(id, s);
 		addAlias(id, svcName);
 		return s;
@@ -313,10 +351,11 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		const id = `res:${slug(key)}`;
 		let r = resources.get(id);
 		if (!r) {
-			r = { id, name: label, kind, tech, aliases: new Set(), evidence: [], declared };
+			r = { id, name: label, kind, tech, aliases: new Set(), evidence: [], declared, files: new Set() };
 			resources.set(id, r);
 		}
 		if (declared) r.declared = true;
+		r.files.add(fileOfEvidence(evidence));
 		if (!r.evidence.includes(evidence) && r.evidence.length < 8) r.evidence.push(evidence);
 		return r;
 	};
@@ -330,6 +369,9 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		}
 		l.how.add(how);
 		if (l.evidence.size < 6) l.evidence.add(evidence);
+		const file = fileOfEvidence(evidence);
+		filesOf(from)?.add(file);
+		filesOf(to)?.add(file);
 		if (extra.protocol && !l.protocol) l.protocol = extra.protocol;
 		if (extra.port && !l.port) l.port = extra.port;
 		if (extra.verb && !l.verb) l.verb = extra.verb;
@@ -353,17 +395,26 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		const fileEnv = new Map<string, string>();
 		// Compose reads .env next to the file for ${VAR} interpolation.
 		for (const envFile of files.filter((x) => dirOf(x.rel) === base && /(^|\/)\.env$/.test(x.rel))) for (const [k, v] of parseEnvFile(envFile.text)) fileEnv.set(k, v);
+		const servicesLine = lineMatching(f.text, /^services:\s*(#.*)?$/) ?? 1;
+		// Services others wait for with `condition: service_healthy`.
+		const awaited = new Map<string, string>();
+		for (const [svcName, svc] of Object.entries<any>(doc.services)) {
+			const deps = svc?.depends_on;
+			if (deps && typeof deps === "object" && !Array.isArray(deps)) for (const [d, cfg] of Object.entries<any>(deps)) if (cfg?.condition === "service_healthy" && !awaited.has(d)) awaited.set(d, svcName);
+		}
 		for (const [svcName, svc] of Object.entries<any>(doc.services)) {
 			const s = svc ?? {};
 			const image = typeof s.image === "string" ? s.image : "";
 			const tech = image ? techOfImage(image) : undefined;
 			const buildCtx = typeof s.build === "string" ? s.build : s.build?.context;
+			const svcLine = lineMatching(f.text, new RegExp(`^\\s+["']?${reEsc(svcName)}["']?:\\s*(#.*)?$`), servicesLine);
 			const ports = (Array.isArray(s.ports) ? s.ports : []).map(composePort).filter(Boolean) as { published?: number; target?: number }[];
 			const evidence = `${f.rel} (${svcName})`;
 			const portText = ports.map((p) => (p.published ? `${p.published}→${p.target ?? p.published}` : `${p.target}`)).join(", ");
 			let ownerId: string;
 			if (tech && !buildCtx) {
 				const r = newResource(`compose:${svcName}`, svcName, tech, tech.kind, true, evidence);
+				r.files.add(f.rel);
 				r.address = `${svcName}${tech.port ? `:${tech.port}` : ""}`;
 				addAlias(r.id, svcName);
 				addAlias(r.id, s.container_name);
@@ -377,6 +428,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 				const s2 = unit ?? (known ? services.get(known) : undefined) ?? newService(svcName, facet);
 				if (s2.facets[0] !== facet) s2.facets.push(facet);
 				s2.deployed = true;
+				s2.files.add(f.rel);
 				addAlias(s2.id, svcName);
 				addAlias(s2.id, s.container_name);
 				addAlias(s2.id, s.hostname);
@@ -392,6 +444,30 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 					}
 				}
 				ownerId = s2.id;
+			}
+			// Health: host access, health checks, literal credentials.
+			health.containersScanned++;
+			const host: string[] = [];
+			if (s.privileged === true) host.push("privileged: true");
+			if (s.network_mode === "host") host.push("network_mode: host");
+			if (s.pid === "host") host.push("pid: host");
+			for (const cap of [].concat(s.cap_add ?? []).map(String)) if (/^(CAP_)?(ALL|SYS_ADMIN)$/i.test(cap)) host.push(`cap_add: ${cap}`);
+			if ([].concat(s.volumes ?? []).some((v: any) => /\/var\/run\/docker\.sock|\/run\/docker\.sock/.test(typeof v === "string" ? v : String(v?.source ?? "")))) host.push("the Docker socket mounted");
+			if (host.length) {
+				const firstKey = s.privileged === true ? "privileged" : s.network_mode === "host" ? "network_mode" : s.pid === "host" ? "pid" : host[0].startsWith("cap_add") ? "cap_add" : "volumes";
+				health.privileged.push({ owner: ownerId, file: f.rel, line: keyLine(f.text, firstKey, svcLine) ?? svcLine, name: svcName, what: host });
+			}
+			const isApp = !resources.has(ownerId);
+			if (isApp || awaited.has(svcName)) {
+				health.healthScanned++;
+				const inImage = dockerHealth.has(ownerId);
+				const checked = (s.healthcheck && !s.healthcheck.disable && s.healthcheck.test !== "NONE") || inImage;
+				if (!checked) health.noHealthcheck.push({ owner: ownerId, file: f.rel, line: svcLine, name: svcName, source: "compose", awaitedBy: awaited.get(svcName) });
+			}
+			for (const [k, v] of envEntries(s.environment)) {
+				health.settingsScanned++;
+				const secret = hardcodedSecret(k, v);
+				if (secret) health.credentials.push({ owner: ownerId, file: f.rel, line: secretLine(f.text, secret.needle, k, svcLine), key: k, hint: secret.hint, what: secret.what, source: "compose" });
 			}
 			const deps = Array.isArray(s.depends_on) ? s.depends_on : s.depends_on && typeof s.depends_on === "object" ? Object.keys(s.depends_on) : [];
 			for (const d of [...deps, ...(Array.isArray(s.links) ? s.links.map((l: string) => String(l).split(":")[0]) : [])]) composeDeps.push({ from: ownerId, dep: String(d), file: f.rel });
@@ -439,6 +515,8 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	const configMaps = new Map<string, Record<string, string>>();
 	for (const { doc } of k8sDocs) if (doc.kind === "ConfigMap") configMaps.set(`${nsOf(doc)}/${doc.metadata.name}`, Object.fromEntries(Object.entries(doc.data ?? {}).map(([k, v]) => [k, String(v)])));
 	const WORKLOADS = new Set(["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod", "ReplicaSet", "Rollout", "DeploymentConfig"]);
+	const LONG_RUNNING = new Set(["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet", "Rollout", "DeploymentConfig"]);
+	const textOf = new Map(files.filter((x) => /\.ya?ml$/i.test(x.rel)).map((x) => [x.rel, x.text]));
 	const workloadOwner = new Map<string, string>();
 	const podLabels = new Map<string, Record<string, string>>();
 	for (const { doc, file } of k8sDocs.filter((x) => WORKLOADS.has(x.doc.kind))) {
@@ -477,6 +555,36 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 			ownerId = s.id;
 		}
 		workloadOwner.set(`${nsOf(doc)}/${doc.kind}/${wName}`, ownerId);
+		filesOf(ownerId)?.add(file);
+		// Health: host access, readiness probes, literal credentials.
+		const text = textOf.get(file) ?? "";
+		const docLine = k8sObjectLine(text, doc.kind, wName);
+		health.containersScanned += containers.length;
+		const host: string[] = [];
+		if (spec.hostNetwork === true) host.push("hostNetwork: true");
+		if (spec.hostPID === true) host.push("hostPID: true");
+		if (spec.hostIPC === true) host.push("hostIPC: true");
+		for (const c of containers) {
+			if (c?.securityContext?.privileged === true) host.push(`privileged: true (container ${c.name ?? "?"})`);
+			for (const cap of [].concat(c?.securityContext?.capabilities?.add ?? []).map(String)) if (/^(CAP_)?(ALL|SYS_ADMIN)$/i.test(cap)) host.push(`capabilities.add: ${cap} (container ${c.name ?? "?"})`);
+		}
+		if ((spec.volumes ?? []).some((v: any) => /docker\.sock$/.test(String(v?.hostPath?.path ?? "")))) host.push("the Docker socket mounted (hostPath)");
+		if (host.length) {
+			const firstKey = spec.hostNetwork === true ? "hostNetwork" : spec.hostPID === true ? "hostPID" : spec.hostIPC === true ? "hostIPC" : /^privileged/.test(host[0]) ? "privileged" : /^capabilities/.test(host[0]) ? "add" : "path";
+			health.privileged.push({ owner: ownerId, file, line: keyLine(text, firstKey, docLine ?? 1) ?? docLine, name: wName, what: host });
+		}
+		if (LONG_RUNNING.has(doc.kind)) {
+			health.healthScanned++;
+			if (!(spec.containers ?? []).some((c: any) => c?.readinessProbe)) health.noHealthcheck.push({ owner: ownerId, file, line: docLine, name: wName, source: "k8s" });
+		}
+		for (const c of containers) {
+			for (const e of c.env ?? []) {
+				if (!e?.name || typeof e.value !== "string") continue;
+				health.settingsScanned++;
+				const secret = hardcodedSecret(e.name, e.value);
+				if (secret) health.credentials.push({ owner: ownerId, file, line: secretLine(text, secret.needle, e.name, docLine ?? 1), key: e.name, hint: secret.hint, what: secret.what, source: "k8s" });
+			}
+		}
 		podLabels.set(`${nsOf(doc)}/${doc.kind}/${wName}`, doc.spec?.template?.metadata?.labels ?? (doc.kind === "Pod" ? doc.metadata.labels ?? {} : {}));
 		for (const c of containers) {
 			const env = new Map<string, string>();
@@ -502,7 +610,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	}
 	// Services name the workloads they select (their DNS names are hosts other services use).
 	const k8sServiceTarget = new Map<string, string>();
-	for (const { doc } of k8sDocs.filter((x) => x.doc.kind === "Service")) {
+	for (const { doc, file } of k8sDocs.filter((x) => x.doc.kind === "Service")) {
 		const sel = doc.spec?.selector;
 		let target: string | undefined;
 		if (sel && typeof sel === "object") {
@@ -516,6 +624,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		}
 		target ??= findAlias(doc.metadata.name);
 		if (!target) continue;
+		filesOf(target)?.add(file);
 		k8sServiceTarget.set(`${nsOf(doc)}/${doc.metadata.name}`, target);
 		addAlias(target, doc.metadata.name);
 		const ports = (doc.spec?.ports ?? []).map((p: any) => Number(p.port)).filter((p: number) => p > 0);
@@ -551,15 +660,27 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	// ----- .env and config files -----
 	const envFiles = files.filter((f) => ENV_RE.test(f.rel) && !COMPOSE_RE.test(f.rel));
 	const configFiles = files.filter((f) => CONFIG_RE.test(f.rel));
-	const rootLevel: { key: string; value: string; evidence: string; env: (n: string) => string | undefined; file: string }[] = [];
+	type Cred = { line?: number; hint: string; what: "value" | "url-password" };
+	const rootLevel: { key: string; value: string; evidence: string; env: (n: string) => string | undefined; file: string; cred?: Cred }[] = [];
 	for (const f of [...envFiles, ...configFiles]) {
-		const entries = ENV_RE.test(f.rel) ? [...parseEnvFile(f.text)] : configEntries(f);
+		const isEnv = ENV_RE.test(f.rel);
+		const entries = isEnv ? [...parseEnvFile(f.text)] : configEntries(f);
 		const map = new Map(entries);
 		const lookup = (n: string) => map.get(n);
 		const unit = unitFor(f.rel);
+		if (unit && unit.dir !== "") unit.files.add(f.rel);
 		for (const [k, v] of entries) {
-			if (unit && unit.dir !== "") candidates.push({ owner: unit.id, key: k, value: v, evidence: `${f.rel} (${k})`, env: lookup });
-			else rootLevel.push({ key: k, value: v, evidence: `${f.rel} (${k})`, env: lookup, file: f.rel });
+			// Config files are committed; .env files are where local secrets belong (not checked).
+			let cred: Cred | undefined;
+			if (!isEnv) {
+				health.settingsScanned++;
+				const secret = hardcodedSecret(k, v);
+				if (secret) cred = { line: secretLine(f.text, secret.needle, k), hint: secret.hint, what: secret.what };
+			}
+			if (unit && unit.dir !== "") {
+				candidates.push({ owner: unit.id, key: k, value: v, evidence: `${f.rel} (${k})`, env: lookup });
+				if (cred) health.credentials.push({ owner: unit.id, file: f.rel, key: k, ...cred, source: "config" });
+			} else rootLevel.push({ key: k, value: v, evidence: `${f.rel} (${k})`, env: lookup, file: f.rel, cred });
 		}
 	}
 
@@ -583,6 +704,11 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		options.visit?.(f);
 		const text = stripComments(f.text, lang);
 		const lines = lineIndex(text);
+		if (!health.auth.has(unit.id)) {
+			const m = AUTH_HINT.exec(text);
+			if (m) health.auth.set(unit.id, `${f.rel}:${lines(m.index ?? 0)} (${m[0]})`);
+		}
+		const before = unit.entries.length;
 		for (const imp of importsOf(text, lang)) {
 			const hit = libraryTech(imp.name);
 			if (hit) addCodeLink({ owner: unit.id, tech: hit.tech, how: `imports ${hit.name}`, evidence: `${f.rel}:${lines(imp.index)}` });
@@ -592,6 +718,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		for (const u of urlLiterals(text)) urlUses.push({ owner: unit.id, url: u.url, evidence: `${f.rel}:${lines(u.index)}` });
 		for (const m of messagingUses(text)) messaging.push({ owner: unit.id, tech: m.tech, name: m.name, dir: m.dir, evidence: `${f.rel}:${lines(m.index)}` });
 		for (const e of entryPoints(text, f.rel, lang)) unit.entries.push(e);
+		if (unit.entries.length > before) unit.files.add(f.rel);
 	}
 	for (const m of messaging) {
 		if (m.dir === "consumes") services.get(m.owner)?.entries.push({ kind: "consumer", label: `${m.name}${m.tech ? ` (${m.tech.label})` : ""}`, file: m.evidence.replace(/:\d+$/, ""), line: Number(m.evidence.split(":").pop()) || 1 });
@@ -601,7 +728,11 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	for (const r of rootLevel) {
 		const readers = [...services.values()].filter((s) => s.envKeys.has(r.key) && s.dir !== undefined);
 		const owners = readers.length ? readers : [units.get("") ?? ([...services.values()].filter((s) => s.dir !== undefined).length === 1 ? [...services.values()].find((s) => s.dir !== undefined)! : rootUnit())];
-		for (const o of owners) candidates.push({ owner: o.id, key: r.key, value: r.value, evidence: r.evidence, env: r.env });
+		for (const o of owners) {
+			candidates.push({ owner: o.id, key: r.key, value: r.value, evidence: r.evidence, env: r.env });
+			o.files.add(r.file);
+			if (r.cred) health.credentials.push({ owner: o.id, file: r.file, key: r.key, ...r.cred, source: "config" });
+		}
 	}
 
 	// ----- resolve configuration candidates -----
@@ -667,6 +798,11 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 			}
 			if (target === owner || seen.has(target)) continue;
 			seen.add(target);
+			if (host && !isLocalHost(host) && !internalHost(host) && !isNoiseHost(host) && !externalSeen.has(`${owner}|${host}`)) {
+				externalSeen.add(`${owner}|${host}`);
+				health.externalScanned++;
+				if (addr.scheme === "http" || addr.scheme === "ws") health.plaintext.push({ owner, target, host, evidence });
+			}
 			const res = resources.get(target);
 			if (res && addr.database && !res.database) res.database = addr.database;
 			if (res && !res.tech && tech) res.tech = tech;
@@ -716,6 +852,8 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 				if ((l.from === c.owner || l.to === c.owner) && other && (other.tech?.id === c.tech.id || (c.tech.id === "sql" && other.kind === "database"))) {
 					l.how.add(c.how);
 					if (l.evidence.size < 6) l.evidence.add(c.evidence);
+					filesOf(l.from)?.add(fileOfEvidence(c.evidence));
+					filesOf(l.to)?.add(fileOfEvidence(c.evidence));
 				}
 			}
 			continue;
@@ -768,6 +906,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		warnings,
 		secretKeys,
 		libraries,
+		health,
 		stats: { files: files.length, codeFiles: code.length, composeFiles: composeFiles.length, k8sObjects, envFiles: envFiles.length, configFiles: configFiles.length, ms: Date.now() - started },
 	};
 }

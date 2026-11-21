@@ -212,7 +212,9 @@ export class MapperService {
 		const files = [...changed.keys()].map(norm);
 		const shapes: { nodeId: string; label: string; files: string[]; how: string[] }[] = [];
 		for (const n of record.graph.nodes) {
-			const own = [...(n.files ?? []), n.data?.file, n.data?.path].filter((x): x is string => !!x).map(norm);
+			// a service's folder counts too (data.dir), unless it is the whole repository
+			const dir = typeof n.data?.dir === "string" && !/^\.?\/?$/.test(n.data.dir) ? n.data.dir.replace(/\/?$/, "/") : undefined;
+			const own = [...(n.files ?? []), n.data?.file, n.data?.path, dir].filter((x): x is string => !!x).map(norm);
 			if (!own.length) continue;
 			const hit = files.filter((f) => own.some((o) => f === o || f.startsWith(o.endsWith("/") ? o : o + "/")));
 			if (hit.length) shapes.push({ nodeId: n.id, label: n.label, files: hit, how: [...new Set(hit.map((f) => changed.get(f) ?? "changed"))] });

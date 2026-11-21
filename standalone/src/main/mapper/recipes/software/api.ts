@@ -7,8 +7,9 @@
 import * as path from "path";
 import * as yaml from "js-yaml";
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug, type FoundFile } from "../common";
-import type { CollectResult, MapEdge, MapGraph, MapNode, MapRow, Recipe } from "../../types";
-import { scrub, STYLE } from "./shared";
+import type { CheckCoverage, CollectResult, MapEdge, MapFinding, MapGraph, MapNode, MapRow, Recipe } from "../../types";
+import { keepOnMap } from "./health";
+import { isLocalHost, scrub, STYLE } from "./shared";
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"];
 const METHOD_COLORS: Record<string, [string, string]> = {
@@ -68,6 +69,8 @@ interface Operation {
 	refs: { name: string; label: string }[];
 	deprecated: boolean;
 	security: string[];
+	/** `security: []` on the operation: deliberately public. */
+	explicitlyPublic: boolean;
 }
 
 function resolve(doc: any, obj: any): any {
@@ -125,6 +128,7 @@ export function operationsOf(doc: any): Operation[] {
 				refs,
 				deprecated: !!op.deprecated,
 				security: (op.security ?? doc.security ?? []).flatMap((s: any) => Object.keys(s ?? {})),
+				explicitlyPublic: Array.isArray(op.security) && (op.security.length === 0 || op.security.some((s: any) => s && typeof s === "object" && Object.keys(s).length === 0)),
 			});
 		}
 	}
@@ -165,6 +169,7 @@ export function openApiToGraph(specs: ApiSpec[], name: string): { graph: MapGrap
 			container: true,
 			style: SPEC_STYLE,
 			data: { file: spec.file, ...(servers.length ? { servers: servers.slice(0, 4).join(", ") } : {}) },
+			files: [spec.file],
 		});
 		const ops = operationsOf(doc);
 		endpoints += ops.length;
@@ -193,6 +198,7 @@ export function openApiToGraph(specs: ApiSpec[], name: string): { graph: MapGrap
 					style: STYLE.table("#dae8fc", "#6c8ebf"),
 					rows: list.map((o) => ({ text: `${o.method} ${o.path}${o.deprecated ? " (deprecated)" : ""}`, detail: o.summary.slice(0, 40) || undefined })),
 					data: { group: g, file: spec.file },
+					files: [spec.file],
 				});
 				const seen = new Set<string>();
 				for (const o of list) for (const r of o.refs) if (shownSchemas.has(r.name) && !seen.has(r.name)) {
@@ -214,6 +220,7 @@ export function openApiToGraph(specs: ApiSpec[], name: string): { graph: MapGrap
 					style: STYLE.table(fill, stroke),
 					rows: [...(o.summary ? [{ text: o.summary }] : []), ...o.rows],
 					data: { method: o.method, path: o.path, file: spec.file, ...(o.operationId ? { operationId: o.operationId } : {}), ...(o.security.length ? { security: o.security.join(", ") } : {}) },
+					files: [spec.file],
 				});
 				const seen = new Set<string>();
 				for (const r of o.refs) {
@@ -228,7 +235,7 @@ export function openApiToGraph(specs: ApiSpec[], name: string): { graph: MapGrap
 			nodes.push({ id: cid, label: `Schemas (${Object.keys(schemas).length})`, kind: "api:schemas", parent: sid, container: true, style: GROUP_STYLE });
 			for (const n of schemaNames) {
 				schemaCount++;
-				nodes.push({ id: schemaId(n), label: n, kind: "api:schema", parent: cid, shape: "table", style: SCHEMA_STYLE, rows: schemaRows(doc, schemas[n]), data: { schema: n, file: spec.file } });
+				nodes.push({ id: schemaId(n), label: n, kind: "api:schema", parent: cid, shape: "table", style: SCHEMA_STYLE, rows: schemaRows(doc, schemas[n]), data: { schema: n, file: spec.file }, files: [spec.file] });
 				const seen = new Set<string>();
 				for (const r of propertyRefs(doc, schemas[n])) {
 					if (r.name === n || !shownSchemas.has(r.name) || seen.has(r.name)) continue;
@@ -249,6 +256,66 @@ function propertyRefs(doc: any, schema: any): { name: string; label: string }[] 
 		for (const [prop, ps] of Object.entries<any>(part?.properties ?? {})) refsOf(ps).forEach((n) => out.push({ name: n, label: prop }));
 	}
 	return out;
+}
+
+/** Server URLs of a spec (v3 servers, v2 schemes + host). */
+function serverUrls(doc: any): string[] {
+	if (Array.isArray(doc.servers)) return doc.servers.map((s: any) => String(s?.url ?? "")).filter(Boolean);
+	if (doc.host) return (Array.isArray(doc.schemes) && doc.schemes.length ? doc.schemes : ["https"]).map((sc: string) => `${sc}://${doc.host}${doc.basePath ?? ""}`);
+	return [];
+}
+
+const WRITE = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+/** Paths that are public by nature (health, sign-in, docs). */
+const PUBLIC_PATH = /^\/?(api\/)?(v\d+\/)?(health\w*|healthz|readyz|livez|ping|status|metrics|version|login|logout|signin|sign-in|signup|sign-up|register|token|oauth\w*|auth\w*|session\w*|password\w*|webhooks?|docs|openapi|swagger)(\/|$)/i;
+
+/** Endpoints without a security requirement in specs that define security, and plain-text servers (exported for tests). */
+export function apiFindings(specs: ApiSpec[], graph: MapGraph): { findings: MapFinding[]; checked: CheckCoverage[] } {
+	const findings: MapFinding[] = [];
+	let examined = 0;
+	let serversSeen = 0;
+	const ids = new Set(graph.nodes.map((n) => n.id));
+	for (const spec of specs) {
+		const doc = spec.doc;
+		const sid = `spec:${slug(spec.file)}`;
+		const schemes = doc.components?.securitySchemes ?? doc.securityDefinitions ?? {};
+		if (Object.keys(schemes).length) {
+			for (const o of operationsOf(doc)) {
+				examined++;
+				if (o.security.length || o.explicitlyPublic || PUBLIC_PATH.test(o.path)) continue;
+				const opNode = `${sid}#op:${o.method}:${slug(o.path)}`;
+				const node = ids.has(opNode) ? opNode : `${sid}#group:${slug(o.group)}`;
+				findings.push({
+					id: `endpoint-without-security:${spec.file}:${o.method} ${o.path}`,
+					kind: "endpoint-without-security",
+					severity: WRITE.has(o.method) ? "medium" : "low",
+					title: `${o.method} ${o.path} has no security requirement`,
+					detail: `${spec.file}: the spec defines ${Object.keys(schemes).join(", ")} but neither this operation nor the spec's global \`security\` requires one, so the endpoint is documented as public.`,
+					nodeIds: [node],
+					fix: `Add a security requirement to ${o.method} ${o.path} in ${spec.file} (or a global one), or mark it public on purpose with \`security: []\`, and check that the implementation enforces the same.`,
+				});
+			}
+		}
+		for (const url of serverUrls(doc)) {
+			serversSeen++;
+			const host = /^http:\/\/([^/:?#]+)/i.exec(url)?.[1]?.toLowerCase();
+			if (!host || isLocalHost(host) || !host.includes(".") || /\.(local|internal|localhost|test|example)$/.test(host)) continue;
+			findings.push({
+				id: `plaintext-http:${spec.file}:${host}`,
+				kind: "plaintext-http",
+				severity: "medium",
+				title: `${doc.info?.title ?? spec.file} is served over plain HTTP (${host})`,
+				detail: `${spec.file}: server ${scrub(url)} uses http://, so requests and tokens travel unencrypted.`,
+				nodeIds: [sid],
+				fix: `Serve the API over HTTPS and change the server URL in ${spec.file} to https://${host}.`,
+			});
+		}
+	}
+	const checked: CheckCoverage[] = [
+		{ check: "Endpoints without a security requirement", scanned: examined, note: "operations of specs that define security schemes" },
+		{ check: "Plain-text HTTP server URLs", scanned: serversSeen, note: "server URLs in the specs" },
+	];
+	return { findings: keepOnMap(findings, graph), checked };
 }
 
 // ----- GraphQL -----
@@ -326,6 +393,7 @@ export function graphqlToGraph(types: GqlType[], name: string): MapGraph {
 			style: root ? STYLE.table("#ffe6cc", "#d79b00") : STYLES[t.kind] ?? STYLES.type,
 			rows: t.members ? t.members.map((mm) => ({ text: mm })) : t.fields.map((f) => ({ text: `${f.name}${f.args ? "(…)" : ""}`, detail: f.type || undefined })),
 			data: { type: t.name, kind: t.kind, file: t.file },
+			files: [t.file],
 		});
 	}
 	const labels = new Map<string, string[]>();
@@ -422,11 +490,12 @@ export const apiRecipe: Recipe = {
 						],
 						edges: [...graphs[0].edges, ...graphs[1].edges],
 				  };
+		const { findings, checked } = specs.length ? apiFindings(specs, graph) : { findings: [], checked: [] };
 		graph.legend = [
 			`API surface of ${name}: ${summary.join("; ")}.`,
 			"Endpoint colours: GET blue, POST green, PUT/PATCH orange, DELETE red. Rows: parameters (? = optional), body, → responses. Grey tables: schemas; arrows: types used.",
 		];
-		return { graph, summary: `${summary.join("; ")} (${Date.now() - started} ms)`, warnings, facts: facts.join("\n") };
+		return { graph, summary: `${summary.join("; ")} (${Date.now() - started} ms)`, warnings, facts: facts.join("\n"), findings, checked };
 	},
 	agentPrompt: (_input, result) =>
 		agentRequest(

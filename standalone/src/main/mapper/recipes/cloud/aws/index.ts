@@ -47,7 +47,7 @@ export const awsEnvironmentRecipe: Recipe = {
 		const inv = await collectAws({ profile: (input.profile ?? "").trim(), regions: input.regions ?? "", services: input.services }, ctx, warnings);
 		ctx.progress("Drawing the map…");
 		const map = awsInventoryToGraph(inv);
-		return { graph: map.graph, facts: map.facts, summary: map.summary, warnings };
+		return { graph: map.graph, facts: map.facts, summary: map.summary, warnings, findings: map.findings, checked: map.checked };
 	},
 	agentPrompt: (input) =>
 		`Review the AWS map on this page (account inventory collected read-only${input.profile ? `, profile "${input.profile}"` : ""}) as an architect. Add short review notes next to the shapes they concern: public exposure (internet-facing load balancers, public IPs with open security groups, publicly accessible databases, public EKS endpoints), single points of failure (single-AZ databases, one NAT gateway for several AZs, load balancers with one target, single-task services), missing encryption where the data shows it, and anything that looks unintended. Use only read-only \`aws\` describe / list / get commands with the ids, regions and profile stored in the shapes' data if you need more detail.`,

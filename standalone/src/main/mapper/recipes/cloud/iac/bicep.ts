@@ -6,7 +6,7 @@
  */
 import * as path from "path";
 import { matchBracket } from "./terraform";
-import { IacGroup, IacResource, keepAttr, lineAt } from "./model";
+import { IacGroup, IacResource, IngressRule, keepAttr, lineAt, markOpenIngress, rulesFromPortSpecs } from "./model";
 
 /** Same length as `src`; comments and string contents blanked, `${…}` interpolations kept. */
 export function maskBicep(src: string): string {
@@ -102,6 +102,43 @@ export function bicepType(raw: string): { type: string; apiVersion?: string } {
 	return { type, apiVersion };
 }
 
+/** Inbound Allow rules in a Bicep body (NSG securityRules), from literal values; masked: same text with strings blanked. */
+export function bicepIngress(text: string, masked: string): IngressRule[] {
+	const out: IngressRule[] = [];
+	const seen = new Set<number>();
+	for (const m of masked.matchAll(/\bdirection\s*:/g)) {
+		// The object that holds this setting.
+		let depth = 0;
+		let open = -1;
+		for (let i = m.index! - 1; i >= 0; i--) {
+			const c = masked[i];
+			if (c === "}") depth++;
+			else if (c === "{") {
+				if (depth === 0) {
+					open = i;
+					break;
+				}
+				depth--;
+			}
+		}
+		if (open < 0 || seen.has(open)) continue;
+		seen.add(open);
+		const close = matchBracket(masked, open);
+		const obj = text.slice(open + 1, close < 0 ? text.length : close);
+		const str = (k: string) => new RegExp(`\\b${k}\\s*:\\s*'([^'\\n]*)'`).exec(obj)?.[1];
+		const list = (k: string) => {
+			const l = new RegExp(`\\b${k}\\s*:\\s*\\[([^\\]]*)\\]`).exec(obj);
+			return l ? [...l[1].matchAll(/'([^'\n]*)'/g)].map((x) => x[1]) : [];
+		};
+		if (!/^inbound$/i.test(str("direction") ?? "") || !/^allow$/i.test(str("access") ?? "")) continue;
+		const sources = [str("sourceAddressPrefix"), ...list("sourceAddressPrefixes")].filter((x): x is string => !!x);
+		const ports = [str("destinationPortRange"), ...list("destinationPortRanges")].filter((x): x is string => !!x);
+		const literal = /destinationPortRanges?\s*:\s*('|\[\s*')/.test(obj) || !/destinationPortRange/.test(obj);
+		out.push(...(literal ? rulesFromPortSpecs(str("protocol"), ports, sources) : [{ protocol: str("protocol"), literal: false, sources }]));
+	}
+	return out;
+}
+
 export function parseBicep(file: string, text: string): { group: IacGroup; resources: IacResource[] } {
 	const masked = maskBicep(text);
 	const group = `bicep:${file}`;
@@ -160,7 +197,11 @@ export function parseBicep(file: string, text: string): { group: IacGroup; resou
 			} else if (ch === "{" || ch === "[" || ch === "(") depth++;
 			else if (ch === "}" || ch === "]" || ch === ")") depth--;
 		}
-		if (/'\*'|'Internet'|'0\.0\.0\.0\/0'/.test(body) && /securityRules|sourceAddressPrefix|firewall|ipRules/i.test(body)) attrs.openToWorld = "true";
+		if (/networkSecurityGroups(\/securityRules)?$/i.test(type)) markOpenIngress(attrs, bicepIngress(ownText, own));
+		if (/Microsoft\.ContainerService\/managedClusters$/i.test(type)) {
+			attrs.privateCluster = String(/enablePrivateCluster\s*:\s*true\b/.test(own));
+			attrs.authorizedIpRanges = String(/authorizedIPRanges\s*:\s*\[\s*'/.test(ownText));
+		}
 		if (/publicNetworkAccess\s*:\s*'Enabled'/.test(body)) attrs.publicNetworkAccess = "Enabled";
 		if (/allowBlobPublicAccess\s*:\s*true/.test(body)) attrs.allowBlobPublicAccess = "true";
 		const nameMatch = /(?:^|\n)\s*name\s*:\s*'([^'\n]*)'/.exec(ownText);

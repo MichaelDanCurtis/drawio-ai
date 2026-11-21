@@ -1,5 +1,6 @@
 /** Draws the IaC resources of one cloud: a container per module / stack / template, edges from references. */
-import type { MapEdge, MapGraph, MapNode } from "../../../types";
+import type { CheckCoverage, MapEdge, MapFinding, MapGraph, MapNode } from "../../../types";
+import { FindingSet, findingsMarkdown, findingsSummary, portNames, riskyPorts, Severity } from "../findings";
 import { collapseCrowds } from "../aws/graph";
 import { iacIconStyle } from "./icons";
 import type { Cloud, IacGroup, IacResource, IacScan, IacTool } from "./model";
@@ -29,33 +30,273 @@ export function shortType(type: string): string {
 	return type.replace(/^(aws|awscc|azurerm|azuread|azapi|google|google-beta)_/, "");
 }
 
-export interface IacFinding {
-	resource: IacResource;
-	text: string;
+/** A health check result on one declared resource (before it becomes a MapFinding). */
+export interface IacCheckResult {
+	kind: string;
+	severity: Severity;
+	title: string;
+	/** The evidence: setting and value (the file:line is added by the caller). */
+	evidence: string;
+	fix: string;
+	/** Addresses of other resources in the same group the finding concerns too (e.g. the bucket of an IAM member). */
+	alsoRefs?: string[];
 }
 
-/** Settings that are worth a review note. */
-export function iacFindings(r: IacResource): string[] {
-	const a = Object.fromEntries(Object.entries(r.attrs).map(([k, v]) => [k.toLowerCase().replace(/_/g, ""), String(v).toLowerCase()]));
-	const out: string[] = [];
-	if (a.opentoworld === "true") out.push("open to the internet (0.0.0.0/0 or *)");
-	if (a.publiclyaccessible === "true") out.push("publicly accessible");
-	if (a.storageencrypted === "false" || a.encrypted === "false") out.push("encryption disabled");
-	if (/public-read/.test(a.acl ?? "")) out.push(`public ACL (${a.acl})`);
-	if (a.allowblobpublicaccess === "true" || a.allownesteditemstobepublic === "true") out.push("allows public blob access");
-	if (a.publicnetworkaccess === "enabled" || a.publicnetworkaccessenabled === "true") out.push("public network access enabled");
-	if (a.httpsonly === "false" || a.supportshttpstrafficonly === "false") out.push("HTTPS not enforced");
-	if (/tls1_[01]|^1\.[01]$/.test(a.mintlsversion ?? a.minimumtlsversion ?? "")) out.push(`old minimum TLS (${a.mintlsversion ?? a.minimumtlsversion})`);
-	if (a.deletionprotection === "false") out.push("deletion protection off");
+const DATABASE = /(^aws_(db_instance|rds_cluster(_instance)?|docdb_cluster|neptune_cluster)$)|^AWS::(RDS|DocDB|Neptune)::DB|^google_(sql_database_instance|spanner_(instance|database)|bigtable_instance|alloydb_cluster)$|sqladmin\.v1\w*\.instance$/i;
+const NETWORK_PROTOCOL = /^(tcp|udp|6|17|\*|any|all|-1)$/i;
+
+/** Risky ports of an openPorts attribute ("tcp/22, all, udp/*, tcp/?"), and whether some ports were not literal. */
+export function openPortRisk(openPorts: string): { risky: string[]; unknown: boolean } {
+	const risky = new Set<string>();
+	let unknown = false;
+	for (const entry of openPorts.split(/,\s*/).filter(Boolean)) {
+		if (entry === "all") {
+			risky.add("all ports");
+			continue;
+		}
+		const [proto, ports] = entry.split("/");
+		if (!NETWORK_PROTOCOL.test(proto)) continue;
+		if (ports === "?") unknown = true;
+		else if (ports === "*") risky.add("all ports");
+		else {
+			const [from, to] = ports.split("-").map(Number);
+			for (const p of riskyPorts(from, to ?? from)) risky.add(p);
+		}
+	}
+	return { risky: [...risky], unknown };
+}
+
+/** Health checks on the settings a resource declares (literal values only; never secrets). */
+export function iacFindings(r: IacResource): IacCheckResult[] {
+	if (r.kind !== "resource" || r.attrs.existing === "true") return [];
+	const norm = (k: string) => k.toLowerCase().replace(/_/g, "");
+	const entries = Object.entries(r.attrs).map(([k, v]) => ({ key: k, n: norm(k), value: String(v), lower: String(v).toLowerCase() }));
+	/** The first declared setting among these (normalized) names. */
+	const get = (...names: string[]) => entries.find((e) => names.includes(e.n));
+	const is = (value: string, ...names: string[]) => {
+		const e = get(...names);
+		return e && e.lower === value ? e : undefined;
+	};
+	const show = (e: { key: string; value: string }) => `${e.key} = ${/^(true|false|-?\d+)$/.test(e.value) ? e.value : `"${e.value}"`}`;
+	const name = r.attrs.name && !/\$\{|\[/.test(r.attrs.name) ? `${r.address} (${r.attrs.name})` : r.address;
+	const out: IacCheckResult[] = [];
+
+	// Inbound rules open to the internet.
+	if (r.attrs.openToWorld === "true" && r.attrs.openPorts) {
+		const { risky, unknown } = openPortRisk(r.attrs.openPorts);
+		const evidence = `inbound ${r.attrs.openPorts} allowed from ${r.attrs.openSources ?? "0.0.0.0/0"}`;
+		if (risky.length)
+			out.push({
+				kind: "open-ingress",
+				severity: "high",
+				title: `${name} opens ${portNames(risky)} to the internet`,
+				evidence,
+				fix: `Narrow the inbound rule(s) of ${r.address} to known address ranges instead of ${r.attrs.openSources ?? "0.0.0.0/0"}, or remove them; reach machines through a bastion, VPN or identity-aware proxy instead.`,
+			});
+		else if (unknown)
+			out.push({
+				kind: "open-ingress",
+				severity: "medium",
+				title: `${name} opens ports set by an expression to the internet`,
+				evidence: `${evidence} (the ports come from a variable or expression)`,
+				fix: `Check which ports the inbound rule(s) of ${r.address} resolve to; if they include remote administration or database ports, narrow the sources to known address ranges.`,
+			});
+	}
+
+	// Databases reachable from the internet.
+	const pubDb = is("true", "publiclyaccessible");
+	if (pubDb)
+		out.push({
+			kind: "public-database",
+			severity: "high",
+			title: `${name} is publicly accessible`,
+			evidence: show(pubDb),
+			fix: `Set ${pubDb.key} to false on ${r.address} and reach the database from inside the network (private subnets, a bastion or a VPN).`,
+		});
+	if (r.attrs.authorizedNetworks)
+		out.push({
+			kind: "public-database",
+			severity: "high",
+			title: `${name} accepts database connections from any address`,
+			evidence: `authorized network ${r.attrs.authorizedNetworks}`,
+			fix: `Remove the ${r.attrs.authorizedNetworks} authorized network from ${r.address}; use private IP or the Cloud SQL Auth Proxy, or list only the client addresses that need access.`,
+		});
+	const start = get("startipaddress");
+	const end = get("endipaddress");
+	if (start?.value === "0.0.0.0" && end?.value === "255.255.255.255")
+		out.push({
+			kind: "public-database",
+			severity: "high",
+			title: `${name} lets every IPv4 address through the database firewall`,
+			evidence: `${show(start)}, ${show(end)}`,
+			fix: `Replace the 0.0.0.0–255.255.255.255 firewall rule ${r.address} with rules for the client addresses that need access, or use a private endpoint.`,
+		});
+
+	// Public buckets and storage.
+	const acl = get("acl", "accesscontrol");
+	if (acl && /^(public-?read(-?write)?|authenticated-?read)$/i.test(acl.value))
+		out.push({
+			kind: "public-bucket",
+			severity: "high",
+			title: `${name} makes its objects readable by anyone`,
+			evidence: show(acl),
+			fix: `Remove the ${acl.value} ACL from ${r.address} (keep it private, with S3 Block Public Access on) and serve public content through CloudFront with origin access control.`,
+		});
+	if (r.attrs.publicMembers)
+		out.push({
+			kind: "public-bucket",
+			severity: "high",
+			title: `${name} grants ${r.attrs.role ?? "a role"} on a bucket to ${r.attrs.publicMembers}`,
+			evidence: `member(s) ${r.attrs.publicMembers}${r.attrs.role ? `, role ${r.attrs.role}` : ""}`,
+			fix: `Remove ${r.attrs.publicMembers} from ${r.address}; grant access to specific principals, and enforce public access prevention on the bucket.`,
+			alsoRefs: r.refs.filter((x) => /^google_storage_bucket\./.test(x)),
+		});
+	const container = get("containeraccesstype", "publicaccess");
+	if (container && /^(blob|container)$/i.test(container.value))
+		out.push({
+			kind: "public-bucket",
+			severity: "high",
+			title: `${name} lets anyone read its blobs`,
+			evidence: show(container),
+			fix: `Set ${container.key} to private ("None" in ARM / Bicep) on ${r.address} and hand out SAS tokens or use Entra ID for readers.`,
+		});
+	const blockOff = entries.filter((e) => ["blockpublicacls", "blockpublicpolicy", "ignorepublicacls", "restrictpublicbuckets"].includes(e.n) && e.lower === "false");
+	if (blockOff.length)
+		out.push({
+			kind: "public-access-block-off",
+			severity: "medium",
+			title: `${name} turns S3 Block Public Access off`,
+			evidence: blockOff.map(show).join(", "),
+			fix: `Set ${blockOff.map((e) => e.key).join(", ")} to true on ${r.address} unless the bucket must be public.`,
+			alsoRefs: r.refs.filter((x) => /^aws_s3_bucket\./.test(x)),
+		});
+	const blobPublic = is("true", "allowblobpublicaccess", "allownesteditemstobepublic");
+	if (blobPublic)
+		out.push({
+			kind: "public-blob-access",
+			severity: "medium",
+			title: `${name} allows containers to be made public`,
+			evidence: show(blobPublic),
+			fix: `Set ${blobPublic.key} to false on ${r.address} so no container can be opened to anonymous readers.`,
+		});
+
+	// Encryption and transport security.
+	const enc = is("false", "storageencrypted", "encrypted");
+	if (enc)
+		out.push({
+			kind: "unencrypted-storage",
+			severity: "medium",
+			title: `${name} stores data unencrypted`,
+			evidence: show(enc),
+			fix: `Set ${enc.key} to true on ${r.address} (for an existing database or volume this means restoring from an encrypted snapshot copy).`,
+		});
+	const https = is("false", "httpsonly", "supportshttpstrafficonly", "enablehttpstrafficonly", "httpstrafficonlyenabled");
+	if (https)
+		out.push({
+			kind: "https-not-enforced",
+			severity: "medium",
+			title: `${name} accepts plain HTTP`,
+			evidence: show(https),
+			fix: `Set ${https.key} to true on ${r.address} so clients are redirected to HTTPS.`,
+		});
+	const nonSsl = is("true", "enablenonsslport");
+	if (nonSsl)
+		out.push({
+			kind: "unencrypted-transit",
+			severity: "medium",
+			title: `${name} opens a non-TLS port`,
+			evidence: show(nonSsl),
+			fix: `Set ${nonSsl.key} to false on ${r.address} and connect over TLS (port 6380).`,
+		});
+	const tls = get("mintlsversion", "minimumtlsversion", "minimaltlsversion");
+	if (tls && /^(tls)?1[._][01]$/i.test(tls.value))
+		out.push({
+			kind: "old-tls",
+			severity: "medium",
+			title: `${name} still accepts TLS ${tls.value.replace(/^tls/i, "").replace("_", ".")}`,
+			evidence: show(tls),
+			fix: `Raise ${tls.key} on ${r.address} to TLS 1.2 (${/^tls/i.test(tls.value) ? '"TLS1_2"' : '"1.2"'}).`,
+		});
+	const pna = is("true", "publicnetworkaccessenabled") ?? is("enabled", "publicnetworkaccess");
+	if (pna)
+		out.push({
+			kind: "public-network-access",
+			severity: "low",
+			title: `${name} is reachable over its public endpoint`,
+			evidence: show(pna),
+			fix: `Disable public network access on ${r.address} and reach it through a private endpoint, or restrict its firewall to known networks.`,
+		});
+
+	// Resilience.
+	const del = is("false", "deletionprotection");
+	if (del && DATABASE.test(r.type))
+		out.push({
+			kind: "deletion-protection-off",
+			severity: "low",
+			title: `${name} can be deleted without protection`,
+			evidence: show(del),
+			fix: `Set ${del.key} to true on ${r.address} so the database cannot be destroyed by an accidental apply or delete.`,
+		});
+	const multiAz = is("false", "multiaz");
+	if (multiAz && DATABASE.test(r.type))
+		out.push({
+			kind: "single-az-database",
+			severity: "low",
+			title: `${name} runs in a single availability zone`,
+			evidence: show(multiAz),
+			fix: `Set ${multiAz.key} to true on ${r.address} for a standby in another zone.`,
+		});
+	if (/^azurerm_key_vault$|^Microsoft\.KeyVault\/vaults$/i.test(r.type)) {
+		const purge = get("purgeprotectionenabled", "enablepurgeprotection");
+		if (!purge || purge.lower !== "true")
+			out.push({
+				kind: "no-purge-protection",
+				severity: "low",
+				title: `${name} can be purged during its soft-delete period`,
+				evidence: purge ? show(purge) : `${r.tool === "terraform" ? "purge_protection_enabled" : "enablePurgeProtection"} not set (off by default)`,
+				fix: `Enable purge protection on ${r.address} (${r.tool === "terraform" ? "purge_protection_enabled = true" : "enablePurgeProtection: true"}) so deleted keys and secrets cannot be destroyed before the retention period ends.`,
+			});
+	}
+
+	// Kubernetes control planes reachable from anywhere.
+	const k8s =
+		(r.type === "google_container_cluster" && r.attrs.privateEndpoint === "false" && r.attrs.masterAuthorizedNetworks === "false" && "no private endpoint and no master_authorized_networks_config") ||
+		((r.type === "azurerm_kubernetes_cluster" || /managedClusters$/i.test(r.type)) && r.attrs.privateCluster === "false" && r.attrs.authorizedIpRanges === "false" && "not a private cluster and no authorized IP ranges") ||
+		(r.type === "aws_eks_cluster" && r.attrs.endpointPublicAccess === "true" && /0\.0\.0\.0\/0/.test(r.attrs.publicAccessCidrs ?? "") && `endpoint_public_access on, public_access_cidrs ${r.attrs.publicAccessCidrs}`);
+	if (k8s)
+		out.push({
+			kind: "public-control-plane",
+			severity: "medium",
+			title: `The Kubernetes API of ${name} is reachable from the whole internet`,
+			evidence: k8s,
+			fix: `Restrict the API server of ${r.address} to known networks (authorized networks / authorized IP ranges / public_access_cidrs) or make the endpoint private.`,
+		});
 	return out;
 }
+
+/** The health checks and the resource types each one examines. */
+const IAC_CHECKS: { check: string; types: RegExp; note?: string }[] = [
+	{
+		check: "Inbound rules open to the internet",
+		types: /^(aws_security_group(_rule)?|aws_vpc_security_group_ingress_rule|google_compute_firewall|azurerm_network_security_(group|rule))$|^AWS::EC2::SecurityGroup(Ingress)?$|networkSecurityGroups(\/securityRules)?$|compute\.v1\.firewall$/i,
+		note: "Security groups, firewalls and NSGs examined; only literal rules opening remote administration, database or all ports (or ports set by an expression) are reported.",
+	},
+	{ check: "Publicly accessible databases", types: /db_instance|rds_cluster|^AWS::RDS::|sql_database_instance|sqladmin|firewall_rule$|firewallRules$|^Microsoft\.(Sql|DBfor\w+)\//i },
+	{ check: "Public buckets and storage", types: /s3_bucket|^AWS::S3::Bucket$|storage_bucket|storage\.v1\.bucket|storage_(account|container)$|^Microsoft\.Storage\/storageAccounts/i },
+	{ check: "Encryption at rest", types: /db_instance|rds_cluster|ebs_volume|^AWS::(RDS::DB|EC2::Volume)/i },
+	{ check: "HTTPS and TLS settings", types: /app_service|web_app|function_app|^Microsoft\.Web\/sites$|storage_account$|^Microsoft\.Storage\/storageAccounts$|(mssql|sql)_server$|^Microsoft\.Sql\/servers$|redis_cache$|^Microsoft\.Cache\/redis$/i },
+	{ check: "Kubernetes API exposure", types: /^(google_container_cluster|azurerm_kubernetes_cluster|aws_eks_cluster)$|managedClusters$/i },
+	{ check: "Key Vault purge protection", types: /^azurerm_key_vault$|^Microsoft\.KeyVault\/vaults$/i },
+	{ check: "Database deletion protection and availability", types: DATABASE },
+];
 
 export interface IacMap {
 	graph: MapGraph;
 	facts: string;
 	summary: string;
 	warnings: string[];
-	findings: IacFinding[];
+	findings: MapFinding[];
+	checked: CheckCoverage[];
 }
 
 export function iacToGraph(scan: IacScan, cloud: Exclude<Cloud, "other">, repoName: string): IacMap {
@@ -83,7 +324,8 @@ export function iacToGraph(scan: IacScan, cloud: Exclude<Cloud, "other">, repoNa
 	const nodeIds = new Set<string>();
 	const groups = scan.groups.filter((g) => included.has(g.id));
 	for (const g of groups) {
-		nodes.push({ id: g.id, label: g.label, kind: `iac:${g.tool}:group`, container: true, style: groupStyle(g.tool), data: { tool: g.tool, path: g.path } });
+		const files = [...new Set([...own, ...keptModules].filter((r) => r.group === g.id).map((r) => r.file))].sort();
+		nodes.push({ id: g.id, label: g.label, kind: `iac:${g.tool}:group`, container: true, style: groupStyle(g.tool), data: { tool: g.tool, path: g.path }, ...(files.length ? { files } : {}) });
 		nodeIds.add(g.id);
 	}
 	const dataOf = (r: IacResource): Record<string, string> => {
@@ -106,6 +348,7 @@ export function iacToGraph(scan: IacScan, cloud: Exclude<Cloud, "other">, repoNa
 			width: icon.width,
 			height: icon.height,
 			data: dataOf(r),
+			files: [r.file],
 		});
 		nodeIds.add(r.id);
 	}
@@ -120,6 +363,7 @@ export function iacToGraph(scan: IacScan, cloud: Exclude<Cloud, "other">, repoNa
 			width: 170,
 			height: 46,
 			data: { ...dataOf(m), ...(m.moduleSource ? { moduleSource: m.moduleSource } : {}) },
+			files: [m.file],
 		});
 		nodeIds.add(m.id);
 	}
@@ -135,21 +379,34 @@ export function iacToGraph(scan: IacScan, cloud: Exclude<Cloud, "other">, repoNa
 	}
 	for (const m of keptModules) if (m.moduleTarget && !groupsById.has(m.moduleTarget)) warnings.push(`${m.file}:${m.line}: ${m.address} points at ${m.moduleTarget.replace(/^\w+:/, "")}, which has no IaC files in the folder.`);
 
-	const findings: IacFinding[] = own.flatMap((r) => iacFindings(r).map((text) => ({ resource: r, text })));
+	const found = new FindingSet();
+	const declared = own.filter((r) => r.kind === "resource" && r.attrs.existing !== "true");
+	for (const c of IAC_CHECKS) {
+		const scanned = declared.filter((r) => c.types.test(r.type)).length;
+		if (scanned) found.check(c.check, scanned, c.note);
+	}
+	for (const r of declared) {
+		for (const f of iacFindings(r)) {
+			const also = (f.alsoRefs ?? []).map((a) => `${r.group}::${a}`).filter((id) => nodeIds.has(id));
+			found.add({ kind: f.kind, severity: f.severity, title: f.title, detail: `${r.file}:${r.line} ${r.address}: ${f.evidence}.`, nodeIds: [r.id, ...also], fix: f.fix });
+		}
+	}
 	const graph: MapGraph = { title: `${CLOUD_NAMES[cloud]} IaC · ${repoName}`, nodes, edges, direction: "down", legend: [] };
 	// Fold only many resources of the same type in one module (e.g. 60 DNS records).
-	const folded = collapseCrowds(graph, 30, (n) => `${n.kind}\u0000${n.data?.type ?? ""}`);
+	const foldedIds = new Map<string, string>();
+	const folded = collapseCrowds(graph, 30, (n) => `${n.kind}\u0000${n.data?.type ?? ""}`, foldedIds);
+	const { findings, checked } = found.finish(graph, foldedIds);
 	const tools = [...new Set(groups.map((g) => g.tool))];
 	graph.legend = [
 		`${CLOUD_NAMES[cloud]} resources declared in ${repoName} (${tools.join(", ") || "no IaC"}): ${own.length} in ${groups.length} module(s) / stack(s) / template(s).`,
 		"Arrows: a resource refers to another (references, dependsOn). Dashed purple: a module or nested stack and the code it instantiates. Faded: data sources and existing resources.",
 		...(folded ? [`${folded} resources folded into "+N more" shapes.`] : []),
 	];
-	const summary = own.length ? `${own.length} ${CLOUD_NAMES[cloud]} resource(s) in ${groups.length} module(s)/stack(s)/template(s) (${tools.join(", ")})${findings.length ? `, ${findings.length} review finding(s)` : ""}` : `No ${CLOUD_NAMES[cloud]} resources found in the IaC files.`;
-	return { graph, facts: factsOf(groups, own, keptModules, findings, cloud), summary, warnings, findings };
+	const summary = own.length ? `${own.length} ${CLOUD_NAMES[cloud]} resource(s) in ${groups.length} module(s)/stack(s)/template(s) (${tools.join(", ")})${findingsSummary(findings)}` : `No ${CLOUD_NAMES[cloud]} resources found in the IaC files.`;
+	return { graph, facts: factsOf(groups, own, keptModules, findings, cloud), summary, warnings, findings, checked };
 }
 
-function factsOf(groups: IacGroup[], own: IacResource[], modules: IacResource[], findings: IacFinding[], cloud: Exclude<Cloud, "other">): string {
+function factsOf(groups: IacGroup[], own: IacResource[], modules: IacResource[], findings: MapFinding[], cloud: Exclude<Cloud, "other">): string {
 	const lines = [`# ${CLOUD_NAMES[cloud]} infrastructure as code (read from the repository)`, ""];
 	for (const g of groups) {
 		lines.push(`## ${g.label}`);
@@ -161,9 +418,6 @@ function factsOf(groups: IacGroup[], own: IacResource[], modules: IacResource[],
 		}
 		lines.push("");
 	}
-	if (findings.length) {
-		lines.push("## Review findings (from the declared settings)");
-		for (const f of findings) lines.push(`- ${f.resource.address} (${f.resource.file}:${f.resource.line}): ${f.text}`);
-	}
+	lines.push(...findingsMarkdown(findings, "## Health findings (from the declared settings; also drawn as badges on the shapes)"));
 	return lines.join("\n");
 }

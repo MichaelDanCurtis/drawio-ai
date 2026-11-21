@@ -11,12 +11,15 @@ const { MapperError } = require("../src/main/mapper/types");
 const { softwareRecipes } = require("../src/main/mapper/recipes/software");
 const { parseAddress, isSecretKey, scrub, techOf, libraryTech } = require("../src/main/mapper/recipes/software/shared");
 const { scanSystem, stripComments } = require("../src/main/mapper/recipes/software/systemScan");
-const { modulesToGraph, classesToGraph, cycleMembers } = require("../src/main/mapper/recipes/software/codeStructure");
+const { modulesToGraph, classesToGraph, cycleMembers, moduleFindings } = require("../src/main/mapper/recipes/software/codeStructure");
 const { openApiToGraph, parseGraphQL, graphqlToGraph } = require("../src/main/mapper/recipes/software/api");
+const { hardcodedSecret, maskHint } = require("../src/main/mapper/recipes/software/health");
 const { clusterToGraph } = require("../src/main/mapper/recipes/software/kubernetes");
 const { checkModelXml } = require("./helpers/xml");
 
 const SHOP = path.join(__dirname, "fixtures/software/shop");
+/** The same kind of system with none of the planted issues. */
+const CLEAN = path.join(__dirname, "fixtures/software/clean");
 const recipe = (id) => softwareRecipes.find((r) => r.id === id);
 const noExec = async () => assert.fail("no commands");
 const ctxFor = (dir, exec = noExec) => ({ cwd: dir, progress: () => {}, signal: new AbortController().signal, exec });
@@ -28,6 +31,33 @@ function assertNoSecrets(label, ...outputs) {
 }
 const node = (g, id) => g.nodes.find((n) => n.id === id);
 const edge = (g, from, to) => g.edges.find((e) => e.from === from && e.to === to);
+
+/** Findings point at shapes that exist; every check reports what it scanned. */
+function checkFindings(r, label) {
+	const ids = new Set(r.graph.nodes.map((n) => n.id));
+	assert.ok(Array.isArray(r.findings), `${label}: findings`);
+	assert.ok(Array.isArray(r.checked) && r.checked.length, `${label}: checked`);
+	for (const c of r.checked) assert.ok(c.check && Number.isInteger(c.scanned) && c.scanned >= 0, `${label}: ${JSON.stringify(c)}`);
+	for (const f of r.findings) {
+		assert.ok(f.id && f.kind && f.title && ["high", "medium", "low", "info"].includes(f.severity), `${label}: ${JSON.stringify(f)}`);
+		assert.ok(f.nodeIds.length && f.nodeIds.every((id) => ids.has(id)), `${label}: ${f.id} points at ${f.nodeIds}`);
+	}
+	assert.equal(new Set(r.findings.map((f) => f.id)).size, r.findings.length, `${label}: ids are unique`);
+}
+const byKind = (r, kind) => r.findings.filter((f) => f.kind === kind);
+
+/** Every node's files are relative paths (forward slashes) that exist under the mapped folder. */
+function checkFiles(g, root, label) {
+	let n = 0;
+	for (const x of g.nodes) {
+		for (const f of x.files ?? []) {
+			n++;
+			assert.ok(!f.startsWith("/") && !f.includes("\\") && !f.split("/").includes(".."), `${label}: ${x.id} ${f}`);
+			assert.ok(fs.statSync(path.join(root, f)).isFile(), `${label}: ${x.id} ${f} exists`);
+		}
+	}
+	assert.ok(n > 0, `${label}: some nodes carry files`);
+}
 
 test("addresses: scheme, host and port only — credentials, paths and queries are dropped", () => {
 	assert.deepEqual(parseAddress("postgres://app:p%40ss@db.internal:5432/orders?sslmode=require&password=x"), { scheme: "postgres", hosts: [{ host: "db.internal", port: 5432 }], database: "orders" });
@@ -108,6 +138,178 @@ test("connectivity: services, stores, queues and APIs from compose, Kubernetes, 
 	assertNoSecrets("connectivity", r, xml, prompt);
 	assert.match(prompt, /<facts collected read-only/);
 	assert.match(recipe("software.connectivity").digDeeper([{ label: "orders", data: { dir: "services/orders" } }], ""), /Trace what this calls[\s\S]*services\/orders/);
+});
+
+test("health findings (connectivity): credentials, plain HTTP, health checks, privileged containers, unguarded write routes", async () => {
+	const rec = recipe("software.connectivity");
+	const r = await rec.collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFindings(r, "connectivity");
+	// Hard-coded credentials: one per file and setting, located, value masked.
+	const creds = byKind(r, "hardcoded-credential");
+	assert.deepEqual(
+		creds.map((f) => f.id),
+		["DATABASE_URL", "JWT_SECRET", "MONGO_URL", "POSTGRES_PASSWORD", "REDIS_URL", "STRIPE_API_KEY"].map((k) => `hardcoded-credential:docker-compose.yml:${k}`)
+	);
+	const stripe = creds.find((f) => f.id.endsWith("STRIPE_API_KEY"));
+	assert.deepEqual(stripe.nodeIds, ["svc:orders"]);
+	assert.equal(stripe.severity, "medium");
+	assert.match(stripe.detail, /^docker-compose\.yml:10 sets STRIPE_API_KEY to a literal value \(fa… \(40 chars\)\)/);
+	assert.match(creds.find((f) => f.id.endsWith("DATABASE_URL")).detail, /docker-compose\.yml:6 puts a literal password in DATABASE_URL/);
+	assert.deepEqual(creds.find((f) => f.id.endsWith("POSTGRES_PASSWORD")).nodeIds, ["res:compose:db"]);
+	assert.ok(!creds.some((f) => /SLACK|AWS_SECRET|AZURE_STORAGE/.test(f.id)), ".env files hold local secrets and are not flagged");
+	// Plain HTTP to a host outside the system (http://inventory:8000 is internal).
+	const plain = byKind(r, "plaintext-http");
+	assert.deepEqual(plain.map((f) => f.id), ["plaintext-http:svc:orders:api.parcel-partner.com"]);
+	assert.deepEqual(plain[0].nodeIds, ["svc:orders", "res:ext:api.parcel-partner.com"]);
+	assert.match(plain[0].detail, /k8s\/orders\.yaml \(orders: SHIPPING_API_URL\)/);
+	// Health checks: compose app services, the awaited mongo (medium), the k8s Deployment.
+	const health = Object.fromEntries(byKind(r, "missing-healthcheck").map((f) => [f.id, f]));
+	assert.deepEqual(Object.keys(health).sort(), ["missing-healthcheck:res:compose:mongo:compose", "missing-healthcheck:svc:inventory:compose", "missing-healthcheck:svc:orders:compose", "missing-healthcheck:svc:orders:k8s"]);
+	assert.equal(health["missing-healthcheck:res:compose:mongo:compose"].severity, "medium");
+	assert.match(health["missing-healthcheck:res:compose:mongo:compose"].title, /inventory waits for mongo to be healthy/);
+	assert.equal(health["missing-healthcheck:svc:orders:k8s"].severity, "low");
+	assert.match(health["missing-healthcheck:svc:orders:k8s"].detail, /^k8s\/orders\.yaml:22: .*readinessProbe/);
+	// Privileged container.
+	const priv = byKind(r, "privileged-container");
+	assert.equal(priv.length, 1);
+	assert.equal(priv[0].severity, "high");
+	assert.match(priv[0].detail, /^k8s\/orders\.yaml:38: privileged: true \(container orders\)/);
+	// Write routes in services whose code has no auth at all.
+	assert.deepEqual(byKind(r, "no-auth-guard").map((f) => [f.id, f.nodeIds[0]]), [
+		["no-auth-guard:svc:inventory", "svc:inventory"],
+		["no-auth-guard:svc:orders", "svc:orders"],
+	]);
+	assert.match(byKind(r, "no-auth-guard")[1].detail, /POST \/orders \(services\/orders\/src\/index\.ts:15\), DELETE \/orders\/:id/);
+	assert.equal(r.findings[0].severity, "high", "most severe first");
+	// Coverage of every check family.
+	assert.deepEqual(
+		r.checked.map((c) => c.check),
+		["Hard-coded credentials in compose, Kubernetes and config files", "Plain-text HTTP to external hosts", "Health checks and readiness probes", "Privileged containers, host network / PID and Docker socket mounts", "HTTP write endpoints without authentication"]
+	);
+	assert.ok(r.checked.every((c) => c.scanned > 0), JSON.stringify(r.checked));
+	// Stable across runs, and no secret anywhere.
+	const again = await rec.collect({ folder: SHOP }, ctxFor(SHOP));
+	assert.deepEqual(again.findings.map((f) => f.id), r.findings.map((f) => f.id));
+	const { xml } = renderGraph(r.graph, { recipe: rec.id });
+	assertNoSecrets("findings", r.findings, r.checked, r.facts, xml);
+	// Data flow: the same checks; the route finding sits on the HTTP routes table.
+	const df = await recipe("software.dataflow").collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFindings(df, "dataflow");
+	assert.deepEqual(byKind(df, "no-auth-guard").map((f) => f.nodeIds[0]), ["svc:inventory#http", "svc:orders#http"]);
+	assertNoSecrets("dataflow findings", df.findings);
+});
+
+test("health findings: a clean system has none, and still reports what was checked", async () => {
+	for (const id of ["software.connectivity", "software.dataflow", "software.github-actions", "software.api", "software.modules"]) {
+		const r = await recipe(id).collect({ folder: CLEAN }, ctxFor(CLEAN));
+		checkFindings(r, `${id} (clean)`);
+		assert.deepEqual(r.findings, [], `${id}: ${JSON.stringify(r.findings, null, 1)}`);
+		assert.ok(r.checked.some((c) => c.scanned > 0), `${id}: something was checked`);
+	}
+	const c = await recipe("software.connectivity").collect({ folder: CLEAN }, ctxFor(CLEAN));
+	assert.ok(c.checked.every((x) => x.scanned > 0), JSON.stringify(c.checked));
+});
+
+test("credentials: secret settings and URL / connection-string passwords with literal values; references and placeholders are not", () => {
+	assert.equal(hardcodedSecret("API_KEY", "sk_live_abcdefghijklmnop").what, "value");
+	assert.equal(hardcodedSecret("DATABASE_URL", "postgres://u:hunter2@db/x").what, "url-password");
+	assert.equal(hardcodedSecret("ConnectionStrings:Main", "Server=db;Database=x;User Id=u;Password=hunter22;").what, "url-password");
+	for (const [k, v] of [
+		["API_KEY", "${API_KEY}"],
+		["DB_PASSWORD", "{{ .Values.pw }}"],
+		["JWT_SECRET", "<your-secret>"],
+		["AUTH_ENABLED", "true"],
+		["PASSWORD_MIN_LENGTH", "12"],
+		["API_KEY_HEADER", "X-Api-Key"],
+		["SECRET_FILE", "/run/secrets/db"],
+		["DATABASE_URL", "postgres://u:${DB_PASSWORD}@db/x"],
+		["DATABASE_URL", "postgres://db:5432/x"],
+		["TOKEN", "changeme-here"],
+		["LOG_LEVEL", "debug"],
+	])
+		assert.equal(hardcodedSecret(k, v), undefined, `${k}=${v}`);
+	assert.equal(maskHint("supersecretvalue"), "su… (16 chars)");
+	assert.equal(maskHint("short"), "*** (5 chars)");
+	assert.ok(!JSON.stringify(hardcodedSecret("API_KEY", "sk_live_abcdefghijklmnop").hint).includes("abcdef"));
+});
+
+test("files: every shape carries the repository files it comes from (relative, existing)", async () => {
+	const c = await recipe("software.connectivity").collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFiles(c.graph, SHOP, "connectivity");
+	assert.deepEqual(node(c.graph, "svc:orders").files, [".env.example", "docker-compose.yml", "k8s/orders.yaml", "services/orders/Dockerfile", "services/orders/package.json", "services/orders/src/db.ts", "services/orders/src/index.ts"]);
+	assert.deepEqual(node(c.graph, "svc:orders#f1").files, ["services/orders/Dockerfile"]);
+	assert.ok(node(c.graph, "res:compose:db").files.includes("docker-compose.yml"));
+	assert.deepEqual(node(c.graph, "res:kafka:order-created").files, ["services/inventory/app/main.py", "services/inventory/requirements.txt", "services/orders/package.json", "services/orders/src/index.ts"]);
+	assert.deepEqual(node(c.graph, "ing:shop/shop").files, ["k8s/orders.yaml"]);
+	const df = await recipe("software.dataflow").collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFiles(df.graph, SHOP, "dataflow");
+	assert.deepEqual(node(df.graph, "svc:orders#http").files, ["services/orders/src/index.ts"]);
+	assert.deepEqual(node(df.graph, "svc:orders#schedule").files, ["k8s/orders.yaml"]);
+	for (const id of ["software.modules", "software.classes", "software.api", "software.github-actions"]) {
+		const r = await recipe(id).collect({ folder: SHOP }, ctxFor(SHOP));
+		checkFiles(r.graph, SHOP, id);
+	}
+	const m = await recipe("software.modules").collect({ folder: SHOP }, ctxFor(SHOP));
+	assert.deepEqual(node(m.graph, "services/orders/src/db.ts").files, ["services/orders/src/db.ts"]);
+	const cl = await recipe("software.classes").collect({ folder: SHOP }, ctxFor(SHOP));
+	assert.deepEqual(node(cl.graph, "type:OrderRepository").files, ["services/orders/src/models.ts"]);
+	const api = await recipe("software.api").collect({ folder: SHOP }, ctxFor(SHOP));
+	assert.deepEqual(node(api.graph, "spec:api/openapi.yaml#op:POST:/orders").files, ["api/openapi.yaml"]);
+	assert.deepEqual(node(api.graph, "gql:Query").files, ["api/schema.graphql"]);
+});
+
+test("health findings (GitHub Actions): unpinned actions, pull_request_target checkout, token permissions, script injection", async () => {
+	const rec = recipe("software.github-actions");
+	const r = await rec.collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFindings(r, "github-actions");
+	const job = "wf:.github/workflows/ci.yml#test";
+	const deploy = "wf:.github/workflows/ci.yml#deploy";
+	assert.deepEqual(
+		r.findings.map((f) => [f.severity, f.id]),
+		[
+			["high", `pr-target-checkout:${job}`],
+			["high", `script-injection:${job}`],
+			["medium", `token-permissions:${deploy}`],
+			["medium", `token-permissions:${job}`],
+			["medium", `unpinned-action:${job}:acme-tools/setup-thing`],
+		]
+	);
+	const f = Object.fromEntries(r.findings.map((x) => [x.id, x]));
+	assert.match(f[`pr-target-checkout:${job}`].detail, /^\.github\/workflows\/ci\.yml:12:/);
+	assert.match(f[`script-injection:${job}`].title, /github\.event\.pull_request\.title/);
+	assert.match(f[`script-injection:${job}`].detail, /^\.github\/workflows\/ci\.yml:15:/);
+	assert.match(f[`token-permissions:${deploy}`].title, /write-all/);
+	assert.match(f[`token-permissions:${job}`].title, /default token permissions/);
+	assert.match(f[`unpinned-action:${job}:acme-tools/setup-thing`].detail, /^\.github\/workflows\/ci\.yml:13:/);
+	assert.ok(!r.findings.some((x) => /aws-actions|actions\/checkout/.test(x.id)), "SHA-pinned and first-party actions are fine");
+	assert.deepEqual(r.checked.map((c) => c.scanned), [3, 1, 2, 2]);
+	assert.deepEqual(node(r.graph, job).files, [".github/workflows/ci.yml"]);
+	assert.deepEqual((await rec.collect({ folder: SHOP }, ctxFor(SHOP))).findings.map((x) => x.id), r.findings.map((x) => x.id));
+});
+
+test("health findings (API, modules): endpoints without security, plain-text servers, import cycles", async () => {
+	const api = await recipe("software.api").collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFindings(api, "api");
+	assert.deepEqual(api.findings.map((f) => [f.severity, f.id, f.nodeIds[0]]), [
+		["medium", "endpoint-without-security:api/legacy-swagger.json:PUT /items", "spec:api/legacy-swagger.json#op:PUT:/items"],
+		["medium", "plaintext-http:api/legacy-swagger.json:legacy.acme-shop.com", "spec:api/legacy-swagger.json"],
+	]);
+	assert.ok(!api.findings.some((f) => f.id.includes("openapi.yaml")), "global security and an explicit security: [] on /health are fine");
+	assert.deepEqual(api.checked.map((c) => c.scanned), [7, 2]);
+	// Modules: a file-level cycle is one finding on its members; folder-level maps are not checked.
+	const modules = new Map(["a.ts", "b.ts", "c.ts"].map((f) => [f, { file: f, lang: "js" }]));
+	const edges = new Map([
+		["a.ts", new Set(["b.ts"])],
+		["b.ts", new Set(["a.ts", "c.ts"])],
+	]);
+	const { graph } = modulesToGraph({ modules, edges, externals: new Map(), unresolved: 0, languages: new Map([["js", 3]]) }, "x");
+	const m = moduleFindings(graph);
+	assert.deepEqual(m.findings.map((f) => [f.id, f.severity, f.nodeIds]), [["import-cycle:a.ts", "low", ["a.ts", "b.ts"]]]);
+	assert.match(m.findings[0].detail, /a\.ts → b\.ts; b\.ts → a\.ts/);
+	assert.deepEqual(m.checked, [{ check: "Import cycles between files", scanned: 3, note: "modules on the map" }]);
+	const shop = await recipe("software.modules").collect({ folder: SHOP }, ctxFor(SHOP));
+	checkFindings(shop, "modules");
+	assert.deepEqual(shop.findings, []);
 });
 
 test("connectivity: tests / fixtures are skipped unless asked for, and an empty folder says so", async () => {

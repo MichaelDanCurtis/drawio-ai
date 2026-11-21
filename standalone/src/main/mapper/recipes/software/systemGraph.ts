@@ -64,7 +64,7 @@ export function systemGraph(scan: SystemScan, opts: SystemGraphOptions): MapGrap
 	if (scan.exposed.size || scan.ingresses.length) {
 		push({ id: "clients", label: "Users / clients", kind: "software:clients", shape: "icon", style: STYLE.actor, width: 36, height: 56 });
 		for (const ing of scan.ingresses) {
-			push({ id: ing.id, label: ing.label, kind: "software:ingress", style: STYLE.gateway, height: ing.label.includes("\n") ? 52 : 40, data: { file: ing.file } });
+			push({ id: ing.id, label: ing.label, kind: "software:ingress", style: STYLE.gateway, height: ing.label.includes("\n") ? 52 : 40, data: { file: ing.file }, files: [ing.file] });
 			edges.push({ from: "clients", to: ing.id, label: "HTTPS", style: STYLE.edge });
 			const byService = new Map<string, string[]>();
 			for (const r of ing.routes) byService.set(r.service, [...(byService.get(r.service) ?? []), r.path]);
@@ -93,6 +93,7 @@ export function systemGraph(scan: SystemScan, opts: SystemGraphOptions): MapGrap
 				envKeys: [...s.envKeys].slice(0, 30).join(", "),
 				files: s.facets.map((f) => f.file).slice(0, 6).join(", "),
 			}),
+			...(s.files.size ? { files: fileList(s.files) } : {}),
 		});
 		if (opts.entries && s.entries.length) {
 			for (const kind of ["http", "consumer", "schedule", "grpc", "cli"] as const) {
@@ -112,11 +113,12 @@ export function systemGraph(scan: SystemScan, opts: SystemGraphOptions): MapGrap
 					style: STYLE.table(kind === "http" ? "#dae8fc" : kind === "consumer" ? "#e1d5e7" : "#fff2cc", kind === "http" ? "#6c8ebf" : kind === "consumer" ? "#9673a6" : "#d6b656"),
 					rows,
 					data: { service: s.name, files: dedupe(list.map((e) => `${e.file}:${e.line}`)).slice(0, 12).join(", ") },
+					files: fileList(list.map((e) => e.file)),
 				});
 			}
 		} else {
 			for (const [i, f] of s.facets.slice(0, 4).entries()) {
-				out.push({ id: `${s.id}#f${i}`, label: f.label, kind: `software:${f.source}`, parent: s.id, style: STYLE.facet, height: 30, width: Math.max(130, Math.min(240, f.label.length * 6.5 + 20)), data: { file: f.file } });
+				out.push({ id: `${s.id}#f${i}`, label: f.label, kind: `software:${f.source}`, parent: s.id, style: STYLE.facet, height: 30, width: Math.max(130, Math.min(240, f.label.length * 6.5 + 20)), data: { file: f.file }, files: [f.file] });
 			}
 		}
 		return out;
@@ -133,7 +135,8 @@ export function systemGraph(scan: SystemScan, opts: SystemGraphOptions): MapGrap
 		const tech = r.tech?.label;
 		const lines = [r.name, tech && tech.toLowerCase() !== r.name.toLowerCase() && r.kind !== "external" ? tech : "", r.database ? `db: ${r.database}` : ""].filter(Boolean);
 		const data = compact({ tech: r.tech?.id, address: r.address, database: r.database, evidence: r.evidence.slice(0, 4).join(", ") });
-		if (isBroker) return { id: r.id, label: lines.join(" · "), kind: `software:${r.kind}`, container: true, style: STYLE.broker, data };
+		const files = fileList(r.files);
+		if (isBroker) return { id: r.id, label: lines.join(" · "), kind: `software:${r.kind}`, container: true, style: STYLE.broker, data, ...(files.length ? { files } : {}) };
 		const cyl = ["database", "cache", "search", "storage"].includes(r.kind);
 		return {
 			id: r.id,
@@ -144,6 +147,7 @@ export function systemGraph(scan: SystemScan, opts: SystemGraphOptions): MapGrap
 			width: cyl ? 130 : r.kind === "external" ? 150 : undefined,
 			height: cyl ? 64 + Math.max(0, lines.length - 2) * 14 : r.kind === "external" ? 70 : lines.length > 2 ? 64 : 48,
 			data,
+			...(files.length ? { files } : {}),
 		};
 	}
 
@@ -167,6 +171,11 @@ export function systemGraph(scan: SystemScan, opts: SystemGraphOptions): MapGrap
 
 export function compact(o: Record<string, string | undefined>): Record<string, string> {
 	return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== "")) as Record<string, string>;
+}
+
+/** A node's source files: sorted, de-duplicated, capped. */
+function fileList(files: Iterable<string>, max = 60): string[] {
+	return [...new Set(files)].filter(Boolean).sort().slice(0, max);
 }
 
 function dedupe(xs: string[]): string[] {

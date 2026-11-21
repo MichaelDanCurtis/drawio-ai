@@ -6,7 +6,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug, type FoundFile } from "../common";
-import type { CollectResult, FieldDef, MapEdge, MapGraph, MapNode, MapRow, Recipe } from "../../types";
+import type { CheckCoverage, CollectResult, FieldDef, MapEdge, MapFinding, MapGraph, MapNode, MapRow, Recipe } from "../../types";
+import { keepOnMap } from "./health";
 import { isOn, STYLE } from "./shared";
 
 // The analyzer lives in the extension's sources. It is loaded with require() so the
@@ -78,6 +79,8 @@ export interface ModuleDeps {
 	externals: Map<string, number>;
 	unresolved: number;
 	languages: Map<string, number>;
+	/** Node id → its source files (a Go package's .go files); defaults to the module's own file. */
+	sources?: Map<string, string[]>;
 }
 
 export function moduleDependencies(files: FoundFile[]): ModuleDeps {
@@ -85,6 +88,7 @@ export function moduleDependencies(files: FoundFile[]): ModuleDeps {
 	const edges = new Map<string, Set<string>>();
 	const externals = new Map<string, number>();
 	const languages = new Map<string, number>();
+	const sources = new Map<string, string[]>();
 	let unresolved = 0;
 	const paths = new Set(files.map((f) => f.rel));
 	const langOf = (rel: string) => (/\.(tsx?|jsx?|mjs|cjs)$/i.test(rel) ? "js" : /\.py$/i.test(rel) ? "py" : /\.go$/i.test(rel) ? "go" : /\.(java|kt)$/i.test(rel) ? "java" : "cs");
@@ -94,6 +98,7 @@ export function moduleDependencies(files: FoundFile[]): ModuleDeps {
 		languages.set(lang, (languages.get(lang) ?? 0) + 1);
 		const id = idOf(f.rel);
 		if (!modules.has(id)) modules.set(id, { file: lang === "go" ? dirOf(f.rel) || "." : f.rel, lang });
+		sources.set(id, [...(sources.get(id) ?? []), f.rel]);
 	}
 	const ext = (name: string) => externals.set(name, (externals.get(name) ?? 0) + 1);
 
@@ -217,7 +222,7 @@ export function moduleDependencies(files: FoundFile[]): ModuleDeps {
 		}
 		edges.set(from, deps);
 	}
-	return { modules, edges, externals, unresolved, languages };
+	return { modules, edges, externals, unresolved, languages, sources };
 }
 
 function goModulePaths(files: FoundFile[]): { module: string; dir: string }[] {
@@ -304,6 +309,12 @@ export function modulesToGraph(deps: ModuleDeps, name: string, maxNodes = MAX_NO
 	const edges: MapEdge[] = [];
 	let level = "file";
 	let groupOf = (id: string) => id;
+	const filesOfModule = (id: string): string[] => {
+		const m = deps.modules.get(id);
+		return deps.sources?.get(id) ?? (m && m.lang !== "go" ? [m.file] : []);
+	};
+	/** Folder node → files of the modules it stands for. */
+	const memberFiles = new Map<string, string[]>();
 	if (deps.modules.size > maxNodes) {
 		// Aggregate to folders, at the deepest level that stays under the cap.
 		const folders = [...deps.modules.values()].map((m) => (m.lang === "go" ? m.file : dirOf(m.file) || "."));
@@ -311,6 +322,7 @@ export function modulesToGraph(deps: ModuleDeps, name: string, maxNodes = MAX_NO
 		const cut = (f: string, d: number) => (f === "." ? "." : f.split("/").slice(0, d).join("/"));
 		while (depth > 1 && new Set(folders.map((f) => cut(f, depth))).size > maxNodes) depth--;
 		const byId = new Map([...deps.modules].map(([id, m]) => [id, cut(m.lang === "go" ? m.file : dirOf(m.file) || ".", depth)]));
+		for (const [id, folder] of byId) memberFiles.set(`dir:${folder}`, [...(memberFiles.get(`dir:${folder}`) ?? []), ...filesOfModule(id)]);
 		groupOf = (id) => `dir:${byId.get(id) ?? id}`;
 		level = `folder (depth ${depth})`;
 	}
@@ -343,7 +355,8 @@ export function modulesToGraph(deps: ModuleDeps, name: string, maxNodes = MAX_NO
 		for (const [id, m] of deps.modules) {
 			const dir = m.lang === "go" ? dirOf(m.file === "." ? "" : m.file) : dirOf(m.file);
 			const label = m.lang === "go" ? `${m.file.split("/").pop()} (package)` : m.file.split("/").pop()!;
-			nodes.push({ id, label, kind: "software:module", parent: container(dir), style: STYLE.module, height: 36, data: { file: m.file, language: m.lang, ...(cycles.has(id) ? { cycle: String(cycles.get(id)) } : {}) } });
+			const files = filesOfModule(id);
+			nodes.push({ id, label, kind: "software:module", parent: container(dir), style: STYLE.module, height: 36, data: { file: m.file, language: m.lang, ...(cycles.has(id) ? { cycle: String(cycles.get(id)) } : {}) }, ...(files.length ? { files: files.slice(0, 60) } : {}) });
 		}
 	} else {
 		const tops = new Set([...members.keys()].map((g) => g.slice(4).split("/")[0]));
@@ -352,7 +365,8 @@ export function modulesToGraph(deps: ModuleDeps, name: string, maxNodes = MAX_NO
 			const top = folder.split("/")[0];
 			const parent = tops.size > 1 && folder.includes("/") ? container(top) : undefined;
 			const label = parent ? folder.slice(top.length + 1) : folder === "." ? "(root)" : folder;
-			nodes.push({ id: g, label: `${label}\n${n} module${n === 1 ? "" : "s"}`, kind: "software:folder", parent, style: STYLE.folderNode, height: 52, data: { folder, modules: String(n), ...(cycles.has(g) ? { cycle: String(cycles.get(g)) } : {}) } });
+			const files = [...new Set(memberFiles.get(g) ?? [])].sort().slice(0, 60);
+			nodes.push({ id: g, label: `${label}\n${n} module${n === 1 ? "" : "s"}`, kind: "software:folder", parent, style: STYLE.folderNode, height: 52, data: { folder, modules: String(n), ...(cycles.has(g) ? { cycle: String(cycles.get(g)) } : {}) }, ...(files.length ? { files } : {}) });
 		}
 	}
 	for (const [k, n] of counts) {
@@ -361,6 +375,34 @@ export function modulesToGraph(deps: ModuleDeps, name: string, maxNodes = MAX_NO
 		edges.push({ from: a, to: b, label: level === "file" || n === 1 ? undefined : String(n), kind: "imports", style: inCycle ? STYLE.edgeCycle : STYLE.edge });
 	}
 	return { graph: { title: `Modules · ${name}`, nodes, edges, direction: "down" }, level, cycles: new Set(cycles.values()).size };
+}
+
+/**
+ * Import cycles between files: one finding per cycle, on its members (exported for tests).
+ * Folder-level maps are not checked: cycles between folders are often just layout.
+ */
+export function moduleFindings(graph: MapGraph): { findings: MapFinding[]; checked: CheckCoverage[] } {
+	const byCycle = new Map<string, string[]>();
+	const drawn = graph.nodes.filter((n) => n.kind === "software:module");
+	if (!drawn.length) return { findings: [], checked: [{ check: "Import cycles between files", scanned: 0, note: "not checked: this map is drawn per folder (map a sub-folder for file-level cycles)" }] };
+	for (const n of drawn) if (n.data?.cycle) byCycle.set(n.data.cycle, [...(byCycle.get(n.data.cycle) ?? []), n.id]);
+	const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+	const label = (id: string) => byId.get(id)?.data?.file ?? byId.get(id)?.data?.folder ?? id;
+	const findings: MapFinding[] = [...byCycle.values()].map((members) => {
+		const sorted = [...members].sort();
+		const inCycle = new Set(sorted);
+		const hops = graph.edges.filter((e) => inCycle.has(e.from) && inCycle.has(e.to)).slice(0, 6).map((e) => `${label(e.from)} → ${label(e.to)}`);
+		return {
+			id: `import-cycle:${sorted[0]}`,
+			kind: "import-cycle",
+			severity: "low",
+			title: `Import cycle between ${sorted.length} modules`,
+			detail: `${sorted.slice(0, 8).map(label).join(", ")}${sorted.length > 8 ? `, … ${sorted.length - 8} more` : ""}. Imports in the cycle: ${hops.join("; ")}${hops.length === 6 ? "; …" : ""}.`,
+			nodeIds: sorted,
+			fix: "Break the cycle: move what both sides need into a module they can both import, or invert one dependency (pass an interface or callback instead of importing).",
+		};
+	});
+	return { findings: keepOnMap(findings, graph), checked: [{ check: "Import cycles between files", scanned: drawn.length, note: "modules on the map" }] };
 }
 
 export const modulesRecipe: Recipe = {
@@ -400,7 +442,8 @@ export const modulesRecipe: Recipe = {
 				.slice(0, 600)
 				.map(([from, tos]) => `- ${from} → ${[...tos].slice(0, 20).join(", ")}${tos.size > 20 ? ` … +${tos.size - 20}` : ""}`),
 		].join("\n");
-		return { graph, summary: `${deps.modules.size} modules, ${edgeCount} imports, ${cycles} cycle(s) (${Date.now() - started} ms)`, warnings, facts };
+		const { findings, checked } = moduleFindings(graph);
+		return { graph, summary: `${deps.modules.size} modules, ${edgeCount} imports, ${cycles} cycle(s) (${Date.now() - started} ms)`, warnings, facts, findings, checked };
 	},
 	agentPrompt: (_input, result) =>
 		agentRequest(
@@ -456,6 +499,7 @@ export function classesToGraph(a: CaAnalysis, name: string, maxNodes = MAX_NODES
 			style: CLASS_STYLE[e.kind] ?? CLASS_STYLE.class,
 			rows,
 			data: { file: e.file, line: String(e.line), type: e.kind },
+			files: [e.file],
 		});
 	}
 	const edges: MapEdge[] = [];

@@ -40,3 +40,8 @@ stages:
     plots:
       - eval/plots/sklearn/roc.json:
           cache: false
+  publish:
+    cmd: python src/publish.py model.pkl
+    deps:
+      - model.pkl
+      - src/publish.py

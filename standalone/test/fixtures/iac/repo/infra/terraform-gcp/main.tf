@@ -42,6 +42,11 @@ resource "google_sql_database_instance" "db" {
     tier = "db-f1-micro"
     ip_configuration {
       private_network = google_compute_network.vpc.id
+      ipv4_enabled    = true
+      authorized_networks {
+        name  = "anywhere"
+        value = "0.0.0.0/0"
+      }
     }
   }
 }
@@ -58,4 +63,16 @@ resource "google_cloud_run_v2_service" "api" {
       }
     }
   }
+}
+
+resource "google_storage_bucket_iam_member" "public_read" {
+  bucket = google_storage_bucket.data.name
+  role   = "roles/storage.objectViewer"
+  member = "allUsers"
+}
+
+resource "google_container_cluster" "gke" {
+  name     = "app-gke"
+  location = "europe-west1"
+  network  = google_compute_network.vpc.id
 }

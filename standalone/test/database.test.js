@@ -22,6 +22,7 @@ const { relationStyle, LARGE_SCHEMA } = require("../src/main/mapper/recipes/data
 const { inferFields, guessCollection } = require("../src/main/mapper/recipes/database/mongo");
 const { oracleConnectParams } = require("../src/main/mapper/recipes/database/oracle");
 const { dbtLineageRecipe, manifestToGraph } = require("../src/main/mapper/recipes/database/dbt");
+const { schemaFindings } = require("../src/main/mapper/recipes/database/findings");
 const { checkModelXml } = require("./helpers/xml");
 
 const FIX = path.join(__dirname, "fixtures/database");
@@ -249,6 +250,110 @@ describe("building blocks", () => {
 	});
 });
 
+// ----- health findings -----
+
+/** Findings point at shapes on the map, ids are unique, and every check says what it scanned. */
+function checkFindings(r, label) {
+	const ids = new Set(r.graph.nodes.map((n) => n.id));
+	assert.ok(Array.isArray(r.findings) && Array.isArray(r.checked) && r.checked.length, label);
+	for (const c of r.checked) assert.ok(c.check && Number.isInteger(c.scanned), `${label}: ${JSON.stringify(c)}`);
+	for (const f of r.findings) assert.ok(f.nodeIds.length && f.nodeIds.every((id) => ids.has(id)) && ["high", "medium", "low", "info"].includes(f.severity), `${label}: ${JSON.stringify(f)}`);
+	assert.equal(new Set(r.findings.map((f) => f.id)).size, r.findings.length, `${label}: unique ids`);
+}
+const kinds = (r) => [...new Set(r.findings.map((f) => f.kind))].sort();
+
+describe("health findings", () => {
+	test("recorded catalogs: unindexed foreign keys where the engine does not index them, nullable FKs; no table lacks a primary key", () => {
+		for (const engine of ["postgres", "mysql", "mssql", "oracle", "sqlite"]) {
+			const r = resultFromRaw(loadRaw(engine), { includeViews: true, now: NOW });
+			checkFindings(r, engine);
+			assert.ok(!r.findings.some((f) => f.kind === "missing-primary-key"), `${engine}: every shop table has a primary key`);
+			assert.ok(!r.findings.some((f) => f.kind === "orphan-table"), `${engine}: every table is related`);
+			assert.equal(r.checked.find((c) => c.check === "Tables without a primary key").scanned, r.graph.nodes.filter((n) => n.kind === "db:table").length, engine);
+			assert.deepEqual(resultFromRaw(loadRaw(engine), { includeViews: true, now: NOW }).findings.map((f) => f.id), r.findings.map((f) => f.id), `${engine}: stable ids`);
+		}
+		const pg = resultFromRaw(loadRaw("postgres"), { includeViews: true, now: NOW });
+		assert.deepEqual(kinds(pg), ["nullable-foreign-key", "unindexed-foreign-key"]);
+		const fk = pg.findings.find((f) => f.id === "unindexed-foreign-key:db:public.orders:customer_id");
+		assert.equal(fk.severity, "low");
+		assert.deepEqual(fk.nodeIds, ["db:public.orders", "db:public.customers"]);
+		assert.match(fk.detail, /orders_customer_id_fkey \(customer_id\) → public\.customers\(id\): no index starts with customer_id\. PostgreSQL does not create one/);
+		assert.match(fk.fix, /CREATE INDEX ON public\.orders \(customer_id\)/);
+		assert.ok(!pg.findings.some((f) => f.id.includes("customer_profiles")), "the 1:1 key is the primary key");
+		assert.ok(!pg.findings.some((f) => f.id.includes("orders:status")), "indexed columns are fine");
+		assert.ok(pg.findings.some((f) => f.id === "nullable-foreign-key:db:public.orders:shipping_address_id" && f.severity === "info"));
+		// MySQL (InnoDB) indexes foreign keys itself: the check does not run.
+		const my = resultFromRaw(loadRaw("mysql"), { includeViews: true, now: NOW });
+		assert.deepEqual(kinds(my), ["nullable-foreign-key"]);
+		assert.ok(!my.checked.some((c) => /without an index/.test(c.check)));
+		assert.ok(resultFromRaw(loadRaw("mssql"), { includeViews: true, now: NOW }).checked.some((c) => c.check === "Foreign keys without an index" && c.scanned === 8));
+	});
+
+	test("MongoDB: collections referenced by other documents but indexed on _id only", () => {
+		const r = resultFromRaw(loadRaw("mongodb"), { includeViews: true, now: NOW });
+		checkFindings(r, "mongodb");
+		assert.deepEqual(r.findings.map((f) => [f.id, f.severity]), [
+			["unindexed-references:db:shop.payments", "low"],
+			["unindexed-references:db:shop.reviews", "low"],
+		]);
+		assert.match(r.findings[1].detail, /customer.*product_id|product_id.*customer/);
+		assert.ok(!r.findings.some((f) => f.id.includes("shop.orders")), "orders has an index on customerId");
+		assert.deepEqual(r.checked, [{ check: "Collections referenced by other documents without an index", scanned: 3, note: "collections with guessed reference fields" }]);
+	});
+
+	test("planted issues: a table without a primary key, an orphan table, a nullable unindexed FK", () => {
+		const col = (name, nullable = false) => ({ name, type: "int", nullable });
+		const t = (name, columns, primaryKey = ["id"], extra = {}) => ({ schema: "app", name, kind: "table", columns, primaryKey, uniques: [], ...extra });
+		const model = {
+			engine: "postgres",
+			database: "app",
+			tables: [
+				t("users", [col("id")]),
+				t("teams", [col("id")]),
+				t("members", [col("id"), col("user_id"), col("team_id", true)], ["id"], { indexed: ["user_id"] }),
+				t("events", [col("user_id"), col("at")], []),
+				t("audit_log", [col("id"), col("payload")]),
+				t("posts", [col("id"), col("author_id")]),
+			],
+			relations: [
+				{ name: "members_user_fk", schema: "app", table: "members", columns: ["user_id"], refSchema: "app", refTable: "users", refColumns: ["id"] },
+				{ name: "members_team_fk", schema: "app", table: "members", columns: ["team_id"], refSchema: "app", refTable: "teams", refColumns: ["id"] },
+				{ name: "events_user_fk", schema: "app", table: "events", columns: ["user_id"], refSchema: "app", refTable: "users", refColumns: ["id"] },
+				{ name: "posts_author_fk", schema: "app", table: "posts", columns: ["author_id"], refSchema: "app", refTable: "users", refColumns: ["id"] },
+			],
+			warnings: [],
+		};
+		const r = resultFromModel(model, { now: NOW });
+		checkFindings(r, "planted");
+		assert.deepEqual(r.findings.map((f) => [f.severity, f.id]), [
+			["medium", "missing-primary-key:db:app.events"],
+			["low", "unindexed-foreign-key:db:app.events:user_id"],
+			["low", "unindexed-foreign-key:db:app.members:team_id"],
+			["low", "unindexed-foreign-key:db:app.posts:author_id"],
+			["info", "nullable-foreign-key:db:app.members:team_id"],
+			["info", "orphan-table:db:app.audit_log"],
+		]);
+		assert.match(r.findings[0].title, /events has no primary key/);
+		assert.match(r.findings.find((f) => f.kind === "orphan-table").detail, /5 of 6 tables in app are related/);
+		assert.deepEqual(r.checked.map((c) => [c.check, c.scanned]), [
+			["Tables without a primary key", 6],
+			["Foreign keys without an index", 4],
+			["Nullable foreign key columns", 4],
+			["Tables with no relations in a related schema", 6],
+		]);
+		// Fixed: the issues are gone.
+		model.tables[3].primaryKey = ["user_id", "at"];
+		model.tables[2].columns[2].nullable = false;
+		model.tables[2].indexed.push("team_id");
+		model.tables[5].indexed = ["author_id"];
+		model.tables.splice(4, 1);
+		assert.deepEqual(resultFromModel(model, { now: NOW }).findings, []);
+		// Without any index information (e.g. no access to the index catalog) the FK index check is skipped.
+		const bare = schemaFindings({ ...model, tables: model.tables.map((x) => ({ ...x, indexed: undefined, uniques: [] })) }, r.graph);
+		assert.ok(!bare.checked.some((c) => /without an index/.test(c.check)));
+	});
+});
+
 // ----- secrets -----
 
 describe("secrets never leave the collector", () => {
@@ -381,6 +486,26 @@ test("dbt lineage: sources → models → exposures, materializations, tests, fo
 	checkModelXml(renderGraph(g, { recipe: dbtLineageRecipe.id }).xml);
 	await assert.rejects(dbtLineageRecipe.collect({ folder: os.tmpdir(), manifest: "nope/manifest.json" }, ctx()), /dbt compile|No nope/);
 	assert.ok(manifestToGraph({}).graph.nodes.length === 0);
+});
+
+test("dbt lineage: model files from the project folder, untested models", async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mapper-dbt-files-"));
+	fs.mkdirSync(path.join(dir, "target"));
+	fs.copyFileSync(path.join(FIX, "dbt-manifest.json"), path.join(dir, "target/manifest.json"));
+	for (const f of ["models/staging/stg_orders.sql", "models/marts/core/fct_orders.sql", "seeds/country_codes.csv"]) {
+		fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+		fs.writeFileSync(path.join(dir, f), "select 1\n");
+	}
+	const r = await dbtLineageRecipe.collect({ folder: dir }, ctx(dir));
+	const node = (uid) => r.graph.nodes.find((n) => n.data?.uniqueId === uid);
+	assert.deepEqual(node("model.shop.stg_orders").files, ["models/staging/stg_orders.sql"]);
+	assert.deepEqual(node("model.shop.fct_orders").files, ["models/marts/core/fct_orders.sql"]);
+	assert.deepEqual(node("seed.shop.country_codes").files, ["seeds/country_codes.csv"]);
+	assert.equal(node("model.shop.int_ephemeral").files, undefined, "files that are not in the folder are left out");
+	for (const n of r.graph.nodes) for (const f of n.files ?? []) assert.ok(!f.startsWith("/") && fs.existsSync(path.join(dir, f)), f);
+	// stg_orders has no test; fct_orders has two; ephemeral models are tested through their users.
+	assert.deepEqual(r.findings.map((f) => [f.id, f.severity, f.nodeIds]), [["untested-model:model.shop.stg_orders", "low", [node("model.shop.stg_orders").id]]]);
+	assert.deepEqual(r.checked, [{ check: "Models without tests", scanned: 2, note: "non-ephemeral models in the manifest" }]);
 });
 
 // ----- live databases (Docker) -----

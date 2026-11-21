@@ -9,6 +9,7 @@ import { MapperError } from "../../types";
 import type { CollectResult, FieldDef, MapInput, Recipe } from "../../types";
 import { abortable, connectionError, connSpecFromInput, isOn, scrubSecrets } from "./connection";
 import type { Engine, RawCatalog } from "./engines";
+import { schemaFindings } from "./findings";
 import { DbModel, ENGINE_NAMES, ENGINES, EngineId, LARGE_SCHEMA, listInput, modelFacts, modelToGraph } from "./model";
 import { mongoEngine } from "./mongo";
 import { mssqlEngine } from "./mssql";
@@ -105,8 +106,12 @@ export function resultFromModel(model: DbModel, opts: { now?: string; secrets?: 
 	const declared = model.relations.filter((r) => !r.inferred).length;
 	const guessed = model.relations.length - declared;
 	const rel = [declared ? `${declared} foreign key(s)` : "", guessed ? `${guessed} guessed reference(s)` : ""].filter(Boolean).join(", ");
+	const graph = modelToGraph(model, { now: opts.now });
+	const { findings, checked } = schemaFindings(model, graph);
 	return {
-		graph: modelToGraph(model, { now: opts.now }),
+		graph,
+		findings,
+		checked,
 		facts: modelFacts(model),
 		summary: `${tables} ${word}(s)${views ? `, ${views} view(s)` : ""}${rel ? `, ${rel}` : ""} in ${schemas} ${model.engine === "mongodb" ? "database" : "schema"}(s) · ${ENGINE_NAMES[model.engine]}${model.version ? ` ${model.version}` : ""}`,
 		warnings: warnings.map(scrub),

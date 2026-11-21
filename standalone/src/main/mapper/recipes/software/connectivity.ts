@@ -1,5 +1,6 @@
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput } from "../common";
 import type { CollectResult, FieldDef, MapInput, Recipe } from "../../types";
+import { systemFindings } from "./health";
 import { matchesFocus, scanFacts, systemGraph } from "./systemGraph";
 import { isOn } from "./shared";
 import { scanSystem, type SystemScan } from "./systemScan";
@@ -34,7 +35,8 @@ export const connectivityRecipe: Recipe = {
 			"Solid arrows: calls (protocol :port). Dashed purple: publish / consume. Dashed grey: start-up order only (depends_on).",
 			"Read-only from config and code: hosts and ports only, credentials are never read into the map.",
 		];
-		return { graph, summary: summaryOf(scan), warnings: scan.warnings, facts: scanFacts(scan) };
+		const { findings, checked } = systemFindings(scan, graph);
+		return { graph, summary: summaryOf(scan), warnings: scan.warnings, facts: scanFacts(scan), findings, checked };
 	},
 	agentPrompt: (_input, result) =>
 		agentRequest(
@@ -100,8 +102,11 @@ export const dataflowRecipe: Recipe = {
 			scanFacts(scan, { entries: true, maxEntries: 120 }),
 			terms.length ? `\n## Code mentioning “${focus}” (matches)\n${focusFiles(hits).map((f) => `- ${f}`).join("\n") || "- none found"}` : "",
 		].join("\n");
+		const { findings, checked } = systemFindings(scan, graph, { entries: true });
 		return {
 			graph,
+			findings,
+			checked,
 			summary: `${scan.services.length} service(s), ${entryCount} entry point(s)${terms.length ? ` (${focused} matching “${focus}”, ${hits.size} file(s) mention it)` : ""}, ${scan.resources.length} store(s)/queue(s)/API(s)`,
 			warnings: scan.warnings,
 			facts,

@@ -90,7 +90,7 @@
 			{ "GroupId": "sg-web", "GroupName": "web", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 80, "ToPort": 80, "IpRanges": [], "UserIdGroupPairs": [{ "GroupId": "sg-alb" }, { "GroupId": "sg-web" }] }] },
 			{ "GroupId": "sg-db", "GroupName": "db", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432, "IpRanges": [], "UserIdGroupPairs": [{ "GroupId": "sg-web" }, { "GroupId": "sg-lambda" }] }] },
 			{ "GroupId": "sg-lambda", "GroupName": "lambda", "VpcId": "vpc-0a1", "IpPermissions": [] },
-			{ "GroupId": "sg-cache", "GroupName": "cache", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 6379, "ToPort": 6379, "UserIdGroupPairs": [{ "GroupId": "sg-web" }] }] },
+			{ "GroupId": "sg-cache", "GroupName": "cache", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 6379, "ToPort": 6379, "UserIdGroupPairs": [{ "GroupId": "sg-web" }] }, { "IpProtocol": "tcp", "FromPort": 6379, "ToPort": 6379, "IpRanges": [{ "CidrIp": "0.0.0.0/0", "Description": "temporary debugging" }] }] },
 			{ "GroupId": "sg-bastion", "GroupName": "bastion", "VpcId": "vpc-0a1", "IpPermissions": [{ "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{ "CidrIp": "0.0.0.0/0" }] }] },
 			{ "GroupId": "sg-def", "GroupName": "default", "VpcId": "vpc-def", "IpPermissions": [{ "IpProtocol": "-1", "UserIdGroupPairs": [{ "GroupId": "sg-def" }] }] }
 		]
@@ -189,7 +189,7 @@
 				"EngineVersion": "13.12",
 				"AvailabilityZone": "us-east-1a",
 				"MultiAZ": false,
-				"PubliclyAccessible": false,
+				"PubliclyAccessible": true,
 				"StorageEncrypted": false,
 				"VpcSecurityGroups": [{ "VpcSecurityGroupId": "sg-db", "Status": "active" }],
 				"DBSubnetGroup": { "DBSubnetGroupName": "data", "VpcId": "vpc-0a1", "Subnets": [{ "SubnetIdentifier": "subnet-data-a", "SubnetAvailabilityZone": { "Name": "us-east-1a" } }, { "SubnetIdentifier": "subnet-data-b", "SubnetAvailabilityZone": { "Name": "us-east-1b" } }] }
@@ -312,6 +312,13 @@
 		"Owner": { "DisplayName": "example-owner", "ID": "abc123" }
 	},
 	"s3api get-bucket-location|example-logs-eu": { "LocationConstraint": "eu-west-1" },
+	"s3control get-public-access-block": { "$error": "\nAn error occurred (NoSuchPublicAccessBlockConfiguration) when calling the GetPublicAccessBlock operation: The public access block configuration was not found\n" },
+	"s3api get-public-access-block|example-assets": { "PublicAccessBlockConfiguration": { "BlockPublicAcls": true, "IgnorePublicAcls": true, "BlockPublicPolicy": false, "RestrictPublicBuckets": false } },
+	"s3api get-bucket-policy-status|example-assets": { "PolicyStatus": { "IsPublic": true } },
+	"s3api get-bucket-acl|example-assets": { "Owner": { "DisplayName": "ops-oncall@example.com", "ID": "abc123" }, "Grants": [{ "Grantee": { "Type": "CanonicalUser", "DisplayName": "ops-oncall@example.com", "ID": "abc123" }, "Permission": "FULL_CONTROL" }] },
+	"s3api get-public-access-block|example-logs-eu": { "$error": "\nAn error occurred (NoSuchPublicAccessBlockConfiguration) when calling the GetPublicAccessBlock operation: The public access block configuration was not found\n" },
+	"s3api get-bucket-policy-status|example-logs-eu": { "$error": "\nAn error occurred (NoSuchBucketPolicy) when calling the GetBucketPolicyStatus operation: The bucket policy does not exist\n" },
+	"s3api get-bucket-acl|example-logs-eu": { "Owner": { "DisplayName": "ops-oncall@example.com", "ID": "abc123" }, "Grants": [{ "Grantee": { "Type": "CanonicalUser", "DisplayName": "ops-oncall@example.com", "ID": "abc123" }, "Permission": "FULL_CONTROL" }, { "Grantee": { "Type": "Group", "URI": "http://acs.amazonaws.com/groups/s3/LogDelivery" }, "Permission": "WRITE" }] },
 	"cloudfront list-distributions": {
 		"DistributionList": {
 			"Items": [
@@ -322,6 +329,9 @@
 					"Aliases": { "Quantity": 1, "Items": ["www.example.com"] },
 					"Enabled": true,
 					"WebACLId": "",
+					"DefaultCacheBehavior": { "TargetOriginId": "web", "ViewerProtocolPolicy": "redirect-to-https" },
+					"CacheBehaviors": { "Quantity": 1, "Items": [{ "PathPattern": "/legacy/*", "TargetOriginId": "web", "ViewerProtocolPolicy": "allow-all" }] },
+					"ViewerCertificate": { "ACMCertificateArn": "arn:aws:acm:us-east-1:111122223333:certificate/abcd-1234", "SSLSupportMethod": "sni-only", "MinimumProtocolVersion": "TLSv1_2016", "CloudFrontDefaultCertificate": false },
 					"Origins": {
 						"Quantity": 3,
 						"Items": [

@@ -111,8 +111,85 @@ export const INTERESTING_ATTRS = new Set(
 		"allowblobpublicaccess",
 		"publicnetworkaccess",
 		"minimumtlsversion",
+		"minimal_tls_version",
+		"minimaltlsversion",
+		"mintlsversion",
+		"purge_protection_enabled",
+		"enablepurgeprotection",
+		"enable_https_traffic_only",
+		"https_traffic_only_enabled",
+		"container_access_type",
+		"publicaccess",
+		"accesscontrol",
+		"deletionprotection",
+		"block_public_acls",
+		"block_public_policy",
+		"ignore_public_acls",
+		"restrict_public_buckets",
+		"start_ip_address",
+		"end_ip_address",
+		"startipaddress",
+		"endipaddress",
+		"enable_non_ssl_port",
+		"enablenonsslport",
+		"public_access_prevention",
 	].map((s) => s.toLowerCase())
 );
+
+/**
+ * An inbound rule as declared: protocol, port range (undefined = all ports),
+ * sources. `literal` is false when the ports are expressions (variables...).
+ */
+export interface IngressRule {
+	protocol?: string;
+	from?: number;
+	to?: number;
+	literal: boolean;
+	sources: string[];
+}
+
+/** A port range as written ("22", "1000-2000", "*", 22) → [from, to], or undefined. */
+function rangeOf(spec: unknown): [number, number] | undefined {
+	if (typeof spec === "number" && Number.isFinite(spec)) return [spec, spec];
+	const s = String(spec ?? "").trim();
+	if (s === "*" || /^all$/i.test(s)) return [0, 65535];
+	const m = /^(\d+)(?:\s*-\s*(\d+))?$/.exec(s);
+	return m ? [Number(m[1]), Number(m[2] ?? m[1])] : undefined;
+}
+
+/** Rules from port specs as written: none = all ports of the protocol. */
+export function rulesFromPortSpecs(protocol: string | undefined, specs: unknown[], sources: string[]): IngressRule[] {
+	if (!specs.length) return [{ protocol, literal: true, sources }];
+	return specs.map((spec) => {
+		const r = rangeOf(spec);
+		return r ? { protocol, from: r[0], to: r[1], literal: true, sources } : { protocol, literal: false, sources };
+	});
+}
+
+/** "the internet" as declared: 0.0.0.0/0, ::/0, Azure's * / Internet / Any. */
+export const WORLD_SOURCE = /^(0\.0\.0\.0\/0|::\/0|\*|internet|any)$/i;
+/** AWS's "all protocols" ignores ports; Azure's "*" protocol keeps them. */
+const ALL_PROTOCOLS = /^(-1|all)$/i;
+
+/**
+ * Records the inbound rules open to the internet on a resource:
+ * openToWorld = "true", openPorts = "tcp/22, udp/*, all, tcp/?" (? = not a literal),
+ * openSources = "0.0.0.0/0".
+ */
+export function markOpenIngress(attrs: Record<string, string>, rules: IngressRule[]): void {
+	const open = rules.filter((r) => r.sources.some((s) => WORLD_SOURCE.test(s.trim())));
+	if (!open.length) return;
+	const text = (r: IngressRule): string => {
+		const proto = String(r.protocol ?? "tcp").toLowerCase();
+		if (ALL_PROTOCOLS.test(proto) || ((proto === "*" || proto === "any") && r.literal && (r.from === undefined || (r.from <= 1 && (r.to ?? 65535) >= 65535)))) return "all";
+		if (!r.literal) return `${proto}/?`;
+		if (r.from === undefined || (r.from <= 1 && (r.to ?? 65535) >= 65535)) return `${proto}/*`;
+		return r.from === r.to ? `${proto}/${r.from}` : `${proto}/${r.from}-${r.to}`;
+	};
+	attrs.openToWorld = "true";
+	attrs.openPorts = [...new Set(open.map(text))].join(", ");
+	attrs.openSources = [...new Set(open.flatMap((r) => r.sources.map((s) => s.trim()).filter((s) => WORLD_SOURCE.test(s))))].join(", ");
+}
 
 const SECRETISH = /pass(word)?|secret|token|key|credential|connection_?string|private/i;
 

@@ -5,9 +5,10 @@
  * CloudFront origins, API integrations, event sources, subscriptions,
  * security-group references, peering and transit gateways).
  */
-import type { MapEdge, MapGraph, MapNode } from "../../../types";
+import type { CheckCoverage, MapEdge, MapFinding, MapGraph, MapNode } from "../../../types";
+import { FindingSet, findingsMarkdown, findingsSummary, portNames, riskyPorts } from "../findings";
 import { AWS_GROUPS, awsIconStyle } from "./icons";
-import type { AwsInventory, AwsRegionInventory } from "./inventory";
+import type { AwsBucket, AwsInventory, AwsRegionInventory, S3PublicAccessBlock } from "./inventory";
 
 const EDGE = {
 	network: "edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endFill=1;strokeColor=#8C4FFF;fontSize=10;",
@@ -46,18 +47,29 @@ function portLabel(p: any): string {
 	return from === to ? `${proto}/${from}` : `${proto}/${from}-${to}`;
 }
 
-export interface Finding {
-	severity: "high" | "medium" | "info";
-	text: string;
-}
-
 export interface AwsMap {
 	graph: MapGraph;
 	facts: string;
 	summary: string;
-	findings: Finding[];
+	/** Health findings on the drawn shapes. */
+	findings: MapFinding[];
+	/** The checks that ran and what they looked at. */
+	checked: CheckCoverage[];
 	counts: Record<string, number>;
 }
+
+/** An ingress rule of a security group that is open to the whole internet. */
+interface WorldRule {
+	sg: string;
+	sgName?: string;
+	/** "tcp/22", "all traffic". */
+	ports: string;
+	/** Risky ports it opens: "22 (SSH)", "all ports". */
+	risky: string[];
+	cidr: string;
+}
+
+const OLD_TLS = /^(SSLv3|TLSv1|TLSv1_2016|TLSv1\.1_2016)$/;
 
 /** Subnets whose route table sends traffic to an internet gateway (explicit association, else the VPC's main table). */
 export function publicSubnets(region: AwsRegionInventory): Map<string, { public: boolean; routeTable?: string; defaultRoute?: string }> {
@@ -81,8 +93,11 @@ export function publicSubnets(region: AwsRegionInventory): Map<string, { public:
 	return out;
 }
 
-/** Collapses more than `max` same-kind leaves in one container into a single counted node. */
-export function collapseCrowds(graph: MapGraph, max = 24, groupKey: (n: MapNode) => string = (n) => n.kind): number {
+/**
+ * Collapses more than `max` same-kind leaves in one container into a single
+ * counted node. `folded` (when given) receives old node id → the counted node's id.
+ */
+export function collapseCrowds(graph: MapGraph, max = 24, groupKey: (n: MapNode) => string = (n) => n.kind, folded?: Map<string, string>): number {
 	const groups = new Map<string, MapNode[]>();
 	const parents = new Set(graph.nodes.map((n) => n.parent).filter(Boolean));
 	for (const n of graph.nodes) {
@@ -99,6 +114,7 @@ export function collapseCrowds(graph: MapGraph, max = 24, groupKey: (n: MapNode)
 		const rest = list.slice(max - 1);
 		const id = `crowd:${k.replace(/\u0000/g, "|")}`;
 		const sample = rest[0];
+		const files = [...new Set(rest.flatMap((n) => n.files ?? []))].sort();
 		added.push({
 			id,
 			label: `+${rest.length} more ${groupKey(sample).split(/[:/_]/).pop()}`,
@@ -107,8 +123,12 @@ export function collapseCrowds(graph: MapGraph, max = 24, groupKey: (n: MapNode)
 			shape: sample.shape,
 			style: sample.style,
 			data: { count: String(rest.length), ids: rest.map((n) => n.data?.id ?? n.id).slice(0, 200).join(", "), ...(sample.data?.region ? { region: sample.data.region } : {}) },
+			...(files.length ? { files } : {}),
 		});
-		for (const n of rest) replace.set(n.id, id);
+		for (const n of rest) {
+			replace.set(n.id, id);
+			folded?.set(n.id, id);
+		}
 		collapsed += rest.length;
 	}
 	if (!collapsed) return 0;
@@ -140,7 +160,8 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 	const nodes: MapNode[] = [];
 	const edges: MapEdge[] = [];
 	const byId = new Map<string, MapNode>();
-	const findings: Finding[] = [];
+	const found = new FindingSet();
+	const has = (s: string) => inv.services.includes(s);
 	const counts: Record<string, number> = {};
 	const legendExtra: string[] = [];
 	const acct = inv.account;
@@ -348,7 +369,31 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			}
 			return [...out];
 		};
-		const riskyOpen = (ports: string[]) => ports.filter((p) => /all traffic|^-1|\/(22|3389|3306|5432|1433|1521|6379|11211|27017|9200|5601|2375|2379)(\b|-)/.test(p));
+		/** Ingress rules of these groups open to 0.0.0.0/0 or ::/0 on risky ports. */
+		const worldRules = (sgIds: Iterable<string>): WorldRule[] => {
+			const out: WorldRule[] = [];
+			for (const sg of [...new Set(sgIds)].sort()) {
+				const g = sgById.get(sg);
+				for (const p of arr(g?.IpPermissions)) {
+					const cidr = arr(p.IpRanges).some((r: any) => r?.CidrIp === "0.0.0.0/0") ? "0.0.0.0/0" : arr(p.Ipv6Ranges).some((r: any) => r?.CidrIpv6 === "::/0") ? "::/0" : undefined;
+					if (!cidr) continue;
+					const all = p.IpProtocol === "-1" || p.IpProtocol === -1;
+					const risky = all ? ["all ports"] : /^(tcp|udp|6|17)$/.test(String(p.IpProtocol)) ? riskyPorts(p.FromPort, p.ToPort) : [];
+					if (risky.length) out.push({ sg, sgName: g?.GroupName, ports: portLabel(p), risky, cidr });
+				}
+			}
+			return out;
+		};
+		found.check(
+			"Security group rules open to the internet",
+			region.securityGroups.reduce((n, g) => n + arr(g?.IpPermissions).length, 0),
+			"Ingress rules examined; only rules opening remote administration, database or all ports to 0.0.0.0/0 are reported."
+		);
+		/** Resources that can be reached from the internet, and why. */
+		const publicReach = new Map<string, string>();
+		/** Publicly accessible databases: their open rules are part of that finding. */
+		const publicDbs = new Set<string>();
+		const where = ` in ${R}`;
 
 		// ----- compute -----
 		const instanceByIp = new Map<string, string>();
@@ -374,11 +419,10 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			});
 			member(sgs, i.InstanceId);
 			if (i.PrivateIpAddress) instanceByIp.set(i.PrivateIpAddress, i.InstanceId);
+			if (i.PublicIpAddress) publicReach.set(i.InstanceId, "has a public IP address");
 			if (i.PublicIpAddress && open.length) {
 				const igw = igwByVpc.get(i.VpcId);
 				link(igw ?? internet(), i.InstanceId, "sg", open.slice(0, 4).join(", "));
-				const risky = riskyOpen(open);
-				if (risky.length) findings.push({ severity: "high", text: `EC2 ${name ?? i.InstanceId} (${R}) has a public IP and allows ${risky.join(", ")} from 0.0.0.0/0.` });
 			}
 		}
 
@@ -406,10 +450,19 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			member(arr(lb.SecurityGroups), lb.LoadBalancerArn);
 			if (lb.Scheme === "internet-facing") {
 				link(igwByVpc.get(lb.VpcId) ?? internet(), lb.LoadBalancerArn, "traffic", open.length ? open.slice(0, 3).join(", ") : "internet-facing");
-				findings.push({ severity: "info", text: `Load balancer ${lb.LoadBalancerName} (${R}) is internet-facing${open.length ? ` (${open.join(", ")} open to the world)` : ""}.` });
+				publicReach.set(lb.LoadBalancerArn, "is an internet-facing load balancer");
 			}
-			if (azs.length === 1) findings.push({ severity: "medium", text: `Load balancer ${lb.LoadBalancerName} (${R}) spans a single AZ (${azs[0]?.ZoneName}).` });
+			if (azs.length === 1 && type !== "gateway")
+				found.add({
+					kind: "single-az-load-balancer",
+					severity: "low",
+					title: `Load balancer ${lb.LoadBalancerName} runs in a single availability zone`,
+					detail: `AvailabilityZones = ${azs[0]?.ZoneName ?? "1 zone"} on ${type} load balancer ${lb.LoadBalancerName}${where}.`,
+					nodeIds: [lb.LoadBalancerArn],
+					fix: `Attach subnets in at least two availability zones to ${lb.LoadBalancerName} (elbv2 set-subnets) so an AZ outage does not take it down.`,
+				});
 		}
+		if (has("elb")) found.check("Load balancer availability (zones, targets, health)", region.loadBalancers.length + region.classicLoadBalancers.length);
 		// ECS services registered in target groups (drawn instead of their task IPs).
 		const servicesByTg = new Map<string, string[]>();
 		for (const [cluster, services] of Object.entries(region.ecsServices)) {
@@ -436,11 +489,31 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 					if (!lbTargets.has(lbArn)) lbTargets.set(lbArn, new Set());
 					lbTargets.get(lbArn)!.add(t.id);
 				}
-				if (health.length > 0 && healthy === 0) findings.push({ severity: "medium", text: `Target group ${tg.TargetGroupName} (${R}) has no healthy targets.` });
+				if (health.length > 0 && healthy === 0) {
+					const states = [...new Set(health.map((h) => h?.TargetHealth?.State ?? "unknown"))].sort().join(", ");
+					found.add({
+						kind: "no-healthy-targets",
+						severity: "medium",
+						key: tgArn,
+						title: `Target group ${tg.TargetGroupName} has no healthy targets`,
+						detail: `describe-target-health: 0 of ${health.length} target(s) healthy (${states}) in ${tg.TargetGroupName} behind ${lbByArn.get(lbArn)?.LoadBalancerName ?? lbArn}${where}.`,
+						nodeIds: [lbArn],
+						fix: `Find out why the targets of ${tg.TargetGroupName} fail their health check (health check path/port, security groups, the application) and fix it.`,
+					});
+				}
 			}
 		}
 		for (const [lbArn, targets] of lbTargets) {
-			if (targets.size === 1) findings.push({ severity: "medium", text: `Load balancer ${lbByArn.get(lbArn)?.LoadBalancerName ?? lbArn} (${R}) has a single target: a single point of failure.` });
+			const name = lbByArn.get(lbArn)?.LoadBalancerName ?? lbArn;
+			if (targets.size === 1)
+				found.add({
+					kind: "single-target",
+					severity: "low",
+					title: `Load balancer ${name} sends traffic to a single target`,
+					detail: `All target groups of ${name}${where} register one target (${[...targets][0]}).`,
+					nodeIds: [lbArn, ...targets],
+					fix: `Run at least two targets for ${name}, in different availability zones (e.g. an Auto Scaling group or an ECS service with desired count ≥ 2).`,
+				});
 		}
 		for (const clb of region.classicLoadBalancers) {
 			const id = `arn:aws:elasticloadbalancing:${R}:${acct}:loadbalancer/${clb.LoadBalancerName}`;
@@ -454,7 +527,10 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			});
 			if (clb.DNSName) lbByDns.set(String(clb.DNSName).toLowerCase(), id);
 			member(arr(clb.SecurityGroups), id);
-			if (clb.Scheme === "internet-facing") link(igwByVpc.get(clb.VPCId) ?? internet(), id, "traffic", "internet-facing");
+			if (clb.Scheme === "internet-facing") {
+				link(igwByVpc.get(clb.VPCId) ?? internet(), id, "traffic", "internet-facing");
+				publicReach.set(id, "is an internet-facing load balancer");
+			}
 			for (const i of arr(clb.Instances)) targetEdges.push([id, i.InstanceId, "classic"]);
 		}
 
@@ -480,11 +556,42 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 				securityGroups: vpcSgs.join(", "),
 			});
 			if (sg.VpcId) dbVpc.set(d.DBInstanceIdentifier, sg.VpcId);
+			const dbId = d.DBInstanceArn ?? d.DBInstanceIdentifier;
 			// Cluster members are reached through their cluster (drawn once, below).
-			if (!d.DBClusterIdentifier) member(vpcSgs, d.DBInstanceArn ?? d.DBInstanceIdentifier);
-			if (d.PubliclyAccessible) findings.push({ severity: "high", text: `RDS ${d.DBInstanceIdentifier} (${R}) is publicly accessible.` });
-			if (!d.StorageEncrypted) findings.push({ severity: "medium", text: `RDS ${d.DBInstanceIdentifier} (${R}) storage is not encrypted.` });
-			if (!d.MultiAZ && !d.DBClusterIdentifier) findings.push({ severity: "medium", text: `RDS ${d.DBInstanceIdentifier} (${R}) is single-AZ.` });
+			if (!d.DBClusterIdentifier) member(vpcSgs, dbId);
+			const engine = `${d.Engine ?? "database"}${d.EngineVersion ? ` ${d.EngineVersion}` : ""}`;
+			if (d.PubliclyAccessible === true) {
+				publicDbs.add(dbId);
+				const open = worldRules(vpcSgs);
+				found.add({
+					kind: "public-database",
+					severity: "high",
+					title: `RDS ${d.DBInstanceIdentifier} is publicly accessible`,
+					detail: `PubliclyAccessible = true on RDS instance ${d.DBInstanceIdentifier} (${engine})${where}${
+						open.length ? `; security group ${open.map((o) => `${o.sg} allows ${o.ports} from ${o.cidr}`).join("; ")}` : vpcSgs.length ? `; reachable from the addresses its security groups allow (${vpcSgs.join(", ")})` : ""
+					}.`,
+					nodeIds: [dbId],
+					fix: `Turn off public accessibility of ${d.DBInstanceIdentifier} (aws rds modify-db-instance --no-publicly-accessible) and reach it from inside the VPC (bastion, VPN or application subnets)${open.length ? `; remove the 0.0.0.0/0 rules from ${[...new Set(open.map((o) => o.sg))].join(", ")}` : ""}.`,
+				});
+			}
+			if (d.StorageEncrypted === false && !d.DBClusterIdentifier)
+				found.add({
+					kind: "unencrypted-storage",
+					severity: "medium",
+					title: `RDS ${d.DBInstanceIdentifier} stores data unencrypted`,
+					detail: `StorageEncrypted = false on RDS instance ${d.DBInstanceIdentifier} (${engine})${where}.`,
+					nodeIds: [dbId],
+					fix: `Encrypt ${d.DBInstanceIdentifier} at rest: take a snapshot, copy it with a KMS key (copy-db-snapshot --kms-key-id), restore from the encrypted copy and switch over.`,
+				});
+			if (d.MultiAZ === false && !d.DBClusterIdentifier && !d.ReadReplicaSourceDBInstanceIdentifier)
+				found.add({
+					kind: "single-az-database",
+					severity: "low",
+					title: `RDS ${d.DBInstanceIdentifier} runs in a single availability zone`,
+					detail: `MultiAZ = false on RDS instance ${d.DBInstanceIdentifier} (${engine}, ${d.AvailabilityZone ?? "one AZ"})${where}.`,
+					nodeIds: [dbId],
+					fix: `Enable Multi-AZ on ${d.DBInstanceIdentifier} (aws rds modify-db-instance --multi-az) so a standby takes over when its zone fails.`,
+				});
 		}
 		const dbArnById = new Map(region.dbInstances.map((d) => [d.DBInstanceIdentifier, d.DBInstanceArn ?? d.DBInstanceIdentifier]));
 		for (const c of region.dbClusters) {
@@ -505,8 +612,30 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			});
 			for (const m of members) link(id, dbArnById.get(m.DBInstanceIdentifier), "member");
 			member(vpcSgs, id);
-			if (!c.StorageEncrypted) findings.push({ severity: "medium", text: `RDS cluster ${c.DBClusterIdentifier} (${R}) storage is not encrypted.` });
-			if (members.length === 1) findings.push({ severity: "medium", text: `RDS cluster ${c.DBClusterIdentifier} (${R}) has a single instance.` });
+			const engine = `${c.Engine ?? "database"}${c.EngineVersion ? ` ${c.EngineVersion}` : ""}`;
+			if (c.StorageEncrypted === false)
+				found.add({
+					kind: "unencrypted-storage",
+					severity: "medium",
+					title: `RDS cluster ${c.DBClusterIdentifier} stores data unencrypted`,
+					detail: `StorageEncrypted = false on RDS cluster ${c.DBClusterIdentifier} (${engine})${where}.`,
+					nodeIds: [id],
+					fix: `Encrypt ${c.DBClusterIdentifier} at rest: snapshot the cluster, restore it with a KMS key (restore-db-cluster-from-snapshot --kms-key-id) and switch over.`,
+				});
+			if (members.length === 1 && !/serverless/i.test(String(c.EngineMode ?? "")))
+				found.add({
+					kind: "single-instance-cluster",
+					severity: "low",
+					title: `RDS cluster ${c.DBClusterIdentifier} has a single instance`,
+					detail: `DBClusterMembers = ${members[0]?.DBInstanceIdentifier ?? "1 instance"} only, in RDS cluster ${c.DBClusterIdentifier} (${engine})${where}.`,
+					nodeIds: [id],
+					fix: `Add a reader instance to ${c.DBClusterIdentifier} in another availability zone so it can fail over.`,
+				});
+		}
+		if (has("rds")) {
+			found.check("Publicly accessible databases (RDS)", region.dbInstances.length);
+			found.check("Encryption at rest (RDS, ElastiCache)", region.dbInstances.filter((d) => !d.DBClusterIdentifier).length + region.dbClusters.length);
+			found.check("Database availability (Multi-AZ, cluster instances)", region.dbInstances.filter((d) => !d.DBClusterIdentifier).length + region.dbClusters.length);
 		}
 		const cacheGroups = new Map<string, any>(region.cacheSubnetGroups.map((g) => [g.CacheSubnetGroupName, g]));
 		for (const c of region.cacheClusters) {
@@ -527,8 +656,30 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 				az: c.PreferredAvailabilityZone,
 			});
 			member(sgs, id);
-			if (!c.AtRestEncryptionEnabled || !c.TransitEncryptionEnabled)
-				findings.push({ severity: "medium", text: `ElastiCache ${c.CacheClusterId} (${R}): encryption at rest ${c.AtRestEncryptionEnabled ? "on" : "off"}, in transit ${c.TransitEncryptionEnabled ? "on" : "off"}.` });
+			const engine = `${c.Engine ?? "cache"}${c.EngineVersion ? ` ${c.EngineVersion}` : ""}`;
+			// Node-based Memcached cannot encrypt at rest: only Redis / Valkey are held to it.
+			if (c.AtRestEncryptionEnabled === false && /redis|valkey/i.test(String(c.Engine ?? "")))
+				found.add({
+					kind: "unencrypted-storage",
+					severity: "medium",
+					title: `ElastiCache ${c.CacheClusterId} stores data unencrypted`,
+					detail: `AtRestEncryptionEnabled = false on ElastiCache ${c.CacheClusterId} (${engine})${c.ReplicationGroupId ? `, replication group ${c.ReplicationGroupId}` : ""}${where}.`,
+					nodeIds: [id],
+					fix: `Recreate ${c.ReplicationGroupId ?? c.CacheClusterId} with encryption at rest (--at-rest-encryption-enabled) from a backup; it cannot be turned on in place.`,
+				});
+			if (c.TransitEncryptionEnabled === false)
+				found.add({
+					kind: "unencrypted-transit",
+					severity: "medium",
+					title: `ElastiCache ${c.CacheClusterId} accepts unencrypted connections`,
+					detail: `TransitEncryptionEnabled = false on ElastiCache ${c.CacheClusterId} (${engine})${where}.`,
+					nodeIds: [id],
+					fix: `Enable in-transit encryption (TLS) on ${c.ReplicationGroupId ?? c.CacheClusterId} (modify-replication-group --transit-encryption-enabled with transit-encryption-mode preferred, then required) and connect with TLS.`,
+				});
+		}
+		if (has("elasticache")) {
+			found.check("Encryption at rest (RDS, ElastiCache)", region.cacheClusters.length);
+			found.check("Encryption in transit (ElastiCache)", region.cacheClusters.length);
 		}
 		for (const name of region.dynamoTables) {
 			const id = `arn:aws:dynamodb:${R}:${acct}:table/${name}`;
@@ -583,9 +734,19 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 					taskDefinition: s.taskDefinition,
 				});
 				member(arr(net?.securityGroups), sid);
-				if ((s.desiredCount ?? 0) === 1) findings.push({ severity: "info", text: `ECS service ${s.serviceName} (${R}) runs a single task.` });
+				if (net?.assignPublicIp === "ENABLED") publicReach.set(sid, "gives its tasks public IP addresses (assignPublicIp = ENABLED)");
+				if (s.desiredCount === 1 && s.schedulingStrategy !== "DAEMON")
+					found.add({
+						kind: "single-task-service",
+						severity: "info",
+						title: `ECS service ${s.serviceName} runs a single task`,
+						detail: `desiredCount = 1 for ECS service ${s.serviceName} in cluster ${c.clusterName}${where}.`,
+						nodeIds: [sid],
+						fix: `Raise the desired count of ${s.serviceName} to 2 or more (spread across availability zones) if it must stay up while a task is replaced.`,
+					});
 			}
 		}
+		if (has("ecs")) found.check("Single-task ECS services", Object.values(region.ecsServices).reduce((n, l) => n + l.length, 0));
 		for (const k of region.eksClusters) {
 			const vpcCfg = k.resourcesVpcConfig ?? {};
 			icon(k.arn ?? k.name, k.name, "aws:eks:cluster", "eks", place(undefined, vpcCfg.vpcId), {
@@ -601,9 +762,17 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 				subnets: arr(vpcCfg.subnetIds).join(", "),
 			});
 			member([vpcCfg.clusterSecurityGroupId, ...arr(vpcCfg.securityGroupIds)].filter(Boolean), k.arn ?? k.name);
-			if (vpcCfg.endpointPublicAccess && arr(vpcCfg.publicAccessCidrs).includes("0.0.0.0/0"))
-				findings.push({ severity: "medium", text: `EKS ${k.name} (${R}) API endpoint is public to 0.0.0.0/0.` });
+			if (vpcCfg.endpointPublicAccess === true && arr(vpcCfg.publicAccessCidrs).includes("0.0.0.0/0"))
+				found.add({
+					kind: "public-control-plane",
+					severity: "medium",
+					title: `The Kubernetes API of EKS cluster ${k.name} is open to the whole internet`,
+					detail: `resourcesVpcConfig: endpointPublicAccess = true, publicAccessCidrs = ${arr(vpcCfg.publicAccessCidrs).join(", ")}, endpointPrivateAccess = ${!!vpcCfg.endpointPrivateAccess} on EKS cluster ${k.name}${where}.`,
+					nodeIds: [k.arn ?? k.name],
+					fix: `Limit the public endpoint of ${k.name} to known CIDRs (aws eks update-cluster-config --resources-vpc-config publicAccessCidrs=…) or turn it off and use the private endpoint.`,
+				});
 		}
+		if (has("eks")) found.check("Kubernetes API exposure (EKS)", region.eksClusters.length);
 		for (const url of region.queueUrls) {
 			const arn = queueArn(url) ?? url;
 			const name = url.split("/").pop()!;
@@ -710,18 +879,55 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			}
 		}
 
+		// Security groups open to the internet, on the resources that use them.
+		const sgsOf = new Map<string, Set<string>>();
+		for (const [sg, nodesIn] of sgMembers) for (const n of nodesIn) (sgsOf.get(n) ?? sgsOf.set(n, new Set()).get(n)!).add(sg);
+		for (const [nodeId, sgs] of [...sgsOf].sort(([a], [b]) => a.localeCompare(b))) {
+			if (publicDbs.has(nodeId)) continue;
+			const open = worldRules(sgs);
+			if (!open.length) continue;
+			const label = (byId.get(nodeId)?.label ?? nodeId).split("\n")[0];
+			const ports = portNames(open.flatMap((o) => o.risky));
+			const rules = open.map((o) => `security group ${o.sg}${o.sgName ? ` (${o.sgName})` : ""} allows ${o.ports} from ${o.cidr}`).join("; ");
+			const groups = [...new Set(open.map((o) => o.sg))].join(", ");
+			const reach = publicReach.get(nodeId);
+			found.add(
+				reach
+					? {
+							kind: "open-ingress",
+							severity: "high",
+							title: `${label} accepts ${ports} from the internet`,
+							detail: `${rules}; ${label} ${reach}${where}.`,
+							nodeIds: [nodeId],
+							fix: `Remove the 0.0.0.0/0 rules for ${ports} from ${groups} or narrow them to known address ranges; reach the host through SSM Session Manager, a VPN or a bastion instead.`,
+					  }
+					: {
+							kind: "open-ingress",
+							severity: "low",
+							title: `${label} has a security group open to the internet on ${ports}`,
+							detail: `${rules}${where}. ${label} has no public address today, so the rule takes effect as soon as it gets one.`,
+							nodeIds: [nodeId],
+							fix: `Narrow the 0.0.0.0/0 rules for ${ports} in ${groups} to the address ranges that need them.`,
+					  }
+			);
+		}
+
 		// NAT gateways: private subnets in several AZs behind one NAT.
 		for (const v of region.vpcs) {
 			const nats = region.natGateways.filter((n) => n.VpcId === v.VpcId && n.State === "available");
 			const privAz = new Set(region.subnets.filter((s) => s.VpcId === v.VpcId && !isPublic.get(s.SubnetId)?.public && /^nat-/.test(isPublic.get(s.SubnetId)?.defaultRoute ?? "")).map((s) => s.AvailabilityZone));
-			if (nats.length === 1 && privAz.size > 1) findings.push({ severity: "medium", text: `VPC ${tagName(v.Tags) ?? v.VpcId} (${R}) routes ${privAz.size} AZs through one NAT gateway: a single point of failure.` });
+			if (nats.length === 1 && privAz.size > 1)
+				found.add({
+					kind: "single-nat-gateway",
+					severity: "low",
+					title: `VPC ${tagName(v.Tags) ?? v.VpcId} sends ${privAz.size} availability zones out through one NAT gateway`,
+					detail: `Private subnets in ${[...privAz].sort().join(", ")} route 0.0.0.0/0 to ${nats[0].NatGatewayId}, the only NAT gateway in VPC ${v.VpcId}${where}.`,
+					nodeIds: [nats[0].NatGatewayId, v.VpcId],
+					key: v.VpcId,
+					fix: `Add a NAT gateway in each availability zone and point each zone's private route table at its own one.`,
+				});
 		}
-		for (const s of region.subnets) {
-			if (vpcInfo.has(s.VpcId) && s.MapPublicIpOnLaunch && !isPublic.get(s.SubnetId)?.public) {
-				// Harmless but surprising: public IPs in a subnet without an internet route.
-				findings.push({ severity: "info", text: `Subnet ${s.SubnetId} (${R}) assigns public IPs but has no internet gateway route.` });
-			}
-		}
+		found.check("Single points of failure (NAT gateways)", region.vpcs.length);
 	}
 
 	// ----- global: S3 and CloudFront -----
@@ -739,6 +945,15 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 		}
 		icon(arn, b.name, "aws:s3:bucket", "s3", parent, { ...common(b.region), type: "AWS::S3::Bucket", arn, id: b.name });
 		bucketNode.set(b.name, arn);
+		s3Findings(b, arn, inv.accountPublicAccessBlock, found);
+	}
+	if (has("s3")) {
+		const known = inv.buckets.filter((b) => b.publicAccessBlock !== undefined || b.policyIsPublic !== undefined || b.publicAclGrants !== undefined).length;
+		found.check(
+			"S3 public access (bucket policy, ACLs, Block Public Access)",
+			known,
+			known < inv.buckets.length ? `${inv.buckets.length - known} of ${inv.buckets.length} bucket(s) could not be checked (no permission or not read).` : undefined
+		);
 	}
 	for (const d of inv.distributions) {
 		const id = d.ARN ?? `cloudfront:${d.Id}`;
@@ -755,7 +970,37 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			priceClass: d.PriceClass,
 		});
 		link(internet(), id, "traffic");
-		if (!d.WebACLId) findings.push({ severity: "info", text: `CloudFront ${aliases[0] ?? d.Id} has no WAF web ACL.` });
+		const dname = aliases[0] ?? d.DomainName ?? d.Id;
+		if (!d.WebACLId && d.Enabled !== false)
+			found.add({
+				kind: "no-waf",
+				severity: "info",
+				title: `CloudFront ${dname} has no WAF web ACL`,
+				detail: `WebACLId is empty on CloudFront distribution ${d.Id}.`,
+				nodeIds: [id],
+				fix: `Associate an AWS WAF web ACL (for example the AWS managed core rule set) with distribution ${d.Id} if it serves an application.`,
+			});
+		const behaviors = [d.DefaultCacheBehavior, ...arr(d.CacheBehaviors?.Items)].filter(Boolean);
+		const plain = behaviors.filter((b: any) => b.ViewerProtocolPolicy === "allow-all").map((b: any) => b.PathPattern ?? "default (*)");
+		if (plain.length)
+			found.add({
+				kind: "https-not-enforced",
+				severity: "medium",
+				title: `CloudFront ${dname} serves content over plain HTTP`,
+				detail: `ViewerProtocolPolicy = allow-all for cache behavior ${plain.join(", ")} on distribution ${d.Id}.`,
+				nodeIds: [id],
+				fix: `Set ViewerProtocolPolicy to redirect-to-https (or https-only) on those cache behaviors of distribution ${d.Id}.`,
+			});
+		const minTls = String(d.ViewerCertificate?.MinimumProtocolVersion ?? "");
+		if (OLD_TLS.test(minTls) && !d.ViewerCertificate?.CloudFrontDefaultCertificate)
+			found.add({
+				kind: "old-tls",
+				severity: "medium",
+				title: `CloudFront ${dname} still accepts TLS older than 1.2`,
+				detail: `ViewerCertificate.MinimumProtocolVersion = ${minTls} on distribution ${d.Id}.`,
+				nodeIds: [id],
+				fix: `Set the minimum protocol version of distribution ${d.Id} to TLSv1.2_2021.`,
+			});
 		for (const o of arr(d.Origins?.Items)) {
 			const domain = String(o.DomainName ?? "").toLowerCase();
 			const bucket = /^(.+?)\.s3(?:[.-]website)?[.-]/.exec(domain)?.[1];
@@ -768,6 +1013,7 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 			link(id, target, "traffic", o.Id && o.Id !== domain ? `origin ${o.Id}`.slice(0, 50) : "origin");
 		}
 	}
+	if (has("cloudfront")) found.check("CloudFront HTTPS, TLS and WAF", inv.distributions.length);
 
 	// ----- tidy up: hide empty default VPCs and regions with nothing in them -----
 	const descendants = (id: string): Set<string> => {
@@ -818,8 +1064,10 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 		direction: "down",
 		legend: [],
 	};
-	const collapsed = collapseCrowds(graph);
+	const folded = new Map<string, string>();
+	const collapsed = collapseCrowds(graph, 24, undefined, folded);
 	if (collapsed) legendExtra.push(`${collapsed} resources folded into "+N more" shapes (their ids are in the shape data).`);
+	const { findings, checked } = found.finish(graph, folded);
 	const resources = graph.nodes.filter((n) => !n.container && !n.kind.startsWith("external") && !n.kind.endsWith(":empty")).length;
 	graph.legend = [
 		`AWS account ${acct}${inv.profile ? ` (profile ${inv.profile})` : ""}, ${inv.regions.length > 5 ? `${inv.regions.length} regions` : inv.regions.map((r) => r.region).join(", ") || "no regions"}: mapped read-only.`,
@@ -827,12 +1075,44 @@ export function awsInventoryToGraph(inv: AwsInventory, options: AwsGraphOptions 
 		...legendExtra,
 	];
 	const nonZero = Object.fromEntries(Object.entries(counts).filter(([, v]) => v > 0));
-	const summary = `${resources} resources in ${inv.regions.length - hiddenRegions.length} region(s) of account ${acct}${findings.filter((f) => f.severity !== "info").length ? `, ${findings.filter((f) => f.severity !== "info").length} review finding(s)` : ""}`;
-	return { graph, facts: factsOf(inv, graph, findings), summary, findings, counts: nonZero };
+	const summary = `${resources} resources in ${inv.regions.length - hiddenRegions.length} region(s) of account ${acct}${findingsSummary(findings)}`;
+	return { graph, facts: factsOf(inv, graph, findings), summary, findings, checked, counts: nonZero };
+}
+
+/** Public buckets (policy or ACL) and buckets without Block Public Access. */
+function s3Findings(b: AwsBucket, arn: string, account: S3PublicAccessBlock | null | undefined, found: FindingSet): void {
+	const on = (k: keyof S3PublicAccessBlock) => b.publicAccessBlock?.[k] === true || account?.[k] === true;
+	const publicBy: string[] = [];
+	if (b.policyIsPublic === true && !on("RestrictPublicBuckets")) publicBy.push("its bucket policy grants public access (get-bucket-policy-status IsPublic = true)");
+	if (b.publicAclGrants?.length && !on("IgnorePublicAcls")) publicBy.push(`its ACL grants ${b.publicAclGrants.join(", ")}`);
+	if (publicBy.length) {
+		found.add({
+			kind: "public-bucket",
+			severity: "high",
+			title: `S3 bucket ${b.name} is public`,
+			detail: `Bucket ${b.name}${b.region ? ` (${b.region})` : ""}: ${publicBy.join("; ")}, and Block Public Access does not override it.`,
+			nodeIds: [arn],
+			fix: `Remove the public statements / grants from ${b.name} and turn on S3 Block Public Access for the bucket (aws s3api put-public-access-block, all four settings true); serve public content through CloudFront with origin access control instead.`,
+		});
+		return;
+	}
+	// Block Public Access: only when both the bucket's and the account's settings are known.
+	if (b.publicAccessBlock === undefined || account === undefined) return;
+	const keys: (keyof S3PublicAccessBlock)[] = ["BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"];
+	const off = keys.filter((k) => !on(k));
+	if (!off.length) return;
+	found.add({
+		kind: "public-access-block-off",
+		severity: "medium",
+		title: `S3 bucket ${b.name} is not protected by Block Public Access`,
+		detail: `${b.publicAccessBlock === null ? "No bucket-level Block Public Access configuration" : "Bucket-level Block Public Access"} and ${account === null ? "no account-level configuration" : "the account-level settings"} leave ${off.join(", ")} off for ${b.name}${b.region ? ` (${b.region})` : ""}; nothing public was found on it now.`,
+		nodeIds: [arn],
+		fix: `Turn on all four Block Public Access settings for ${b.name} (aws s3api put-public-access-block) or for the whole account (aws s3control put-public-access-block), unless the bucket must be public.`,
+	});
 }
 
 /** A compact inventory the agent can dig into: one line per resource with its ids. */
-function factsOf(inv: AwsInventory, graph: MapGraph, findings: Finding[]): string {
+function factsOf(inv: AwsInventory, graph: MapGraph, findings: MapFinding[]): string {
 	const lines: string[] = [`# AWS inventory (collected read-only)`, `Account ${inv.account}${inv.profile ? `, profile ${inv.profile}` : ""}; regions: ${inv.regions.map((r) => r.region).join(", ")}; services: ${inv.services.join(", ")}.`, ""];
 	const byParent = new Map<string | undefined, MapNode[]>();
 	for (const n of graph.nodes) byParent.set(n.parent, [...(byParent.get(n.parent) ?? []), n]);
@@ -853,9 +1133,6 @@ function factsOf(inv: AwsInventory, graph: MapGraph, findings: Finding[]): strin
 		lines.push("", "## Connections");
 		for (const e of graph.edges) lines.push(`- ${ids.get(e.from) ?? e.from} → ${ids.get(e.to) ?? e.to}${e.kind ? ` (${e.kind}${e.label ? `: ${e.label}` : ""})` : ""}`);
 	}
-	if (findings.length) {
-		lines.push("", "## Review findings (heuristic)");
-		for (const f of findings) lines.push(`- [${f.severity}] ${f.text}`);
-	}
+	lines.push(...findingsMarkdown(findings, "## Health findings (from the collected settings; also drawn as badges on the shapes)"));
 	return lines.join("\n");
 }

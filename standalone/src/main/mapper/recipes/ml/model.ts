@@ -160,6 +160,20 @@ export function mapLocalModel(target: string): ModelResult {
 	throw new MapperError(`${base} is not a model format the Mapper reads.`, "Supported: Hugging Face folders (config.json), .safetensors, .gguf, .onnx, XGBoost JSON and LightGBM text/JSON models.");
 }
 
+/** The files a local model is read from, relative to the mapped folder (the folder, or the file's folder). */
+export function localModelFiles(target: string): string[] {
+	try {
+		const stat = fs.statSync(target);
+		if (stat.isFile()) return [path.basename(target)];
+		return fs
+			.readdirSync(target)
+			.filter((n) => /^(config|adapter_config|generation_config|tokenizer_config)\.json$|\.(safetensors|gguf|onnx)$|^model\.(json|txt)$|^(xgb|lgb|lightgbm)[^/]*\.(json|txt|ubj)$/i.test(n) && fs.statSync(path.join(target, n)).isFile())
+			.sort();
+	} catch {
+		return [];
+	}
+}
+
 function readJsonSafe(p: string): any {
 	try {
 		return readJson(p);
@@ -356,6 +370,12 @@ export const modelRecipe: Recipe = {
 	],
 	async collect(input, ctx): Promise<CollectResult> {
 		const r = await collectModel(input, ctx);
+		const local = (input.file || input.folder || "").trim();
+		if (local && !input.hfModel?.trim()) {
+			const files = localModelFiles(local);
+			// The model's files stand for every block of the diagram (its weights and config change together).
+			if (files.length) for (const n of r.graph.nodes) if (!n.container) n.files = files;
+		}
 		return { graph: r.graph, summary: r.summary, warnings: r.warnings, facts: JSON.stringify(r.facts, (_k, v) => (v instanceof Set ? [...v] : v), 1).slice(0, 50_000) };
 	},
 	agentPrompt: (_input, result) =>

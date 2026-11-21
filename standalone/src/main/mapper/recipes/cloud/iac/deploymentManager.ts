@@ -4,7 +4,7 @@
  * (.jinja / .py types) are drawn as modules.
  */
 import * as path from "path";
-import { IacGroup, IacResource, keepAttr, lineAt } from "./model";
+import { IacGroup, IacResource, IngressRule, keepAttr, lineAt, markOpenIngress, rulesFromPortSpecs } from "./model";
 
 const DM_TYPE = /^([a-z0-9-]+\.v\d[a-z0-9]*\.[A-Za-z.]+|gcp-types\/.+|[\w./-]+\.(jinja|py))$/;
 
@@ -31,7 +31,17 @@ export function parseDeploymentManager(file: string, text: string, doc: any): { 
 		for (const d of [].concat(r.metadata?.dependsOn ?? [])) if (names.has(String(d))) refs.add(String(d));
 		const attrs: Record<string, string> = {};
 		for (const k of ["zone", "region", "machineType", "databaseVersion", "ipCidrRange", "location"]) keepAttr(attrs, k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`), typeof r.properties?.[k] === "string" ? (k === "machineType" ? String(r.properties[k]).split("/").pop() : String(r.properties[k])) : undefined);
-		if (/"sourceRanges":\[[^\]]*"0\.0\.0\.0\/0"/.test(body)) attrs.openToWorld = "true";
+		const p = r.properties ?? {};
+		if (/firewall$/i.test(String(r.type)) && !/^egress$/i.test(String(p.direction ?? "")) && p.disabled !== true) {
+			const sources: string[] = Array.isArray(p.sourceRanges) ? p.sourceRanges.filter((x: unknown) => typeof x === "string") : [];
+			const rules: IngressRule[] = (Array.isArray(p.allowed) ? p.allowed : []).flatMap((a: any) => rulesFromPortSpecs(a?.IPProtocol === undefined ? undefined : String(a.IPProtocol), Array.isArray(a?.ports) ? a.ports : [], sources));
+			markOpenIngress(attrs, rules);
+		}
+		if (/sqladmin\.v1\w*\.instance$/i.test(String(r.type))) {
+			const nets: any[] = p.settings?.ipConfiguration?.authorizedNetworks ?? [];
+			const world = (Array.isArray(nets) ? nets : []).map((n) => n?.value).filter((v) => v === "0.0.0.0/0");
+			if (world.length) attrs.authorizedNetworks = world.join(", ");
+		}
 		const template = /\.(jinja|py)$/.test(r.type);
 		const esc = String(r.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const at = new RegExp(`name\\s*:\\s*["']?${esc}["']?\\s*$`, "m").exec(text);
