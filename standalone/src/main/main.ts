@@ -106,6 +106,10 @@ function buildMenu(): void {
 		{
 			label: "View",
 			submenu: [
+				{ label: "Presentation Mode", accelerator: "F5", click: () => w()?.togglePresentation() },
+				// Same, for keyboards without easy F-keys (hidden; its shortcut still works).
+				{ label: "Presentation Mode", accelerator: "CmdOrCtrl+Shift+Enter", visible: false, acceleratorWorksWhenHidden: true, click: () => w()?.togglePresentation() },
+				{ type: "separator" },
 				{ label: "Toggle Chat", accelerator: "CmdOrCtrl+J", click: () => w()?.toggleChat() },
 				{ label: "Wider Chat", accelerator: "CmdOrCtrl+Alt+]", click: () => w()?.resizeChat(60) },
 				{ label: "Narrower Chat", accelerator: "CmdOrCtrl+Alt+[", click: () => w()?.resizeChat(-60) },

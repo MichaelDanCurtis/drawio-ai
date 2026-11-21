@@ -60,6 +60,9 @@ export class DiagramWindow {
 	private loaded = false;
 	private loadedWaiters: (() => void)[] = [];
 	private chatVisible = true;
+	/** Presentation mode: only the diagram, read-only, full screen. */
+	public presenting = false;
+	private enteredFullScreen = false;
 	private closing = false;
 	public readonly mapper: MapperDialog;
 	/** Mapped shapes in the selection (for Dig Deeper), refreshed when the selection changes. */
@@ -281,7 +284,10 @@ export class DiagramWindow {
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
 		});
-		c.onChange.sub(() => this.setDirty(true));
+		// Presenting only views the diagram; draw.io still auto-saves page view state when pages change.
+		c.onChange.sub(() => {
+			if (!this.presenting) this.setDirty(true);
+		});
 		c.onSave.sub(() => void this.save());
 		c.onSelectedCellsChanged.sub(() => {
 			this.chat.postState();
@@ -334,6 +340,7 @@ export class DiagramWindow {
 			case "export": return void this.exportAny();
 			case "importDiagram": return void this.importFromOtherTool();
 			case "print": return void this.print();
+			case "exitPresentation": return this.setPresenting(false);
 		}
 	}
 
@@ -369,10 +376,33 @@ export class DiagramWindow {
 
 	private layout(): void {
 		const { width, height } = this.win.getContentBounds();
-		const chatWidth = this.chatVisible ? Math.min(Math.max(280, settings().chatWidth), Math.floor(width * 0.6)) : 0;
+		const chatWidth = this.chatVisible && !this.presenting ? Math.min(Math.max(280, settings().chatWidth), Math.floor(width * 0.6)) : 0;
 		this.editorView.setBounds({ x: 0, y: 0, width: width - chatWidth, height });
 		this.chatView.setBounds({ x: width - chatWidth, y: 0, width: chatWidth, height });
-		this.chatView.setVisible(this.chatVisible);
+		this.chatView.setVisible(this.chatVisible && !this.presenting);
+	}
+
+	/** Shows only the diagram, read-only and full screen, with page dots; Esc leaves. */
+	public setPresenting(on: boolean): void {
+		if (on === this.presenting || (on && !this.loaded)) return;
+		this.presenting = on;
+		if (on) {
+			this.enteredFullScreen = !this.win.isFullScreen();
+			// Test runs stay windowed (full screen moves the window to its own Space).
+			if (this.enteredFullScreen && !process.env.DRAWAI_E2E) this.win.setFullScreen(true);
+		} else if (this.enteredFullScreen) {
+			this.enteredFullScreen = false;
+			this.win.setFullScreen(false);
+		}
+		this.layout();
+		if (!this.editorView.webContents.isDestroyed()) {
+			this.editorView.webContents.send("drawio:toWebview", JSON.stringify({ action: "desktopPresentation", enabled: on }));
+			if (on) this.editorView.webContents.focus();
+		}
+	}
+
+	public togglePresentation(): void {
+		this.setPresenting(!this.presenting);
 	}
 
 	public toggleChat(): void {

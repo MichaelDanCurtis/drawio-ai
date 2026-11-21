@@ -60,7 +60,7 @@ export class StaticServer {
 			.replace("$$lang$$", JSON.stringify("en"))
 			.replace("$$simpleLabels$$", "false")
 			.replace("$$chrome$$", JSON.stringify("1"))
-			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`]))
+			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/presentation.js`]))
 			.replace("$$localStorage$$", JSON.stringify(o.localStorage))
 			.replace("$$additionalCode$$", "[]");
 	}
@@ -85,7 +85,7 @@ export class StaticServer {
 			return void res.end(html);
 		}
 		let file: string | undefined;
-		if (["/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js"].includes(p)) {
+		if (["/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/presentation.js"].includes(p)) {
 			file = path.join(paths.out, path.basename(p));
 		} else if (p.startsWith("/webapp/")) {
 			file = path.join(paths.webapp, p.slice("/webapp/".length));

@@ -25,6 +25,8 @@ export interface E2eConfig {
 	/** ACP session mode to switch to before prompting (e.g. Claude's "default", which asks before edits). */
 	mode?: string;
 	/** Run a Mapper recipe (instead of the agent prompt), optionally screenshot its dialog, then dig deeper with the agent. */
+	/** Check presentation mode: enter, step pages, pan, try to edit, leave. */
+	present?: boolean;
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 }
 
@@ -93,7 +95,9 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("mcpWithoutTokenStatus", unauthorized.status);
 
 		const before = await w.client.getXml();
-		if (config.map) {
+		if (config.present) {
+			await runPresent(w, config, log);
+		} else if (config.map) {
 			await runMap(w, config, log);
 		} else if (config.agent) {
 			let clicker: NodeJS.Timeout | undefined;
@@ -221,4 +225,100 @@ async function waitFor<T>(get: () => T | undefined, ms: number): Promise<T> {
 		if (Date.now() > end) throw new Error("timed out waiting");
 		await new Promise((r) => setTimeout(r, 100));
 	}
+}
+
+async function runPresent(w: DiagramWindow, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const wc = w.editorView.webContents;
+	const state = () =>
+		Promise.race([
+			wc.executeJavaScript("window.drawaiPresentation.state()"),
+			new Promise((_, rej) => setTimeout(() => rej(new Error("editor did not answer within 5s")), 5000)),
+		]) as Promise<any>;
+	const shot = async (name: string) => fs.writeFileSync(path.join(config.out, name), (await wc.capturePage()).toPNG());
+	const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	const key = async (keyCode: string, modifiers: any[] = []) => {
+		wc.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+		wc.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+		await pause(400);
+	};
+	// The GitHub "octocat" link draw.io puts in its footer, which the desktop app hides.
+	log(
+		"githubLinks",
+		await wc.executeJavaScript(`Array.from(document.querySelectorAll("a, img, div, span")).filter((e) => /github/i.test((e.getAttribute("href") || "") + (e.getAttribute("src") || "") + (e.getAttribute("title") || "") + (getComputedStyle(e).backgroundImage || ""))).map((e) => ({ tag: e.tagName, cls: e.className, title: e.getAttribute("title"), visible: e.offsetParent !== null, parent: e.parentElement && e.parentElement.className }))`)
+	);
+	log("stateBefore", await state());
+	const xmlBefore = await w.client.getXml();
+	await shot("before-present.png");
+	w.setPresenting(true);
+	await pause(1800);
+	let s1: any;
+	try {
+		s1 = await state();
+	} catch (e) {
+		// Frozen: pause the page with the debugger and print where it is stuck.
+		wc.debugger.attach("1.3");
+		await wc.debugger.sendCommand("Debugger.enable");
+		const paused = new Promise<any>((res) => wc.debugger.once("message", (_e, method, params) => method === "Debugger.paused" && res(params)));
+		await wc.debugger.sendCommand("Debugger.pause");
+		const p: any = await Promise.race([paused, new Promise((r) => setTimeout(() => r(null), 5000))]);
+		log("frozenStack", p ? p.callFrames.slice(0, 30).map((f: any) => `${f.functionName || "(anon)"} ${String(f.url).split("/").pop()}:${f.location.lineNumber + 1}`) : "could not pause");
+		throw e;
+	}
+	log("presenting", s1);
+	await shot("present-page1.png");
+	await key("Tab");
+	const s2 = await state();
+	log("afterTab", { page: s2.page, pages: s2.pages });
+	await shot("present-page2.png");
+	await key("Tab", ["shift"]);
+	log("afterShiftTab", (await state()).page);
+	// Drag the view with the left button.
+	const { width, height } = w.editorView.getBounds();
+	const cx = Math.round(width / 2);
+	const cy = Math.round(height / 2);
+	const before = await state();
+	wc.sendInputEvent({ type: "mouseDown", x: cx, y: cy, button: "left", clickCount: 1 });
+	for (let i = 1; i <= 10; i++) {
+		wc.sendInputEvent({ type: "mouseMove", x: cx + i * 15, y: cy + i * 8, button: "left", modifiers: ["leftbuttondown"] as any });
+		await pause(16);
+	}
+	wc.sendInputEvent({ type: "mouseUp", x: cx + 150, y: cy + 80, button: "left", clickCount: 1 });
+	await pause(300);
+	const after = await state();
+	log("pan", { before: before.translate, after: after.translate, scrollBefore: before.scroll, scrollAfter: after.scroll });
+	// Clicks select nothing; right-click opens no menu.
+	wc.sendInputEvent({ type: "mouseDown", x: cx, y: cy, button: "left", clickCount: 1 });
+	wc.sendInputEvent({ type: "mouseUp", x: cx, y: cy, button: "left", clickCount: 1 });
+	wc.sendInputEvent({ type: "mouseDown", x: cx, y: cy, button: "right", clickCount: 1 });
+	wc.sendInputEvent({ type: "mouseUp", x: cx, y: cy, button: "right", clickCount: 1 });
+	await pause(300);
+	log(
+		"afterClicks",
+		await wc.executeJavaScript(`({ selected: editorUi.editor.graph.getSelectionCount(), popupMenus: document.querySelectorAll(".mxPopupMenu").length })`)
+	);
+	await key("Delete");
+	await key("Backspace");
+	await key("a", ["meta"]);
+	await key("Delete");
+	await shot("present-final.png");
+	await key("Escape");
+	await pause(1200);
+	// Page view state (scroll position, view defaults draw.io writes when a page is visited) may differ; content may not.
+	// Attribute order is not content either (draw.io re-serializes a page it visits).
+	const viewless = (x: string) =>
+		x
+			.replace(/<mxGraphModel[^>]*>/g, "<mxGraphModel>")
+			.replace(/<([\w:]+)((?:\s+[\w:-]+="[^"]*")+)\s*(\/?)>/g, (_m, tag: string, attrs: string, close: string) => `<${tag} ${attrs.trim().match(/[\w:-]+="[^"]*"/g)!.sort().join(" ")}${close}>`);
+	const xmlAfter = await w.client.getXml();
+	log("diagramUnchanged", viewless(xmlAfter) === viewless(xmlBefore));
+	log("markedEdited", (w as any).dirty);
+	const a = viewless(xmlBefore);
+	const b = viewless(xmlAfter);
+	if (a !== b) {
+		let i = 0;
+		while (i < a.length && a[i] === b[i]) i++;
+		log("firstDifference", { at: i, lengths: [a.length, b.length], before: a.slice(Math.max(0, i - 150), i + 150), after: b.slice(Math.max(0, i - 150), i + 150) });
+	}
+	log("afterEscape", { hostPresenting: w.presenting, plugin: await state() });
+	await shot("after-present.png");
 }

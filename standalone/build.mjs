@@ -96,5 +96,5 @@ const jobs = [
 ];
 
 await Promise.all(jobs.map((j) => build(j)));
-for (const f of ["chat.html", "mapper.html", "desktop-menu.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+for (const f of ["chat.html", "mapper.html", "desktop-menu.js", "presentation.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
 console.log(`Built to ${out}${watch ? " (watch not supported; rerun)" : ""}`);
