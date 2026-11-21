@@ -202,6 +202,20 @@ Electron main process                          agent subprocess (cwd = diagram f
 - Shared code is imported read-only from `../src`; `vscode` imports resolve to a
   small shim (`src/main/vscode-shim.ts`).
 
+## Build a release
+
+```bash
+yarn dist:mac
+```
+
+builds `dist/Draw.AI-<version>-arm64.dmg` and a `.zip` with electron-builder (`yarn dist`
+for the current platform). The draw.io webapp and the examples ship as resources. Agents
+run the stdio MCP proxy from `app.asar.unpacked`. The macOS build is not signed yet:
+set `build.mac.identity` (and notarization) in `package.json` once a Developer ID
+certificate is available. `node scripts/e2e.mjs --app
+dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI` runs the end-to-end check against
+the packaged app.
+
 ## Settings
 
 **Draw.AI → Settings…** opens `settings.json` in the app's data folder. Everything

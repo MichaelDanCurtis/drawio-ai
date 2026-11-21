@@ -11,7 +11,9 @@
 		"build": "node build.mjs",
 		"start": "node scripts/prepare-assets.mjs && node build.mjs && electron .",
 		"typecheck": "tsc -p tsconfig.json --noEmit",
-		"e2e": "node build.mjs && node scripts/e2e.mjs"
+		"e2e": "node build.mjs && node scripts/e2e.mjs",
+		"dist": "node scripts/prepare-assets.mjs && node build.mjs && electron-builder --publish never",
+		"dist:mac": "node scripts/prepare-assets.mjs && node build.mjs && electron-builder --mac --publish never"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^2.8.0",
@@ -32,10 +34,78 @@
 		"@types/pg": "^8.23.1",
 		"@types/vscode": "1.105.0",
 		"electron": "^45.4.1",
+		"electron-builder": "^26",
 		"esbuild": "^0.28.2",
 		"fast-xml-parser": "^5.12.1",
 		"mithril": "^2.0.4",
 		"mobx": "^5",
 		"typescript": "^5.7.3"
+	},
+	"author": "Michael Curtis",
+	"homepage": "https://github.com/MichaelDanCurtis/drawio-ai",
+	"build": {
+		"appId": "ai.luxis.drawai.desktop",
+		"productName": "Draw.AI",
+		"copyright": "GPL-3.0; includes draw.io (Apache-2.0)",
+		"directories": {
+			"output": "dist",
+			"buildResources": "build"
+		},
+		"files": [
+			"out/**/*",
+			"!out/**/*.map",
+			"package.json"
+		],
+		"asarUnpack": [
+			"out/mcp-stdio-proxy.js"
+		],
+		"extraResources": [
+			{
+				"from": "../drawio/src/main/webapp",
+				"to": "webapp",
+				"filter": [
+					"**/*",
+					"!WEB-INF/**",
+					"!META-INF/**"
+				]
+			},
+			{
+				"from": "../examples",
+				"to": "examples"
+			}
+		],
+		"mac": {
+			"category": "public.app-category.developer-tools",
+			"target": [
+				"dmg",
+				"zip"
+			],
+			"icon": "build/icon.png",
+			"identity": null,
+			"hardenedRuntime": false
+		},
+		"win": {
+			"target": [
+				"nsis"
+			],
+			"icon": "build/icon.png"
+		},
+		"linux": {
+			"target": [
+				"AppImage"
+			],
+			"category": "Development",
+			"icon": "build/icon.png"
+		},
+		"fileAssociations": [
+			{
+				"ext": [
+					"drawio",
+					"dio"
+				],
+				"name": "draw.io diagram",
+				"role": "Editor"
+			}
+		]
 	}
 }
