@@ -1,0 +1,29 @@
+tree
+version=v4
+num_class=1
+num_tree_per_iteration=1
+label_index=0
+max_feature_idx=2
+objective=regression
+feature_names=sqft bedrooms age
+feature_infos=[500:5000] [1:6] [0:120]
+tree_sizes=300 280
+
+Tree=0
+num_leaves=3
+num_cat=0
+split_feature=0 1
+threshold=1500 3
+leaf_value=1 2 3
+
+Tree=1
+num_leaves=5
+num_cat=0
+split_feature=0 2 1 0
+threshold=2500 40 2 900
+leaf_value=0.1 0.2 0.3 0.4 0.5
+
+end of trees
+
+feature_importances:
+sqft=3

@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  annotations:
+    note: "talks to AWS::SQS via the SDK"
+spec:
+  template:
+    spec:
+      containers: [{ name: api, image: example/api }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api }

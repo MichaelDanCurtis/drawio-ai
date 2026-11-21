@@ -1,0 +1,210 @@
+[
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub",
+  "name": "vnet-hub",
+  "type": "Microsoft.Network/virtualNetworks",
+  "location": "westeurope",
+  "resourceGroup": "rg-network",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "provisioningState": "Succeeded",
+  "addressSpace": {
+   "addressPrefixes": [
+    "10.0.0.0/16"
+   ]
+  },
+  "subnets": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub/subnets/AzureBastionSubnet",
+    "name": "AzureBastionSubnet",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.0.0.0/26",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/bastionHosts/bas-hub/bastionHostIpConfigurations/IpConf"
+     }
+    ],
+    "resourceGroup": "rg-network"
+   },
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub/subnets/GatewaySubnet",
+    "name": "GatewaySubnet",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.0.1.0/27",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "resourceGroup": "rg-network"
+   }
+  ],
+  "virtualNetworkPeerings": [
+   {
+    "name": "hub-to-spoke",
+    "peeringState": "Connected",
+    "peeringSyncLevel": "FullyInSync",
+    "remoteVirtualNetwork": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke"
+    },
+    "allowVirtualNetworkAccess": true,
+    "allowForwardedTraffic": true,
+    "useRemoteGateways": false
+   }
+  ],
+  "enableDdosProtection": false
+ },
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke",
+  "name": "vnet-spoke",
+  "type": "Microsoft.Network/virtualNetworks",
+  "location": "westeurope",
+  "resourceGroup": "rg-network",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "provisioningState": "Succeeded",
+  "addressSpace": {
+   "addressPrefixes": [
+    "10.1.0.0/16"
+   ]
+  },
+  "subnets": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web",
+    "name": "snet-web",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.1.1.0/24",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "networkSecurityGroup": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/networkSecurityGroups/nsg-web"
+    },
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01/ipConfigurations/ipconfig1"
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02/ipConfigurations/ipconfig1"
+     }
+    ],
+    "resourceGroup": "rg-network"
+   },
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-aks",
+    "name": "snet-aks",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.1.2.0/23",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss/virtualMachines/0/networkInterfaces/aks-system-12345678-vmss/ipConfigurations/ipconfig1"
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss/virtualMachines/1/networkInterfaces/aks-system-12345678-vmss/ipConfigurations/ipconfig1"
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/MC_rg-app_aks-prod_westeurope/providers/Microsoft.Compute/virtualMachineScaleSets/aks-system-12345678-vmss/virtualMachines/2/networkInterfaces/aks-system-12345678-vmss/ipConfigurations/ipconfig1"
+     }
+    ],
+    "resourceGroup": "rg-network"
+   },
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe",
+    "name": "snet-pe",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.1.4.0/24",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "privateEndpoints": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql"
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob"
+     }
+    ],
+    "ipConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001/ipConfigurations/privateEndpointIpConfig.1"
+     },
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002/ipConfigurations/privateEndpointIpConfig.1"
+     }
+    ],
+    "resourceGroup": "rg-network"
+   },
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appint",
+    "name": "snet-appint",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.1.5.0/24",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "delegations": [
+     {
+      "name": "delegation",
+      "properties": {
+       "serviceName": "Microsoft.Web/serverFarms",
+       "actions": [
+        "Microsoft.Network/virtualNetworks/subnets/action"
+       ]
+      }
+     }
+    ],
+    "serviceAssociationLinks": [
+     {
+      "name": "AppServiceLink",
+      "properties": {
+       "linkedResourceType": "Microsoft.Web/serverfarms",
+       "link": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Web/serverfarms/plan-web"
+      }
+     }
+    ],
+    "serviceEndpoints": [
+     {
+      "service": "Microsoft.KeyVault",
+      "locations": [
+       "*"
+      ]
+     }
+    ],
+    "resourceGroup": "rg-network"
+   },
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-appgw",
+    "name": "snet-appgw",
+    "provisioningState": "Succeeded",
+    "addressPrefix": "10.1.6.0/24",
+    "privateEndpointNetworkPolicies": "Disabled",
+    "privateLinkServiceNetworkPolicies": "Enabled",
+    "applicationGatewayIPConfigurations": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/gatewayIPConfigurations/appGatewayIpConfig"
+     }
+    ],
+    "resourceGroup": "rg-network"
+   }
+  ],
+  "virtualNetworkPeerings": [
+   {
+    "name": "spoke-to-hub",
+    "peeringState": "Connected",
+    "peeringSyncLevel": "FullyInSync",
+    "remoteVirtualNetwork": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-hub"
+    },
+    "allowVirtualNetworkAccess": true,
+    "allowForwardedTraffic": true,
+    "useRemoteGateways": false
+   }
+  ]
+ }
+]

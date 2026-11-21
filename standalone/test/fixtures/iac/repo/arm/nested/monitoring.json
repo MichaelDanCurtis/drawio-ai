@@ -1,0 +1,8 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "resources": [
+    { "type": "Microsoft.OperationalInsights/workspaces", "apiVersion": "2022-10-01", "name": "law-app", "location": "westeurope" },
+    { "type": "Microsoft.Insights/components", "apiVersion": "2020-02-02", "name": "appi-app", "location": "westeurope", "kind": "web", "dependsOn": ["law-app"], "properties": { "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', 'law-app')]" } }
+  ]
+}

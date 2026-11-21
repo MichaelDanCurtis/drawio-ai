@@ -1,0 +1,47 @@
+[
+ {
+  "kind": "sql#instance",
+  "name": "orders-db",
+  "project": "acme-shop-prod",
+  "region": "us-central1",
+  "gceZone": "us-central1-a",
+  "databaseVersion": "POSTGRES_15",
+  "state": "RUNNABLE",
+  "connectionName": "acme-shop-prod:us-central1:orders-db",
+  "selfLink": "https://sqladmin.googleapis.com/sql/v1beta4/projects/acme-shop-prod/instances/orders-db",
+  "ipAddresses": [
+   {
+    "type": "PRIMARY",
+    "ipAddress": "34.66.0.50"
+   },
+   {
+    "type": "PRIVATE",
+    "ipAddress": "10.60.0.3"
+   }
+  ],
+  "settings": {
+   "tier": "db-custom-2-7680",
+   "availabilityType": "ZONAL",
+   "backupConfiguration": {
+    "enabled": true,
+    "pointInTimeRecoveryEnabled": true
+   },
+   "ipConfiguration": {
+    "ipv4Enabled": true,
+    "privateNetwork": "projects/acme-shop-prod/global/networks/vpc-prod",
+    "authorizedNetworks": [
+     {
+      "kind": "sql#aclEntry",
+      "name": "anywhere",
+      "value": "0.0.0.0/0"
+     }
+    ],
+    "sslMode": "ALLOW_UNENCRYPTED_AND_ENCRYPTED"
+   },
+   "userLabels": {
+    "env": "prod"
+   }
+  },
+  "rootPassword": "Sup3rS3cret!"
+ }
+]

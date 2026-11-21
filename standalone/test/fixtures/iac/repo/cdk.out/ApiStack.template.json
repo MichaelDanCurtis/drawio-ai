@@ -1,0 +1,37 @@
+{
+  "Resources": {
+    "HandlerServiceRoleFCDC14AE": {
+      "Type": "AWS::IAM::Role",
+      "Properties": { "AssumeRolePolicyDocument": { "Statement": [] } },
+      "Metadata": { "aws:cdk:path": "ApiStack/Handler/ServiceRole/Resource" }
+    },
+    "Handler886CB40B": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Role": { "Fn::GetAtt": ["HandlerServiceRoleFCDC14AE", "Arn"] },
+        "Runtime": "python3.12",
+        "Environment": { "Variables": { "TABLE": { "Ref": "ItemsTable5AAC2C46" } } }
+      },
+      "DependsOn": ["HandlerServiceRoleFCDC14AE"],
+      "Metadata": { "aws:cdk:path": "ApiStack/Handler/Resource" }
+    },
+    "ItemsTable5AAC2C46": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": { "KeySchema": [] },
+      "Metadata": { "aws:cdk:path": "ApiStack/Items/Resource" }
+    },
+    "RestApi0C43BF4B": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Metadata": { "aws:cdk:path": "ApiStack/RestApi/Resource" }
+    },
+    "RestApiMethod": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "RestApiId": { "Ref": "RestApi0C43BF4B" },
+        "Integration": { "Uri": { "Fn::Join": ["", ["arn:", { "Fn::Sub": "${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/functions/${Handler886CB40B.Arn}/invocations" }]] } }
+      },
+      "Metadata": { "aws:cdk:path": "ApiStack/RestApi/Default/ANY/Resource" }
+    },
+    "CDKMetadata": { "Type": "AWS::CDK::Metadata", "Properties": { "Analytics": "v2:deflate64:x" } }
+  }
+}

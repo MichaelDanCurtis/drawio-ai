@@ -1,0 +1,108 @@
+[
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01",
+  "name": "vm-web-01",
+  "type": "Microsoft.Compute/virtualMachines",
+  "location": "westeurope",
+  "resourceGroup": "rg-app",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": [
+   "1"
+  ],
+  "vmId": "00000000-0000-4000-8000-000000000001",
+  "hardwareProfile": {
+   "vmSize": "Standard_B2s"
+  },
+  "storageProfile": {
+   "imageReference": {
+    "publisher": "Canonical",
+    "offer": "0001-com-ubuntu-server-jammy",
+    "sku": "22_04-lts-gen2",
+    "version": "latest"
+   },
+   "osDisk": {
+    "osType": "Linux",
+    "name": "osdisk-web-01",
+    "managedDisk": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/disks/osdisk-web-01"
+    }
+   }
+  },
+  "osProfile": {
+   "computerName": "vm-web-01",
+   "adminUsername": "azureuser",
+   "linuxConfiguration": {
+    "disablePasswordAuthentication": false
+   }
+  },
+  "networkProfile": {
+   "networkInterfaces": [
+    {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01"
+    }
+   ]
+  },
+  "diagnosticsProfile": {
+   "bootDiagnostics": {
+    "enabled": true
+   }
+  }
+ },
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-02",
+  "name": "vm-web-02",
+  "type": "Microsoft.Compute/virtualMachines",
+  "location": "westeurope",
+  "resourceGroup": "rg-app",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": [
+   "2"
+  ],
+  "vmId": "00000000-0000-4000-8000-000000000002",
+  "hardwareProfile": {
+   "vmSize": "Standard_B2s"
+  },
+  "storageProfile": {
+   "imageReference": {
+    "publisher": "Canonical",
+    "offer": "0001-com-ubuntu-server-jammy",
+    "sku": "22_04-lts-gen2",
+    "version": "latest"
+   },
+   "osDisk": {
+    "osType": "Linux",
+    "name": "osdisk-web-02",
+    "managedDisk": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/disks/osdisk-web-02"
+    }
+   }
+  },
+  "osProfile": {
+   "computerName": "vm-web-02",
+   "adminUsername": "azureuser",
+   "linuxConfiguration": {
+    "disablePasswordAuthentication": false
+   }
+  },
+  "networkProfile": {
+   "networkInterfaces": [
+    {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02"
+    }
+   ]
+  },
+  "diagnosticsProfile": {
+   "bootDiagnostics": {
+    "enabled": true
+   }
+  }
+ }
+]

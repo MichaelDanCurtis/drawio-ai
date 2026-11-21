@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Orders service (made up for tests)
+Parameters:
+  Stage:
+    Type: String
+Resources:
+  OrdersQueue:
+    Type: AWS::SQS::Queue
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "orders-${Stage}"
+      BillingMode: PAY_PER_REQUEST
+  OrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Environment:
+        Variables:
+          TABLE: !Ref OrdersTable
+          BUCKET_ARN: !GetAtt [ReportsBucket, Arn]
+          API_KEY: "not-a-real-secret"
+      Events:
+        Queue:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt OrdersQueue.Arn
+        Api:
+          Type: Api
+          Properties:
+            Path: /orders
+            Method: post
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: OrdersTable
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-reports"
+  Alarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+        - !If [HasTopic, !Ref "AWS::NoValue", !Ref "AWS::NoValue"]
+      Dimensions:
+        - Name: FunctionName
+          Value: !Sub
+            - "${Fn}"
+            - Fn: !Ref OrdersFunction
+  Network:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: ./network.yaml
+Outputs:
+  Queue:
+    Value: !Ref OrdersQueue

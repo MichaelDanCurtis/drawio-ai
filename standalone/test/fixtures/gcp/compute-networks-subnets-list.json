@@ -1,0 +1,68 @@
+[
+ {
+  "kind": "compute#subnetwork",
+  "id": "1000002",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-web",
+  "name": "subnet-web",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+  "ipCidrRange": "10.10.0.0/24",
+  "gatewayAddress": "10.10.0.1",
+  "stackType": "IPV4_ONLY",
+  "purpose": "PRIVATE",
+  "privateIpGoogleAccess": true
+ },
+ {
+  "kind": "compute#subnetwork",
+  "id": "1000003",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+  "name": "subnet-gke",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+  "ipCidrRange": "10.20.0.0/20",
+  "gatewayAddress": "10.20.0.1",
+  "stackType": "IPV4_ONLY",
+  "purpose": "PRIVATE",
+  "privateIpGoogleAccess": true,
+  "secondaryIpRanges": [
+   {
+    "rangeName": "pods",
+    "ipCidrRange": "10.100.0.0/14"
+   },
+   {
+    "rangeName": "services",
+    "ipCidrRange": "10.104.0.0/20"
+   }
+  ]
+ },
+ {
+  "kind": "compute#subnetwork",
+  "id": "1000004",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/europe-west1/subnetworks/subnet-eu",
+  "name": "subnet-eu",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-prod",
+  "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/europe-west1",
+  "ipCidrRange": "10.30.0.0/24",
+  "gatewayAddress": "10.30.0.1",
+  "stackType": "IPV4_ONLY",
+  "purpose": "PRIVATE",
+  "privateIpGoogleAccess": false
+ },
+ {
+  "kind": "compute#subnetwork",
+  "id": "1000005",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-shared",
+  "name": "subnet-shared",
+  "network": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/networks/vpc-shared",
+  "region": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/regions/us-central1",
+  "ipCidrRange": "10.40.0.0/24",
+  "gatewayAddress": "10.40.0.1",
+  "stackType": "IPV4_ONLY",
+  "purpose": "PRIVATE",
+  "privateIpGoogleAccess": false
+ }
+]

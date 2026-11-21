@@ -1,0 +1,9 @@
+apiVersion: serving.kserve.io/v1beta1
+kind: InferenceService
+metadata:
+  name: churn
+spec:
+  predictor:
+    containers:
+      - name: kserve-container
+        image: ghcr.io/acme/churn-serve:latest

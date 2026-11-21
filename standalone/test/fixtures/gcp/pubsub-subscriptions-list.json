@@ -1,0 +1,21 @@
+[
+ {
+  "name": "projects/acme-shop-prod/subscriptions/orders-push",
+  "topic": "projects/acme-shop-prod/topics/orders",
+  "pushConfig": {
+   "pushEndpoint": "https://orders-api-abcdefghij-uc.a.run.app/events",
+   "oidcToken": {
+    "serviceAccountEmail": "orders-api@acme-shop-prod.iam.gserviceaccount.com"
+   }
+  },
+  "ackDeadlineSeconds": 30,
+  "state": "ACTIVE"
+ },
+ {
+  "name": "projects/acme-shop-prod/subscriptions/orders-audit",
+  "topic": "projects/acme-shop-prod/topics/orders",
+  "pushConfig": {},
+  "ackDeadlineSeconds": 60,
+  "state": "ACTIVE"
+ }
+]

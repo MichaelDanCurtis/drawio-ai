@@ -1,0 +1,34 @@
+[
+ {
+  "name": "projects/acme-shop-prod/locations/us-central1/functions/process-orders",
+  "environment": "GEN_2",
+  "state": "ACTIVE",
+  "buildConfig": {
+   "runtime": "python312",
+   "entryPoint": "handle",
+   "source": {
+    "storageSource": {
+     "bucket": "gcf-v2-sources-123456789012-us-central1",
+     "object": "process-orders/function-source.zip"
+    }
+   }
+  },
+  "serviceConfig": {
+   "service": "projects/acme-shop-prod/locations/us-central1/services/process-orders",
+   "uri": "https://process-orders-abcdefghij-uc.a.run.app",
+   "ingressSettings": "ALLOW_INTERNAL_ONLY",
+   "serviceAccountEmail": "123456789012-compute@developer.gserviceaccount.com",
+   "environmentVariables": {
+    "API_TOKEN": "tok_live_supersecret"
+   },
+   "availableMemory": "256M"
+  },
+  "eventTrigger": {
+   "trigger": "projects/acme-shop-prod/locations/us-central1/triggers/process-orders-123",
+   "eventType": "google.cloud.pubsub.topic.v1.messagePublished",
+   "pubsubTopic": "projects/acme-shop-prod/topics/orders",
+   "retryPolicy": "RETRY_POLICY_RETRY"
+  },
+  "url": "https://us-central1-acme-shop-prod.cloudfunctions.net/process-orders"
+ }
+]

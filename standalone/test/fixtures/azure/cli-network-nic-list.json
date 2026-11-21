@@ -1,0 +1,118 @@
+[
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01",
+  "name": "nic-web-01",
+  "type": "Microsoft.Network/networkInterfaces",
+  "location": "westeurope",
+  "resourceGroup": "rg-app",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "virtualMachine": {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-01"
+  },
+  "ipConfigurations": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-01/ipConfigurations/ipconfig1",
+    "name": "ipconfig1",
+    "privateIPAddress": "10.1.1.4",
+    "privateIPAllocationMethod": "Dynamic",
+    "subnet": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web"
+    },
+    "primary": true,
+    "applicationGatewayBackendAddressPools": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/backendAddressPools/web"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02",
+  "name": "nic-web-02",
+  "type": "Microsoft.Network/networkInterfaces",
+  "location": "westeurope",
+  "resourceGroup": "rg-app",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "virtualMachine": {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Compute/virtualMachines/vm-web-02"
+  },
+  "ipConfigurations": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-app/providers/Microsoft.Network/networkInterfaces/nic-web-02/ipConfigurations/ipconfig1",
+    "name": "ipconfig1",
+    "privateIPAddress": "10.1.1.5",
+    "privateIPAllocationMethod": "Dynamic",
+    "subnet": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-web"
+    },
+    "primary": true,
+    "applicationGatewayBackendAddressPools": [
+     {
+      "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/applicationGateways/agw-prod/backendAddressPools/web"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001",
+  "name": "pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001",
+  "type": "Microsoft.Network/networkInterfaces",
+  "location": "westeurope",
+  "resourceGroup": "rg-data",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "privateEndpoint": {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-sql"
+  },
+  "ipConfigurations": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-sql.nic.0a1b2c3d-0000-4000-8000-000000000001/ipConfigurations/privateEndpointIpConfig.1",
+    "privateIPAddress": "10.1.4.4",
+    "subnet": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+    }
+   }
+  ]
+ },
+ {
+  "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002",
+  "name": "pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002",
+  "type": "Microsoft.Network/networkInterfaces",
+  "location": "westeurope",
+  "resourceGroup": "rg-data",
+  "kind": "",
+  "sku": null,
+  "tags": {},
+  "identity": null,
+  "managedBy": "",
+  "zones": null,
+  "privateEndpoint": {
+   "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/privateEndpoints/pe-stblob"
+  },
+  "ipConfigurations": [
+   {
+    "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-data/providers/Microsoft.Network/networkInterfaces/pe-stblob.nic.0a1b2c3d-0000-4000-8000-000000000002/ipConfigurations/privateEndpointIpConfig.1",
+    "privateIPAddress": "10.1.4.5",
+    "subnet": {
+     "id": "/subscriptions/00000000-1111-2222-3333-444444444444/resourceGroups/rg-network/providers/Microsoft.Network/virtualNetworks/vnet-spoke/subnets/snet-pe"
+    }
+   }
+  ]
+ }
+]

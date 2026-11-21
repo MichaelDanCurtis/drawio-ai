@@ -1,0 +1,56 @@
+[
+ {
+  "name": "shop-cluster",
+  "location": "us-central1",
+  "locations": [
+   "us-central1-a",
+   "us-central1-b",
+   "us-central1-c"
+  ],
+  "selfLink": "https://container.googleapis.com/v1/projects/acme-shop-prod/locations/us-central1/clusters/shop-cluster",
+  "network": "vpc-prod",
+  "subnetwork": "subnet-gke",
+  "networkConfig": {
+   "network": "projects/acme-shop-prod/global/networks/vpc-prod",
+   "subnetwork": "projects/acme-shop-prod/regions/us-central1/subnetworks/subnet-gke",
+   "datapathProvider": "ADVANCED_DATAPATH"
+  },
+  "currentMasterVersion": "1.30.5-gke.1014000",
+  "status": "RUNNING",
+  "endpoint": "34.30.0.40",
+  "privateClusterConfig": {
+   "enablePrivateNodes": true,
+   "enablePrivateEndpoint": false,
+   "masterIpv4CidrBlock": "172.16.0.0/28"
+  },
+  "masterAuthorizedNetworksConfig": {
+   "enabled": false
+  },
+  "masterAuth": {
+   "clusterCaCertificate": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t"
+  },
+  "workloadIdentityConfig": {
+   "workloadPool": "acme-shop-prod.svc.id.goog"
+  },
+  "nodePools": [
+   {
+    "name": "default-pool",
+    "config": {
+     "machineType": "e2-standard-4",
+     "diskSizeGb": 100,
+     "serviceAccount": "default"
+    },
+    "initialNodeCount": 1,
+    "autoscaling": {
+     "enabled": true,
+     "minNodeCount": 1,
+     "maxNodeCount": 3
+    },
+    "status": "RUNNING"
+   }
+  ],
+  "resourceLabels": {
+   "env": "prod"
+  }
+ }
+]

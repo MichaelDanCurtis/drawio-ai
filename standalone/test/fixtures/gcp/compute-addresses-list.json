@@ -1,0 +1,15 @@
+[
+ {
+  "kind": "compute#address",
+  "id": "1000023",
+  "creationTimestamp": "2025-06-01T03:00:00.000-07:00",
+  "selfLink": "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/addresses/web-lb-ip",
+  "name": "web-lb-ip",
+  "address": "34.149.0.20",
+  "addressType": "EXTERNAL",
+  "status": "IN_USE",
+  "users": [
+   "https://www.googleapis.com/compute/v1/projects/acme-shop-prod/global/forwardingRules/web-lb-fr"
+  ]
+ }
+]

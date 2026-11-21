@@ -1,0 +1,12 @@
+name: train
+on:
+  schedule:
+    - cron: "0 4 * * 1"
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python data/ingest.py
+      - run: python -m src.train
+      - run: python src/evaluate.py

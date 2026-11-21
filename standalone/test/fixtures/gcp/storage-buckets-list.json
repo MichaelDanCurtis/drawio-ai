@@ -1,0 +1,13 @@
+[
+ {
+  "name": "acme-shop-assets",
+  "location": "US",
+  "location_type": "multi-region",
+  "storage_url": "gs://acme-shop-assets/",
+  "default_storage_class": "STANDARD",
+  "public_access_prevention": "inherited",
+  "uniform_bucket_level_access": true,
+  "versioning_enabled": false,
+  "creation_time": "2025-06-01T10:00:00+0000"
+ }
+]

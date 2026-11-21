@@ -1,0 +1,72 @@
+[
+ {
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+   "name": "orders-api",
+   "namespace": "123456789012",
+   "selfLink": "/apis/serving.knative.dev/v1/namespaces/123456789012/services/orders-api",
+   "labels": {
+    "cloud.googleapis.com/location": "us-central1"
+   },
+   "annotations": {
+    "run.googleapis.com/ingress": "all",
+    "run.googleapis.com/ingress-status": "all",
+    "serving.knative.dev/creator": "deployer@acme.example"
+   }
+  },
+  "spec": {
+   "template": {
+    "metadata": {
+     "annotations": {
+      "autoscaling.knative.dev/maxScale": "10",
+      "run.googleapis.com/vpc-access-connector": "projects/acme-shop-prod/locations/us-central1/connectors/run-conn",
+      "run.googleapis.com/vpc-access-egress": "private-ranges-only",
+      "run.googleapis.com/cloudsql-instances": "acme-shop-prod:us-central1:orders-db"
+     }
+    },
+    "spec": {
+     "serviceAccountName": "orders-api@acme-shop-prod.iam.gserviceaccount.com",
+     "containers": [
+      {
+       "image": "us-central1-docker.pkg.dev/acme-shop-prod/apps/orders-api:1.4.2",
+       "env": [
+        {
+         "name": "DB_PASSWORD",
+         "value": "Sup3rS3cret!"
+        },
+        {
+         "name": "TOPIC",
+         "value": "projects/acme-shop-prod/topics/orders"
+        }
+       ],
+       "ports": [
+        {
+         "containerPort": 8080
+        }
+       ]
+      }
+     ]
+    }
+   },
+   "traffic": [
+    {
+     "percent": 100,
+     "latestRevision": true
+    }
+   ]
+  },
+  "status": {
+   "url": "https://orders-api-abcdefghij-uc.a.run.app",
+   "address": {
+    "url": "https://orders-api-abcdefghij-uc.a.run.app"
+   },
+   "conditions": [
+    {
+     "type": "Ready",
+     "status": "True"
+    }
+   ]
+  }
+ }
+]

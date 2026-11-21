@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": { "vmName": { "type": "string" }, "adminPassword": { "type": "securestring" } },
+  "variables": { "vnetName": "vnet-arm", "nicName": "[concat(parameters('vmName'), '-nic')]" },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-04-01",
+      "name": "[variables('vnetName')]",
+      "location": "westeurope",
+      "properties": { "addressSpace": { "addressPrefixes": ["10.40.0.0/16"] } },
+      "resources": [
+        { "type": "subnets", "apiVersion": "2023-04-01", "name": "default", "dependsOn": ["[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]"], "properties": { "addressPrefix": "10.40.0.0/24" } }
+      ]
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-04-01",
+      "name": "[concat(parameters('vmName'), '-pip')]",
+      "location": "westeurope"
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-04-01",
+      "name": "[variables('nicName')]",
+      "location": "westeurope",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), 'default')]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', concat(parameters('vmName'), '-pip'))]"
+      ],
+      "properties": { "ipConfigurations": [] }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-03-01",
+      "name": "[parameters('vmName')]",
+      "location": "westeurope",
+      "dependsOn": ["[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"],
+      "properties": { "osProfile": { "adminPassword": "[parameters('adminPassword')]" }, "networkProfile": { "networkInterfaces": [{ "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]" }] } }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "monitoring",
+      "properties": { "mode": "Incremental", "templateLink": { "relativePath": "nested/monitoring.json" } }
+    }
+  ]
+}
