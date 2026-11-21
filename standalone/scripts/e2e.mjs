@@ -26,13 +26,23 @@ const config = {
 	prompt: arg("prompt"),
 	timeoutMs: Number(arg("timeout", "420000")),
 	clickPermissions: process.argv.includes("--click-permissions"),
+	// yarn e2e --map software.github-actions --map-input '{"folder":"…"}' [--map-dialog] [--agent claude --ask-agent] [--dig "question"]
+	map: arg("map")
+		? {
+				recipe: arg("map"),
+				input: JSON.parse(arg("map-input", "{}")),
+				dialog: process.argv.includes("--map-dialog"),
+				askAgent: process.argv.includes("--ask-agent"),
+				digDeeper: arg("dig"),
+		  }
+		: undefined,
 };
 const electron = createRequire(import.meta.url)("electron");
 const r = spawnSync(electron, [join(here, "..")], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config) } });
 console.log(`\nResults in ${config.out}`);
 try {
 	const s = JSON.parse(readFileSync(join(config.out, "summary.json"), "utf8"));
-	if (config.agent && !s.diagramChanged) {
+	if (config.agent && !config.map && !s.diagramChanged) {
 		console.error("The agent did not change the diagram.");
 		process.exit(1);
 	}

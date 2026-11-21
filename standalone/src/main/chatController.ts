@@ -33,6 +33,10 @@ export interface ChatHost {
 	cwd(): string;
 	/** The diagram is loaded and the Draw.AI plugin is ready. */
 	ready(): boolean;
+	/** Mapper: open its dialog, and the number of mapped shapes in the selection. */
+	openMapper?(): void;
+	mappedSelectionCount?(): number;
+	digDeeper?(question: string): void;
 }
 
 const MAX_IMAGES = 4;
@@ -148,6 +152,12 @@ export class ChatController {
 			}
 			case "command":
 				await this.command(String(msg.command ?? ""));
+				break;
+			case "openMapper":
+				this.host.openMapper?.();
+				break;
+			case "digDeeper":
+				this.host.digDeeper?.(String(msg.text ?? ""));
 				break;
 		}
 	}
@@ -316,7 +326,8 @@ export class ChatController {
 
 	// ----- prompting -----
 
-	public async send(text: string, origin?: SelectionContext, images: ImageData[] = []): Promise<void> {
+	/** `shown` replaces the request in the transcript (e.g. a Mapper request with its facts). */
+	public async send(text: string, origin?: SelectionContext, images: ImageData[] = [], shown?: string): Promise<void> {
 		const client = this.host.client();
 		if (this.busy) {
 			this.push({ kind: "error", text: "Still working on the previous request — press Stop first." });
@@ -333,7 +344,7 @@ export class ChatController {
 				: selection.region
 				? "◌ empty area"
 				: undefined;
-		this.push({ kind: "user", text, scope, attachments: images.length ? [`🖼 ${images.length} image${images.length === 1 ? "" : "s"}`] : undefined });
+		this.push({ kind: "user", text: shown ?? text, scope, attachments: images.length ? [`🖼 ${images.length} image${images.length === 1 ? "" : "s"}`] : undefined });
 		if (!client || !this.host.ready()) {
 			this.push({ kind: "error", text: "The diagram is still loading. Try again in a moment." });
 			return;
@@ -568,6 +579,7 @@ export class ChatController {
 			state: {
 				file: this.host.fileName() ?? "Untitled diagram",
 				selectionCount: client?.currentSelection.length ?? 0,
+				mappedSelection: this.host.mappedSelectionCount?.() ?? 0,
 				lassoActive: this.lassoActive,
 				busy: this.busy,
 				transcript: this.transcript,
@@ -593,7 +605,7 @@ export class ChatController {
 function firstPromptNote(fileName: string | undefined): string {
 	return [
 		`You are working inside the Draw.AI desktop app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
-		"Read and change it ONLY with the drawio_* tools of the \"draw-ai\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk, and do not run shell commands for diagram work.",
+		"Read and change it ONLY with the drawio_* tools of the \"draw-ai\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
 		"Reply with a brief summary of what you changed.",
 	].join("\n");
 }

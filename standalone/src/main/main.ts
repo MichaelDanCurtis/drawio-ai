@@ -5,6 +5,7 @@ import { AGENTS } from "./agents";
 import { DiagramWindow } from "./diagramWindow";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
+import { CATEGORIES } from "./mapper/types";
 import { paths } from "./paths";
 import { settingsPath, updateSettings } from "./settings";
 import { StaticServer } from "./staticServer";
@@ -131,6 +132,16 @@ function buildMenu(): void {
 				{ label: "Revert AI Changes", click: () => w()?.client.aiResolveReview("reject") },
 			],
 		},
+		{
+			label: "Map",
+			submenu: [
+				{ label: "Map Something…", accelerator: "CmdOrCtrl+Shift+M", click: () => void withWindow((x) => x.mapper.open()) },
+				{ type: "separator" },
+				...CATEGORIES.map((c) => ({ label: `${c.title}…`, click: () => void withWindow((x) => x.mapper.open(c.id)) })),
+				{ type: "separator" },
+				{ label: "Dig Deeper into Selection", accelerator: "CmdOrCtrl+Shift+D", click: () => void w()?.digDeeper("") },
+			],
+		},
 		{ role: "windowMenu" },
 		{
 			role: "help",
@@ -138,6 +149,18 @@ function buildMenu(): void {
 		},
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Runs `action` on the focused window, opening a new diagram first when there is none. */
+async function withWindow(action: (w: DiagramWindow) => void): Promise<void> {
+	let w = DiagramWindow.focused();
+	if (!w) {
+		await openFile();
+		w = DiagramWindow.focused();
+	}
+	if (!w) return;
+	await w.whenLoaded();
+	action(w);
 }
 
 function openSettings(): void {

@@ -20,6 +20,8 @@ export interface E2eConfig {
 	clickPermissions?: boolean;
 	/** ACP session mode to switch to before prompting (e.g. Claude's "default", which asks before edits). */
 	mode?: string;
+	/** Run a Mapper recipe (instead of the agent prompt), optionally screenshot its dialog, then dig deeper with the agent. */
+	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 }
 
 /**
@@ -70,7 +72,9 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("mcpWithoutTokenStatus", unauthorized.status);
 
 		const before = await w.client.getXml();
-		if (config.agent) {
+		if (config.map) {
+			await runMap(w, config, log);
+		} else if (config.agent) {
 			let clicker: NodeJS.Timeout | undefined;
 			if (config.clickPermissions) {
 				// Through the real UI: the permission card the user would see.
@@ -121,5 +125,69 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 	} catch (e: any) {
 		log("error", String(e?.stack ?? e));
 		finish(1);
+	}
+}
+
+async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const map = config.map!;
+	const { recipeById } = await import("./mapper/registry");
+	const recipe = recipeById(map.recipe);
+	if (!recipe) throw new Error(`Unknown recipe ${map.recipe}`);
+	if (map.dialog) {
+		w.mapper.open(recipe.category);
+		const dlg = await waitFor(() => w.mapper.window, 10_000);
+		await new Promise((r) => setTimeout(r, 1500));
+		fs.writeFileSync(path.join(config.out, "mapper-dialog.png"), (await dlg.webContents.capturePage()).toPNG());
+		log("dialogText", (await dlg.webContents.executeJavaScript("document.body.innerText")).slice(0, 1500));
+	}
+	if (config.agent) w.chat.autoApprove = true;
+	const t0 = Date.now();
+	const turn = config.agent && map.askAgent ? waitForTurn(w) : undefined;
+	const r = await w.mapper.run(recipe.id, { ...(map.input ?? {}) }, !!map.askAgent);
+	log("mapMs", Date.now() - t0);
+	log("mapSummary", r.result?.summary ?? null);
+	log("mapWarnings", r.result?.warnings ?? []);
+	if (r.error) throw new Error(`Mapper: ${r.error}`);
+	const pages = await w.client.aiPages({ op: "list" });
+	log("pages", pages.pages.map((p) => `${p.name}${p.current ? " (shown)" : ""}: ${p.cells}`));
+	const model = await w.client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 5000 });
+	const mapped = model.cells.filter((c) => c.data?.mapper === recipe.id);
+	log("mappedShapes", mapped.length);
+	log("mappedKinds", Object.fromEntries([...new Set(mapped.map((c) => c.data!.mapperKind))].map((k) => [k, mapped.filter((c) => c.data!.mapperKind === k).length])));
+	log("reviewPending", !!w.client.pendingReview?.pending);
+	if (map.dialog && w.mapper.window) fs.writeFileSync(path.join(config.out, "mapper-dialog-done.png"), (await w.mapper.window.webContents.capturePage()).toPNG());
+	await new Promise((res) => setTimeout(res, 800));
+	fs.writeFileSync(path.join(config.out, "map.png"), (await w.editorView.webContents.capturePage()).toPNG());
+	fs.writeFileSync(path.join(config.out, "map.drawio"), await w.client.getXml());
+	if (turn) log("agentTurn", await turn);
+	if (config.agent && map.digDeeper !== undefined) {
+		// Select a few mapped leaf shapes, as the user would, and dig deeper.
+		const pick = mapped.filter((c) => c.kind === "vertex").slice(0, 3).map((c) => c.id);
+		await w.client.aiSetSelection(pick, true);
+		await new Promise((res) => setTimeout(res, 600));
+		const dig = waitForTurn(w);
+		await w.digDeeper(map.digDeeper);
+		log("digDeeperTurn", await dig);
+		const items = w.chat.items;
+		log("digDeeperShown", items.filter((i) => i.kind === "user").map((i: any) => i.text).slice(-1)[0]);
+		log("digDeeperTools", items.filter((i) => i.kind === "tool").map((i: any) => `${i.status}: ${i.summary}`).slice(-15));
+		log("digDeeperPermissions", items.filter((i) => i.kind === "permission").map((i: any) => i.title).slice(-15));
+		log("digDeeperReply", items.filter((i) => i.kind === "assistant").map((i: any) => i.text).join("\n").slice(-1500));
+		fs.writeFileSync(path.join(config.out, "after-dig.png"), (await w.editorView.webContents.capturePage()).toPNG());
+		fs.writeFileSync(path.join(config.out, "chat.png"), (await w.chatView.webContents.capturePage()).toPNG());
+	}
+}
+
+function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {
+	return new Promise((resolve) => (w.chat.onTurnEnd = (stop, error) => resolve({ stop, error })));
+}
+
+async function waitFor<T>(get: () => T | undefined, ms: number): Promise<T> {
+	const end = Date.now() + ms;
+	for (;;) {
+		const v = get();
+		if (v) return v;
+		if (Date.now() > end) throw new Error("timed out waiting");
+		await new Promise((r) => setTimeout(r, 100));
 	}
 }

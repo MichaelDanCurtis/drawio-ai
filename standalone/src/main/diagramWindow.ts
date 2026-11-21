@@ -6,6 +6,10 @@ import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
 import { exportDiagram, EXPORT_FORMATS, ExportFormat } from "./exporter";
+import { mappedSelection } from "./mapper/draw";
+import { digDeeperRequest } from "./mapper/recipes/common";
+import { recipeById } from "./mapper/registry";
+import { MapperDialog } from "./mapperDialog";
 import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { settings, updateSettings } from "./settings";
@@ -50,6 +54,10 @@ export class DiagramWindow {
 	private loadedWaiters: (() => void)[] = [];
 	private chatVisible = true;
 	private closing = false;
+	public readonly mapper: MapperDialog;
+	/** Mapped shapes in the selection (for Dig Deeper), refreshed when the selection changes. */
+	private mapped: { recipe: string; label: string; data: Record<string, string> }[] = [];
+	private mappedTimer: NodeJS.Timeout | undefined;
 
 	public static async open(server: StaticServer, file?: string): Promise<DiagramWindow> {
 		if (file) {
@@ -142,10 +150,26 @@ export class DiagramWindow {
 			{
 				client: () => this.client,
 				fileName: () => this.fileName(),
-				cwd: () => (this.file ? path.dirname(this.file) : app.getPath("documents")),
+				cwd: () => this.cwd(),
 				ready: () => this.loaded,
+				openMapper: () => this.mapper.open(),
+				mappedSelectionCount: () => this.mapped.length,
+				digDeeper: (question) => void this.digDeeper(question),
 			},
 			this.mcp
+		);
+		this.mapper = new MapperDialog(
+			{
+				win: this.win,
+				client: this.client,
+				cwd: () => this.cwd(),
+				ready: () => this.loaded,
+				askAgent: (text, shown) => void this.chat.send(text, { cellIds: [] }, [], shown),
+				showChat: () => {
+					if (!this.chatVisible) this.toggleChat();
+				},
+			},
+			server
 		);
 		this.chat.attach(this.chatView.webContents);
 		this.wireEditorEvents();
@@ -172,6 +196,42 @@ export class DiagramWindow {
 		if (!this.loaded) return undefined;
 		const p = this.file ?? path.join(app.getPath("documents"), "Untitled.drawio");
 		return { drawioClient: this.client, uri: { path: p, fsPath: p, scheme: "file", toString: () => `file://${encodeURI(p)}` } };
+	}
+
+	/** Folder the agent and the Mapper work in: the diagram's folder. */
+	public cwd(): string {
+		return this.file ? path.dirname(this.file) : app.getPath("documents");
+	}
+
+	private refreshMapped(): void {
+		clearTimeout(this.mappedTimer);
+		this.mappedTimer = setTimeout(async () => {
+			const before = this.mapped.length;
+			try {
+				this.mapped = this.loaded ? await mappedSelection(this.client) : [];
+			} catch {
+				this.mapped = [];
+			}
+			if (this.mapped.length !== before) this.chat.postState();
+		}, 150);
+	}
+
+	/** Asks the agent to investigate the selected mapped shapes further (read-only). */
+	public async digDeeper(question: string): Promise<void> {
+		const shapes = this.loaded ? await mappedSelection(this.client).catch(() => []) : [];
+		if (shapes.length === 0) {
+			void dialog.showMessageBox(this.win, { type: "info", message: "Select shapes on a map first", detail: "Dig Deeper works on shapes the Mapper drew: select one or more, then ask what you want to know." });
+			return;
+		}
+		// The recipe most of the selection comes from decides how to dig.
+		const counts = new Map<string, number>();
+		for (const s of shapes) counts.set(s.recipe, (counts.get(s.recipe) ?? 0) + 1);
+		const recipeId = [...counts].sort((a, b) => b[1] - a[1])[0][0];
+		const recipe = recipeById(recipeId);
+		const data = shapes.map((s) => ({ label: s.label, data: Object.fromEntries(Object.entries(s.data).filter(([k]) => k !== "mapper")) }));
+		const text = recipe?.digDeeper ? recipe.digDeeper(data, question) : digDeeperRequest("mapped items", data, question);
+		if (!this.chatVisible) this.toggleChat();
+		await this.chat.send(text, { cellIds: this.client.currentSelection }, [], `🔎 Dig deeper into ${shapes.length} shape${shapes.length === 1 ? "" : "s"}${question.trim() ? `: ${question.trim()}` : ""}`);
 	}
 
 	public fileName(): string | undefined {
@@ -203,7 +263,10 @@ export class DiagramWindow {
 		});
 		c.onChange.sub(() => this.setDirty(true));
 		c.onSave.sub(() => void this.save());
-		c.onSelectedCellsChanged.sub(() => this.chat.postState());
+		c.onSelectedCellsChanged.sub(() => {
+			this.chat.postState();
+			this.refreshMapped();
+		});
 		c.onAiReview.sub(() => this.chat.postState());
 		let lastLasso: { cellIds: string[] } | undefined;
 		c.onAiLasso.sub((evt) => {
@@ -363,6 +426,8 @@ export class DiagramWindow {
 	}
 
 	private dispose(): void {
+		clearTimeout(this.mappedTimer);
+		this.mapper.close();
 		this.chat.dispose();
 		this.mcp.dispose();
 		this.client.dispose();

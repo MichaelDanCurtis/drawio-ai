@@ -226,3 +226,8 @@ test("catalog: every category exists and recipe ids are unique", () => {
 		assert.ok(r.fields.every((f) => f.id && f.label && f.type), r.id);
 	}
 });
+
+test("render: line breaks in labels survive as <br> (draw.io labels are HTML)", () => {
+	const { xml } = renderGraph({ title: "t", nodes: [{ id: "a", label: "schedule\n0 3 * * *", kind: "x" }], edges: [] }, { recipe: "r" });
+	assert.match(xml, /label="schedule&lt;br&gt;0 3 \* \* \*"/);
+});

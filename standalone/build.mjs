@@ -54,7 +54,8 @@ const jobs = [
 		outdir: out,
 		platform: "node",
 		format: "cjs",
-		external: ["electron"],
+		// Database drivers load optional native add-ons at runtime: keep them out of the bundle.
+		external: ["electron", "pg", "pg-native", "mysql2", "mssql", "tedious", "oracledb", "mongodb"],
 		alias: { vscode: join(here, "src/main/vscode-shim.ts") },
 		loader: { ".html": "text" },
 	},
@@ -63,6 +64,7 @@ const jobs = [
 		entryPoints: {
 			"preload-editor": join(here, "src/preload/editor.ts"),
 			"preload-chat": join(here, "src/preload/chat.ts"),
+			"preload-mapper": join(here, "src/preload/mapper.ts"),
 		},
 		outdir: out,
 		platform: "node",
@@ -94,5 +96,5 @@ const jobs = [
 ];
 
 await Promise.all(jobs.map((j) => build(j)));
-for (const f of ["chat.html"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+for (const f of ["chat.html", "mapper.html"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
 console.log(`Built to ${out}${watch ? " (watch not supported; rerun)" : ""}`);

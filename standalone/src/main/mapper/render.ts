@@ -81,7 +81,8 @@ export function renderGraph(graph: MapGraph, options: RenderOptions): { xml: str
 		const isContainer = (!!n.container || hasChildren.has(n.id)) && n.shape !== "table";
 		const attrs: Record<string, string> = { mapper: options.recipe, mapperKind: n.kind, mapperId: n.id };
 		for (const [k, v] of Object.entries(n.data ?? {})) if (v !== undefined && v !== null && v !== "") attrs[dataAttributeName(k)] = String(v);
-		const label = n.shape === "note" ? escapeHtml(n.label).replace(/\n/g, "<br>") : escapeHtml(n.label);
+		// Labels are HTML (html=1): keep line breaks.
+		const label = escapeHtml(n.label).replace(/\n/g, "<br>");
 		const id = cellId.get(n.id)!;
 		out.push(
 			`<object id="${id}" label="${escapeXml(label)}"${Object.entries(attrs)

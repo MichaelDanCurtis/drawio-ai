@@ -145,6 +145,8 @@
 		<button id="askInDiagram" title="Open the inline prompt next to the selection (Alt+K in the diagram)">✦ Inline</button>
 		<button id="markup" title="Draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M in the diagram)">✎ Markup</button>
 		<button id="lint" title="Ask the agent to check the diagram for problems and fix them">✓ Review</button>
+		<button id="map" title="Map software, a database, a cloud environment or an ML system into this diagram (read-only)">🗺 Map…</button>
+		<button id="digDeeper" class="hidden" title="Ask the agent to investigate the selected mapped shapes further, read-only. Type a question in the box first to focus it.">🔎 Dig deeper</button>
 	</div>
 	<div id="messages">
 		<div id="empty">
@@ -374,6 +376,8 @@
 		sel.classList.toggle("hidden", !state.selectionCount);
 		sel.textContent = "◉ " + state.selectionCount + " selected";
 		$("lasso").classList.toggle("active", !!state.lassoActive);
+		$("digDeeper").classList.toggle("hidden", !state.mappedSelection);
+		$("digDeeper").textContent = state.mappedSelection ? "🔎 Dig deeper (" + state.mappedSelection + ")" : "🔎 Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
 		$("provider").title = state.providerTitle || "Coding agent";
 		$("agentInfo").textContent = state.agentInfo || "";
@@ -494,6 +498,12 @@
 	$("markup").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.markup" }));
 	$("lint").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.reviewDiagram" }));
 	$("attach").addEventListener("click", () => vscode.postMessage({ type: "pickImage" }));
+	$("map").addEventListener("click", () => vscode.postMessage({ type: "openMapper" }));
+	$("digDeeper").addEventListener("click", () => {
+		const question = $("input").value.trim();
+		$("input").value = "";
+		vscode.postMessage({ type: "digDeeper", text: question });
+	});
 	input.addEventListener("paste", (e) => {
 		const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
 		if (files.length) { e.preventDefault(); addFiles(files); }
