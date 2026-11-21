@@ -65,6 +65,43 @@ installed and look signed in; when one is not, the chat says what to run (and of
   paper, through the system print dialog). draw.io's in-editor File menu is replaced by
   `src/renderer/desktop-menu.js`, a draw.io plugin loaded after the Draw.AI one.
 
+## Mapper
+
+**Map → Map Something…** (Cmd/Ctrl+Shift+M), or **🗺 Map…** in the chat, maps a
+system into the diagram. Every map is collected **read-only**, drawn as one pending
+change on its own page (keep or revert it like any AI change), and can then be handed
+to your agent to review, complete or dig into.
+
+| Category | Maps |
+| --- | --- |
+| Software | Connectivity (services, databases, queues, external APIs from compose, Kubernetes YAML, config and code), data flow (entry points; the agent traces the flows), module dependencies, class diagram, API surface (OpenAPI/Swagger, GraphQL), GitHub Actions workflows, live Kubernetes cluster |
+| Databases | Schema/ERD for PostgreSQL, MySQL/MariaDB, SQL Server/Azure SQL, Oracle, SQLite and MongoDB (fields inferred from sampled documents); dbt lineage |
+| Azure | Subscription › resource groups › VNets › subnets › resources (Resource Graph or `az` list commands); infrastructure as code (Bicep, ARM, Terraform) |
+| AWS | Account › regions › VPCs › subnets › services, with load balancer, event source, subscription and security-group edges; infrastructure as code (Terraform, CloudFormation/SAM, CDK) |
+| Google Cloud | Project › VPCs › regions › subnetworks › resources (Cloud Asset Inventory); infrastructure as code (Terraform, Deployment Manager) |
+| Machine learning | Pipelines (DVC, Kubeflow/Vertex, Argo, Azure ML, SageMaker, Airflow, Metaflow), MLflow tracking and registry, the end-to-end lifecycle (with gaps marked), model architecture (Hugging Face config + safetensors, GGUF, ONNX, XGBoost, LightGBM) |
+
+- **Read-only.** Cloud and Kubernetes maps use your signed-in CLIs (`az`, `aws`,
+  `gcloud`, `kubectl`) through a guard that only lets listing, describing and querying
+  commands run; databases are read with fixed catalog queries in read-only sessions.
+  Passwords, connection strings and tokens are used for the run only: they are never
+  stored, drawn, or sent to the agent.
+- **Dig deeper.** Select shapes on a map and press **🔎 Dig deeper** in the chat (or
+  Map → Dig Deeper into Selection, Cmd/Ctrl+Shift+D); type a question first to focus
+  it. The agent investigates with the ids stored on the shapes (resource ids, ARNs,
+  files and lines), read-only, and you approve each command it wants to run.
+- **Agent follow-up.** Tick *Then ask the agent to review and annotate the map* in the
+  Mapper to have the agent add review notes (exposure, single points of failure,
+  design issues) with the collected facts.
+
+## Presentation mode
+
+**View → Presentation Mode** (F5, or Cmd/Ctrl+Shift+Enter) shows only the diagram, full
+screen and read-only. Drag with either mouse button to move around, scroll or pinch to
+zoom, F to fit. Pages are dots in the bottom left: click one, or use Tab / Shift+Tab or
+the arrow keys. Esc returns to the editor. Presenting never edits or marks the diagram
+as changed.
+
 ## How it works
 
 ```
@@ -120,10 +157,15 @@ is optional:
 
 - `yarn build` — bundle to `out/`; `yarn typecheck` — TypeScript, including the
   shared `../src` modules it uses.
+- `node --test test/*.test.js` — unit tests (Mapper core, every collector with
+  fixtures; `MAPPER_DB_LIVE=1` adds the live database tests, see
+  `test/fixtures/database/live/`).
 - `yarn e2e` — opens an example in the real app, calls the window's MCP endpoint,
   exports PDF/SVG and screenshots the editor and chat into a temp folder.
   `yarn e2e --agent claude` (or `gemini`, `codex`, `copilot`, `kimi`) also sends one prompt through that
   agent over ACP, auto-approving its permission requests, and fails if the diagram
-  did not change. `--click-permissions` answers them by clicking the permission card
+  did not change. `--map <recipe> --map-input '{…}'` draws a map (add `--map-dialog`,
+  `--ask-agent`, `--dig "question"`); `--present` checks presentation mode.
+  `--click-permissions` answers them by clicking the permission card
   in the chat instead. `--prompt "…"` and `--file path` pick the request and diagram.
 - View → Editor/Chat Developer Tools for the two web views.
