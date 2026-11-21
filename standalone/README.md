@@ -57,8 +57,13 @@ installed and look signed in; when one is not, the chat says what to run (and of
   (allow once / always / reject) and waits for you.
 - **Review**: the agent's edits appear as pending changes; **Accept** keeps them,
   **Reject** reverts them (also under the **Agent** menu).
-- **Export** (File → Export As): PDF (vector, one PDF page per diagram page, via
-  Chromium's `printToPDF`), editable SVG and PNG, Visio `.vsdx`, and `.drawio`.
+- **File menu** (both the app menu and draw.io's own File menu in the editor): New,
+  Open, Save, Save As, Export as PDF (vector, one PDF page per diagram page, via
+  Chromium's `printToPDF`), Export to any format (PDF, editable SVG and PNG, Visio
+  `.vsdx`, `.drawio`), Open from Another Tool (Visio, Gliffy, yEd/GraphML, Lucidchart,
+  Miro: converted by draw.io into a new window), and Print (every page, fitted to the
+  paper, through the system print dialog). draw.io's in-editor File menu is replaced by
+  `src/renderer/desktop-menu.js`, a draw.io plugin loaded after the Draw.AI one.
 
 ## How it works
 
@@ -92,6 +97,9 @@ Electron main process                          agent subprocess (cwd = diagram f
 - The draw.io page is the extension's `src/DrawioClient/webview-content.html`,
   served unchanged; a preload recreates the `acquireVsCodeApi()` bridge over IPC.
   The Draw.AI plugin is built from `drawio-custom-plugins/` by `build.mjs`.
+- Each window is a `BaseWindow` holding two `WebContentsView`s (editor, chat). A
+  `BrowserWindow` would add its own, empty page in front of them on macOS, which gets
+  in the way of mouse events such as hover.
 - Shared code is imported read-only from `../src`; `vscode` imports resolve to a
   small shim (`src/main/vscode-shim.ts`).
 

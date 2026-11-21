@@ -591,6 +591,7 @@ export class ChatController {
 				modelId,
 				modelsLoading: starting,
 				modelsError: this.sessionError ?? (!starting && !info && status?.problem ? status.problem.split("\n")[0] : undefined),
+				agentState: info ? "ready" : starting ? "starting" : this.sessionError || status?.problem ? "problem" : "",
 				agentInfo: info
 					? `${info.agentName} · ACP session ready · Draw.AI tools over MCP (${info.mcpTransport})${status?.viaNpx ? " · adapter via npx" : ""}`
 					: starting

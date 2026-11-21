@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
+import { app, BaseWindow, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { agentEnv } from "./agents";
@@ -12,7 +12,7 @@ import type { StaticServer } from "./staticServer";
 
 /** What the Mapper needs from the diagram window it maps into. */
 export interface MapperHost {
-	win: BrowserWindow;
+	win: BaseWindow;
 	client: import("../../../src/DrawioClient/CustomizedDrawioClient").CustomizedDrawioClient;
 	/** The diagram's folder: default for folder and file fields. */
 	cwd(): string;

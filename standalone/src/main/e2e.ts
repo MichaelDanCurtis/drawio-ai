@@ -18,6 +18,10 @@ export interface E2eConfig {
 	timeoutMs?: number;
 	/** Answer permission requests by clicking the first "allow" button in the chat panel (instead of auto-approving in code). */
 	clickPermissions?: boolean;
+	/** JavaScript to run in the editor before the screenshots (e.g. open a menu). */
+	editorScript?: string;
+	/** Measure editor responsiveness and editor→app traffic instead of the normal checks. */
+	diagnose?: boolean;
 	/** ACP session mode to switch to before prompting (e.g. Claude's "default", which asks before edits). */
 	mode?: string;
 	/** Run a Mapper recipe (instead of the agent prompt), optionally screenshot its dialog, then dig deeper with the agent. */
@@ -53,6 +57,23 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		const w = await DiagramWindow.open(server, config.file);
 		await w.whenLoaded();
 		log("loadedMs", Date.now() - t0);
+		const diagnose = async (label: string) => {
+			w.traffic = new Map();
+			const wc = w.editorView.webContents;
+			// Event-loop lag (timer drift) and long tasks; works even when the window is covered.
+			const frames = wc.executeJavaScript(`new Promise((resolve) => { const lag = []; const long = []; try { new PerformanceObserver((l) => l.getEntries().forEach((e) => long.push(Math.round(e.duration)))).observe({ type: "longtask" }); } catch {} let last = performance.now(); const id = setInterval(() => { const now = performance.now(); lag.push(now - last - 10); last = now; if (lag.length >= 380) { clearInterval(id); lag.sort((a, b) => a - b); resolve({ lagP50: Math.round(lag[190]), lagP95: Math.round(lag[361]), lagMax: Math.round(lag[379]), longTasks: long.length, longestTask: Math.max(0, ...long), heapMB: Math.round((performance.memory?.usedJSHeapSize ?? 0) / 1e6), cells: document.querySelectorAll("svg g g").length }); } }, 10); })`);
+			for (let i = 0; i < 240; i++) {
+				wc.sendInputEvent({ type: "mouseMove", x: 300 + Math.round(200 * Math.sin(i / 10)), y: 300 + Math.round(150 * Math.cos(i / 13)) });
+				await new Promise((r) => setTimeout(r, 16));
+			}
+			log(`perf ${label}`, { ...(await frames), traffic: Object.fromEntries(w.traffic) });
+			w.traffic = new Map();
+			await new Promise((r) => setTimeout(r, 3000));
+			log(`idle traffic 3s ${label}`, Object.fromEntries(w.traffic));
+			w.traffic = undefined;
+			log(`cpu ${label}`, app.getAppMetrics().map((m) => `${m.type}:${Math.round(m.cpu.percentCPUUsage)}%`).join(" "));
+		};
+		if (config.diagnose) await diagnose("fresh");
 
 		// The MCP endpoint, exactly as an agent reaches it.
 		const mcp = (w as any).mcp as { url: string; token: string };
@@ -108,11 +129,21 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 			log("reply", items.filter((i) => i.kind === "assistant").map((i: any) => i.text).join("\n").slice(0, 2000));
 			log("errors", items.filter((i) => i.kind === "error").map((i: any) => i.text));
 			fs.writeFileSync(path.join(config.out, "transcript.json"), JSON.stringify(items, null, 2));
+			if (config.diagnose) {
+				await diagnose("review pending");
+				w.client.aiResolveReview("accept");
+				await new Promise((r) => setTimeout(r, 1000));
+				await diagnose("after accept");
+			}
 			await new Promise((r) => setTimeout(r, 1500)); // let the editor repaint
 		}
 		const model2 = JSON.parse((await rpc("tools/call", { name: "drawio_get_diagram", arguments: {} })).result.content[0].text);
 		log("cellsAfter", model2.totalCells);
 
+		if (config.editorScript) {
+			log("editorScript", await w.editorView.webContents.executeJavaScript(config.editorScript).catch((e) => String(e)));
+			await new Promise((r) => setTimeout(r, 800));
+		}
 		fs.writeFileSync(path.join(config.out, "editor.png"), (await w.editorView.webContents.capturePage()).toPNG());
 		fs.writeFileSync(path.join(config.out, "chat.png"), (await w.chatView.webContents.capturePage()).toPNG());
 		const pdf = await exportDiagram(w.client, "pdf", path.join(config.out, "diagram.pdf"));
