@@ -143,6 +143,13 @@ export class WindowMcpServer {
 		private readonly mapper?: () => MapperService
 	) {}
 
+	/** Runs a tool the way the endpoint does (the desktop-wide endpoint routes calls here). */
+	public async call(name: string, args: unknown): Promise<ToolResult> {
+		const result = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args) : await this.toolbox.invoke(name, args as any, { scoped: true });
+		this.onToolResult?.(name, result);
+		return result;
+	}
+
 	public get url(): string {
 		return `http://127.0.0.1:${this.port}/mcp`;
 	}
@@ -158,11 +165,7 @@ export class WindowMcpServer {
 				serverVersion: "0.1.0",
 				tools: () => (this.compactDescriptions ? compact : tools),
 				instructions: async () => standaloneInstructions(this.fileName(), this.compactDescriptions),
-				callTool: async (name, args) => {
-					const result = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args) : await this.toolbox.invoke(name, args, { scoped: true });
-					this.onToolResult?.(name, result);
-					return result;
-				},
+				callTool: async (name, args) => this.call(name, args),
 			},
 		});
 		this.server = http.createServer(listener);

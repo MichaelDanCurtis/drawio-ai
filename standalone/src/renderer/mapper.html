@@ -268,6 +268,9 @@
 		const focus = document.activeElement;
 		const keepFocus = focus && box.contains(focus) && (focus.tagName === "INPUT" || focus.tagName === "TEXTAREA");
 		if (keepFocus) return; // don't re-render under the user's typing
+		const describe = el("input", { type: "checkbox", id: "describe" });
+		describe.checked = !!state.describe;
+		describe.addEventListener("change", (e) => (state.describe = e.target.checked));
 		const askAgent = el("input", { type: "checkbox", id: "askAgent" });
 		askAgent.checked = r.mode === "agent" || !!state.askAgent;
 		askAgent.disabled = r.mode === "agent" || !r.canAskAgent;
@@ -288,6 +291,13 @@
 						)
 				  )
 				: null,
+			r.mode !== "agent"
+				? el(
+						"div",
+						{ class: "field" },
+						el("label", { class: "check" }, describe, el("span", {}, "Then have the agent describe every shape in plain English", el("div", { class: "help", text: "Shown as each shape's tooltip; the agent works from what the map shows and the files, in the chat." })))
+				  )
+				: null,
 			el(
 				"div",
 				{ class: "actions" },
@@ -306,7 +316,7 @@
 		if (!r) return;
 		const input = {};
 		for (const f of r.fields) if (visible(r, f)) input[f.id] = String(state.values[f.id] ?? "");
-		host.post({ type: "run", recipeId: r.id, input, askAgent: r.mode === "agent" || !!state.askAgent });
+		host.post({ type: "run", recipeId: r.id, input, askAgent: r.mode === "agent" || !!state.askAgent, describe: !!state.describe });
 	}
 
 	function selectCategory(id) {

@@ -15,6 +15,7 @@ import { MapperDialog } from "./mapperDialog";
 import { agentEnv } from "./agents";
 import { createContext } from "./mapper/context";
 import { MapperService } from "./mapper/service";
+import { MapActions } from "./mapActions";
 import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { settings, updateSettings } from "./settings";
@@ -73,6 +74,7 @@ export class DiagramWindow {
 	public readonly mapper: MapperDialog;
 	/** The Mapper's maps of this diagram: runs, lookups, findings, descriptions, tours. */
 	public readonly maps: MapperService;
+	private mapActions!: MapActions;
 	/** Mapped shapes in the selection (for Dig Deeper), refreshed when the selection changes. */
 	private mapped: { recipe: string; label: string; data: Record<string, string> }[] = [];
 	private mappedTimer: NodeJS.Timeout | undefined;
@@ -191,6 +193,12 @@ export class DiagramWindow {
 				openMapper: () => this.mapper.open(),
 				mappedSelectionCount: () => this.mapped.length,
 				digDeeper: (question) => void this.digDeeper(question),
+				pageMaps: () => this.mapActions?.pageSummary ?? { maps: 0, findings: 0 },
+				mapAction: (action, text) => {
+					if (!this.chatVisible) this.toggleChat();
+					void this.mapActions.run(action, text);
+				},
+				reportAction: (action) => void this.mapActions.action(action),
 			},
 			this.mcp
 		);
@@ -208,6 +216,7 @@ export class DiagramWindow {
 			},
 			server
 		);
+		this.mapActions = new MapActions(this.client, this.chat, this.maps, () => this.loaded, (category) => this.mapper.open(category));
 		this.chat.attach(this.chatView.webContents);
 		this.wireEditorEvents();
 
@@ -234,6 +243,11 @@ export class DiagramWindow {
 		if (!this.loaded) return undefined;
 		const p = this.file ?? path.join(app.getPath("documents"), "Untitled.drawio");
 		return { drawioClient: this.client, uri: { path: p, fsPath: p, scheme: "file", toString: () => `file://${encodeURI(p)}` } };
+	}
+
+	/** A diagram or Mapper tool call from the desktop-wide MCP endpoint. */
+	public callTool(name: string, args: unknown) {
+		return this.mcp.call(name, args);
 	}
 
 	/** Folder the agent and the Mapper work in: the diagram's folder. */
@@ -298,10 +312,12 @@ export class DiagramWindow {
 			this.setDirty(!!this.initial && !this.file);
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
+			this.mapActions.refreshSummary();
 		});
 		// Presenting only views the diagram, but draw.io still auto-saves page view state when pages
 		// change: that is not an edit. Anything else (an agent or the Mapper still working) is.
 		c.onChange.sub(({ newXml }) => {
+			this.mapActions.refreshSummary();
 			if (this.presenting && this.presentBaseline !== undefined && diagramContent(newXml) === this.presentBaseline) return;
 			this.setDirty(true);
 		});
@@ -309,6 +325,7 @@ export class DiagramWindow {
 		c.onSelectedCellsChanged.sub(() => {
 			this.chat.postState();
 			this.refreshMapped();
+			this.mapActions.refreshSummary();
 		});
 		c.onAiReview.sub(() => this.chat.postState());
 		let lastLasso: { cellIds: string[] } | undefined;
@@ -400,7 +417,8 @@ export class DiagramWindow {
 	}
 
 	/** Shows only the diagram, read-only and full screen, with page dots; Esc leaves. */
-	public setPresenting(on: boolean): void {
+	public setPresenting(on: boolean, opts: { startTour?: boolean } = {}): void {
+		if (on && this.presenting && opts.startTour) return this.sendTours(true);
 		if (on === this.presenting || (on && !this.loaded)) return;
 		this.presenting = on;
 		this.presentBaseline = undefined;
@@ -416,8 +434,22 @@ export class DiagramWindow {
 		this.layout();
 		if (!this.editorView.webContents.isDestroyed()) {
 			this.editorView.webContents.send("drawio:toWebview", JSON.stringify({ action: "desktopPresentation", enabled: on }));
-			if (on) this.editorView.webContents.focus();
+			if (on) {
+				this.sendTours(!!opts.startTour);
+				this.editorView.webContents.focus();
+			}
 		}
+	}
+
+	/** The diagram's map tours, for presentation mode to play (it finds their shapes on each page). */
+	private sendTours(start: boolean): void {
+		let tours: { mapId: string; title: string; steps: { title: string; caption: string; nodeIds: string[] }[] }[] = [];
+		try {
+			tours = this.maps.records().flatMap((r) => r.tours.map((t) => ({ mapId: r.id, title: t.title, steps: t.steps })));
+		} catch {
+			// no maps
+		}
+		if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.send("drawio:toWebview", JSON.stringify({ action: "desktopPresentationTours", tours, start }));
 	}
 
 	public togglePresentation(): void {
@@ -562,6 +594,7 @@ export class DiagramWindow {
 
 	private dispose(): void {
 		clearTimeout(this.mappedTimer);
+		this.mapActions.dispose();
 		this.mapper.close();
 		this.chat.dispose();
 		this.mcp.dispose();

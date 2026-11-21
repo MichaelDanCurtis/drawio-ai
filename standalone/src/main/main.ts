@@ -6,6 +6,7 @@ import { DiagramWindow } from "./diagramWindow";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
 import { CATEGORIES } from "./mapper/types";
+import { connectAgents, DesktopMcp } from "./desktopMcp";
 import { paths } from "./paths";
 import { settingsPath, updateSettings } from "./settings";
 import { StaticServer } from "./staticServer";
@@ -13,10 +14,30 @@ import { StaticServer } from "./staticServer";
 app.setName("Draw.AI");
 // Test runs get their own data folder: they must not touch the user's settings or
 // collide with a copy of the app that is already running.
-if (process.env.DRAWAI_E2E) app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
+if (process.env.DRAWAI_E2E) {
+	app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
+	// Nor the user's ~/.drawio-ai (the desktop MCP endpoint's address file and launcher).
+	process.env.DRAWIO_AI_HOME ||= fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-home-"));
+}
 const server = new StaticServer();
 const pendingFiles: string[] = [];
 let ready = false;
+let desktopMcp: DesktopMcp | undefined;
+
+/** Agent → Connect / Disconnect Claude Code and Codex: registers the desktop app as their MCP server. */
+async function connectExternalAgents(connect: boolean): Promise<void> {
+	const results = await connectAgents(connect);
+	const ok = results.some((r) => r.ok);
+	await dialog.showMessageBox({
+		type: ok ? "info" : "warning",
+		message: connect ? "Claude Code and Codex can use Draw.AI" : "Claude Code and Codex disconnected",
+		detail:
+			results.map((r) => `${r.ok ? "✓" : "✕"} ${r.agent}: ${r.message}`).join("\n") +
+			(connect && ok
+				? "\n\nIn a new Claude Code or Codex session, the draw-ai-desktop tools work on the diagrams open here (pass `file` to pick one) and on their maps: mapper_maps, mapper_find, mapper_show, mapper_path, mapper_run, mapper_findings… Keep Draw.AI open while they work."
+				: ""),
+	});
+}
 
 if (!app.requestSingleInstanceLock() && !process.env.DRAWAI_E2E) {
 	app.quit();
@@ -133,6 +154,9 @@ function buildMenu(): void {
 				{ label: "Stop", accelerator: "CmdOrCtrl+.", click: () => w()?.chat.stop() },
 				{ label: "Restart Agent", click: () => void w()?.chat.onMessage({ type: "command", command: "drawai.retry" }) },
 				{ type: "separator" },
+				{ label: "Connect Claude Code / Codex to Draw.AI…", click: () => void connectExternalAgents(true) },
+				{ label: "Disconnect Claude Code / Codex", click: () => void connectExternalAgents(false) },
+				{ type: "separator" },
 				{ label: "Allow All Requests in This Chat", click: () => w()?.chat.setAllowAll(true) },
 				{ label: "Ask Before Each Request", click: () => w()?.chat.setAllowAll(false) },
 				{ type: "separator" },
@@ -148,6 +172,13 @@ function buildMenu(): void {
 				...CATEGORIES.map((c) => ({ label: `${c.title}…`, click: () => void withWindow((x) => x.mapper.open(c.id)) })),
 				{ type: "separator" },
 				{ label: "Dig Deeper into Selection", accelerator: "CmdOrCtrl+Shift+D", click: () => void w()?.digDeeper("") },
+				{ type: "separator" },
+				{ label: "Show Findings", click: () => w()?.chat.onMessage({ type: "mapAction", action: "findings", text: "" }) },
+				{ label: "Describe Shapes in Plain English", click: () => w()?.chat.onMessage({ type: "mapAction", action: "describe", text: "" }) },
+				{ label: "Show Recent Changes", click: () => w()?.chat.onMessage({ type: "mapAction", action: "recent", text: "" }) },
+				{ label: "Refresh Map", click: () => w()?.chat.onMessage({ type: "mapAction", action: "refresh", text: "" }) },
+				{ label: "Build a Tour", click: () => w()?.chat.onMessage({ type: "mapAction", action: "tour", text: "" }) },
+				{ label: "Play Tour", accelerator: "CmdOrCtrl+Shift+T", click: () => w()?.setPresenting(true, { startTour: true }) },
 			],
 		},
 		{ role: "windowMenu" },
@@ -197,6 +228,12 @@ app.whenReady().then(async () => {
 	blockRemoteRequests();
 	DiagramWindow.installIpc();
 	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog() };
+	desktopMcp = new DesktopMcp({
+		windows: () => [...DiagramWindow.all],
+		focused: () => DiagramWindow.focused(),
+		open: (file) => DiagramWindow.open(server, file),
+	});
+	await desktopMcp.start().catch((e) => console.error("Draw.AI: desktop MCP endpoint did not start:", e));
 	buildMenu();
 	ready = true;
 
@@ -218,4 +255,7 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin" || process.env.DRAWAI_E2E) app.quit();
 });
 
-app.on("will-quit", () => server.dispose());
+app.on("will-quit", () => {
+	desktopMcp?.dispose();
+	server.dispose();
+});

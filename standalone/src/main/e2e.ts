@@ -30,6 +30,8 @@ export interface E2eConfig {
 	/** Run a Mapper recipe (instead of the agent prompt), optionally screenshot its dialog, then dig deeper with the agent. */
 	/** Check presentation mode: enter, step pages, pan, try to edit, leave. */
 	present?: boolean;
+	/** Check map records, mapper_* tools, descriptions, health, recent changes, refresh, tours, Ask and the desktop endpoint. */
+	insights?: boolean;
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 }
 
@@ -98,7 +100,9 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("mcpWithoutTokenStatus", unauthorized.status);
 
 		const before = await w.client.getXml();
-		if (config.present) {
+		if (config.insights) {
+			await runInsights(w, config, log);
+		} else if (config.present) {
 			await runPresent(w, config, log);
 		} else if (config.map) {
 			await runMap(w, config, log);
@@ -335,4 +339,114 @@ async function runPresent(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 	log("editWhilePresentingMarkedEdited", (w as any).dirty);
 	w.setPresenting(false);
 	await pause(600);
+}
+
+async function runInsights(w: DiagramWindow, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const { execFileSync, spawn } = await import("child_process");
+	const os = await import("os");
+	const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	const call = async (name: string, args: unknown = {}) => {
+		const r = await w.callTool(name, args);
+		if (r.isError) throw new Error(`${name}: ${r.text}`);
+		return JSON.parse(r.text);
+	};
+	// A small repository under git, from the software test fixture.
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "drawai-insights-"));
+	fs.cpSync(path.join(__dirname, "../test/fixtures/software/shop"), repo, { recursive: true });
+	const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" }).toString();
+	git("init", "-q");
+	git("-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "add", "-A");
+	git("-c", "user.email=e2e@example.com", "-c", "user.name=e2e", "commit", "-qm", "initial");
+
+	const run = await call("mapper_run", { recipe: "software.connectivity", input: { folder: repo } });
+	log("run", { summary: run.map.summary, page: run.drawnOn, badges: run.healthBadges, findings: run.map.findings });
+	const mapId = run.map.id;
+	const maps = await call("mapper_maps");
+	log("maps", { count: maps.maps.length, onPage: maps.onPage });
+	const found = await call("mapper_find", { query: "postgres" });
+	log("find", found.slice(0, 3).map((n: any) => `${n.id} (${n.kind})`));
+	const any = found[0] ?? (await call("mapper_find", { query: "" }))[0];
+	const shown = await call("mapper_show", { nodeId: any.id });
+	log("show", { id: shown.id, uses: shown.uses.length, usedBy: shown.usedBy.length, files: shown.files?.length ?? 0 });
+	const ws = await call("mapper_worksheet", { mapId, limit: 5 });
+	log("worksheet", { total: ws.total, first: ws.entries.map((e: any) => e.id) });
+	const desc = await call("mapper_set_descriptions", {
+		mapId,
+		items: [{ nodeId: ws.entries[0].id, description: "Keeps the shop running and answers the pages people open." }, { nodeId: "nope", description: "Nothing here at all, really." }],
+	});
+	log("describe", desc);
+	const page = await w.client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 5000 });
+	log("tooltipOnShape", page.cells.find((c) => c.data?.mapperId === ws.entries[0].id)?.data?.tooltip ?? null);
+	log("healthBadgesOnPage", page.cells.filter((c) => c.data?.mapperKind === "finding-badge").length);
+	log("layers", page.layers.map((l) => l.name));
+	const findings = await call("mapper_findings", { mapId });
+	log("findings", { n: findings.findings.length, checked: findings.checked.length, first: findings.findings[0]?.title ?? null });
+
+	// Change a file the map knows about, and add one.
+	const known = run && (await call("mapper_show", { nodeId: any.id })).files?.[0];
+	const target = known ? path.join(repo, known.replace(/\/$/, "")) : undefined;
+	if (target && fs.existsSync(target) && fs.statSync(target).isFile()) fs.appendFileSync(target, "\n// changed by e2e\n");
+	fs.writeFileSync(path.join(repo, "NEW_FILE.md"), "new");
+	const recent = await call("mapper_recent_changes", { mapId, draw: true });
+	log("recent", { since: recent.since, files: recent.changedFiles, shapes: recent.shapes.map((s: any) => s.nodeId).slice(0, 5), badges: recent.badges });
+
+	const refreshed = await call("mapper_refresh", { mapId });
+	log("refresh", { page: refreshed.drawnOn, diff: refreshed.diff, carriedDescriptions: refreshed.map.described });
+	const newMap = refreshed.map.id;
+
+	const path2 = shown.uses[0] ? await call("mapper_path", { mapId: newMap, from: shown.id, to: shown.uses[0].id }) : null;
+	log("path", path2?.map((s: any) => s.id) ?? null);
+	const steps = [shown.id, ...(shown.uses[0] ? [shown.uses[0].id] : [])].map((id: string, i: number) => ({ title: `Step ${i + 1}`, caption: `This is ${id}.`, nodeIds: [id] }));
+	const tour = await call("mapper_set_tour", { mapId: newMap, title: "Quick tour", steps });
+	log("tour", tour);
+
+	// Play it in presentation mode.
+	w.setPresenting(true, { startTour: true });
+	await pause(1800);
+	const st = await w.editorView.webContents.executeJavaScript("window.drawaiPresentation.state()");
+	log("presentTour", st.tour);
+	fs.writeFileSync(path.join(config.out, "tour.png"), (await w.editorView.webContents.capturePage()).toPNG());
+	w.editorView.webContents.sendInputEvent({ type: "keyDown", keyCode: "Tab" });
+	await pause(600);
+	log("tourAfterTab", (await w.editorView.webContents.executeJavaScript("window.drawaiPresentation.state()")).tour);
+	w.setPresenting(false);
+	await pause(800);
+
+	const answer = await call("mapper_answer", { question: "What does it talk to?", answer: "Its database.", steps: steps.map((s) => ({ nodeId: s.nodeIds[0], note: s.caption, mapId: newMap })) });
+	log("answer", answer);
+	fs.writeFileSync(path.join(config.out, "answer.png"), (await w.editorView.webContents.capturePage()).toPNG());
+
+	// The desktop-wide endpoint, as Claude Code / Codex reach it.
+	const home = process.env.DRAWIO_AI_HOME!;
+	const info = JSON.parse(fs.readFileSync(path.join(home, "desktop.json"), "utf8"));
+	const rpc = async (method: string, params: unknown) =>
+		(await (await fetch(info.url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${info.token}` }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json()) as any;
+	const dtools = (await rpc("tools/list", {})).result.tools.map((t: any) => t.name);
+	log("desktopTools", { count: dtools.length, mapper: dtools.filter((n: string) => n.startsWith("mapper_")).length, hasList: dtools.includes("drawio_list_diagrams") });
+	const dlist = JSON.parse((await rpc("tools/call", { name: "drawio_list_diagrams", arguments: {} })).result.content[0].text);
+	log("desktopDiagrams", dlist);
+	const dmaps = JSON.parse((await rpc("tools/call", { name: "mapper_maps", arguments: { file: config.file } })).result.content[0].text);
+	log("desktopMaps", dmaps.maps.length);
+	// The launcher, over stdio, exactly as an agent starts it.
+	const launcher = path.join(home, "bin", "draw-ai-desktop-mcp");
+	const out = await new Promise<string>((resolve) => {
+		const child = spawn(launcher, [], { env: { ...process.env, DRAWIO_AI_HOME: home } });
+		let buf = "";
+		child.stdout.on("data", (d) => {
+			buf += d;
+			if (buf.split("\n").filter(Boolean).length >= 2) {
+				child.kill();
+				resolve(buf);
+			}
+		});
+		child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } } }) + "\n");
+		child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "mapper_find", arguments: { query: "postgres", file: config.file } } }) + "\n");
+		setTimeout(() => {
+			child.kill();
+			resolve(buf);
+		}, 15000);
+	});
+	const lines = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+	log("launcher", { server: lines[0]?.result?.serverInfo?.name ?? null, findOk: !!lines[1]?.result && !lines[1].result.isError });
+	log("recordFiles", fs.readdirSync(path.join(path.dirname(config.file), ".drawai", "maps")).length);
 }

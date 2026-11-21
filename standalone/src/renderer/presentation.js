@@ -8,7 +8,7 @@
 // arrows): changing those would auto-save them and mark the diagram as edited.
 (function () {
 	var STYLE = [
-		"body.drawai-presenting > *:not(.geDiagramContainer):not(#drawai-page-dots):not(#drawai-present-hint) { display: none !important; }",
+		"body.drawai-presenting > *:not(.geDiagramContainer):not(#drawai-page-dots):not(#drawai-present-hint):not(#drawai-tour-caption) { display: none !important; }",
 		"body.drawai-presenting .geDiagramContainer { position: fixed !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important; width: auto !important; height: auto !important; border: 0 !important; scrollbar-width: none; }",
 		// Scrollbars stay on (draw.io positions the view with them) but are not shown.
 		"body.drawai-presenting .geDiagramContainer::-webkit-scrollbar { display: none; }",
@@ -26,6 +26,12 @@
 		"#drawai-page-dots button:hover { transform: scale(1.3); }",
 		"#drawai-page-dots button.current { background: #7c3aed; border-color: #7c3aed; transform: scale(1.15); }",
 		"#drawai-page-dots .name { font: 12px -apple-system, system-ui, sans-serif; color: rgba(127,127,127,.95); margin-left: 4px; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }",
+		"#drawai-page-dots .tour { width: auto; height: auto; border-radius: 999px; padding: 2px 9px; font: 11px -apple-system, system-ui, sans-serif; color: #fff; background: #7c3aed; border-color: #7c3aed; }",
+		"#drawai-page-dots .tour:hover { transform: none; filter: brightness(1.1); }",
+		"#drawai-tour-caption { position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 20000; max-width: min(720px, 80vw); padding: 12px 18px; border-radius: 12px; font: 14px/1.45 -apple-system, system-ui, sans-serif; color: #fff; background: rgba(24,20,32,.92); box-shadow: 0 8px 28px rgba(0,0,0,.35); }",
+		"#drawai-tour-caption .step { font-size: 11px; opacity: .7; margin-bottom: 2px; }",
+		"#drawai-tour-caption .title { font-weight: 600; margin-bottom: 2px; }",
+		"#drawai-tour-caption .keys { font-size: 11px; opacity: .55; margin-top: 6px; }",
 		"#drawai-present-hint { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 20000; padding: 6px 14px; border-radius: 999px; font: 12px -apple-system, system-ui, sans-serif; color: #fff; background: rgba(30,30,34,.78); pointer-events: none; transition: opacity .6s; }",
 	].join("\n");
 
@@ -37,6 +43,12 @@
 		var hint = null;
 		var hintTimer = null;
 		var pageListener = null;
+		// Map tours: [{ mapId, title, steps: [{ title, caption, nodeIds }] }]; the one playing and its step.
+		var tours = [];
+		var tour = null;
+		var tourStep = 0;
+		var highlights = [];
+		var caption = null;
 
 		var style = document.createElement("style");
 		style.textContent = STYLE;
@@ -76,6 +88,108 @@
 			goTo(pages().indexOf(ui.currentPage) + delta);
 		}
 
+		/** The map's shapes on the page shown, by node id (shapes carry mapId and mapperId). */
+		function mapCells(mapId) {
+			var out = {};
+			var cells = graph.model.cells || {};
+			for (var id in cells) {
+				var c = cells[id];
+				if (c && c.value && typeof c.value.getAttribute === "function" && c.value.getAttribute("mapId") === mapId && c.value.getAttribute("mapperId")) {
+					var kind = c.value.getAttribute("mapperKind");
+					if (kind !== "finding-badge" && kind !== "change-badge") out[c.value.getAttribute("mapperId")] = c;
+				}
+			}
+			return out;
+		}
+
+		function toursHere() {
+			return tours.filter(function (t) {
+				return Object.keys(mapCells(t.mapId)).length > 0;
+			});
+		}
+
+		function clearHighlights() {
+			highlights.forEach(function (h) { h.destroy(); });
+			highlights = [];
+		}
+
+		function startTour(t) {
+			tour = t;
+			tourStep = 0;
+			// After presentation's own fit (scheduled when it starts), or it would undo the step's zoom.
+			setTimeout(showStep, 120);
+		}
+
+		function endTour() {
+			tour = null;
+			clearHighlights();
+			if (caption) caption.remove();
+			caption = null;
+			renderDots();
+			fit();
+		}
+
+		function showStep() {
+			if (!tour) return;
+			var step = tour.steps[tourStep];
+			var cells = mapCells(tour.mapId);
+			clearHighlights();
+			var states = step.nodeIds.map(function (id) { return cells[id] && graph.view.getState(cells[id]); }).filter(Boolean);
+			if (states.length) {
+				var b = null;
+				states.forEach(function (st) {
+					var r = new mxRectangle(st.x, st.y, st.width, st.height);
+					if (b) b.add(r);
+					else b = r;
+					var h = new mxCellHighlight(graph, "#7c3aed", 4);
+					h.highlight(st);
+					highlights.push(h);
+				});
+				var s = graph.view.scale;
+				var t = graph.view.translate;
+				// Room for the caption at the bottom; don't blow single shapes up too far.
+				graph.fitWindow(new mxRectangle(b.x / s - t.x, b.y / s - t.y, b.width / s, b.height / s + 140 / s), 80, 1.6);
+				// Highlights follow the new view.
+				setTimeout(function () {
+					clearHighlights();
+					step.nodeIds.forEach(function (id) {
+						var st = cells[id] && graph.view.getState(cells[id]);
+						if (!st) return;
+						var h = new mxCellHighlight(graph, "#7c3aed", 4);
+						h.highlight(st);
+						highlights.push(h);
+					});
+				}, 60);
+			}
+			if (!caption) {
+				caption = document.createElement("div");
+				caption.id = "drawai-tour-caption";
+				document.body.appendChild(caption);
+			}
+			caption.replaceChildren();
+			var meta = document.createElement("div");
+			meta.className = "step";
+			meta.textContent = tour.title + " · step " + (tourStep + 1) + " of " + tour.steps.length;
+			var title = document.createElement("div");
+			title.className = "title";
+			title.textContent = step.title || "";
+			var text = document.createElement("div");
+			text.textContent = step.caption;
+			var keys = document.createElement("div");
+			keys.className = "keys";
+			keys.textContent = "Tab or → next · Shift+Tab or ← back · Esc ends the tour";
+			caption.append(meta, title, text, keys);
+			renderDots();
+		}
+
+		function tourMove(delta) {
+			if (!tour) return;
+			var next = tourStep + delta;
+			if (next >= tour.steps.length) return endTour();
+			tourStep = Math.max(0, next);
+			showStep();
+		}
+
 		function renderDots() {
 			if (!dots) return;
 			var list = pages();
@@ -89,6 +203,17 @@
 				b.addEventListener("click", function () { goTo(i); });
 				dots.appendChild(b);
 			});
+			if (!tour) {
+				toursHere().forEach(function (t) {
+					var b = document.createElement("button");
+					b.className = "tour";
+					b.textContent = "▶ " + t.title;
+					b.title = "Play the tour (" + t.steps.length + " steps)";
+					b.addEventListener("click", function () { startTour(t); });
+					dots.appendChild(b);
+				});
+				if (toursHere().length) dots.style.display = "flex";
+			}
 			var name = document.createElement("span");
 			name.className = "name";
 			name.textContent = (ui.currentPage && ui.currentPage.getName && ui.currentPage.getName()) || "";
@@ -119,6 +244,21 @@
 			if (!active) return;
 			var mod = evt.metaKey || evt.ctrlKey;
 			var handled = true;
+			if (tour) {
+				switch (evt.key) {
+					case "Escape": endTour(); break;
+					case "Tab": tourMove(evt.shiftKey ? -1 : 1); break;
+					case "ArrowRight": case "ArrowDown": case "PageDown": case " ": tourMove(1); break;
+					case "ArrowLeft": case "ArrowUp": case "PageUp": case "Backspace": tourMove(-1); break;
+					default: handled = !mod;
+				}
+				if (handled) {
+					evt.preventDefault();
+					evt.stopPropagation();
+					evt.stopImmediatePropagation();
+				}
+				return;
+			}
 			switch (evt.key) {
 				case "Escape": send("exitPresentation"); break;
 				case "Tab": step(evt.shiftKey ? -1 : 1); break;
@@ -197,6 +337,12 @@
 
 		function leave() {
 			if (!active) return;
+			if (tour) {
+				tour = null;
+				clearHighlights();
+				if (caption) caption.remove();
+				caption = null;
+			}
 			active = false;
 			window.removeEventListener("keydown", onKey, true);
 			if (pageListener) ui.editor.removeListener(pageListener);
@@ -276,6 +422,16 @@
 					}
 					send("exitPresentation");
 				}
+			} else if (data && data.action === "desktopPresentationTours") {
+				tours = Array.isArray(data.tours) ? data.tours : [];
+				if (active) {
+					renderDots();
+					if (data.start) {
+						var here = toursHere();
+						if (here.length) startTour(here[0]);
+						else showHint("No tour on this page. Build one from the chat: Map ▾ → Build a tour.");
+					}
+				}
 			} else if (data && data.action === "desktopPresentationStep" && active) {
 				if (typeof data.page === "number") goTo(data.page);
 				else step(data.delta || 1);
@@ -301,6 +457,8 @@
 						return c.offsetParent !== null && c !== dots && c !== hint && !c.classList.contains("geDiagramContainer");
 					}).map(function (c) { return c.className || c.tagName; }),
 					translate: { x: graph.view.translate.x, y: graph.view.translate.y },
+					tours: toursHere().map(function (t) { return t.title; }),
+					tour: tour ? { title: tour.title, step: tourStep, steps: tour.steps.length, highlighted: highlights.length, caption: caption ? caption.textContent : "" } : null,
 					scroll: { x: graph.container.scrollLeft, y: graph.container.scrollTop },
 					scale: graph.view.scale,
 				};

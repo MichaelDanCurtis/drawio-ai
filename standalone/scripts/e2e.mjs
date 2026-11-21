@@ -27,6 +27,7 @@ const config = {
 	timeoutMs: Number(arg("timeout", "420000")),
 	clickPermissions: process.argv.includes("--click-permissions"),
 	present: process.argv.includes("--present"),
+	insights: process.argv.includes("--insights"),
 	clickAllowAll: process.argv.includes("--click-allow-all"),
 	// yarn e2e --map software.github-actions --map-input '{"folder":"…"}' [--map-dialog] [--agent claude --ask-agent] [--dig "question"]
 	map: arg("map")
