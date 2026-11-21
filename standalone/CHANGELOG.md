@@ -29,5 +29,6 @@ own coding agents.
 - **MCP for Claude Code and Codex**: Agent → Connect Claude Code / Codex to Draw.AI
   lets coding agents on this computer use the open diagrams and maps.
 
-The macOS build is not signed yet. The first time, right-click Draw.AI.app → **Open**
-(or run `xattr -dr com.apple.quarantine /Applications/Draw.AI.app`).
+The macOS build is not signed with a Developer ID yet. The first time you open it, macOS
+says it can't verify Draw.AI: click **Done**, then **System Settings → Privacy & Security →
+Open Anyway**. Or run `xattr -dr com.apple.quarantine /Applications/Draw.AI.app` once.
