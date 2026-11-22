@@ -190,3 +190,14 @@ input[type="text"]:hover, input[type="password"]:hover, select:hover, textarea:h
 input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 18%, transparent); }
 textarea::placeholder, input::placeholder { color: var(--faint); }
 input[type="checkbox"], input[type="radio"] { accent-color: var(--ink); }
+
+/* ---------- the matrix: the head's dot field, over every surface (ui/matrix.js) ----------
+   The same dots, grid and grey as the live field behind the head, laid over the whole
+   window. Settings → Appearance can tint it green or turn it off. */
+
+:root { --matrix-dot: var(--dot); }
+:root[data-matrix="green"] { --matrix-dot: #2f8f5b; }
+@media (prefers-color-scheme: dark) {
+	:root[data-matrix="green"]:not([data-theme="light"]) { --matrix-dot: #6fd69b; }
+}
+:root[data-matrix="green"][data-theme="dark"] { --matrix-dot: #6fd69b; }

@@ -12,6 +12,11 @@ import type { Insertable } from "./galleries";
 export interface WorkshopHost {
 	insert(shape: Insertable): Promise<string | undefined>;
 	diagramName(): string | undefined;
+	/** draw.io's own shape sets (what its "More Shapes" dialog chose between), or undefined with no diagram open. */
+	shapeSets(): { title: string; entries: { id: string; title: string; on: boolean }[] }[] | undefined;
+	setShapeSet(id: string, on: boolean): void;
+	/** Asks the editor to report its shape sets again. */
+	refreshShapeSets(): void;
 }
 
 /**
@@ -30,6 +35,9 @@ export class WorkshopWindow {
 		WorkshopWindow.install();
 		const existing = WorkshopWindow.win;
 		if (existing && !existing.isDestroyed()) {
+			// (it may be minimized or hidden behind other windows)
+			if (existing.isMinimized()) existing.restore();
+			existing.show();
 			existing.focus();
 			if (mode) existing.webContents.send("workshop:toWebview", { type: "mode", mode });
 			return;
@@ -52,6 +60,8 @@ export class WorkshopWindow {
 		win.webContents.on("will-navigate", (e) => e.preventDefault());
 		win.once("ready-to-show", () => win.show());
 		win.on("closed", () => (WorkshopWindow.win = undefined));
+		// the sidebar can change in the editor itself (the Scratchpad's ✕, a set enabled from a search): ask again
+		win.on("focus", () => WorkshopWindow.host?.refreshShapeSets());
 		void win.loadURL(`${server.base}/workshop.html${mode ? `#${encodeURIComponent(mode)}` : ""}`);
 	}
 
@@ -79,6 +89,11 @@ export class WorkshopWindow {
 	}
 
 	private static stateTimer: NodeJS.Timeout | undefined;
+	/** Something the Workshop shows changed elsewhere (draw.io's shape sets, the diagram in front). */
+	public static refresh(): void {
+		if (WorkshopWindow.window) WorkshopWindow.postState();
+	}
+
 	private static postState(): void {
 		clearTimeout(WorkshopWindow.stateTimer);
 		WorkshopWindow.stateTimer = setTimeout(() => {
@@ -86,7 +101,9 @@ export class WorkshopWindow {
 				type: "state",
 				galleries: galleries().status(galleryConfigs()),
 				iconStyle: settings().appearance.iconStyle,
+				matrix: settings().appearance.matrix,
 				diagram: WorkshopWindow.host?.diagramName() ?? null,
+				sets: WorkshopWindow.host?.shapeSets() ?? null,
 				version: app.getVersion(),
 			});
 		}, 30);
@@ -118,6 +135,7 @@ export class WorkshopWindow {
 		const s = galleries();
 		switch (msg?.type) {
 			case "ready":
+				WorkshopWindow.host?.refreshShapeSets();
 				WorkshopWindow.postState();
 				// indexes of enabled galleries load in the background, so search has something to search
 				for (const g of galleryConfigs()) if (g.enabled) void s.items(g);
@@ -170,6 +188,9 @@ export class WorkshopWindow {
 			}
 			case "restoreDefaults":
 				restoreDefaultGalleries();
+				break;
+			case "setShapeSet":
+				if (typeof msg.id === "string" && /^[\w.-]{1,60}$/.test(msg.id)) WorkshopWindow.host?.setShapeSet(msg.id, !!msg.on);
 				break;
 			case "addGithub": {
 				const parsed = parseGithubUrl(String(msg.url ?? ""));

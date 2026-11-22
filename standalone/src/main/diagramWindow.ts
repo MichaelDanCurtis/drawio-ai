@@ -1,3 +1,5 @@
+import { DrawioStorage } from "./drawioStorage";
+import { cleanShapeSets, type ShapeSetGroup } from "./shapeSets";
 import { app, BaseWindow, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
@@ -27,24 +29,32 @@ import type { StaticServer } from "./staticServer";
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
 let nextId = 1;
 
-// draw.io's preferences (recent colours, panels, ...) are kept across windows and runs.
-const localStorageFile = () => path.join(app.getPath("userData"), "drawio-local-storage.json");
-let localStorage: Record<string, string> | undefined;
-let saveTimer: NodeJS.Timeout | undefined;
-function drawioLocalStorage(): Record<string, string> {
-	if (!localStorage) {
-		try {
-			localStorage = JSON.parse(fs.readFileSync(localStorageFile(), "utf8"));
-		} catch {
-			localStorage = {};
-		}
-	}
-	return localStorage!;
+// draw.io's settings (recent colours, panels, shape sets) and its Scratchpad are kept across windows and runs.
+const storage = new DrawioStorage(() => path.join(app.getPath("userData"), "drawio-local-storage.json"));
+export function drawioLocalStorage(): Record<string, string> {
+	return storage.all();
+}
+/** Writes draw.io's storage now (before the app quits). */
+export function flushDrawioStorage(): void {
+	storage.flush();
 }
 
 /** One diagram: a window with the draw.io editor on the left and the agent chat on the right. */
 export class DiagramWindow {
 	public static readonly all = new Set<DiagramWindow>();
+	/** draw.io's own shape sets and which are shown, as the editor used last reported them (for the Shape Workshop). */
+	public static shapeSets: ShapeSetGroup[] | undefined;
+	public static onShapeSets: (() => void) | undefined;
+
+	/** Asks the editor in front to say again which shape sets show (they can change in the sidebar itself). */
+	public static requestShapeSets(): void {
+		DiagramWindow.focused()?.sendToEditor({ action: "desktopReportShapeSets" });
+	}
+
+	/** Shows or hides one of draw.io's shape sets in every open diagram (they share draw.io's settings). */
+	public static setShapeSet(id: string, on: boolean): void {
+		for (const w of DiagramWindow.all) w.sendToEditor({ action: "desktopSetShapeSet", id, on });
+	}
 	private static byEditor = new Map<number, DiagramWindow>();
 	/** The diagram window used last, even while another app (a terminal) has focus. */
 	private static lastFocused: DiagramWindow | undefined;
@@ -322,7 +332,7 @@ export class DiagramWindow {
 	/** Icon style and the chat's state, for the editor's plugins. */
 	private sendEditorPrefs(): void {
 		const s = settings();
-		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, toolbar: s.appearance.toolbar, chatVisible: this.chatVisible, chatSide: s.chat.side });
+		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, matrix: s.appearance.matrix, toolbar: s.appearance.toolbar, chatVisible: this.chatVisible, chatSide: s.chat.side });
 	}
 
 	private shapesSeq = 0;
@@ -345,6 +355,18 @@ export class DiagramWindow {
 		})();
 	}
 
+	/** What this window's editor page knows of draw.io's storage (given at load, or posted since). */
+	private storageSeen: Record<string, string> = {};
+
+	/** Another window changed draw.io's storage (a Scratchpad shape, a setting): this one's page takes it over. */
+	private takeStorage(changes: Record<string, string | null>): void {
+		for (const [k, v] of Object.entries(changes)) {
+			if (v === null) delete this.storageSeen[k];
+			else this.storageSeen[k] = v;
+		}
+		this.sendToEditor({ action: "desktopStorage", changes });
+	}
+
 	/** Puts a shape from the Workshop in this diagram (in the middle of the view, selected). */
 	public insertShape(shape: Insertable): void {
 		// (the page can see a message twice; the sequence number makes it insert once)
@@ -357,7 +379,7 @@ export class DiagramWindow {
 		const dark = nativeTheme.shouldUseDarkColors;
 		this.win.show();
 		this.editorView.webContents.focus();
-		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() })}?icons=${settings().appearance.iconStyle}&toolbar=${settings().appearance.toolbar}`);
+		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: () => (this.storageSeen = storage.snapshot()) })}?icons=${settings().appearance.iconStyle}&toolbar=${settings().appearance.toolbar}&matrix=${settings().appearance.matrix}`);
 		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
 		void dark;
 	}
@@ -479,9 +501,12 @@ export class DiagramWindow {
 		c.onUnknownMessage.sub(({ message }) => {
 			const m = message as any;
 			if (m?.event === "updateLocalStorage" && m.newLocalStorage && typeof m.newLocalStorage === "object") {
-				localStorage = m.newLocalStorage;
-				clearTimeout(saveTimer);
-				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+				// only what this page changed is taken over, and the other windows are told
+				const changes = storage.apply(m.newLocalStorage, this.storageSeen);
+				if (Object.keys(changes).length) for (const other of DiagramWindow.all) if (other !== this) other.takeStorage(changes);
+			} else if (m?.event === "desktopShapeSets" && Array.isArray(m.groups)) {
+				DiagramWindow.shapeSets = cleanShapeSets(m.groups);
+				DiagramWindow.onShapeSets?.();
 			} else if (m?.event === "desktopGallerySearch" && typeof m.query === "string") {
 				// draw.io's own search asks for gallery shapes too
 				const query = m.query.slice(0, 200), reqId = m.reqId;
@@ -517,6 +542,7 @@ export class DiagramWindow {
 			case "toggleChat": return this.toggleChat();
 			case "settings": return DiagramWindow.appCommands.settings();
 			case "workshop": return DiagramWindow.appCommands.workshop?.();
+			case "shapeSets": return DiagramWindow.appCommands.workshop?.("sets");
 		}
 	}
 

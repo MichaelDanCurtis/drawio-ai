@@ -118,6 +118,15 @@
 					</div>
 				</div>
 				<div class="group">
+					<span class="label">Matrix</span>
+					<div class="seg" role="group" aria-label="Matrix of dots over every surface" id="matrix">
+						<button data-value="grey" aria-pressed="false">Grey</button>
+						<button data-value="green" aria-pressed="false">Green</button>
+						<button data-value="off" aria-pressed="false">Off</button>
+					</div>
+					<span class="field-hint">The dot field from the chat's corner, over every panel, bar and card. Dots near the pointer light up.</span>
+				</div>
+				<div class="group">
 					<span class="label">Icons</span>
 					<div class="styles" id="iconStyles"></div>
 				</div>
@@ -170,7 +179,9 @@
 	<span class="tag hidden saved" data-tone="ok" id="saved">Saved</span>
 <script type="module" nonce="$$nonce$$">
 	import { mountDotField } from "/ui/dots.js";
-	mountDotField(document.getElementById("field"), { density: 0.4, grid: 7 });
+	import { mountMatrix } from "/ui/matrix.js";
+	mountDotField(document.getElementById("field"), { density: 0.4, grid: 7, anchor: "viewport" });
+	window.omnidrawMatrix = mountMatrix();
 	// the live dot mark in the head
 	const mark = document.querySelector(".head .brandmark");
 	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
@@ -216,6 +227,8 @@
 	function renderAppearance(s) {
 		seg($("theme"), s.appearance.theme, (v) => set({ appearance: { ...state.settings.appearance, theme: v } }));
 		seg($("toolbarSide"), s.appearance.toolbar, (v) => set({ appearance: { ...state.settings.appearance, toolbar: v } }));
+		seg($("matrix"), s.appearance.matrix || "grey", (v) => set({ appearance: { ...state.settings.appearance, matrix: v } }));
+		document.documentElement.dataset.matrix = s.appearance.matrix || "grey";
 		const box = $("iconStyles");
 		box.textContent = "";
 		for (const style of I.styles) {

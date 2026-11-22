@@ -26,7 +26,7 @@
 	// Our own buttons' classic look: the flat glyphs.
 	var EXTRA = { present: null, chatArrow: null, workshop: null, ruler: null };
 	// which glyph each of them shows now (the chat's arrow changes with the chat)
-	var EXTRA_GLYPH = { present: "present", chatArrow: "chevronRight", workshop: "workshop", ruler: "ruler" };
+	var EXTRA_GLYPH = { present: "present", chatArrow: "sparkle", workshop: "workshop", ruler: "ruler" };
 	var style = (/[?&]icons=([a-z0-9]+)/.exec(location.search) || [])[1] || "dots2d";
 	var side = (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
 
@@ -188,9 +188,9 @@
 		if (end) {
 			var chat = document.createElement("a");
 			chat.className = "geButton drawai-chat-toggle";
-			chat.setAttribute("title", "Close the chat (" + ctrl + "+J)");
-			chat.setAttribute("aria-label", "Close or open the chat");
-			chat.style.backgroundImage = "url('" + glyphUri("chevronRight", style) + "')";
+			chat.setAttribute("title", "Open the AI chat (" + ctrl + "+J)");
+			chat.setAttribute("aria-label", "Open or close the AI chat");
+			chat.style.backgroundImage = "url('" + glyphUri("sparkle", style) + "')";
 			mxEvent.addListener(chat, "click", function (evt) { send("toggleChat"); mxEvent.consume(evt); });
 			mxEvent.preventDefault(chat);
 			end.appendChild(chat);
@@ -238,12 +238,17 @@
 			".drawai-brandmark i[data-on] { background: light-dark(#141414, #ededed); }",
 			".drawai-brandmark i[data-signal] { background: light-dark(#d71921, #e5262f); }",
 			".drawai-mark:hover .drawai-brandmark i[data-on] { background: light-dark(#000000, #ffffff); }",
-			// the arrow that closes and opens the chat: a small tab of its own at the end of the toolbar
-			".drawai-chat-toggle { border: 1px solid light-dark(#d2cfc8, #333333) !important; border-radius: 7px !important; margin-left: 4px !important; }",
-			".drawai-chat-toggle:hover { border-color: light-dark(#8b8984, #6b6b6b) !important; }",
-			// while the chat is open its own arrow (next to this one, across the edge) closes it: one arrow at a time
+			// the AI symbol opens the chat: an ordinary toolbar button, at the edge the chat comes from
+			".drawai-chat-toggle { margin-left: 2px !important; }",
+			// while the chat is open the same symbol sits in the chat's own corner (next to this spot) and closes it
 			".drawai-chat-toggle[data-chat='open'] { display: none !important; }",
 			".drawai-coloured { filter: none !important; }",
+			// The matrix is a layer behind the editor's chrome: the bars and panels let it through, and
+			// everything in them (buttons, tabs, fields, shapes) is in front of it. Controls with an
+			// outline get the panel's colour, so no dots show inside them.
+			":root:not([data-drawai-matrix='off']) .geToolbarContainer, :root:not([data-drawai-matrix='off']) .geToolbar, :root:not([data-drawai-matrix='off']) .geSidebarContainer, :root:not([data-drawai-matrix='off']) .geSidebar, :root:not([data-drawai-matrix='off']) .geTabContainer { background-color: transparent !important; }",
+			".geSidebarFooter, .geSidebarFooter .geBtn.gePrimaryBtn { background-color: light-dark(#f3f2ef, #000000) !important; }",
+			".geTabContainer .geTab, .geTabContainer .geControlTab { background-color: light-dark(#f3f2ef, #000000); }",
 			".drawai-dots-host { position: relative; isolation: isolate; }",
 			".drawai-backdrop { position: absolute; top: 0; left: 0; right: 0; height: 150px; z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); -webkit-mask-composite: source-in; mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); mask-composite: intersect; }",
 			".drawai-backdrop canvas { display: block; width: 100%; height: 100%; }",
@@ -277,12 +282,76 @@
 			};
 			box.insertBefore(back, box.firstChild);
 			import("/ui/dots.js").then(function (m) {
-				var fieldLayer = m.mountDotField(canvas, { density: 0.42, grid: 7 });
+				var fieldLayer = m.mountDotField(canvas, { density: 0.42, grid: 7, anchor: "viewport" });
 				if (!fieldLayer) return;
 				window.omnidrawFormatDots = fieldLayer;
 				try { ui.addListener("darkModeChanged", function () { colours(); fieldLayer.engine.readColours(); }); } catch (e) { /* older draw.io */ }
 			}).catch(function () { /* the panel is complete without it */ });
 		})();
+
+		// ----- the matrix: the chat's dot field over all of the editor's chrome, never over the diagram -----
+		var matrixLayer = null;
+		var matrixMode = document.documentElement.getAttribute("data-drawai-matrix") || "grey";
+		import("/ui/matrix.js").then(function (m) {
+			var diagram = ui.diagramContainer;
+			matrixLayer = m.mountMatrix({
+				mode: matrixMode,
+				holes: function () { return diagram && diagram.offsetWidth ? [diagram.getBoundingClientRect()] : []; },
+				colour: function (mode) {
+					var dark = typeof Editor.isDarkMode === "function" && Editor.isDarkMode();
+					return mode === "green" ? (dark ? "#6fd69b" : "#2f8f5b") : dark ? "#7d7d7d" : "#8b8984";
+				},
+			});
+			if (!matrixLayer) return;
+			window.omnidrawMatrix = matrixLayer;
+			// the diagram's place changes when panels open and close or the toolbar moves
+			if (typeof ResizeObserver !== "undefined" && diagram) new ResizeObserver(function () { matrixLayer.check(); }).observe(diagram);
+			try { ui.addListener("darkModeChanged", function () { matrixLayer.refresh(); }); } catch (e) { /* older draw.io */ }
+		}).catch(function () { /* the editor is complete without it */ });
+
+		// ----- draw.io's own shape sets (what its "More Shapes" dialog chooses) live in the Shape Workshop -----
+		function shapeSets() {
+			var groups = [];
+			if (typeof ui.isScratchpadEnabled !== "function" || ui.isScratchpadEnabled()) {
+				groups.push({ title: "Yours", entries: [{ id: ".scratchpad", title: mxResources.get("scratchpad") || "Scratchpad", on: ui.scratchpad != null }] });
+			}
+			(ui.sidebar.entries || []).forEach(function (g) {
+				var entries = (g.entries || []).filter(function (e) { return e.id !== "search" && e.id !== ".scratchpad"; }).map(function (e) {
+					return { id: e.id, title: e.title, on: !!ui.sidebar.isEntryVisible(e.id) };
+				});
+				if (entries.length) groups.push({ title: g.title, entries: entries });
+			});
+			return groups;
+		}
+		var setsTimer = 0;
+		function postShapeSets() {
+			clearTimeout(setsTimer);
+			setsTimer = setTimeout(function () {
+				window.VsCodeApi.postMessage(JSON.stringify({ event: "desktopShapeSets", groups: shapeSets() }));
+			}, 150);
+		}
+		/** Shows or hides one of draw.io's shape sets, and remembers it (as "More Shapes" did with "Remember this setting"). */
+		function setShapeSet(id, on) {
+			if (id === ".scratchpad") {
+				if ((ui.scratchpad != null) !== !!on) ui.toggleScratchpad();
+			} else {
+				var ids = [];
+				(ui.sidebar.entries || []).forEach(function (g) {
+					(g.entries || []).forEach(function (e) {
+						if (e.id === "search" || e.id === ".scratchpad") return;
+						if (e.id === id ? on : ui.sidebar.isEntryVisible(e.id)) ids.push(e.id);
+					});
+				});
+				ui.sidebar.showEntries(ids.join(";"), true, true);
+			}
+			postShapeSets();
+			setTimeout(postShapeSets, 900); // (the Scratchpad opens a moment later)
+		}
+		// "+ More Shapes" under the sidebar opens the Workshop: one place for every kind of shape
+		var moreShapes = ui.actions.get("shapes");
+		if (moreShapes) moreShapes.funct = function () { send("shapeSets"); };
+		postShapeSets();
+		setTimeout(postShapeSets, 1500);
 
 		// ----- a shape from the Workshop: in the middle of the view, selected -----
 		function insertShape(shape) {
@@ -361,6 +430,23 @@
 			palettes: function () {
 				return Array.from(document.querySelectorAll(".geSidebarContainer .geTitle")).map(function (t) { return t.textContent.trim(); });
 			},
+			sets: shapeSets,
+			/** The Scratchpad: add a new shape to it the way its "+" does, and say what it holds and where it is kept. */
+			scratchpad: function (add) {
+				var elts = ui.sidebar.palettes["L.scratchpad"] || [];
+				if (add && elts[0]) {
+					var graph = ui.editor.graph;
+					graph.setSelectionCell(graph.insertVertex(graph.getDefaultParent(), null, add, 20, 20, 90, 40));
+					var want = mxResources.get("add");
+					var btn = Array.from(elts[0].querySelectorAll("img")).find(function (i) { return i.getAttribute("title") === want || i.getAttribute("data-tip") === want; });
+					if (btn) btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+				}
+				return {
+					open: ui.scratchpad != null,
+					database: ui.database != null,
+					items: elts[1] ? elts[1].querySelectorAll("a.geItem").length : 0,
+				};
+			},
 		};
 
 		// ----- the user's shape folders and libraries -----
@@ -411,21 +497,22 @@
 		window.addEventListener("message", function (evt) {
 			var data = evt.data;
 			if (typeof data === "string") {
-				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0) return;
+				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0 && data.indexOf('"desktopStorage"') < 0 && data.indexOf('"desktopReportShapeSets"') < 0) return;
 				try { data = JSON.parse(data); } catch (e) { return; }
 			}
 			if (!data) return;
 			if (data.action === "desktopPrefs") {
 				if (data.iconStyle && data.iconStyle !== style) setStyle(data.iconStyle, ui);
 				if (data.toolbar && data.toolbar !== side) setSide(data.toolbar, ui);
+				if (data.matrix && data.matrix !== matrixMode) {
+					matrixMode = data.matrix;
+					document.documentElement.setAttribute("data-drawai-matrix", matrixMode);
+					if (matrixLayer) matrixLayer.setMode(matrixMode);
+				}
+				if (matrixLayer) matrixLayer.check();
 				if (EXTRA.chatArrow) {
-					// the arrow points the way the chat goes: away to close it, back to open it
-					var right = data.chatSide !== "left";
-					var glyph = !!data.chatVisible === right ? "chevronRight" : "chevronLeft";
-					EXTRA_GLYPH.chatArrow = glyph;
-					EXTRA.chatArrow.style.backgroundImage = "url('" + glyphUri(glyph, style) + "')";
 					EXTRA.chatArrow.removeAttribute("data-tip");
-					EXTRA.chatArrow.setAttribute("title", (data.chatVisible ? "Close" : "Open") + " the chat (" + ctrl + "+J)");
+					EXTRA.chatArrow.setAttribute("title", (data.chatVisible ? "Close" : "Open") + " the AI chat (" + ctrl + "+J)");
 					EXTRA.chatArrow.setAttribute("data-chat", data.chatVisible ? "open" : "closed");
 					markOwn();
 				}
@@ -435,6 +522,23 @@
 				if (data.seq && data.seq <= lastInsertSeq) return;
 				lastInsertSeq = data.seq || lastInsertSeq;
 				try { insertShape(data.shape); } catch (e) { ui.handleError(e); }
+			} else if (data.action === "desktopReportShapeSets") {
+				postShapeSets();
+			} else if (data.action === "desktopStorage" && data.changes && window.omnidrawStorage) {
+				// another window changed draw.io's storage: this page takes it over, so it does not write its old copy back
+				var store = window.omnidrawStorage, settingsChanged = false, padChanged = false;
+				for (var key in data.changes) {
+					var value = data.changes[key];
+					if (value === null) { delete store[key]; continue; }
+					if (typeof value !== "string" || store[key] === value) continue;
+					store[key] = value;
+					if (key.indexOf(".drawio-config") === 0) settingsChanged = true;
+					if (key === ".scratchpad") padChanged = true;
+				}
+				try { if (settingsChanged && typeof mxSettings !== "undefined") mxSettings.load(); } catch (e) { /* keeps its own */ }
+				try { if (padChanged && ui.scratchpad != null) ui.loadScratchpad(true); } catch (e) { /* shows it after a reload */ }
+			} else if (data.action === "desktopSetShapeSet" && typeof data.id === "string") {
+				try { setShapeSet(data.id, !!data.on); } catch (e) { console.warn("OmniDraw: could not switch the shape set", e); }
 			} else if (data.action === "desktopGalleryResults") {
 				var waiting = pendingSearches[data.reqId];
 				if (waiting) { delete pendingSearches[data.reqId]; waiting(data.shapes || []); }

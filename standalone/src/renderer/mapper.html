@@ -25,7 +25,7 @@
 	main { flex: 1; display: grid; grid-template-columns: 196px 236px 1fr; min-height: 0; }
 	nav, #recipes { border-right: 1px solid var(--border); overflow: auto; padding: 12px 10px; }
 	nav { display: flex; flex-direction: column; gap: 2px; }
-	#recipes { background: var(--surface-2); }
+	#recipes { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
 	.cat { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 1px solid transparent; background: none; color: var(--ink-2); font: inherit; padding: 8px 10px; border-radius: var(--radius); cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 	.cat:hover { background: var(--surface-3); color: var(--ink); }
 	.cat.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
@@ -84,7 +84,9 @@
 </main>
 <script type="module" nonce="$$nonce$$">
 	import { mountDotField } from "/ui/dots.js";
-	const field = mountDotField(document.getElementById("field"), { density: 0.45 });
+	import { mountMatrix } from "/ui/matrix.js";
+	const field = mountDotField(document.getElementById("field"), { density: 0.45, anchor: "viewport" });
+	window.omnidrawMatrix = mountMatrix();
 	// the live dot mark in the head
 	const mark = document.querySelector(".head .brandmark");
 	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
@@ -355,6 +357,7 @@
 			case "catalog":
 				state.catalog = msg.catalog;
 				iconStyle = msg.iconStyle || iconStyle;
+				document.documentElement.dataset.matrix = msg.matrix || "grey";
 				state.saved = msg.saved ?? {};
 				state.cwd = msg.cwd ?? "";
 				renderCats();

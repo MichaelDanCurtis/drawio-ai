@@ -9,6 +9,10 @@ export type IconStyle = "classic" | "dots2d" | "dots" | "real";
 export const ICON_STYLES: IconStyle[] = ["classic", "dots2d", "dots", "real"];
 /** Styles of earlier versions, and what took their place. */
 const OLD_ICON_STYLES: Record<string, IconStyle> = { isometric: "dots2d", extruded: "real" };
+/** The dot field over every surface: in its own grey, tinted green, or none. */
+export type MatrixStyle = "grey" | "green" | "off";
+export const MATRIX_STYLES: MatrixStyle[] = ["grey", "green", "off"];
+
 /** Where draw.io's toolbar sits in the editor. */
 export type ToolbarSide = "top" | "left" | "right" | "bottom";
 
@@ -74,7 +78,7 @@ export interface Settings {
 	chatWidth: number;
 	/** OmniDraw editor settings, with the same keys as the VS Code extension's `drawio-ai.*` settings. */
 	editor: Record<string, unknown>;
-	appearance: { theme: ThemeChoice; iconStyle: IconStyle; toolbar: ToolbarSide };
+	appearance: { theme: ThemeChoice; iconStyle: IconStyle; toolbar: ToolbarSide; matrix: MatrixStyle };
 	chat: {
 		/** Which side of the window the chat docks on. */
 		side: "right" | "left";
@@ -101,7 +105,7 @@ const DEFAULTS: Settings = {
 		"drawio-ai.selectChangedCells": false,
 		"drawio-ai.maxCellsInContext": 400,
 	},
-	appearance: { theme: "system", iconStyle: "dots2d", toolbar: "top" },
+	appearance: { theme: "system", iconStyle: "dots2d", toolbar: "top", matrix: "grey" },
 	chat: { side: "right", startCollapsed: false, allowAllByDefault: false },
 	models: {},
 	modelCatalog: {},
@@ -123,6 +127,7 @@ function merge(user: any): Settings {
 	if (!["system", "light", "dark"].includes(appearance.theme)) appearance.theme = DEFAULTS.appearance.theme;
 	if (!ICON_STYLES.includes(appearance.iconStyle)) appearance.iconStyle = (Object.hasOwn(OLD_ICON_STYLES, String(appearance.iconStyle)) ? OLD_ICON_STYLES[String(appearance.iconStyle)] : undefined) ?? DEFAULTS.appearance.iconStyle;
 	if (!["top", "left", "right", "bottom"].includes(appearance.toolbar)) appearance.toolbar = DEFAULTS.appearance.toolbar;
+	if (!MATRIX_STYLES.includes(appearance.matrix)) appearance.matrix = DEFAULTS.appearance.matrix;
 	const chat = { ...DEFAULTS.chat, ...obj(user.chat) };
 	if (chat.side !== "left") chat.side = "right";
 	chat.startCollapsed = !!chat.startCollapsed;

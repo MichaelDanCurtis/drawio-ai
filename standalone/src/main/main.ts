@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { adapterPackages, AGENTS } from "./agents";
 import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
-import { DiagramWindow, type DrawioMenuItem } from "./diagramWindow";
+import { DiagramWindow, type DrawioMenuItem, flushDrawioStorage } from "./diagramWindow";
 import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
@@ -45,6 +45,11 @@ function applyTheme(): void {
 // collide with a copy of the app that is already running.
 if (process.env.DRAWAI_E2E) {
 	app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
+	// It starts like a profile from an earlier version: draw.io's settings name the Scratchpad, nothing is kept for it yet.
+	fs.writeFileSync(
+		path.join(app.getPath("userData"), "drawio-local-storage.json"),
+		JSON.stringify({ ".drawio-config@undefined": JSON.stringify({ language: "", customFonts: [], libraries: "general", customLibraries: ["L.scratchpad"], plugins: [], recentColors: [], formatWidth: 0, sidebarWidth: 232, pageFormat: { x: 0, y: 0, width: 850, height: 1100 }, search: true, darkMode: "auto", autosave: true, openCounter: 0, version: 18, unit: 1, isRulerOn: true, ui: "" }) })
+	);
 	// Nor the user's ~/.drawio-ai (the desktop MCP endpoint's address file and launcher).
 	process.env.DRAWIO_AI_HOME ||= fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-home-"));
 }
@@ -357,7 +362,11 @@ app.whenReady().then(async () => {
 			const w = DiagramWindow.focused();
 			return w ? w.fileName() ?? "the untitled diagram" : undefined;
 		},
+		shapeSets: () => (DiagramWindow.all.size ? DiagramWindow.shapeSets : undefined),
+		refreshShapeSets: () => DiagramWindow.requestShapeSets(),
+		setShapeSet: (id, on) => DiagramWindow.setShapeSet(id, on),
 	};
+	DiagramWindow.onShapeSets = () => WorkshopWindow.refresh();
 	desktopMcp = new DesktopMcp({
 		windows: () => [...DiagramWindow.all],
 		focused: () => DiagramWindow.focused(),
@@ -390,7 +399,9 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin" || process.env.DRAWAI_E2E) app.quit();
 });
 
+app.on("before-quit", () => flushDrawioStorage());
 app.on("will-quit", () => {
+	flushDrawioStorage();
 	desktopMcp?.dispose();
 	server.dispose();
 });

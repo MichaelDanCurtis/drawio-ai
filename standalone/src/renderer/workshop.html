@@ -33,8 +33,21 @@
 	nav button.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
 	nav button:disabled { color: var(--faint); cursor: default; }
 	nav button .tag { margin-left: auto; padding: 0 6px; font-size: 9.5px; }
-	#galleryCol { border-right: 1px solid var(--border); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; }
-	#galleryList { flex: 1; overflow: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+	#galleryCol { border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 55%, transparent); display: flex; flex-direction: column; min-height: 0; }
+	#galleryScroll { flex: 1; overflow: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+	#galleryList { display: flex; flex-direction: column; gap: 8px; }
+	/* draw.io's own shape sets (what its "More Shapes" dialog chose between), in the same list */
+	#shapeSets { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+	#shapeSets .sets-head { padding: 4px 4px 0; }
+	#shapeSets .sets-note { margin: 0; padding: 0 4px 4px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+	details.sets { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; overflow: hidden; }
+	details.sets summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-weight: 500; list-style: none; user-select: none; }
+	details.sets summary::-webkit-details-marker { display: none; }
+	details.sets summary::before { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(-45deg); transition: transform var(--dur-fast) var(--ease-out); flex: none; margin-right: 2px; }
+	details.sets[open] summary::before { transform: rotate(45deg); }
+	details.sets summary .count { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--faint); font-weight: 400; }
+	details.sets .set { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-top: 1px solid var(--border); cursor: pointer; font-size: 13px; color: var(--ink-2); }
+	details.sets .set:hover { background: var(--surface-2); color: var(--ink); }
 	.gallery { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 10px 12px; cursor: pointer; animation: rise var(--dur) var(--ease-enter) backwards; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
 	.gallery:hover { border-color: var(--control-line); }
 	.gallery.selected { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
@@ -100,7 +113,10 @@
 			<button data-mode="creator" disabled title="Describe a shape and let an agent draw it — coming next"><span data-icon="sparkle"></span>Shape Creator<span class="tag" data-tone="plain">Next</span></button>
 		</nav>
 		<section id="galleryCol" aria-label="Galleries">
-			<div id="galleryList"></div>
+			<div id="galleryScroll">
+				<div id="galleryList"></div>
+				<div id="shapeSets"></div>
+			</div>
 			<div id="galleryActions">
 				<button class="btn btn-sm" id="addGallery" aria-haspopup="menu">Add a gallery…</button>
 				<button class="btn btn-sm" id="newCollection">New collection…</button>
@@ -126,7 +142,9 @@
 	</dialog>
 <script type="module" nonce="$$nonce$$">
 	import { mountDotField } from "/ui/dots.js";
-	mountDotField(document.getElementById("field"), { density: 0.42, grid: 7 });
+	import { mountMatrix } from "/ui/matrix.js";
+	mountDotField(document.getElementById("field"), { density: 0.42, grid: 7, anchor: "viewport" });
+	window.omnidrawMatrix = mountMatrix();
 	const mark = document.querySelector(".head .brandmark");
 	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
 </script>
@@ -225,6 +243,58 @@
 			list.append(card);
 		});
 		$("restoreDefaults").classList.toggle("hidden", ["thesvg", "tech-logos", "ui-icons"].every((id) => state.galleries.some((g) => g.id === id)));
+	}
+
+	// ----- draw.io's own shape sets: the choice its "More Shapes" dialog offered, here with the galleries -----
+	let setsShown = "", setsEver = false, setsHold = 0, wantSets = location.hash === "#sets";
+	function renderSets() {
+		const box = $("shapeSets");
+		// (a report made just before a click here would flip the switch back for a moment)
+		if (Date.now() < setsHold) return void setTimeout(renderSets, setsHold - Date.now() + 20);
+		const now = JSON.stringify(state.sets || null);
+		if (now === setsShown && box.children.length) return;
+		const first = !setsEver;
+		if (state.sets) setsEver = true;
+		setsShown = now;
+		const open = new Set([...box.querySelectorAll("details[open]")].map((d) => d.dataset.group));
+		box.textContent = "";
+		box.append(el("div", { class: "label sets-head", text: "Built into draw.io" }));
+		if (!state.sets) {
+			box.append(el("p", { class: "sets-note", text: "Open a diagram to choose which of draw.io's own shape sets show in the shapes sidebar." }));
+			return;
+		}
+		box.append(el("p", { class: "sets-note", text: "The shape sets that come with draw.io. Switch one on to show it in the shapes sidebar of every diagram." }));
+		state.sets.forEach((g, i) => {
+			const count = el("span", { class: "count" });
+			const tally = () => (count.textContent = g.entries.filter((e) => e.on).length + " of " + g.entries.length);
+			tally();
+			const d = el("details", { class: "sets" }, el("summary", {}, el("span", { text: g.title }), count));
+			d.dataset.group = g.title;
+			if (open.has(g.title) || (first && (i < 2 || wantSets))) d.open = true;
+			for (const e of g.entries) {
+				const sw = el("input", { type: "checkbox", class: "switch", "aria-label": "Show " + e.title });
+				sw.checked = e.on;
+				sw.addEventListener("change", () => {
+					e.on = sw.checked;
+					tally();
+					setsShown = JSON.stringify(state.sets);
+					setsHold = Date.now() + 500;
+					post({ type: "setShapeSet", id: e.id, on: sw.checked });
+				});
+				const row = el("label", { class: "set" }, sw, el("span", { text: e.title }));
+				row.dataset.set = e.id;
+				d.append(row);
+			}
+			box.append(d);
+		});
+		if (wantSets) showSets();
+	}
+	/** Brings draw.io's shape sets into view (the editor's "+ More Shapes" button opens the Workshop here). */
+	function showSets() {
+		wantSets = false;
+		const box = $("shapeSets");
+		if (box.children.length) box.scrollIntoView({ block: "start", behavior: "smooth" });
+		else wantSets = true;
 	}
 
 	function galleryMenu(anchor, g) {
@@ -333,7 +403,9 @@
 			// a collection being browsed changed (a shape added or removed): show it again
 			if (now && was && now.count !== was.count) setTimeout(runSearch);
 			applyIcons(m.iconStyle || "dots2d");
+			document.documentElement.dataset.matrix = m.matrix || "grey";
 			renderGalleries();
+			renderSets();
 			renderScope();
 		} else if (m.type === "results" && m.reqId === reqId) {
 			hits = m.hits;
@@ -355,6 +427,7 @@
 			$("q").value = "";
 			select(m.id);
 		} else if (m.type === "mode" && m.mode === "gallery") $("q").focus();
+		else if (m.type === "mode" && m.mode === "sets") showSets();
 	});
 	post({ type: "ready" });
 	renderGrid();

@@ -176,6 +176,17 @@ an icon) come next.
   to add it to the diagram you used last (selected, in the middle of the view).
 - **In the editor:** each gallery is a palette in the shapes sidebar (a first page; the rest
   is found by search), and draw.io's own sidebar search finds gallery shapes too.
+- **draw.io's own shape sets** (General, UML, AWS, BPMN… and the Scratchpad) are switches in
+  the same list, under "Built into draw.io". The editor's **+ More Shapes** button opens the
+  Workshop there: draw.io's separate "More Shapes" dialog is not used, so there is one place
+  for every kind of shape. A switch applies to every open diagram and is remembered.
+- **The Scratchpad** (draw.io's shelf for shapes you drag onto it) is kept in the app's data
+  folder, so it is still there after a restart. draw.io would keep it in the page's own
+  database, which is new on every launch because the editor's local address changes.
+  Windows share that storage (`src/main/drawioStorage.ts`): a window's save only changes the
+  keys that window changed, and the others are told, so two open diagrams cannot lose each
+  other's Scratchpad shapes. The file is written whole, then moved into place, and once more
+  before the app quits.
 - **Downloads** happen in the app's main process, only from jsDelivr (npm and GitHub's CDN)
   and, for theSVG's licence data, raw.githubusercontent.com. Every redirect is checked
   against those hosts and every answer is size-capped (`src/main/workshop/fetch.ts`).
@@ -217,11 +228,20 @@ findings count, the current tour step). Depth comes from dots: a live dot field 
 the chat and Mapper heads that leans away from the pointer and ripples when you switch
 agents or start a new chat, and a 3D dot object in the empty chat that keeps changing
 shape: it starts as a square of stacked layers, then every dot travels to its place in a
-face, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
+human head (a fine mesh of some 3,700 dots, lit like a 3D scan), a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
 more (`ui/dot-object.js`). When you start to type it shoots to the top right corner of
 the chat and stays there, small, during the conversation; in a new, empty chat it comes
 back. The dots near the pointer brighten and lean, in the object, in every head's dot
-field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel. Motion is short and ease-out only: messages, menus, cards and tour captions
+field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel.
+
+- **The matrix:** the head's dot field also lies behind every surface (`ui/matrix.js`): the
+  same dots, 7px grid and grey across the whole of each window (the chat, Settings, the Mapper,
+  the Workshop, and draw.io's toolbar, sidebars and page tabs), never over the diagram. It is
+  a background: text, buttons, tabs, fields and cards are in front of it. Dots
+  near the pointer brighten and lean away, as in the field. It is drawn once and only the patch
+  around the pointer is drawn again, so it costs nothing while the mouse is still. The heads'
+  live fields sit on the same grid, so their dots fall on the matrix's. Settings → Appearance →
+  Matrix: Grey, Green or Off. Motion is short and ease-out only: messages, menus, cards and tour captions
 rise in. Under *reduce motion* nothing moves.
 
 - Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
@@ -316,7 +336,7 @@ the packaged app.
 **OmniDraw → Settings…** (Cmd/Ctrl+, or the dot mark at the start of the toolbar) opens the Settings
 window. Changes save at once and reach open windows straight away:
 
-- **Appearance:** System, Light or Dark; the toolbar on the top, left, right or bottom; the icon style.
+- **Appearance:** System, Light or Dark; the toolbar on the top, left, right or bottom; the matrix of dots over every surface (grey, green or off); the icon style.
 - **Agents & models:** for each agent, the models its picker shows and the command that
   launches it. Each agent is asked for its models when the page opens (it is started in an
   empty folder with no tools, and nothing is sent to a model); **Refresh** asks again. A

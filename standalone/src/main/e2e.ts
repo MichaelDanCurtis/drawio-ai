@@ -6,6 +6,7 @@ import { DiagramWindow } from "./diagramWindow";
 import { exportDiagram } from "./exporter";
 import { diagramContent } from "./xmlContent";
 import { settings, updateSettings } from "./settings";
+import { drawioLocalStorage } from "./diagramWindow";
 import { SettingsWindow } from "./settingsWindow";
 import { Menu, screen } from "electron";
 import type { StaticServer } from "./staticServer";
@@ -290,6 +291,13 @@ async function runPresent(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 		throw e;
 	}
 	log("presenting", s1);
+	// the buttons: leave at the bottom left; the pages at the bottom right (only when there are several); no rulers
+	const chrome = await wc.executeJavaScript(`(() => {
+		const box = (id) => { const e = document.getElementById(id); if (!e) return null; const r = e.getBoundingClientRect(); return { shown: getComputedStyle(e).display !== "none", left: Math.round(r.left), fromRight: Math.round(innerWidth - r.right), fromBottom: Math.round(innerHeight - r.bottom) }; };
+		return { exit: box("drawai-present-exit"), nav: box("drawai-present-nav"), rulersShown: Array.from(document.querySelectorAll(".geRuler")).filter((r) => getComputedStyle(r).display !== "none").length };
+	})()`);
+	log("presentButtons", chrome);
+	if (!chrome.exit?.shown || chrome.exit.left > 40 || chrome.exit.fromBottom > 40 || !chrome.nav || chrome.rulersShown) throw new Error("Presentation mode lacks its Exit button, or shows rulers (see presentButtons above).");
 	await shot("present-page1.png");
 	await key("Tab");
 	const s2 = await state();
@@ -576,6 +584,36 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	})()`));
 	await save("toolbar-buttons.png", ed, await top());
 
+	// the Scratchpad: a shape put on it is kept by the app, so it is there after a restart
+	const scratch0 = await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`);
+	await ed.executeJavaScript(`window.omnidrawShapes.scratchpad("kept shape")`);
+	await pause(1500);
+	const scratch1 = await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`);
+	const kept = drawioLocalStorage()[".scratchpad"] ?? "";
+	// a window opened afterwards (as after a restart: a fresh page given what the app kept) has it too
+	const second = await DiagramWindow.open(server);
+	await second.whenLoaded();
+	await pause(1200);
+	const scratch2 = await second.editorView.webContents.executeJavaScript(`window.omnidrawShapes.scratchpad()`);
+	(second as any).win?.destroy?.();
+	await pause(300);
+	log("scratchpad", { before: scratch0, after: scratch1, keptByApp: kept.includes("kept shape") || /mxlibrary/.test(kept), keptBytes: kept.length, inNewWindow: scratch2 });
+	if (!scratch0.open || scratch1.items !== scratch0.items + 1 || !/mxlibrary/.test(kept) || scratch2.items !== scratch1.items) throw new Error("The Scratchpad does not keep its shapes (see the scratchpad line above).");
+
+	// the matrix: the chat head's dot field over every surface, but never over the diagram
+	const matrix = async (wc: Electron.WebContents) => wc.executeJavaScript(`window.omnidrawMatrix ? window.omnidrawMatrix.stats() : null`);
+	const edMatrix = await matrix(ed), chatMatrix = await matrix(chat);
+	const overDiagram = await ed.executeJavaScript(`(() => {
+		const c = document.querySelector(".matrix-layer canvas"), d = document.querySelector(".geDiagramContainer").getBoundingClientRect();
+		const k = c.width / window.innerWidth, g = c.getContext("2d");
+		const lit = (x, y, w, h) => { const px = g.getImageData(Math.round(x * k), Math.round(y * k), Math.round(w * k), Math.round(h * k)).data; let n = 0; for (let i = 3; i < px.length; i += 4) if (px[i]) n++; return n; };
+		return { inDiagram: lit(d.left + 20, d.top + 20, 120, 120), inToolbar: lit(0, 0, 300, 30) };
+	})()`);
+	log("matrix", { editor: edMatrix, chat: chatMatrix, overDiagram });
+	if (!edMatrix?.dots || !chatMatrix?.dots || edMatrix.holes !== 1 || overDiagram.inDiagram !== 0 || overDiagram.inToolbar === 0) throw new Error("The matrix is not on every surface, or is over the diagram (see the matrix line above).");
+	await save("matrix-editor.png", ed);
+	await save("matrix-chat.png", chat);
+
 	// the Format panel has the chat's live dot field in its top right corner
 	await pause(600);
 	log("formatDots", await ed.executeJavaScript(`(() => {
@@ -611,7 +649,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
 	}
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "dots2d", toolbar: "top" } });
+	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "dots2d", toolbar: "top" } });
 	await pause(600);
 	// the toolbar on each side
 	for (const side of ["left", "right", "bottom", "top"] as const) {
@@ -766,6 +804,38 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	log("collection", { title: col.title, count: colCount, file: fs.existsSync(galleries().collectionFile(col.id)) });
 	await pause(600);
 	await shot("workshop-galleries-light.png", wc);
+
+	// draw.io's own shape sets are chosen here too (its "More Shapes" dialog is gone)
+	const sets = await until("draw.io's shape sets in the Workshop", async () => {
+		const r = await wc.executeJavaScript(`({ groups: document.querySelectorAll("#shapeSets details.sets").length, rows: document.querySelectorAll("#shapeSets .set").length, on: document.querySelectorAll("#shapeSets .set input:checked").length })`);
+		return r.rows > 20 ? r : undefined;
+	});
+	const paletteShown = (title: string) => ed.executeJavaScript(`(() => { const t = Array.from(document.querySelectorAll(".geSidebarContainer .geTitle")).find((x) => x.textContent.trim() === ${JSON.stringify(title)}); return !!t && getComputedStyle(t).display !== "none" && t.offsetHeight > 0; })()`);
+	const click = (id: string) => wc.executeJavaScript(`(() => { const i = document.querySelector('#shapeSets .set[data-set="${id}"] input'); if (!i) return false; i.closest("details").open = true; i.click(); return i.checked; })()`);
+	const umlBefore = await paletteShown("UML");
+	const umlSwitch = await click("uml");
+	const umlOn = await until("the UML palette", async () => ((await paletteShown("UML")) ? true : undefined));
+	const remembered = () => String(drawioLocalStorage()[".drawio-config@undefined"] ?? Object.entries(drawioLocalStorage()).find(([k]) => k.startsWith(".drawio-config"))?.[1] ?? "");
+	await pause(700);
+	const keptOn = /"libraries":"[^"]*\buml\b/.test(remembered());
+	await shot("workshop-sets-light.png", wc);
+	await click("uml");
+	await until("the UML palette to go", async () => ((await paletteShown("UML")) ? undefined : true));
+	// the Scratchpad is one of the switches
+	const padBefore = (await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`)).open;
+	await click(".scratchpad");
+	const padOff = await until("the Scratchpad to close", async () => ((await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`)).open ? undefined : true));
+	await click(".scratchpad");
+	const padBack = await until("the Scratchpad to open again", async () => ((await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`)).open ? true : undefined));
+	// the galleries' palettes are still there after draw.io's sets changed
+	const stillThere: string[] = await ed.executeJavaScript("window.omnidrawShapes.palettes()");
+	// "+ More Shapes" in the editor opens the Workshop at these switches, not draw.io's dialog
+	ww.hide();
+	await ed.executeJavaScript(`(() => { const b = Array.from(document.querySelectorAll(".geSidebarFooter button, .geSidebarFooter a, .geSidebarContainer button")).find((x) => /More Shapes/.test(x.textContent)); if (b) b.click(); return !!b; })()`).then((found) => log("moreShapesButton", found));
+	const reopened = await until("the Workshop from More Shapes", async () => (ww.isVisible() ? true : undefined)).catch(() => false);
+	const drawioDialog = await ed.executeJavaScript(`!!document.querySelector(".geDialog")`);
+	log("shapeSets", { listed: sets, uml: { before: umlBefore, switchedOn: umlSwitch, paletteShown: umlOn, remembered: keptOn }, scratchpad: { before: padBefore, off: padOff, back: padBack }, galleriesKept: ["theSVG", "Tech logos", "UI icons"].every((t) => stillThere.some((x) => x.startsWith(t))), moreShapesOpensWorkshop: reopened, drawioDialog });
+	if (!umlOn || !keptOn || !padOff || !padBack || !reopened || drawioDialog) throw new Error("The Workshop does not switch draw.io's shape sets as it should (see the shapeSets line above).");
 
 	// dark
 	process.env.DRAWAI_THEME = "dark";

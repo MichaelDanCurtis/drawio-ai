@@ -23,7 +23,7 @@
  * entrance, no lean, no morphing; drag and keys still work, because the
  * person moves it. Stops when hidden or scrolled away.
  *
- * OmniDraw's addition: `morph: ["planes", "face", "tetrahedron", …]` makes the
+ * OmniDraw's addition: `morph: ["planes", "bust", "tetrahedron", …]` makes the
  * object a shape-shifter. It holds each shape for a few seconds, then every dot
  * travels to its place in the next one (staggered, with a little swirl), and it
  * sways slowly so each shape reads as 3D. At most ~30 frames a second.
@@ -119,40 +119,104 @@ export function planes(layers = 3, m = 13, gap = 0.55) {
 
 /* ---------- more shapes (OmniDraw): each a list of [x, y, z], unit radius ---------- */
 
-/** A head with a face on it: eyes, brows, a nose that stands out and a smile, facing +z. */
-export function face() {
+/**
+ * A human head as a fine mesh of dots, like a 3D scan: rows of dots follow the surface
+ * round the head, closer together across the face. The profile (forehead, brow, the bridge
+ * and tip of the nose, lips, chin), the eye sockets with closed lids, cheekbones, jaw, ears
+ * and a neck are modelled in the surface itself; nothing is drawn on. It faces +z.
+ * Units: the head is 1 high, chin at y = 0, crown at y = 1 (scaled and centred at the end).
+ */
+export function bust() {
   const out = [];
-  const A = 0.6, B = 0.78, C = 0.62; // half width, height, depth of the head
-  const on = (x, y, lift = 1) => {
-    // the point of the head's front surface over (x, y), pushed out by `lift`
-    const q = 1 - (x / A) ** 2 - (y / B) ** 2;
-    return [x * lift, y * lift, Math.sqrt(Math.max(0, q)) * C * lift];
+  const bump = (x, y, cx, cy, sx, sy) => Math.exp(-(((Math.abs(x) - cx) / sx) ** 2) - ((y - cy) / sy) ** 2);
+  /** Half the head's width at height y. */
+  const width = (y) => (y >= 0.6 ? 0.335 * Math.sqrt(Math.max(0, 1 - ((y - 0.6) / 0.4) ** 2)) ** 0.85 : 0.335 - 0.225 * ((0.6 - y) / 0.6) ** 2.6);
+  /** How far the face reaches forward at height y, before its features. */
+  const front = (y) => (y >= 0.62 ? 0.37 * Math.sqrt(Math.max(0, 1 - ((y - 0.62) / 0.38) ** 2)) ** 0.8 : 0.37 - 0.075 * ((0.62 - y) / 0.62) ** 1.4);
+  /** How far the skull reaches back. */
+  const back = (y) => (y >= 0.55 ? 0.43 * Math.sqrt(Math.max(0, 1 - ((y - 0.55) / 0.45) ** 2)) : 0.43 - 0.24 * ((0.55 - y) / 0.55) ** 1.25);
+  /** The face's relief at (x, y): what stands out from, or sinks into, the plain head. */
+  const relief = (x, y) => {
+    // the nose: a ridge that grows from the bridge to the tip, then tucks under
+    let nose = 0;
+    if (y > 0.3 && y < 0.57) {
+      const t = Math.min(1, Math.max(0, (0.55 - y) / 0.19)); // 0 at the bridge, 1 at the tip
+      const under = y < 0.36 ? Math.max(0, (y - 0.315) / 0.045) : 1;
+      nose = (0.028 + 0.112 * t ** 1.35) * under * Math.exp(-((x / (0.02 + 0.03 * t)) ** 2));
+    }
+    return (
+      nose +
+      0.036 * bump(x, y, 0.05, 0.352, 0.024, 0.022) + // the wings of the nose
+      0.04 * bump(x, y, 0, 0.605, 0.19, 0.032) + // the brow
+      -0.016 * bump(x, y, 0, 0.545, 0.035, 0.022) + // the dip between the eyes
+      -0.068 * bump(x, y, 0.128, 0.52, 0.066, 0.044) + // the eye sockets
+      0.042 * bump(x, y, 0.128, 0.514, 0.046, 0.022) + // the closed eyes in them
+      0.03 * bump(x, y, 0.2, 0.43, 0.075, 0.065) + // cheekbones
+      -0.016 * bump(x, y, 0.165, 0.27, 0.06, 0.07) + // the hollow of the cheeks
+      0.026 * bump(x, y, 0, 0.275, 0.115, 0.075) + // the muzzle
+      0.042 * bump(x, y, 0, 0.266, 0.074, 0.015) + // upper lip
+      0.048 * bump(x, y, 0, 0.226, 0.062, 0.018) + // lower lip
+      -0.026 * bump(x, y, 0, 0.246, 0.08, 0.007) + // the line of the mouth
+      -0.014 * bump(x, y, 0.09, 0.246, 0.02, 0.014) + // its corners
+      -0.026 * bump(x, y, 0, 0.183, 0.06, 0.02) + // the groove under the lip
+      0.056 * bump(x, y, 0, 0.11, 0.075, 0.052) // the chin
+    );
   };
-  const g = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < 250; i++) {
-    const y = 1 - (2 * (i + 0.5)) / 250, r = Math.sqrt(1 - y * y);
-    out.push([Math.cos(g * i) * r * A, y * B, Math.sin(g * i) * r * C]);
+  /** A point of the head at height y, at angle a round it (0 is straight ahead). */
+  const skin = (y, a) => {
+    const c = Math.cos(a), sn = Math.sin(a);
+    const x = width(y) * sn;
+    let z = c > 0 ? front(y) * c ** 0.82 : -back(y) * (-c) ** 0.9;
+    if (c > 0) z += relief(x, y) * Math.min(1, c * 2.4);
+    return [x, y, z];
+  };
+  // angles round the head: close together across the face, wider apart toward the back
+  const angles = [0];
+  for (let a = 0.05; a < Math.PI - 0.04; a += a < 0.75 ? 0.052 : a < 1.5 ? 0.085 : 0.15) angles.push(a, -a);
+  angles.push(Math.PI);
+  // heights: closer together from the chin to the brow
+  const rows = [];
+  for (let y = 0.012; y < 0.985; y += y < 0.64 ? 0.0165 : 0.027) rows.push(y);
+  /** Which way the surface faces at (y, a): the light on it is what shows the face. */
+  const facing = (y, a) => {
+    const e = 0.004;
+    const u = skin(y, a + e), d = skin(y, a - e), n = skin(Math.min(0.999, y + e), a), s2 = skin(Math.max(0.001, y - e), a);
+    const ax = u[0] - d[0], ay = u[1] - d[1], az = u[2] - d[2], bx = n[0] - s2[0], by = n[1] - s2[1], bz = n[2] - s2[2];
+    let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+    const p = skin(y, a);
+    if (nx * p[0] + nz * p[2] + ny * (y - 0.5) * 0.3 < 0) (nx = -nx), (ny = -ny), (nz = -nz); // outward
+    const len = Math.hypot(nx, ny, nz) || 1;
+    return [nx / len, ny / len, nz / len];
+  };
+  for (const y of rows) {
+    for (const a of angles) {
+      // (under the jaw the back of the head gives way to the neck)
+      if (y < 0.16 && Math.cos(a) < -0.2) continue;
+      // (a hollow is darker and a ridge lighter than the light alone makes them: what a sculptor's raking light does)
+      const p = skin(y, a), r = Math.cos(a) > 0 ? relief(p[0], y) * Math.min(1, Math.cos(a) * 2.4) : 0;
+      out.push([...p, ...facing(y, a), Math.max(0.22, Math.min(2.2, 1 + (r < 0 ? 16 : 7) * r))]);
+    }
   }
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 44; i++) {
-      // an eye: a small filled disc
-      const rr = 0.085 * Math.sqrt((i + 0.5) / 44), a = g * i;
-      out.push(on(side * 0.23 + Math.cos(a) * rr * 1.25, 0.2 + Math.sin(a) * rr, 1.05));
-    }
-    for (let i = 0; i < 20; i++) out.push(on(side * (0.11 + 0.24 * (i / 19)), 0.37 + 0.035 * Math.sin((i / 19) * Math.PI), 1.05)); // a brow
+    // the ears
+    for (let ring = 0; ring < 3; ring++)
+      for (let i = 0; i < 14 - ring * 3; i++) {
+        const t = (i / (14 - ring * 3)) * TAU, r = 1 - ring * 0.32;
+        out.push([side * (width(0.47) + 0.012 + 0.02 * r * Math.max(0, Math.cos(t))), 0.47 + 0.085 * r * Math.sin(t) + 0.01, -0.035 + 0.042 * r * Math.cos(t), side * 0.92, 0, 0.39, 1]);
+      }
   }
-  for (let i = 0; i < 26; i++) {
-    // the nose: a ridge that stands out from the face
-    const t = i / 25, p = on(0, 0.14 - t * 0.3);
-    out.push([p[0], p[1], p[2] + 0.04 + 0.12 * Math.sin(t * Math.PI * 0.85)]);
-  }
-  for (let row = 0; row < 2; row++)
-    for (let i = 0; i < 37; i++) {
-      // the smile
-      const t = i / 36, x = (t * 2 - 1) * 0.3;
-      out.push(on(x, -0.36 - row * 0.03 + 0.11 * (x / 0.3) ** 2, 1.05));
+  // the neck, a little forward at the throat, fading out below
+  for (let ring = 0; ring < 13; ring++) {
+    const y = 0.13 - ring * 0.033, grow = 1 + Math.max(0, ring - 7) * 0.085;
+    const count = Math.max(8, 24 - Math.max(0, ring - 8) * 4);
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * TAU + ring * 0.13;
+      if (y > 0.02 && Math.cos(a) > 0.35) continue; // inside the jaw
+      out.push([Math.sin(a) * 0.165 * grow, y, -0.075 + Math.cos(a) * 0.175 * grow, Math.sin(a), 0, Math.cos(a), 0.8]);
     }
-  return out;
+  }
+  // 1 high → the stage: scaled up, the middle of the face at the centre
+  return out.map(([x, y, z, nx, ny, nz, tone]) => [x * 1.5, (y - 0.45) * 1.5, (z + 0.02) * 1.5, nx, ny, nz, tone]);
 }
 
 /** A tetrahedron: dots along its six edges and across its four faces. */
@@ -259,8 +323,24 @@ const triples = (flat) => Array.from({ length: flat.length / 3 }, (_, i) => [fla
  */
 export function fitShape(points, n) {
   const sorted = points.slice().sort((p, q) => Math.round((q[1] - p[1]) * 9) || Math.atan2(p[2], p[0]) - Math.atan2(q[2], q[0]));
+  const m = sorted.length;
   const out = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) out.set(sorted[Math.min(sorted.length - 1, Math.floor(((i + 0.5) / n) * sorted.length))], i * 3);
+  // how much each dot shows: a shape with fewer dots than n keeps its own look, its spare dots
+  // wait unseen inside the others (and fade in on the way to a shape that needs them)
+  const weights = new Float32Array(n).fill(1);
+  // which way the surface faces at each dot, for shapes that say (a lit, solid shape); zeros otherwise
+  const normals = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const k = m >= n ? Math.min(m - 1, Math.floor(((i + 0.5) / n) * m)) : Math.floor((i * m) / n);
+    out[i * 3] = sorted[k][0];
+    out[i * 3 + 1] = sorted[k][1];
+    out[i * 3 + 2] = sorted[k][2];
+    // (a seventh value, the tone, lengthens or shortens the normal: hollows darker, ridges lighter)
+    if (sorted[k].length >= 6) for (let c = 0; c < 3; c++) normals[i * 3 + c] = sorted[k][3 + c] * (sorted[k][6] ?? 1);
+    if (m < n && i !== Math.ceil((k * n) / m)) weights[i] = 0;
+  }
+  out.weights = weights;
+  out.normals = normals;
   return out;
 }
 
@@ -268,7 +348,7 @@ const SHAPES = { sphere, cube, torus, planes };
 /** Shapes to morph through: their dots, and the angle each is best seen from. */
 const MORPHS = {
   planes: { make: () => triples(planes()), yaw: 0.65, pitch: 0.42 },
-  face: { make: face, yaw: 0.3, pitch: 0.06 },
+  bust: { make: bust, yaw: 1.02, pitch: 0.05, dot: 0.62, shade: 1 }, // seen from three quarters round to the profile
   tetrahedron: { make: tetrahedron, yaw: 0.5, pitch: 0.3 },
   spiral: { make: spiral, yaw: 0.4, pitch: 0.3 },
   galaxy: { make: galaxy, yaw: 0.3, pitch: 0.85 },
@@ -293,9 +373,13 @@ export class DotObject {
     const shape = this.opts.shape ?? "sphere";
     const list = (this.opts.morph ?? []).filter((name) => MORPHS[name]);
     if (list.length > 1) {
-      // a shape-shifter: every shape with the first one's number of dots
-      const first = MORPHS[list[0]].make();
-      this.shapes = list.map((name, i) => ({ name, pts: fitShape(i ? MORPHS[name].make() : first, first.length), yaw: MORPHS[name].yaw, pitch: MORPHS[name].pitch }));
+      // a shape-shifter: every shape gets as many dots as the finest one has (the others hide the spare ones)
+      const made = list.map((name) => MORPHS[name].make());
+      const count = Math.min(4200, Math.max(...made.map((p) => p.length)));
+      this.shapes = list.map((name, i) => {
+        const pts = fitShape(made[i], count);
+        return { name, pts, weights: pts.weights, normals: pts.normals, yaw: MORPHS[name].yaw, pitch: MORPHS[name].pitch, dot: MORPHS[name].dot ?? 1, shade: MORPHS[name].shade ?? 0 };
+      });
       this.pts = Float32Array.from(this.shapes[0].pts);
       this.opts.yaw = this.shapes[0].yaw;
       this.opts.pitch = this.shapes[0].pitch;
@@ -306,7 +390,9 @@ export class DotObject {
     this.n = this.pts.length / 3;
     this.shapeIndex = 0;
     this.phase = { morphing: false, since: win.performance.now(), from: null, to: null };
-    this.pose = { yaw: this.opts.yaw, pitch: this.opts.pitch }; // the shape's own best angle (eases between shapes)
+    this.pose = { yaw: this.opts.yaw, pitch: this.opts.pitch, dot: this.shapes ? this.shapes[0].dot : 1, shade: this.shapes ? this.shapes[0].shade : 0 }; // the shape's own best angle, dot size and lighting (they ease between shapes)
+    this.normals = this.shapes ? Float32Array.from(this.shapes[0].normals) : null;
+    this.weights = this.shapes ? Float32Array.from(this.shapes[0].weights) : null; // how much each dot shows
     this.pointer = null; // in canvas px, while it is over the object
     this.swayFrom = win.performance.now();
     this.seeds = Float32Array.from({ length: this.n }, (_, i) => hash(i));
@@ -321,6 +407,7 @@ export class DotObject {
     if (this.shapes && this.opts.signalAt) {
       let best = Infinity;
       for (let i = 0; i < this.n; i++) {
+        if (!this.weights[i]) continue;
         const d = Math.hypot(this.pts[i * 3] - this.opts.signalAt[0], this.pts[i * 3 + 1] - this.opts.signalAt[1], this.pts[i * 3 + 2] - this.opts.signalAt[2]);
         if (d < best) (best = d), (this.signalIndex = i);
       }
@@ -368,7 +455,7 @@ export class DotObject {
     if (!this.shapes) return;
     const i = name ? this.shapes.findIndex((s) => s.name === name) : (this.shapeIndex + 1) % this.shapes.length;
     if (i < 0 || (i === this.shapeIndex && !this.phase.morphing)) return;
-    this.phase = { morphing: true, since: this.win.performance.now(), from: Float32Array.from(this.pts), to: this.shapes[i].pts, fromPose: { ...this.pose }, toPose: this.shapes[i] };
+    this.phase = { morphing: true, since: this.win.performance.now(), from: Float32Array.from(this.pts), to: this.shapes[i].pts, fromW: Float32Array.from(this.weights), toW: this.shapes[i].weights, fromN: Float32Array.from(this.normals), toN: this.shapes[i].normals, fromPose: { ...this.pose }, toPose: this.shapes[i] };
     this.shapeIndex = i;
     this.canvas.dataset.shape = this.shapes[i].name;
     if (this.still) this.finishMorph();
@@ -377,7 +464,9 @@ export class DotObject {
 
   finishMorph() {
     this.pts.set(this.phase.to);
-    this.pose = { yaw: this.phase.toPose.yaw, pitch: this.phase.toPose.pitch };
+    this.weights.set(this.phase.toW);
+    this.normals.set(this.phase.toN);
+    this.pose = { yaw: this.phase.toPose.yaw, pitch: this.phase.toPose.pitch, dot: this.phase.toPose.dot, shade: this.phase.toPose.shade };
     this.phase = { morphing: false, since: this.win.performance.now(), from: null, to: null };
   }
 
@@ -403,9 +492,12 @@ export class DotObject {
       pts[i * 3] = (x * c + z * s) * grow;
       pts[i * 3 + 1] = y * grow;
       pts[i * 3 + 2] = (-x * s + z * c) * grow;
+      this.weights[i] = ph.fromW[i] + (ph.toW[i] - ph.fromW[i]) * e;
+      for (let k = 0; k < 3; k++) this.normals[i * 3 + k] = ph.fromN[i * 3 + k] + (ph.toN[i * 3 + k] - ph.fromN[i * 3 + k]) * e;
     }
     const e = easeInOut(Math.min(1, u));
-    this.pose = { yaw: ph.fromPose.yaw + (ph.toPose.yaw - ph.fromPose.yaw) * e, pitch: ph.fromPose.pitch + (ph.toPose.pitch - ph.fromPose.pitch) * e };
+    const mix = (k) => ph.fromPose[k] + (ph.toPose[k] - ph.fromPose[k]) * e;
+    this.pose = { yaw: mix("yaw"), pitch: mix("pitch"), dot: mix("dot"), shade: mix("shade") };
   }
 
   setReducedMotion(still) {
@@ -502,7 +594,12 @@ export class DotObject {
     // small (tucked into a corner): fewer, relatively larger dots, so it stays a shape and not a smudge
     const small = Math.min(w, h) < 90;
     const stride = small ? 3 : 1;
-    const dotSize = small ? Math.max(1.1, this.opts.dot * 0.62) : this.opts.dot;
+    const dotSize = small ? Math.max(1.1, this.opts.dot * 0.62) : this.opts.dot * (this.pose.dot ?? 1);
+    const weights = this.weights;
+    // a lit shape (the head): each dot as bright as the light on the surface there, with a glow along
+    // the outline, and nothing showing through from the far side
+    const shade = this.normals ? this.pose.shade ?? 0 : 0;
+    const normals = this.normals;
     const p = this.pointer;
     const cx = w / 2, cy = h / 2;
     const project = (x, y, z) => {
@@ -514,14 +611,28 @@ export class DotObject {
       return [cx + x1 * s * R, cy - y2 * s * R, z2];
     };
     for (let i = 0; i < n; i++) {
-      if (i % stride && i !== this.signalIndex) {
+      if ((i % stride && i !== this.signalIndex) || (weights && weights[i] < 0.02)) {
         level[i] = 0;
         continue;
       }
       let [px, py, d] = project(pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
       const near = Math.min(1, Math.max(0, (d + 1) / 2));
       const appear = Math.min(1, Math.max(0, (age - seeds[i] * ASSEMBLE_MS) / 260));
-      let a = appear * (0.14 + 0.86 * near ** 1.4);
+      let a = 0.14 + 0.86 * near ** 1.4;
+      if (shade > 0.01) {
+        const nx = normals[i * 3], ny = normals[i * 3 + 1], nz = normals[i * 3 + 2];
+        const tone = Math.hypot(nx, ny, nz);
+        if (tone) {
+          const ux = nx / tone, uy = ny / tone, uz = nz / tone;
+          const nx1 = ux * cyw + uz * syw, nz1 = -ux * syw + uz * cyw;
+          const ny2 = uy * cp - nz1 * sp, toward = uy * sp + nz1 * cp; // toward the viewer
+          const lambert = Math.max(0, -0.62 * nx1 + 0.42 * ny2 + 0.66 * toward); // light from the upper left
+          const rim = (1 - Math.max(0, toward)) ** 2.4;
+          const seen = Math.min(1, Math.max(0, (toward + 0.12) / 0.3));
+          a += (Math.min(1, (0.1 + 0.62 * lambert) * tone + 0.7 * rim) * seen - a) * shade;
+        }
+      }
+      a *= appear * (weights ? weights[i] : 1);
       if (p) {
         // the dot field's pointer: dots near it brighten and lean away
         const ddx = px - p.x, ddy = py - p.y, dd = Math.hypot(ddx, ddy);
