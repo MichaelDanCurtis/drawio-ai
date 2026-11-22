@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Mapper**: `git` run by the Mapper no longer starts the program a repository's own
+  configuration names (`core.fsmonitor`) and no longer writes the index; only a commit hash
+  from a map's record reaches git's arguments (Recent changes); a tour saved again under its
+  title can no longer share its id with another tour. The Mapper is now also in the Draw.AI
+  extension for VS Code, from this same code.
 - **Shape Workshop** (Shapes → Shape Workshop…, Cmd/Ctrl+Alt+K) with the **Shape Gallery**:
   theSVG (open licences only), Tech logos (devicon + Simple Icons) and UI icons (Lucide +
   Tabler) to start; add GitHub repositories, folders and draw.io libraries; make your own
