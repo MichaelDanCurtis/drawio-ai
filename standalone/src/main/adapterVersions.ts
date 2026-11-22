@@ -51,9 +51,16 @@ export function newerVersion(a: string, b: string): boolean {
 	return false;
 }
 
-/** The newest version of an adapter seen on npm, if it was looked up. */
+const failed = new Set<string>();
+
+/** The newer version of this adapter could not be started: the installed copy is used until the app restarts. */
+export function noteAdapterFailure(pkg: string): void {
+	failed.add(pkg);
+}
+
+/** The newest version of an adapter seen on npm, if it was looked up (and starting it has not failed). */
 export function latestAdapterVersion(pkg: string): string | undefined {
-	return load()[pkg]?.version;
+	return failed.has(pkg) ? undefined : load()[pkg]?.version;
 }
 
 /** The version of the package an installed executable belongs to (following its symlink). */
@@ -116,9 +123,15 @@ async function lookUp(pkgs: string[], opts: { force?: boolean; fetcher?: typeof 
 			try {
 				const ctrl = new AbortController();
 				const timer = setTimeout(() => ctrl.abort(), 8000);
-				const res = await get(`https://registry.npmjs.org/${pkg.replace("/", "%2F")}/latest`, { headers: { Accept: "application/json" }, signal: ctrl.signal }).finally(() => clearTimeout(timer));
-				if (!res.ok) return;
-				const version = (await res.json())?.version;
+				let version: unknown;
+				try {
+					// (the timer covers the whole answer, body included)
+					const res = await get(`https://registry.npmjs.org/${pkg.replace("/", "%2F")}/latest`, { headers: { Accept: "application/json" }, signal: ctrl.signal });
+					if (!res.ok) return;
+					version = (await res.json())?.version;
+				} finally {
+					clearTimeout(timer);
+				}
 				if (!isVersion(version)) return;
 				if (seen[pkg]?.version !== version) changed = true;
 				seen[pkg] = { version, checkedAt: Date.now() };

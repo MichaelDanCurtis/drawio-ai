@@ -27,7 +27,7 @@
 	var EXTRA = { present: null, chatArrow: null, workshop: null, ruler: null };
 	// which glyph each of them shows now (the chat's arrow changes with the chat)
 	var EXTRA_GLYPH = { present: "present", chatArrow: "chevronRight", workshop: "workshop", ruler: "ruler" };
-	var style = (/[?&]icons=([a-z]+)/.exec(location.search) || [])[1] || "dots2d";
+	var style = (/[?&]icons=([a-z0-9]+)/.exec(location.search) || [])[1] || "dots2d";
 	var side = (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
 
 	/**

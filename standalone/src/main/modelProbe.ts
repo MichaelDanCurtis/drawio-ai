@@ -29,7 +29,7 @@ const running = new Map<AgentId, Promise<string | undefined>>();
  * with no tools, a session is opened (nothing is sent to a model), its list is remembered and
  * it is stopped again. Returns what went wrong, if anything.
  */
-export function probeModels(agent: AgentId, timeoutMs = 45_000): Promise<string | undefined> {
+export function probeModels(agent: AgentId, timeoutMs?: number): Promise<string | undefined> {
 	const already = running.get(agent);
 	if (already) return already;
 	const p = (async (): Promise<string | undefined> => {
@@ -38,6 +38,8 @@ export function probeModels(agent: AgentId, timeoutMs = 45_000): Promise<string 
 		const def = agentDef(agent);
 		const spec = launchSpec(def);
 		if ("error" in spec) return spec.error;
+		// (a first start through npx downloads the adapter: stopping that halfway could leave a broken copy)
+		const wait = timeoutMs ?? (path.basename(spec.command) === "npx" ? 180_000 : 45_000);
 		const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-models-"));
 		let exit: string | undefined;
 		const session = new AcpAgentSession(def, spec, cwd, undefined, {
@@ -49,7 +51,7 @@ export function probeModels(agent: AgentId, timeoutMs = 45_000): Promise<string 
 		try {
 			const info = await Promise.race([
 				session.start(),
-				new Promise<never>((_r, reject) => (timer = setTimeout(() => reject(new Error(`${def.label} did not answer in time.`)), timeoutMs))),
+				new Promise<never>((_r, reject) => (timer = setTimeout(() => reject(new Error(`${def.label} did not answer in time.`)), wait))),
 			]);
 			const { models } = modelsFromSession(info);
 			if (!models.length) return `${def.label} did not list any models.`;

@@ -42,6 +42,7 @@
 	/** The element's tooltip text; its title is moved out of the system tooltip's reach. */
 	function textOf(el) {
 		var t = el.getAttribute("title");
+		if (t === "") el.removeAttribute("data-tip"); // cleared by the page: no tooltip any more
 		if (t) {
 			el.setAttribute("data-tip", t);
 			el.removeAttribute("title");
@@ -82,7 +83,14 @@
 
 	doc.addEventListener("mouseover", function (e) {
 		var el = owner(e.target);
-		if (el === target) return;
+		if (el === target) {
+			// the page gave it a new title while the pointer was on it: take that, and keep the system's tooltip away
+			if (el && el.getAttribute("title")) {
+				var fresh = textOf(el);
+				if (tip && tip.style.display !== "none") show(el, fresh);
+			}
+			return;
+		}
 		hide();
 		if (!el) return;
 		var text = textOf(el);
@@ -90,7 +98,17 @@
 		target = el;
 		timer = setTimeout(function () { if (target === el) show(el, text); }, Date.now() - hiddenAt < WARM_FOR ? 0 : DELAY);
 	}, true);
-	doc.addEventListener("mouseleave", hide, true);
+	// (leaving the window; moving between a control's own parts is not leaving it)
+	doc.addEventListener("mouseout", function (e) { if (!e.relatedTarget) hide(); }, true);
+	// a title that changes while its tooltip shows
+	if (root.MutationObserver) {
+		new root.MutationObserver(function () {
+			if (!target || !target.hasAttribute("title")) return;
+			var fresh = textOf(target);
+			if (!fresh) hide();
+			else if (tip && tip.style.display !== "none") show(target, fresh);
+		}).observe(doc.documentElement, { attributes: true, attributeFilter: ["title"], subtree: true });
+	}
 	doc.addEventListener("mousedown", hide, true);
 	doc.addEventListener("keydown", hide, true);
 	doc.addEventListener("scroll", hide, true);

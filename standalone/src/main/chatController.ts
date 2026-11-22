@@ -5,7 +5,7 @@ import * as path from "path";
 import type { ToolResult } from "../../../src/features/ai/DiagramToolbox";
 import { describeContext, SelectionContext } from "../../../src/features/ai/systemPrompt";
 import { AcpAgentSession, AuthRequiredError, SessionInfo } from "./acpSession";
-import { adaptersSettled } from "./adapterVersions";
+import { adaptersSettled, noteAdapterFailure } from "./adapterVersions";
 import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./agents";
 import type { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
@@ -281,15 +281,16 @@ export class ChatController {
 	}
 
 	/** Starts the picked agent and its session if needed; reports problems in the panel. */
-	private ensureSession(): Promise<AcpAgentSession | undefined> {
+	private ensureSession(waited = false): Promise<AcpAgentSession | undefined> {
 		if (this.session?.info) return Promise.resolve(this.session);
 		if (this.starting) return this.starting;
-		// just after launch, the lookup of the newest adapters may still be under way
-		const settling = adaptersSettled();
+		// just after launch, the lookup of the newest adapters may still be under way: wait for it once
+		const settling = waited ? undefined : adaptersSettled();
 		if (settling) {
 			const waiting: Promise<AcpAgentSession | undefined> = settling.then(() => {
 				if (this.starting === waiting) this.starting = undefined;
-				return this.ensureSession();
+				this.refreshStatuses();
+				return this.ensureSession(true);
 			});
 			this.starting = waiting;
 			return waiting;
@@ -332,6 +333,16 @@ export class ChatController {
 				return session;
 			} catch (e: any) {
 				if (this.session !== session) return undefined;
+				// the newer adapter could not be started through npx (offline, a registry mirror without
+				// it…): the copy that is installed still works, so use that for the rest of this run
+				if (spec.adapterFallback && !(e instanceof AuthRequiredError)) {
+					noteAdapterFailure(spec.adapterFallback);
+					session.dispose();
+					this.session = undefined;
+					this.starting = undefined;
+					this.refreshStatuses();
+					return this.ensureSession(true);
+				}
 				this.handleStartError(e, session);
 				throw e;
 			} finally {
@@ -383,7 +394,7 @@ export class ChatController {
 	/** Switches a new session to the model chosen in Settings, if the agent offers it. */
 	private async applyPreferredModel(session: AcpAgentSession): Promise<void> {
 		const preferred = settings().models[this.agentId]?.preferred;
-		if (!preferred || !session.info) return;
+		if (!preferred || preferred.startsWith("mode:") || !session.info) return;
 		const { models, current } = this.modelList(session.info);
 		const target = models.find((m) => m.value === preferred);
 		if (!target || current === preferred) return;
@@ -412,8 +423,9 @@ export class ChatController {
 			const [kind, id, ...rest] = value.split(":");
 			if (kind === "opt") await session.setConfigOption(id, rest.join(":"));
 			else if (kind === "mode") await session.setMode([id, ...rest].join(":"));
-			// a new chat with this agent starts with the model picked last
-			const picked = this.modelList(session.info).models.find((m) => m.id === value)?.value;
+			// a new chat with this agent starts with the model picked last. Only a model: a mode can be
+			// a permission mode ("accept everything"), which must never come back by itself.
+			const picked = kind === "opt" ? this.modelList(session.info).models.find((m) => m.id === value)?.value : undefined;
 			if (picked && settings().models[this.agentId]?.preferred !== picked) updateSettings({ models: { ...settings().models, [this.agentId]: { ...settings().models[this.agentId], preferred: picked } } });
 		} catch (e: any) {
 			this.push({ kind: "error", text: `Could not change it: ${e?.message ?? e}` });

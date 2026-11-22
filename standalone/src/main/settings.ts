@@ -121,7 +121,7 @@ function merge(user: any): Settings {
 	const obj = (v: any) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 	const appearance = { ...DEFAULTS.appearance, ...obj(user.appearance) };
 	if (!["system", "light", "dark"].includes(appearance.theme)) appearance.theme = DEFAULTS.appearance.theme;
-	if (!ICON_STYLES.includes(appearance.iconStyle)) appearance.iconStyle = OLD_ICON_STYLES[String(appearance.iconStyle)] ?? DEFAULTS.appearance.iconStyle;
+	if (!ICON_STYLES.includes(appearance.iconStyle)) appearance.iconStyle = (Object.hasOwn(OLD_ICON_STYLES, String(appearance.iconStyle)) ? OLD_ICON_STYLES[String(appearance.iconStyle)] : undefined) ?? DEFAULTS.appearance.iconStyle;
 	if (!["top", "left", "right", "bottom"].includes(appearance.toolbar)) appearance.toolbar = DEFAULTS.appearance.toolbar;
 	const chat = { ...DEFAULTS.chat, ...obj(user.chat) };
 	if (chat.side !== "left") chat.side = "right";

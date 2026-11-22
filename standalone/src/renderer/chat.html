@@ -57,8 +57,7 @@
 	body.side-left #collapse { order: 99; margin-left: 2px; margin-right: -2px; }
 
 	/* The toolbar: a row of tabs standing on the line under it; one that is on joins the page below. */
-	#context { display: flex; align-items: flex-end; gap: 3px; min-height: 44px; padding: 7px 8px 0; border-bottom: 1px solid var(--border); container-type: inline-size; overflow-x: auto; scrollbar-width: none; }
-	#context::-webkit-scrollbar { display: none; }
+	#context { display: flex; align-items: flex-end; gap: 4px 3px; flex-wrap: wrap; min-height: 44px; padding: 7px 8px 0; border-bottom: 1px solid var(--border); container-type: inline-size; }
 	#context > * { flex: none; }
 	.tb { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 11px; margin-bottom: -1px; border: 1px solid var(--border); border-bottom-color: transparent; border-radius: 9px 9px 0 0; background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 	.tb svg { width: 16px; height: 16px; flex: none; }
@@ -68,7 +67,7 @@
 	.tb .count { font-family: var(--font-mono); font-size: 10.5px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--signal); color: #fff; display: inline-grid; place-items: center; letter-spacing: 0; }
 	#selection { margin-left: auto; align-self: center; margin-bottom: 6px; }
 	/* Narrow chat: the toolbar shows icons only (each keeps its tooltip and name for screen readers). */
-	@container (max-width: 400px) { .tb .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } #context > .tb { flex: 1 1 0; justify-content: center; padding: 0; } }
+	@container (max-width: 520px) { .tb .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } #context > .tb { flex: 1 1 0; min-width: 40px; justify-content: center; padding: 0; } }
 
 	/* ---------- the map menu ---------- */
 	#mapMenu { position: absolute; z-index: 40; left: 8px; right: 8px; top: 92px; }

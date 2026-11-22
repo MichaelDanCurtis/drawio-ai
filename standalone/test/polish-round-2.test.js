@@ -128,3 +128,21 @@ test("the chat's dot object: every shape it turns into has the same dots, all in
 	const f = m.fitShape(m.galaxy(), n);
 	assert.ok(f[1] >= f[(n - 1) * 3 + 1]);
 });
+
+test("adapters: when the newer version cannot be started, the installed copy is used for the rest of the run", async () => {
+	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-adapter-")), "adapters.json");
+	av.useAdapterCache(file);
+	await av.refreshAdapterVersions(["some-adapter"], { fetcher: async () => ({ ok: true, json: async () => ({ version: "2.0.0" }) }) });
+	assert.deepEqual(av.chooseAdapter({ bin: "/x", version: "1.0.0" }, av.latestAdapterVersion("some-adapter")), { use: "npx", version: "2.0.0" });
+	av.noteAdapterFailure("some-adapter");
+	assert.deepEqual(av.chooseAdapter({ bin: "/x", version: "1.0.0" }, av.latestAdapterVersion("some-adapter")), { use: "installed" });
+});
+
+test("the editor reads style names with digits, and a remembered mode is never applied by itself", () => {
+	const toolbar = fs.readFileSync(path.join(__dirname, "../src/renderer/desktop-toolbar.js"), "utf8");
+	const re = new RegExp(/\(\/(\[\?&\]icons=[^/]+)\//.exec(toolbar)[1]);
+	assert.equal(re.exec("?icons=dots2d&toolbar=top")[1], "dots2d");
+	const chat = fs.readFileSync(path.join(__dirname, "../src/main/chatController.ts"), "utf8");
+	assert.match(chat, /preferred\.startsWith\("mode:"\)/, "a stored mode is skipped when a session starts");
+	assert.match(chat, /kind === "opt" \? this\.modelList/, "only model picks are remembered");
+});
