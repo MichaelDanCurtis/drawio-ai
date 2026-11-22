@@ -1,5 +1,24 @@
 # Changelog: Draw.AI desktop
 
+## [Unreleased]
+
+- **Settings window** (Cmd/Ctrl+, or the dot mark before File) instead of a JSON file:
+  System / Light / Dark, the icon style, which models each agent shows and which one a
+  new chat starts with, the chat's side, width and defaults, the editor's review options,
+  and your own shape folders and draw.io libraries in the shapes sidebar.
+- **Icons in four styles**: classic (flat), isometric line, dot-matrix 3D and soft
+  extruded, for the chat, Settings and draw.io's toolbar.
+- **Toolbar**: Layers, Tags, Outline and Presentation mode are buttons; the panel menu
+  keeps only Shapes, Ruler and Fullscreen; a chat button at the right end; the Draw.AI
+  mark sits before File.
+- **Chat**: slides away and back (its own button, the toolbar's, or Cmd/Ctrl+J), docks
+  left or right, resizes by dragging its edge, and keeps its whole button row visible at
+  any width. The agent and model pickers are in-app menus (the native ones opened on the
+  wrong screen after the window moved) and show each model's version, e.g. Opus 4.8.
+- **Mapper, AWS**: the region is a picker filled from your profile (its own region, all
+  enabled regions, or one).
+- New windows open fully on screen, on the display the pointer is on.
+
 ## [0.1.0]
 
 First release of the standalone app: the draw.io editor with a chat that drives your

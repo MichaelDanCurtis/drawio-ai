@@ -5,7 +5,9 @@ import { AgentId } from "./agents";
 import { DiagramWindow } from "./diagramWindow";
 import { exportDiagram } from "./exporter";
 import { diagramContent } from "./xmlContent";
-import { settings } from "./settings";
+import { settings, updateSettings } from "./settings";
+import { SettingsWindow } from "./settingsWindow";
+import { screen } from "electron";
 import type { StaticServer } from "./staticServer";
 
 export interface E2eConfig {
@@ -33,6 +35,8 @@ export interface E2eConfig {
 	/** Check map records, mapper_* tools, descriptions, health, recent changes, refresh, tours, Ask and the desktop endpoint. */
 	insights?: boolean;
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
+	/** Check Settings, themes, icon styles, the toolbar, the chat's menus, sliding and docking, and shape folders. */
+	polish?: boolean;
 }
 
 /**
@@ -100,7 +104,9 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("mcpWithoutTokenStatus", unauthorized.status);
 
 		const before = await w.client.getXml();
-		if (config.insights) {
+		if (config.polish) {
+			await runPolish(w, server, config, log);
+		} else if (config.insights) {
 			await runInsights(w, config, log);
 		} else if (config.present) {
 			await runPresent(w, config, log);
@@ -462,4 +468,119 @@ async function runInsights(w: DiagramWindow, config: E2eConfig, log: (k: string,
 	const lines = out.split("\n").filter(Boolean).map((l) => JSON.parse(l));
 	log("launcher", { server: lines[0]?.result?.serverInfo?.name ?? null, findOk: !!lines[1]?.result && !lines[1].result.isError });
 	log("recordFiles", fs.readdirSync(path.join(path.dirname(config.file), ".drawai", "maps")).length);
+}
+
+async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const ed = w.editorView.webContents, chat = w.chatView.webContents;
+	const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	const save = async (name: string, wc: Electron.WebContents, rect?: Electron.Rectangle) => {
+		const img = await wc.capturePage();
+		const f = img.getSize().width / ((await wc.executeJavaScript("innerWidth")) as number);
+		const out = rect ? img.crop({ x: Math.round(rect.x * f), y: Math.round(rect.y * f), width: Math.round(Math.min(rect.width * f, img.getSize().width)), height: Math.round(Math.min(rect.height * f, img.getSize().height)) }) : img;
+		fs.writeFileSync(path.join(config.out, name), out.toPNG());
+	};
+	const top = async () => ({ x: 0, y: 0, width: (await ed.executeJavaScript("innerWidth")) as number, height: 80 });
+
+	// window placement: inside the display's work area
+	const b = w.win.getBounds(), area = screen.getDisplayMatching(b).workArea;
+	log("windowInsideWorkArea", b.x >= area.x && b.y >= area.y && b.x + b.width <= area.x + area.width && b.y + b.height <= area.y + area.height);
+
+	// toolbar: the mark before File, panel buttons, presentation, chat toggle, the panel menu
+	log(
+		"toolbar",
+		await ed.executeJavaScript(`(() => {
+			const bar = document.querySelector(".geMenubar");
+			const first = bar && bar.firstElementChild;
+			const titles = Array.from(document.querySelectorAll(".geToolbarContainer a.geButton")).map((a) => a.getAttribute("title") || "").filter(Boolean);
+			return {
+				markBeforeFile: !!(first && first.classList.contains("drawai-mark")) && /File/.test(first.nextElementSibling ? first.nextElementSibling.textContent : ""),
+				layers: titles.some((t) => /^Layers/.test(t)), tags: titles.some((t) => /^Tags/.test(t)), outline: titles.some((t) => /^Outline/.test(t)),
+				present: titles.some((t) => /Presentation/.test(t)), chatToggle: !!document.querySelector(".drawai-chat-toggle"),
+			};
+		})()`)
+	);
+	await ed.executeJavaScript(`(() => { const b = document.querySelector(".geToolbarContainer a.geButton"); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); })()`);
+	await pause(400);
+	log("panelMenu", await ed.executeJavaScript(`Array.from(document.querySelectorAll(".mxPopupMenu .mxPopupMenuItem")).map((e) => e.textContent.trim()).filter(Boolean)`));
+	await save("panel-menu.png", ed, { x: 0, y: 0, width: 360, height: 260 });
+	await ed.executeJavaScript(`document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));`);
+
+	// icon styles, in both themes
+	for (const theme of ["light", "dark"] as const) {
+		process.env.DRAWAI_THEME = theme;
+		for (const style of ["isometric", "dots", "extruded", "classic"] as const) {
+			updateSettings({ appearance: { theme, iconStyle: style } });
+			await pause(700);
+			await save(`toolbar-${theme}-${style}.png`, ed, await top());
+			await save(`chat-${theme}-${style}.png`, chat);
+		}
+		const zoomIn = await ed.executeJavaScript(`(() => { const a = Array.from(document.querySelectorAll(".geToolbarContainer a.geButton")).find((x) => /^Zoom In/.test(x.getAttribute("title") || "")); return a ? a.style.backgroundImage.length : 0; })()`);
+		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
+	}
+	process.env.DRAWAI_THEME = "light";
+	updateSettings({ appearance: { theme: "light", iconStyle: "isometric" } });
+	await pause(600);
+	log("chatIconsDrawn", await chat.executeJavaScript(`document.querySelectorAll("[data-icon] svg.icon").length`));
+	log("chatToolbarOneRow", await chat.executeJavaScript(`(() => { const tops = new Set(Array.from(document.querySelectorAll("#context > .tb:not(.hidden)")).map((b) => Math.round(b.getBoundingClientRect().top))); return tops.size === 1; })()`));
+
+	// the agent and model menus (in-app, under their buttons)
+	for (const id of ["providerBtn", "modelBtn"]) {
+		const r = await chat.executeJavaScript(`(() => { const b = document.getElementById("${id}"); b.click(); const m = document.getElementById("pickMenu"); const br = b.getBoundingClientRect(), mr = m.getBoundingClientRect(); return { open: !m.classList.contains("hidden"), items: Array.from(m.querySelectorAll("button")).map((x) => x.textContent.trim()), belowButton: Math.abs(mr.top - br.bottom - 6) < 2 }; })()`);
+		log(`menu-${id}`, r);
+		await pause(350);
+		await save(`menu-${id}.png`, chat);
+		await chat.executeJavaScript(`document.body.click()`);
+		await pause(200);
+	}
+
+	// the chat slides away and docks left
+	const editorWidth = () => w.editorView.getBounds().width;
+	const full = w.win.getContentBounds().width;
+	w.setChatVisible(false);
+	await pause(300);
+	log("collapsedEditorFullWidth", editorWidth() === full);
+	await ed.executeJavaScript(`document.querySelector(".drawai-chat-toggle").dispatchEvent(new MouseEvent("click", { bubbles: true }))`);
+	await pause(500);
+	log("chatBackViaToolbar", editorWidth() < full);
+	updateSettings({ chat: { ...settings().chat, side: "left" } });
+	await pause(400);
+	log("dockedLeft", { chatX: w.chatView.getBounds().x, editorX: w.editorView.getBounds().x });
+	await save("chat-left.png", chat);
+	updateSettings({ chat: { ...settings().chat, side: "right" } });
+	await pause(300);
+
+	// a shape folder becomes a palette
+	const shapes = fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-shapes-"));
+	fs.writeFileSync(path.join(shapes, "server-rack.svg"), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 48"><rect x="2" y="2" width="28" height="44" rx="3" fill="#ddd" stroke="#333"/></svg>');
+	fs.writeFileSync(path.join(shapes, "cloud.svg"), '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="24"><ellipse cx="20" cy="12" rx="18" ry="10" fill="#cde"/></svg>');
+	updateSettings({ shapes: { locations: [{ path: shapes, name: "My test shapes", enabled: true }] } });
+	await pause(1200);
+	log("shapePalette", await ed.executeJavaScript(`(async () => {
+		const titles = Array.from(document.querySelectorAll(".geSidebarContainer .geTitle")).filter((e) => /My test shapes/.test(e.textContent));
+		const t = titles[0];
+		const imgs = t && t.nextElementSibling ? Array.from(t.nextElementSibling.querySelectorAll("a.geItem img, a.geItem image")) : [];
+		await new Promise((r) => setTimeout(r, 300));
+		return { palettes: titles.length, items: t && t.nextElementSibling ? t.nextElementSibling.querySelectorAll("a.geItem").length : 0, imagesLoaded: imgs.filter((i) => i.tagName === "image" || (i.complete && i.naturalWidth > 0)).length };
+	})()`));
+	await save("sidebar-shapes.png", ed, { x: 0, y: 0, width: 260, height: Math.min(900, w.editorView.getBounds().height) });
+
+	// Settings, every section, in both themes
+	SettingsWindow.open(server);
+	for (let i = 0; i < 50 && !SettingsWindow.window?.isVisible(); i++) await pause(100);
+	const sw = SettingsWindow.window!;
+	await pause(800);
+	for (const theme of ["light", "dark"] as const) {
+		process.env.DRAWAI_THEME = theme;
+		updateSettings({ appearance: { theme, iconStyle: "isometric" } });
+		await pause(500);
+		for (const section of ["appearance", "agents", "chat", "editor", "shapes"]) {
+			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
+			await pause(400);
+			await save(`settings-${theme}-${section}.png`, sw.webContents);
+		}
+	}
+	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
+	sw.close();
+	process.env.DRAWAI_THEME = "light";
+	updateSettings({ appearance: { theme: "light", iconStyle: "isometric" } });
 }

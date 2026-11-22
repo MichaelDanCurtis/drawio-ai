@@ -16,26 +16,45 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/icons.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; border-left: 1px solid var(--border); position: relative; }
+	body.side-left { border-left: 0; border-right: 1px solid var(--border); }
+	/* The inner edge: drag it to resize the chat. */
+	#grip { position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; cursor: col-resize; z-index: 60; touch-action: none; }
+	body.side-left #grip { left: auto; right: -3px; }
+	#grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: var(--ink); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+	#grip:hover::after, body.resizing #grip::after { opacity: 0.35; }
+	body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+	svg.icon { flex: none; display: block; }
 
 	/* ---------- head: brandmark, agent, model, state; the live dot field behind ---------- */
 	.top { position: relative; flex: none; isolation: isolate; }
 	.top > header, .top > #context { position: relative; z-index: 1; }
-	header { display: flex; align-items: center; gap: 6px; height: 46px; padding: 0 8px 0 14px; }
-	header .brandmark { margin-right: 4px; }
-	select.pick { appearance: none; -webkit-appearance: none; min-width: 0; border: 1px solid transparent; background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%238b8984' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 8px center; border-radius: var(--radius-pill); padding: 4px 24px 4px 10px; cursor: pointer; text-overflow: ellipsis; font-size: var(--text-sm); }
-	select.pick:hover { background-color: var(--surface-3); border-color: transparent; }
-	select.pick:focus { box-shadow: none; border-color: var(--ink); }
-	#provider { flex: 0 1 auto; max-width: 46%; font-weight: 500; color: var(--ink); }
-	#model { flex: 1 1 auto; max-width: 50%; color: var(--muted); }
+	header { display: flex; align-items: center; gap: 4px; height: 46px; padding: 0 6px 0 8px; }
+	/* Agent and model pickers: in-app menus (native pop-ups lose their place when the window moves between screens). */
+	.pick { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border: 1px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: var(--text-sm); border-radius: var(--radius-pill); padding: 4px 8px 4px 10px; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
+	.pick > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+	.pick::after { content: ""; flex: none; width: 10px; height: 10px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%238b8984' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat center; }
+	.pick:hover, .pick[aria-expanded="true"] { background: var(--surface-3); }
+	.pick:focus-visible { border-color: var(--ink); outline: none; }
+	#providerBtn { flex: 0 1 auto; max-width: 46%; font-weight: 500; color: var(--ink); }
+	#modelBtn { flex: 1 1 auto; max-width: 50%; }
 	#status { margin: 0 4px; }
+	#pickMenu { position: fixed; z-index: 70; min-width: 220px; max-width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 70px); overflow: auto; }
+	#pickMenu [role="menuitemradio"] { display: grid; grid-template-columns: 14px 1fr; gap: 2px 8px; align-items: start; width: 100%; text-align: left; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--text-sm); padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+	#pickMenu [role="menuitemradio"]:hover, #pickMenu [role="menuitemradio"]:focus-visible { background: var(--accent-soft, var(--surface-3)); outline: none; }
+	#pickMenu [role="menuitemradio"] .tick { grid-row: span 2; color: var(--ink); visibility: hidden; padding-top: 1px; }
+	#pickMenu [role="menuitemradio"][aria-checked="true"] .tick { visibility: visible; }
+	#pickMenu [role="menuitemradio"] small { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+	#pickMenu [role="menuitemradio"][aria-disabled="true"] { color: var(--faint); }
+	#pickMenu .more { color: var(--muted); }
 
 	/* The toolbar: ghost pills that come forward (surface + hairline) when on. */
-	#context { display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 8px; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+	#context { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-height: 40px; padding: 6px 8px; border-bottom: 1px solid var(--border); container-type: inline-size; }
 	#context::-webkit-scrollbar { display: none; }
 	#context > * { flex: none; }
-	.tb { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--radius-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out); }
+	.tb { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out); }
 	.tb svg { width: 14px; height: 14px; flex: none; }
 	.tb:hover { background: var(--surface-3); color: var(--ink); }
 	.tb:active { transform: translateY(1px); }
@@ -43,6 +62,8 @@
 	.tb:disabled { opacity: 0.45; cursor: not-allowed; }
 	.tb .count { font-family: var(--font-mono); font-size: 10.5px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--signal); color: #fff; display: inline-grid; place-items: center; letter-spacing: 0; }
 	#selection { margin-left: auto; }
+	/* Narrow chat: the toolbar shows icons only (each keeps its tooltip and name for screen readers). */
+	@container (max-width: 360px) { .tb .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } .tb { padding: 0 7px; } }
 
 	/* ---------- the map menu ---------- */
 	#mapMenu { position: absolute; z-index: 40; left: 8px; right: 8px; top: 88px; }
@@ -147,25 +168,28 @@
 	<div class="top" data-dot-host>
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
 		<header>
-			<span class="brandmark" aria-hidden="true"><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i></i><i data-on></i><i data-on></i><i></i><i></i><i data-signal></i><i></i><i></i><i></i></span>
-			<select id="provider" class="pick" title="Coding agent"></select>
-			<select id="model" class="pick" title="Model or mode"></select>
+			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Coding agent"><span id="providerLabel">Agent</span></button>
+			<button id="modelBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Model or mode"><span id="modelLabel">Model</span></button>
 			<span class="spacer"></span>
 			<button id="allowAllChip" class="tag hidden" data-tone="warn" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">Allow all ✕</button>
 			<span id="status" class="state" data-state="off" role="img" aria-label="Agent status" title=""></span>
-			<button id="newChat" class="icon-btn" title="New chat (starts a new agent session)" aria-label="New chat"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
+			<button id="newChat" class="icon-btn" title="New chat (starts a new agent session)" aria-label="New chat"><span data-icon="plus"></span></button>
+			<button id="settingsBtn" class="icon-btn" title="Settings (⌘,)" aria-label="Settings"><span data-icon="gear"></span></button>
+			<button id="collapse" class="icon-btn" title="Tuck the chat away (⌘J brings it back)" aria-label="Hide the chat"><span data-icon="collapseRight"></span></button>
 		</header>
 		<div id="context">
-			<button id="lasso" class="tb" title="Lasso: draw around shapes in the diagram to select them (Alt+L)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.2 2"><ellipse cx="8" cy="7.5" rx="6" ry="4.8"/></svg>Lasso</button>
-			<button id="askInDiagram" class="tb" title="Ask about the selection right in the diagram (Alt+K)"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5l1.6 4.2 4.4 1.6-4.4 1.6L8 13.1 6.4 8.9 2 7.3l4.4-1.6z"/></svg>Inline</button>
-			<button id="markup" class="tb" title="Markup: draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M10.5 2.5l3 3-8 8H2.5v-3z"/><path d="M9 4l3 3"/></svg>Markup</button>
-			<button id="lint" class="tb" title="Review: ask the agent to check the diagram for problems and fix them"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M5.3 8.2l1.8 1.8 3.6-3.8"/></svg>Review</button>
-			<button id="map" class="tb" title="Map software, a database, a cloud environment or an ML system into this diagram (read-only)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1.5 3.5l4-1.5 5 1.5 4-1.5v10.5l-4 1.5-5-1.5-4 1.5z"/><path d="M5.5 2v10.5M10.5 3.5V14"/></svg>Map…</button>
-			<button id="digDeeper" class="tb hidden" title="Dig deeper: ask the agent to investigate the selected mapped shapes, read-only. Type a question in the box first to focus it."><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.4 10.4L14 14"/></svg><span id="digDeeperLabel">Dig deeper</span></button>
+			<button id="lasso" class="tb" title="Lasso: draw around shapes in the diagram to select them (Alt+L)"><span data-icon="lasso"></span><span class="lbl">Lasso</span></button>
+			<button id="askInDiagram" class="tb" title="Ask about the selection right in the diagram (Alt+K)"><span data-icon="sparkle"></span><span class="lbl">Inline</span></button>
+			<button id="markup" class="tb" title="Markup: draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M)"><span data-icon="pen"></span><span class="lbl">Markup</span></button>
+			<button id="lint" class="tb" title="Review: ask the agent to check the diagram for problems and fix them"><span data-icon="check"></span><span class="lbl">Review</span></button>
+			<button id="map" class="tb" title="Map software, a database, a cloud environment or an ML system into this diagram (read-only)"><span data-icon="map"></span><span class="lbl">Map…</span></button>
+			<button id="digDeeper" class="tb hidden" title="Dig deeper: ask the agent to investigate the selected mapped shapes, read-only. Type a question in the box first to focus it."><span data-icon="search"></span><span id="digDeeperLabel" class="lbl">Dig deeper</span></button>
 			<button id="mapActions" class="tb hidden" aria-haspopup="menu" aria-expanded="false" title="Map actions for the maps on this page: findings, plain-English descriptions, recent changes, refresh, tour, ask"><span id="mapActionsLabel">Map</span><span id="mapCount" class="count hidden"></span><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3.5l3 3 3-3"/></svg></button>
 			<span class="tag hidden" data-tone="plain" id="selection"></span>
 		</div>
 	</div>
+	<div id="grip" role="separator" aria-orientation="vertical" aria-label="Resize the chat" title="Drag to resize the chat"></div>
+	<div id="pickMenu" class="menu hidden" role="menu"></div>
 	<div id="mapMenu" class="menu hidden" role="menu" aria-labelledby="mapActions">
 		<button role="menuitem" data-action="findings">Findings <span class="hint">health</span></button>
 		<div role="separator"></div>
@@ -205,7 +229,7 @@
 		<div class="row">
 			<span class="hint" id="hint">↵ send · ⇧↵ new line · ⌘Z undoes edits</span>
 			<span>
-				<button id="attach" class="icon-btn" title="Attach a sketch, whiteboard photo or screenshot" aria-label="Attach image"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="2"/><circle cx="6" cy="6.5" r="1.2"/><path d="M2.5 12l3.8-3.6 2.7 2.4 1.8-1.6 2.7 2.6"/></svg></button>
+				<button id="attach" class="icon-btn" title="Attach a sketch, whiteboard photo or screenshot" aria-label="Attach image"><span data-icon="image"></span></button>
 				<button id="stop" class="btn btn-sm btn-danger hidden">Stop</button>
 				<button id="send" class="btn btn-sm btn-primary">Send</button>
 			</span>
@@ -480,24 +504,28 @@
 		requestAnimationFrame(() => messages.classList.remove("settled"));
 	}
 
-	function fillSelect(select, items, selected) {
-		select.textContent = "";
-		for (const it of items) {
-			const o = document.createElement("option");
-			o.value = it.id;
-			o.textContent = it.label;
-			o.selected = it.id === selected;
-			select.appendChild(o);
+	let iconStyle = null, side = null;
+	function renderLook() {
+		if (state.chatSide !== side) {
+			side = state.chatSide || "right";
+			document.body.classList.toggle("side-left", side === "left");
+			$("collapse").querySelector("[data-icon]").setAttribute("data-icon", side === "left" ? "collapseLeft" : "collapseRight");
+			iconStyle = null;
+		}
+		const style = state.iconStyle || "isometric";
+		if (style !== iconStyle && window.DrawAIIcons) {
+			iconStyle = style;
+			window.DrawAIIcons.apply(style);
 		}
 	}
 
 	function renderChrome() {
-		fillSelect($("provider"), state.providers || [], state.providerId);
-		const models = (state.models || []).map((m) => ({ id: m.id, label: m.name }));
-		if (state.modelsError) models.unshift({ id: "", label: "⚠ " + state.modelsError });
-		else if (models.length === 0) models.push({ id: "", label: state.modelsLoading ? "Loading models…" : "No models" });
-		fillSelect($("model"), models, state.modelId);
-		$("model").title = state.modelsError || "Model";
+		renderLook();
+		const prov = (state.providers || []).find((p) => p.id === state.providerId);
+		$("providerLabel").textContent = prov ? prov.label.replace(/ — .*$/, "") : "Agent";
+		const cur = (state.models || []).find((m) => m.id === state.modelId);
+		$("modelLabel").textContent = state.modelsError ? "⚠ " + state.modelsError : cur ? cur.name : state.modelsLoading ? "Loading models…" : (state.models || []).length ? "Model" : "No models";
+		$("modelBtn").title = state.modelsError || (cur ? cur.name + (cur.description ? " · " + cur.description : "") : "Model");
 		const sel = $("selection");
 		sel.classList.toggle("hidden", !state.selectionCount);
 		sel.textContent = state.selectionCount + " selected";
@@ -510,7 +538,7 @@
 		$("mapActions").title = (state.pageFindings ? state.pageFindings + " finding(s) on this page's maps. " : "") + "Map actions: findings, plain-English descriptions, recent changes, refresh, tour, ask";
 		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
-		$("provider").title = state.providerTitle || "Coding agent";
+		$("providerBtn").title = state.providerTitle || "Coding agent";
 		const status = $("status");
 		if (status.dataset.state !== (state.agentState || "off") && state.agentState === "ready") window.drawaiUI?.pulse();
 		status.dataset.state = state.agentState || "off";
@@ -689,8 +717,116 @@
 	});
 	$("reviewAccept").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "accept" }));
 	$("reviewReject").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "reject" }));
-	$("provider").addEventListener("change", (e) => { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: e.target.value }); });
-	$("model").addEventListener("change", (e) => { if (e.target.value) vscode.postMessage({ type: "pickModel", modelId: e.target.value }); });
+	// ----- agent and model pickers: in-app menus -----
+	const pickMenu = $("pickMenu");
+	let pickOwner = null;
+	function closePick(focus) {
+		if (!pickOwner) return;
+		pickMenu.classList.add("hidden");
+		pickOwner.setAttribute("aria-expanded", "false");
+		if (focus) pickOwner.focus();
+		pickOwner = null;
+	}
+	function openPick(button, items, footer) {
+		if (pickOwner === button) return closePick(false);
+		closePick(false);
+		pickMenu.textContent = "";
+		for (const it of items) {
+			const b = document.createElement("button");
+			b.setAttribute("role", "menuitemradio");
+			b.setAttribute("aria-checked", String(!!it.checked));
+			if (it.disabled) b.setAttribute("aria-disabled", "true");
+			const tick = document.createElement("span");
+			tick.className = "tick";
+			tick.textContent = "✓";
+			const name = document.createElement("span");
+			name.textContent = it.label;
+			b.append(tick, name);
+			if (it.detail) {
+				const d = document.createElement("small");
+				d.textContent = it.detail;
+				b.appendChild(d);
+			}
+			b.addEventListener("click", (e) => { e.stopPropagation(); closePick(false); if (!it.disabled) it.pick(); });
+			pickMenu.appendChild(b);
+		}
+		if (footer) {
+			const sep = document.createElement("div");
+			sep.setAttribute("role", "separator");
+			const f = document.createElement("button");
+			f.setAttribute("role", "menuitem");
+			f.className = "more";
+			f.textContent = footer.label;
+			f.addEventListener("click", (e) => { e.stopPropagation(); closePick(false); footer.pick(); });
+			pickMenu.append(sep, f);
+		}
+		pickOwner = button;
+		button.setAttribute("aria-expanded", "true");
+		pickMenu.classList.remove("hidden");
+		const r = button.getBoundingClientRect();
+		const w = pickMenu.offsetWidth;
+		pickMenu.style.top = Math.round(r.bottom + 6) + "px";
+		pickMenu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + "px";
+		(pickMenu.querySelector('[aria-checked="true"]') || pickMenu.querySelector("button"))?.focus();
+	}
+	pickMenu.addEventListener("keydown", (e) => {
+		const all = [...pickMenu.querySelectorAll("button")], i = all.indexOf(document.activeElement);
+		if (e.key === "Escape") closePick(true);
+		else if (e.key === "ArrowDown") all[(i + 1) % all.length].focus();
+		else if (e.key === "ArrowUp") all[(i - 1 + all.length) % all.length].focus();
+		else if (e.key === "Tab") closePick(false);
+		else return;
+		e.preventDefault();
+	});
+	document.addEventListener("click", (e) => { if (pickOwner && !pickMenu.contains(e.target)) closePick(false); });
+	window.addEventListener("blur", () => closePick(false));
+	window.addEventListener("resize", () => closePick(false));
+	$("providerBtn").addEventListener("click", (e) => {
+		e.stopPropagation();
+		openPick($("providerBtn"), (state.providers || []).map((p) => {
+			const m = / — (.*)$/.exec(p.label);
+			return { label: p.label.replace(/ — .*$/, ""), detail: m ? m[1] : "", checked: p.id === state.providerId, pick: () => { if (p.id !== state.providerId) { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: p.id }); } } };
+		}), { label: "Agents & models…", pick: () => vscode.postMessage({ type: "openSettings" }) });
+	});
+	$("modelBtn").addEventListener("click", (e) => {
+		e.stopPropagation();
+		const models = state.models || [];
+		const items = models.length
+			? models.map((m) => ({ label: m.name, detail: m.description || "", checked: m.id === state.modelId, pick: () => { if (m.id !== state.modelId) vscode.postMessage({ type: "pickModel", modelId: m.id }); } }))
+			: [{ label: state.modelsError ? "⚠ " + state.modelsError : state.modelsLoading ? "Loading models…" : "No models", disabled: true, pick: () => undefined }];
+		openPick($("modelBtn"), items, { label: "Choose which models show…", pick: () => vscode.postMessage({ type: "openSettings" }) });
+	});
+	$("settingsBtn").addEventListener("click", () => vscode.postMessage({ type: "openSettings" }));
+	$("collapse").addEventListener("click", () => vscode.postMessage({ type: "collapseChat" }));
+
+	// ----- drag the inner edge to resize the chat -----
+	const grip = $("grip");
+	let dragging = false, lastSent = 0, pendingX = null;
+	grip.addEventListener("pointerdown", (e) => {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		dragging = true;
+		grip.setPointerCapture(e.pointerId);
+		document.body.classList.add("resizing");
+	});
+	grip.addEventListener("pointermove", (e) => {
+		if (!dragging) return;
+		pendingX = e.screenX;
+		const now = performance.now();
+		if (now - lastSent > 16) { lastSent = now; vscode.postMessage({ type: "resizeChat", screenX: pendingX }); }
+	});
+	function endDrag(e) {
+		if (!dragging) return;
+		dragging = false;
+		document.body.classList.remove("resizing");
+		// pointercancel / lost capture can report 0: use the last real position instead.
+		const x = e.type === "pointerup" && typeof e.screenX === "number" && e.screenX > 0 ? e.screenX : pendingX;
+		vscode.postMessage({ type: "resizeChat", screenX: typeof x === "number" ? x : null, done: true });
+	}
+	grip.addEventListener("pointerup", endDrag);
+	grip.addEventListener("pointercancel", endDrag);
+	grip.addEventListener("lostpointercapture", endDrag);
+
 	for (const b of document.querySelectorAll(".suggestions button")) {
 		b.addEventListener("click", () => send(b.dataset.prompt));
 	}

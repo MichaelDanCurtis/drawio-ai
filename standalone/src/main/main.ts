@@ -8,12 +8,16 @@ import { EXPORT_FORMATS } from "./exporter";
 import { CATEGORIES } from "./mapper/types";
 import { connectAgents, DesktopMcp } from "./desktopMcp";
 import { paths } from "./paths";
-import { settingsPath, updateSettings } from "./settings";
+import { onSettingsChanged, settings } from "./settings";
+import { SettingsWindow } from "./settingsWindow";
 import { StaticServer } from "./staticServer";
 
 app.setName("Draw.AI");
-// For checks and screenshots: DRAWAI_THEME=light|dark overrides the system appearance.
-if (process.env.DRAWAI_THEME === "light" || process.env.DRAWAI_THEME === "dark") nativeTheme.themeSource = process.env.DRAWAI_THEME;
+/** Settings → Appearance → Theme; DRAWAI_THEME=light|dark (checks and screenshots) wins. */
+function applyTheme(): void {
+	const forced = process.env.DRAWAI_THEME;
+	nativeTheme.themeSource = forced === "light" || forced === "dark" ? forced : settings().appearance.theme;
+}
 // Test runs get their own data folder: they must not touch the user's settings or
 // collide with a copy of the app that is already running.
 if (process.env.DRAWAI_E2E) {
@@ -204,9 +208,8 @@ async function withWindow(action: (w: DiagramWindow) => void): Promise<void> {
 	action(w);
 }
 
-function openSettings(): void {
-	if (!fs.existsSync(settingsPath())) updateSettings({});
-	void shell.openPath(settingsPath());
+function openSettings(section?: string): void {
+	SettingsWindow.open(server, section);
 }
 
 /** The editor works offline: only our own 127.0.0.1 server (and data/blob URLs) may be loaded. */
@@ -219,6 +222,10 @@ function blockRemoteRequests(): void {
 }
 
 app.whenReady().then(async () => {
+	applyTheme();
+	onSettingsChanged((_s, patch) => {
+		if ("appearance" in patch) applyTheme();
+	});
 	if (!fs.existsSync(path.join(paths.webapp, "index.html"))) {
 		const message = `The draw.io webapp was not found at ${paths.webapp}.\nRun \`git submodule update --init --depth 1 drawio\` in the repository (or \`yarn start\`, which does it), then start again.`;
 		console.error(message);
@@ -229,7 +236,7 @@ app.whenReady().then(async () => {
 	await server.start();
 	blockRemoteRequests();
 	DiagramWindow.installIpc();
-	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog() };
+	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog(), settings: (section) => openSettings(section) };
 	desktopMcp = new DesktopMcp({
 		windows: () => [...DiagramWindow.all],
 		focused: () => DiagramWindow.focused(),
