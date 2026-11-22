@@ -4,8 +4,9 @@
 //   yarn e2e --agent codex --prompt "…" --file ../examples/use-cases/cloud-architecture.drawio
 //   node scripts/e2e.mjs --app dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI   the packaged app
 // The diagram is copied to a temp folder first; results land in <temp>/out.
-import { spawnSync } from "child_process";
-import { copyFileSync, mkdtempSync, readFileSync } from "fs";
+import { spawn } from "child_process";
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, statSync } from "fs";
+import { createServer } from "http";
 import { createRequire } from "module";
 import { tmpdir } from "os";
 import { basename, dirname, join, resolve } from "path";
@@ -29,6 +30,7 @@ const config = {
 	clickPermissions: process.argv.includes("--click-permissions"),
 	present: process.argv.includes("--present"),
 	insights: process.argv.includes("--insights"),
+	workshop: process.argv.includes("--workshop"),
 	polish: process.argv.includes("--polish"),
 	clickAllowAll: process.argv.includes("--click-allow-all"),
 	// yarn e2e --map software.github-actions --map-input '{"folder":"…"}' [--map-dialog] [--agent claude --ask-agent] [--dig "question"]
@@ -44,7 +46,20 @@ const config = {
 };
 const packaged = arg("app");
 const electron = packaged ? resolve(packaged) : createRequire(import.meta.url)("electron");
-const r = spawnSync(electron, packaged ? [] : [join(here, "..")], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config) } });
+// The Shape Gallery's sources, served from fixtures: test runs never download from the internet.
+const mirrorRoot = join(here, "../test/fixtures/galleries/mirror");
+const mirror = createServer((req, res) => {
+	const p = join(mirrorRoot, decodeURIComponent(new URL(req.url, "http://x").pathname));
+	if (!p.startsWith(mirrorRoot) || !existsSync(p) || !statSync(p).isFile()) return void res.writeHead(404).end();
+	res.writeHead(200, { "content-type": p.endsWith(".svg") ? "image/svg+xml" : "application/json" }).end(readFileSync(p));
+});
+await new Promise((r) => mirror.listen(0, "127.0.0.1", r));
+const mirrorUrl = `http://127.0.0.1:${mirror.address().port}`;
+const r = await new Promise((done) => {
+	const child = spawn(electron, packaged ? [] : [join(here, "..")], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config), OMNIDRAW_GALLERY_MIRROR: mirrorUrl } });
+	child.on("exit", (status) => done({ status }));
+});
+mirror.close();
 console.log(`\nResults in ${config.out}`);
 try {
 	const s = JSON.parse(readFileSync(join(config.out, "summary.json"), "utf8"));

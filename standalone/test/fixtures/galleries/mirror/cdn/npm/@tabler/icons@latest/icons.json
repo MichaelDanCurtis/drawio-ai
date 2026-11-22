@@ -1,0 +1,150 @@
+{
+ "server": {
+  "name": "server",
+  "category": "Devices",
+  "tags": [
+   "database",
+   "hosting",
+   "datacenter",
+   "backend",
+   "storage",
+   "rack",
+   "cloud",
+   "server"
+  ],
+  "styles": {
+   "outline": {
+    "version": "1.0",
+    "unicode": "eb1f"
+   }
+  }
+ },
+ "database": {
+  "name": "database",
+  "category": "Database",
+  "tags": [
+   "database",
+   "db",
+   "data",
+   "storage",
+   "sql",
+   "server",
+   "records",
+   "table",
+   "backend",
+   "disk"
+  ],
+  "styles": {
+   "outline": {
+    "version": "1.0",
+    "unicode": "ea88"
+   },
+   "filled": {
+    "version": "3.38",
+    "unicode": "101e1"
+   }
+  }
+ },
+ "user": {
+  "name": "user",
+  "category": "System",
+  "tags": [
+   "person",
+   "account",
+   "profile",
+   "avatar",
+   "member",
+   "people",
+   "human",
+   "login",
+   "identity",
+   "user"
+  ],
+  "styles": {
+   "outline": {
+    "version": "1.0",
+    "unicode": "eb4d"
+   },
+   "filled": {
+    "version": "2.39",
+    "unicode": "fd19"
+   }
+  }
+ },
+ "cloud": {
+  "name": "cloud",
+  "category": "Weather",
+  "tags": [
+   "weather",
+   "cloudy",
+   "cloud-storage",
+   "online",
+   "server",
+   "sync",
+   "internet",
+   "overcast",
+   "forecast",
+   "icloud",
+   "cloud"
+  ],
+  "styles": {
+   "outline": {
+    "version": "1.0",
+    "unicode": "ea76"
+   },
+   "filled": {
+    "version": "2.0",
+    "unicode": "f673"
+   }
+  }
+ },
+ "lock": {
+  "name": "lock",
+  "category": "System",
+  "tags": [
+   "lock",
+   "padlock",
+   "locked",
+   "security",
+   "secure",
+   "password",
+   "private",
+   "protected"
+  ],
+  "styles": {
+   "outline": {
+    "version": "1.0",
+    "unicode": "eae2"
+   },
+   "filled": {
+    "version": "3.0",
+    "unicode": "fe15"
+   }
+  }
+ },
+ "home": {
+  "name": "home",
+  "category": "Buildings",
+  "tags": [
+   "home",
+   "house",
+   "homepage",
+   "main",
+   "start",
+   "dashboard",
+   "building",
+   "residence",
+   "real-estate"
+  ],
+  "styles": {
+   "outline": {
+    "version": "1.0",
+    "unicode": "eac1"
+   },
+   "filled": {
+    "version": "3.0",
+    "unicode": "102b3"
+   }
+  }
+ }
+}

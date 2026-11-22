@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; font-src $$cspSource$$; style-src 'nonce-$$nonce$$' $$cspSource$$; script-src 'nonce-$$nonce$$' $$cspSource$$;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shape Workshop</title>
+<!--
+	OmniDraw: the Shape Workshop. Shape Gallery: galleries on and off, add (GitHub, folder,
+	library), sync, offline, collections, search across galleries, click to add to the diagram.
+	Shape Shifter and Shape Creator come next.
+-->
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
+<script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<style nonce="$$nonce$$">
+	body { display: flex; flex-direction: column; }
+	.head { position: relative; isolation: isolate; flex: none; padding: 18px 24px 14px; border-bottom: 1px solid var(--border); }
+	.head > :not(.backdrop) { position: relative; z-index: 1; }
+	.head .backdrop { height: 100%; }
+	.head .label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+	.head h1 { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 4px; }
+	.head p { margin: 0; color: var(--muted); }
+	main { flex: 1; display: grid; grid-template-columns: 178px 300px 1fr; min-height: 0; }
+	nav { border-right: 1px solid var(--border); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; }
+	nav button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid transparent; background: none; color: var(--ink-2); font: inherit; padding: 7px 10px; border-radius: var(--radius); cursor: pointer; }
+	nav button:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
+	nav button.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
+	nav button:disabled { color: var(--faint); cursor: default; }
+	nav button .tag { margin-left: auto; padding: 0 6px; font-size: 9.5px; }
+	#galleryCol { border-right: 1px solid var(--border); background: var(--surface-2); display: flex; flex-direction: column; min-height: 0; }
+	#galleryList { flex: 1; overflow: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+	.gallery { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 10px 12px; cursor: pointer; animation: rise var(--dur) var(--ease-enter) backwards; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+	.gallery:hover { border-color: var(--control-line); }
+	.gallery.selected { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+	.gallery.off { opacity: 0.6; }
+	.gallery .row1 { display: flex; align-items: center; gap: 8px; }
+	.gallery .row1 b { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.gallery .from { font-family: var(--font-mono); font-size: 10.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
+	.gallery .meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--muted); }
+	.gallery .meta .dot-loader i { width: 4px; height: 4px; }
+	.gallery .err { margin-top: 6px; font-size: 11.5px; color: var(--danger); }
+	.switch { appearance: none; -webkit-appearance: none; width: 30px; height: 18px; border-radius: 999px; background: var(--border-strong); position: relative; cursor: pointer; flex: none; transition: background var(--dur-fast) var(--ease-out); margin: 0; border: 0; }
+	.switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); transition: transform var(--dur-fast) var(--ease-out); box-shadow: 0 1px 2px rgb(0 0 0 / 20%); }
+	.switch:checked { background: var(--ink); }
+	.switch:checked::after { transform: translateX(12px); }
+	#galleryActions { flex: none; border-top: 1px solid var(--border); padding: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+	#results { display: flex; flex-direction: column; min-height: 0; }
+	.searchbar { flex: none; display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+	.searchbar input { flex: 1; min-height: 34px; padding: 6px 14px; border-radius: var(--radius-pill); }
+	.scope { flex: none; display: flex; gap: 6px; align-items: center; padding: 8px 16px 0; min-height: 30px; }
+	#grid { flex: 1; overflow: auto; padding: 12px 16px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; align-content: start; }
+	.tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 12px 6px 8px; cursor: pointer; transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out); }
+	.tile:hover { border-color: var(--control-line); }
+	.tile:active { transform: translateY(1px); }
+	/* previews on white, as on the canvas (many icons are black lines) */
+	.tile .pic { width: 48px; height: 48px; display: grid; place-items: center; background: #ffffff; border-radius: 10px; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 6%); }
+	.tile .pic img { max-width: 40px; max-height: 40px; }
+	.tile .pic .ph { width: 28px; height: 28px; border-radius: 8px; background: var(--surface-3); }
+	.tile .name { font-size: 11.5px; text-align: center; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.tile .src { font-family: var(--font-mono); font-size: 9.5px; color: var(--faint); letter-spacing: 0.04em; text-transform: uppercase; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.tile .more { position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; opacity: 0; }
+	.tile:hover .more, .tile .more:focus-visible { opacity: 1; }
+	#empty { grid-column: 1 / -1; padding: 28px 8px; color: var(--muted); }
+	#empty h2 { color: var(--ink); font-size: var(--text-heading); font-weight: 500; margin: 0 0 6px; }
+	#empty .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
+	.soon { padding: 40px 32px; max-width: 560px; }
+	.soon h2 { font-size: var(--text-heading); font-weight: 500; margin: 0 0 6px; }
+	.soon p { color: var(--muted); }
+	.menu { position: fixed; z-index: 50; min-width: 200px; }
+	.toast-region { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 80; }
+	.toast { background: var(--accent); color: var(--accent-ink); border-radius: 12px; padding: 10px 14px; box-shadow: var(--shadow-2); max-width: 380px; font-size: 12.5px; animation: rise var(--dur) var(--ease-enter); }
+	.toast.bad { background: var(--danger); color: #fff; }
+	dialog.modal { border: 1px solid var(--border-strong); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 0; width: min(480px, 92vw); box-shadow: var(--shadow-2); }
+	dialog.modal::backdrop { background: rgb(10 10 10 / 44%); }
+	dialog .mh { padding: 18px 20px 6px; }
+	dialog .mh h2 { margin: 0 0 4px; font-size: var(--text-heading); font-weight: 500; }
+	dialog .mh p { margin: 0; color: var(--muted); font-size: 12.5px; }
+	dialog .mb { padding: 10px 20px; }
+	dialog .mb input { width: 100%; min-height: 34px; padding: 6px 12px; }
+	dialog .mf { padding: 12px 20px 18px; display: flex; gap: 8px; justify-content: flex-end; }
+</style>
+</head>
+<body>
+	<div class="head" data-dot-host>
+		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
+		<div class="label"><span class="brandmark" aria-hidden="true"></span><span class="label">OmniDraw · Shape Workshop</span></div>
+		<h1>Shape Workshop</h1>
+		<p id="lead">Find, collect and make shapes for your diagrams.</p>
+	</div>
+	<main>
+		<nav aria-label="Workshop modes">
+			<button data-mode="shifter" disabled title="Find a shape by words or from an image, import stencils, change a shape — coming next"><span data-icon="search"></span>Shape Shifter<span class="tag" data-tone="plain">Next</span></button>
+			<button data-mode="gallery" class="active"><span data-icon="shapes"></span>Shape Gallery</button>
+			<button data-mode="creator" disabled title="Describe a shape and let an agent draw it — coming next"><span data-icon="sparkle"></span>Shape Creator<span class="tag" data-tone="plain">Next</span></button>
+		</nav>
+		<section id="galleryCol" aria-label="Galleries">
+			<div id="galleryList"></div>
+			<div id="galleryActions">
+				<button class="btn btn-sm" id="addGallery" aria-haspopup="menu">Add a gallery…</button>
+				<button class="btn btn-sm" id="newCollection">New collection…</button>
+				<button class="btn btn-sm btn-ghost hidden" id="restoreDefaults">Restore defaults</button>
+			</div>
+		</section>
+		<section id="results" aria-label="Shapes">
+			<div class="searchbar">
+				<input type="text" id="q" placeholder="Search shapes — server, database, kubernetes, user…" aria-label="Search shapes" autocomplete="off" spellcheck="false">
+			</div>
+			<div class="scope" id="scope"></div>
+			<div id="grid" role="list"></div>
+		</section>
+	</main>
+	<div class="menu hidden" role="menu" id="menu"></div>
+	<div class="toast-region" role="status" aria-live="polite" id="toasts"></div>
+	<dialog class="modal" id="ask">
+		<form method="dialog">
+			<div class="mh"><h2 id="askTitle"></h2><p id="askText"></p></div>
+			<div class="mb"><input type="text" id="askInput" autocomplete="off" spellcheck="false"></div>
+			<div class="mf"><button class="btn" value="cancel">Cancel</button><button class="btn btn-primary" value="ok" id="askOk">OK</button></div>
+		</form>
+	</dialog>
+<script type="module" nonce="$$nonce$$">
+	import { mountDotField } from "/ui/dots.js";
+	mountDotField(document.getElementById("field"), { density: 0.42, grid: 7 });
+	const mark = document.querySelector(".head .brandmark");
+	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
+</script>
+<script nonce="$$nonce$$">
+(function () {
+	const bridge = window.omnidrawWorkshop;
+	const post = (m) => bridge.post(m);
+	const $ = (id) => document.getElementById(id);
+	const I = window.DrawAIIcons;
+	let state = { galleries: [] };
+	let selected = null; // gallery id the search is limited to, or null for every enabled gallery
+	let iconStyle = null;
+	let reqId = 0;
+	let hits = [];
+
+	function el(tag, attrs, ...kids) {
+		const e = document.createElement(tag);
+		for (const [k, v] of Object.entries(attrs || {})) {
+			if (k === "class") e.className = v;
+			else if (k === "text") e.textContent = v;
+			else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+			else if (v !== undefined && v !== null && v !== false) e.setAttribute(k, v === true ? "" : v);
+		}
+		for (const k of kids) if (k) e.append(k);
+		return e;
+	}
+
+	function toast(text, bad) {
+		const t = el("div", { class: "toast" + (bad ? " bad" : ""), text });
+		const box = $("toasts");
+		while (box.children.length >= 4) box.firstElementChild.remove();
+		box.append(t);
+		setTimeout(() => t.remove(), bad ? 9000 : 5000);
+	}
+
+	// ----- a small prompt dialog -----
+	function ask(title, text, value, okLabel) {
+		return new Promise((resolve) => {
+			const d = $("ask");
+			$("askTitle").textContent = title;
+			$("askText").textContent = text;
+			$("askInput").value = value || "";
+			$("askOk").textContent = okLabel || "OK";
+			d.onclose = () => resolve(d.returnValue === "ok" ? $("askInput").value.trim() : null);
+			d.showModal();
+			$("askInput").select();
+		});
+	}
+
+	// ----- menus -----
+	function openMenu(anchor, items) {
+		const m = $("menu");
+		m.textContent = "";
+		for (const it of items) {
+			if (it === "-") { m.append(el("div", { role: "separator" })); continue; }
+			m.append(el("button", { role: "menuitem", "data-tone": it.danger ? "danger" : undefined, disabled: it.disabled, onclick: (e) => { e.stopPropagation(); closeMenu(); it.run(); } }, it.label));
+		}
+		m.classList.remove("hidden");
+		const r = anchor.getBoundingClientRect();
+		m.style.top = Math.min(r.bottom + 6, window.innerHeight - m.offsetHeight - 8) + "px";
+		m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - m.offsetWidth - 8)) + "px";
+		m.querySelector("button")?.focus();
+	}
+	function closeMenu() { $("menu").classList.add("hidden"); }
+	document.addEventListener("click", (e) => { if (!$("menu").contains(e.target)) closeMenu(); });
+	document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+	// ----- galleries -----
+	const isCollection = (g) => g.kinds.includes("collection");
+	function renderGalleries() {
+		const list = $("galleryList");
+		const first = !list.children.length;
+		list.textContent = "";
+		state.galleries.forEach((g, i) => {
+			const sw = el("input", { type: "checkbox", class: "switch", title: g.enabled ? "Shown in the sidebar and in searches" : "Hidden", "aria-label": "Use " + g.title });
+			sw.checked = g.enabled;
+			sw.addEventListener("click", (e) => e.stopPropagation());
+			sw.addEventListener("change", () => post({ type: "toggle", id: g.id, enabled: sw.checked }));
+			const more = el("button", { class: "icon-btn", title: "More", "aria-label": "More for " + g.title, "aria-haspopup": "menu", onclick: (e) => { e.stopPropagation(); galleryMenu(more, g); } }, "⋯");
+			const meta = el("div", { class: "meta" });
+			if (g.busy) meta.append(el("span", { class: "dot-loader", "aria-hidden": "true" }, el("i"), el("i"), el("i"), el("i"), el("i")), el("span", { text: g.busy }));
+			else {
+				meta.append(el("span", { class: "num", text: g.count != null ? g.count.toLocaleString() + (g.count === 1 ? " shape" : " shapes") : g.enabled ? "Not read yet" : "Off" }));
+				if (g.cached) meta.append(el("span", { class: "num", text: "· " + g.cached.toLocaleString() + " offline" }));
+			}
+			const card = el(
+				"div",
+				{ class: "gallery" + (selected === g.id ? " selected" : "") + (g.enabled ? "" : " off"), role: "button", tabindex: "0", title: g.note || "", onclick: () => select(selected === g.id ? null : g.id), onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(selected === g.id ? null : g.id); } } },
+				el("div", { class: "row1" }, sw, el("b", { text: g.title }), more),
+				el("div", { class: "from", text: g.from }),
+				meta,
+				g.error ? el("div", { class: "err", text: g.error }) : null
+			);
+			if (!first) card.style.animation = "none";
+			else card.style.animationDelay = i * 30 + "ms";
+			list.append(card);
+		});
+		$("restoreDefaults").classList.toggle("hidden", ["thesvg", "tech-logos", "ui-icons"].every((id) => state.galleries.some((g) => g.id === id)));
+	}
+
+	function galleryMenu(anchor, g) {
+		const items = [];
+		if (!isCollection(g) && !g.kinds.every((k) => k === "folder" || k === "library")) {
+			items.push({ label: "Sync now", run: () => post({ type: "sync", id: g.id }) });
+			items.push({ label: "Make available offline", run: () => post({ type: "offline", id: g.id }) });
+		} else if (!isCollection(g)) items.push({ label: "Read again", run: () => post({ type: "sync", id: g.id }) });
+		items.push({ label: "Rename…", run: async () => { const t = await ask("Rename gallery", "The name shown in the Workshop and the shapes sidebar.", g.title, "Rename"); if (t) post({ type: "rename", id: g.id, title: t }); } });
+		if (isCollection(g)) items.push({ label: "Export as a draw.io library…", run: () => post({ type: "exportCollection", id: g.id }) });
+		if (g.homepage) items.push({ label: "About this source", run: () => post({ type: "openHomepage", id: g.id }) });
+		items.push("-", { label: "Remove…", danger: true, run: () => post({ type: "remove", id: g.id }) });
+		openMenu(anchor, items);
+	}
+
+	$("addGallery").addEventListener("click", (e) => {
+		e.stopPropagation();
+		openMenu($("addGallery"), [
+			{ label: "From GitHub…", run: async () => { const u = await ask("Add a GitHub gallery", "A public repository with SVG files, or one folder of it: github.com/owner/repo/tree/main/icons", "", "Add"); if (u) post({ type: "addGithub", url: u }); } },
+			{ label: "A folder on this computer…", run: () => post({ type: "addLocal", kind: "folder" }) },
+			{ label: "A draw.io library file…", run: () => post({ type: "addLocal", kind: "library" }) },
+		]);
+	});
+	$("newCollection").addEventListener("click", async () => {
+		const t = await ask("New collection", "A gallery you fill yourself: add shapes to it from any search with ⋯ on a shape.", "", "Create");
+		if (t) post({ type: "newCollection", title: t });
+	});
+	$("restoreDefaults").addEventListener("click", () => post({ type: "restoreDefaults" }));
+
+	// ----- search and results -----
+	function select(id) {
+		selected = id;
+		renderGalleries();
+		runSearch();
+	}
+	function renderScope() {
+		const sc = $("scope");
+		sc.textContent = "";
+		const g = state.galleries.find((x) => x.id === selected);
+		if (g) sc.append(el("span", { class: "label", text: "In" }), el("button", { class: "tag", "data-tone": "plain", title: "Search every gallery that is on", onclick: () => select(null), text: g.title + "  ✕" }));
+		else {
+			const on = state.galleries.filter((x) => x.enabled);
+			const n = on.reduce((a, x) => a + (x.count || 0), 0);
+			sc.append(el("span", { class: "label", text: "In " + on.length + " galleries" + (n ? " · " + n.toLocaleString() + " shapes" : "") }));
+		}
+		if (state.diagram !== undefined) sc.append(el("span", { class: "spacer" }), el("span", { class: "label", text: state.diagram ? "Adds to " + state.diagram : "Open a diagram to add shapes" }));
+	}
+
+	let searchTimer;
+	$("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 160); });
+	document.addEventListener("keydown", (e) => { if (e.key === "/" && document.activeElement !== $("q") && !$("ask").open) { e.preventDefault(); $("q").focus(); } });
+
+	function runSearch() {
+		renderScope();
+		const q = $("q").value.trim();
+		if (!q && !selected) { hits = []; renderGrid(); return; }
+		post({ type: "search", query: q, galleryId: selected, limit: 240, reqId: ++reqId });
+	}
+
+	function renderGrid() {
+		const grid = $("grid");
+		grid.textContent = "";
+		const q = $("q").value.trim();
+		if (!hits.length) {
+			const box = el("div", { id: "empty" });
+			if (!q && !selected) {
+				box.append(el("h2", { text: "What are you looking for?" }), el("p", { text: "Search every gallery that is on, or pick a gallery on the left to browse it. Click a shape to add it to the diagram." }));
+				const chips = el("div", { class: "chips" });
+				for (const w of ["server", "database", "user", "cloud", "kubernetes", "aws", "lock", "queue"]) chips.append(el("button", { class: "tag", "data-tone": "plain", onclick: () => { $("q").value = w; runSearch(); }, text: w }));
+				box.append(chips);
+			} else box.append(el("h2", { text: q ? "Nothing matches “" + q + "”" : "This gallery is empty" }), el("p", { text: q ? "Try another word, or turn on more galleries." : "Add shapes to it with ⋯ on any shape in a search." }));
+			grid.append(box);
+			return;
+		}
+		const collections = state.galleries.filter(isCollection);
+		for (const h of hits) {
+			const pic = el("span", { class: "pic" }, h.src ? el("img", { src: h.src, alt: "" }) : el("span", { class: "ph" }));
+			const more = el("button", { class: "icon-btn more", title: "More", "aria-label": "More for " + h.title, onclick: (e) => {
+				e.stopPropagation();
+				const items = [{ label: "Add to the diagram", run: () => insert(h) }];
+				if (collections.length) items.push("-", ...collections.filter((c) => c.id !== h.galleryId).map((c) => ({ label: "Add to " + c.title, run: () => post({ type: "addToCollection", collectionId: c.id, galleryId: h.galleryId, itemId: h.id }) })));
+				const own = collections.find((c) => c.id === h.galleryId);
+				if (own) items.push("-", { label: "Remove from " + own.title, danger: true, run: () => post({ type: "removeFromCollection", collectionId: own.id, itemId: h.id }) });
+				if (!collections.length) items.push("-", { label: "New collection with it…", run: async () => { const t = await ask("New collection", "A gallery you fill yourself.", "", "Create"); if (t) { pendingAdd = h; post({ type: "newCollection", title: t }); } } });
+				openMenu(more, items);
+			} }, "⋯");
+			const tile = el("div", { class: "tile", role: "listitem", tabindex: "0", title: h.title + " · " + h.galleryTitle + (h.licence ? " · " + h.licence : ""), onclick: () => insert(h), onkeydown: (e) => { if (e.key === "Enter") insert(h); } }, pic, el("span", { class: "name", text: h.title }), el("span", { class: "src", text: h.source }), more);
+			tile.dataset.key = h.galleryId + "|" + h.id;
+			grid.append(tile);
+		}
+	}
+	let pendingAdd = null;
+	function insert(h) { post({ type: "insert", galleryId: h.galleryId, itemId: h.id }); }
+
+	function applyIcons(style) {
+		if (!I || style === iconStyle) return;
+		iconStyle = style;
+		I.apply(style);
+	}
+
+	bridge.onMessage((m) => {
+		if (m.type === "state") {
+			const was = state.galleries.find((g) => g.id === selected);
+			state = m;
+			const now = state.galleries.find((g) => g.id === selected);
+			// a collection being browsed changed (a shape added or removed): show it again
+			if (now && was && now.count !== was.count) setTimeout(runSearch);
+			applyIcons(m.iconStyle || "isometric");
+			renderGalleries();
+			renderScope();
+		} else if (m.type === "results" && m.reqId === reqId) {
+			hits = m.hits;
+			renderGrid();
+		} else if (m.type === "previews" && m.reqId === reqId) {
+			for (const p of m.previews) {
+				const h = hits.find((x) => x.galleryId === p.galleryId && x.id === p.id);
+				if (h) h.src = p.src;
+				const tile = document.querySelector('.tile[data-key="' + CSS.escape(p.galleryId + "|" + p.id) + '"] .pic');
+				if (tile) { tile.textContent = ""; tile.append(el("img", { src: p.src, alt: "" })); }
+			}
+		} else if (m.type === "collectionChanged") {
+			// its shapes changed: what is on screen from it is out of date
+			if (!selected || selected === m.id) setTimeout(runSearch);
+		} else if (m.type === "notice") toast(m.message);
+		else if (m.type === "error") toast(m.message, true);
+		else if (m.type === "selectGallery") {
+			if (pendingAdd) { post({ type: "addToCollection", collectionId: m.id, galleryId: pendingAdd.galleryId, itemId: pendingAdd.id }); pendingAdd = null; }
+			$("q").value = "";
+			select(m.id);
+		} else if (m.type === "mode" && m.mode === "gallery") $("q").focus();
+	});
+	post({ type: "ready" });
+	renderGrid();
+	$("q").focus();
+})();
+</script>
+</body>
+</html>

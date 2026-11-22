@@ -23,7 +23,7 @@
 	var current = {};
 	for (var k in ICON_MAP) if (typeof Editor !== "undefined" && Editor[k]) ORIGINAL[k] = current[k] = Editor[k];
 	// Our own buttons' classic look: the flat glyphs.
-	var EXTRA = { present: null, chatPanel: null };
+	var EXTRA = { present: null, chatPanel: null, workshop: null };
 	var style = (/[?&]icons=([a-z]+)/.exec(location.search) || [])[1] || "isometric";
 	var side = (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
 
@@ -113,6 +113,8 @@
 		ui.actions.addAction("desktop.present", function () { send("present"); }, null, null, "F5");
 		ui.actions.addAction("desktop.toggleChat", function () { send("toggleChat"); }, null, null, ctrl + "+J");
 		ui.actions.addAction("desktop.settings", function () { send("settings"); }, null, null, ctrl + "+,");
+		mxResources.parse("desktop.workshop=Shape Workshop");
+		ui.actions.addAction("desktop.workshop", function () { send("workshop"); }, null, null, ctrl + "+Alt+K");
 		setStyle(style, ui);
 
 		// The panel menu: only what has no other place.
@@ -145,6 +147,11 @@
 			if (present) {
 				present.setAttribute("title", "Presentation mode (F5): only the diagram, pages as dots, Esc leaves");
 				EXTRA.present = present;
+			}
+			var workshop = tb.addItems(["desktop.workshop"], null, null, [glyphUri("workshop", style)])[0];
+			if (workshop) {
+				workshop.setAttribute("title", "Shape Workshop (" + ctrl + "+Alt+K): galleries of icons and logos, and your own collections");
+				EXTRA.workshop = workshop;
 			}
 		}
 
@@ -206,6 +213,85 @@
 		].join("\n");
 		document.head.appendChild(css);
 
+		// ----- a shape from the Workshop: in the middle of the view, selected -----
+		function insertShape(shape) {
+			var graph = ui.editor.graph;
+			if (!graph.isEnabled()) return;
+			var w = Number(shape.w) || 48, h = Number(shape.h) || 48;
+			var pt = graph.getFreeInsertPoint ? graph.getFreeInsertPoint() : null;
+			var c = graph.getCenterInsertPoint ? graph.getCenterInsertPoint(new mxRectangle(0, 0, w, h)) : pt || new mxPoint(40, 40);
+			var cells;
+			graph.getModel().beginUpdate();
+			try {
+				if (shape.xml) {
+					var xml = shape.xml.charAt(0) === "<" ? shape.xml : Graph.decompress(shape.xml);
+					var imported = ui.stringToCells(xml);
+					cells = graph.importCells(imported, c.x, c.y);
+				} else if (shape.style) {
+					cells = [graph.insertVertex(graph.getDefaultParent(), null, "", c.x, c.y, w, h, shape.style)];
+				}
+			} finally {
+				graph.getModel().endUpdate();
+			}
+			if (cells && cells.length) {
+				graph.setSelectionCells(cells);
+				graph.scrollCellToVisible(cells[0]);
+			}
+		}
+
+		// ----- draw.io's own search also finds gallery shapes (asked of the app, page 1 only) -----
+		var pendingSearches = {};
+		var lastInsertSeq = 0;
+		var searchSeq = 0;
+		var sidebarSearch = ui.sidebar.searchEntries;
+		ui.sidebar.searchEntries = function (terms, count, page, success, error, closedLibs, imagesOnly) {
+			var self = this;
+			if (imagesOnly || page > 0 || !terms || !String(terms).trim()) return sidebarSearch.apply(this, arguments);
+			return sidebarSearch.call(this, terms, count, page, function (results, len, more, words) {
+				var id = ++searchSeq;
+				var done = false;
+				var finish = function (shapes) {
+					if (done) return;
+					done = true;
+					var extra = (shapes || []).map(function (s) {
+						return function () {
+							var elt = s.xml
+								? self.createVertexTemplateFromData(s.xml.charAt(0) === "<" ? Graph.compress(s.xml) : s.xml, s.w, s.h, s.title)
+								: self.createVertexTemplate(s.style, s.w || 48, s.h || 48, "", s.title);
+							if (elt && elt.setAttribute) {
+								elt.setAttribute("title", s.title + " (gallery)");
+								elt.setAttribute("data-omnidraw-gallery", s.title);
+							}
+							return elt;
+						};
+					});
+					success(results.concat(extra), (len || results.length) + extra.length, more, words);
+				};
+				pendingSearches[id] = finish;
+				// the app answers quickly from its indexes; draw.io's results show regardless after 2.5 s
+				setTimeout(function () { if (pendingSearches[id]) { delete pendingSearches[id]; finish([]); } }, 2500);
+				window.VsCodeApi.postMessage(JSON.stringify({ event: "desktopGallerySearch", reqId: id, query: String(terms), limit: Math.max(12, Math.min(48, count)) }));
+			}, error, closedLibs, imagesOnly);
+		};
+
+		/** Tests: draw.io's sidebar search (with gallery shapes), and the palettes shown. */
+		window.omnidrawShapes = {
+			search: function (terms) {
+				return new Promise(function (resolve) {
+					ui.sidebar.searchEntries(terms, 50, 0, function (results) {
+						var titles = [];
+						for (var i = 0; i < results.length; i++) {
+							try { var elt = results[i](); titles.push(elt && (elt.getAttribute("title") || elt.textContent || "")); } catch (e) { /* skip */ }
+						}
+						resolve(titles);
+					}, function () { resolve([]); });
+				});
+			},
+			palettes: function () {
+				return Array.from(document.querySelectorAll(".geSidebarContainer .geTitle")).map(function (t) { return t.textContent.trim(); });
+			},
+		};
+
 		// ----- the user's shape folders and libraries -----
 		var palettes = [];
 		function showShapes(libraries) {
@@ -224,6 +310,7 @@
 				var id = "drawai-shapes-" + n;
 				var images = null;
 				if (lib.kind === "images") images = lib.images;
+				else if (lib.kind === "gallery") images = lib.shapes;
 				else if (lib.kind === "xml") {
 					try {
 						var doc = mxUtils.parseXml(lib.xml);
@@ -238,12 +325,14 @@
 					return function () {
 						var title = img.title || "";
 						if (img.xml) return ui.sidebar.createVertexTemplateFromData(img.xml.charAt(0) === "<" ? Graph.compress(img.xml) : img.xml, img.w, img.h, title);
+						if (img.style) return ui.sidebar.createVertexTemplate(img.style, img.w || 48, img.h || 48, "", title);
 						// draw.io styles separate keys with ";", so data URIs are written without ";base64".
 						var data = String(img.data || "").replace(/^data:([^;,]+);base64,/, "data:$1,");
 						return ui.sidebar.createVertexTemplate("shape=image;html=1;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=1;aspect=fixed;image=" + data + ";", img.w || 48, img.h || 48, "", title);
 					};
 				});
-				ui.sidebar.addPaletteFunctions(id, lib.title + (lib.truncated ? " (first 400)" : ""), true, fns);
+				var label = lib.title + (lib.truncated ? " (first 400)" : "") + (lib.more > 0 ? " · search for " + lib.more.toLocaleString() + " more" : "");
+				ui.sidebar.addPaletteFunctions(id, label, lib.kind !== "gallery", fns);
 				palettes.push(id);
 			});
 		}
@@ -251,7 +340,7 @@
 		window.addEventListener("message", function (evt) {
 			var data = evt.data;
 			if (typeof data === "string") {
-				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0) return;
+				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0) return;
 				try { data = JSON.parse(data); } catch (e) { return; }
 			}
 			if (!data) return;
@@ -261,6 +350,13 @@
 				if (EXTRA.chatPanel) EXTRA.chatPanel.classList.toggle("drawai-off", !data.chatVisible);
 			} else if (data.action === "desktopShapes") {
 				try { showShapes(data.libraries); } catch (e) { console.warn("OmniDraw: could not show the shape libraries", e); }
+			} else if (data.action === "desktopInsertShape" && data.shape) {
+				if (data.seq && data.seq <= lastInsertSeq) return;
+				lastInsertSeq = data.seq || lastInsertSeq;
+				try { insertShape(data.shape); } catch (e) { ui.handleError(e); }
+			} else if (data.action === "desktopGalleryResults") {
+				var waiting = pendingSearches[data.reqId];
+				if (waiting) { delete pendingSearches[data.reqId]; waiting(data.shapes || []); }
 			}
 		});
 	});

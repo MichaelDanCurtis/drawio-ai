@@ -66,6 +66,7 @@ const jobs = [
 			"preload-chat": join(here, "src/preload/chat.ts"),
 			"preload-mapper": join(here, "src/preload/mapper.ts"),
 			"preload-settings": join(here, "src/preload/settings.ts"),
+			"preload-workshop": join(here, "src/preload/workshop.ts"),
 		},
 		outdir: out,
 		platform: "node",
@@ -97,7 +98,7 @@ const jobs = [
 ];
 
 await Promise.all(jobs.map((j) => build(j)));
-for (const f of ["chat.html", "mapper.html", "settings.html", "desktop-menu.js", "desktop-toolbar.js", "desktop-menubar.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+for (const f of ["chat.html", "mapper.html", "settings.html", "workshop.html", "desktop-menu.js", "desktop-toolbar.js", "desktop-menubar.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
 // The app's look (omni-design): tokens, motion, the dot layers, and the self-hosted fonts.
 mkdirSync(join(out, "ui/fonts"), { recursive: true });
 for (const f of readdirSync(join(here, "src/renderer/ui"))) copyFileSync(join(here, "src/renderer/ui", f), join(out, "ui", f));

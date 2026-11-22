@@ -37,6 +37,8 @@ export interface E2eConfig {
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 	/** Check Settings, themes, icon styles, the toolbar, the chat's menus, sliding and docking, and shape folders. */
 	polish?: boolean;
+	/** Check the Shape Workshop: gallery palettes, draw.io's search, Workshop search and insert, GitHub galleries, collections. */
+	workshop?: boolean;
 }
 
 /**
@@ -104,7 +106,9 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("mcpWithoutTokenStatus", unauthorized.status);
 
 		const before = await w.client.getXml();
-		if (config.polish) {
+		if (config.workshop) {
+			await runWorkshop(w, server, config, log);
+		} else if (config.polish) {
 			await runPolish(w, server, config, log);
 		} else if (config.insights) {
 			await runInsights(w, config, log);
@@ -652,4 +656,88 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 /** Calls a diagram tool on the window's MCP server, as an agent would. */
 async function rpcTool(w: DiagramWindow, name: string, args: unknown): Promise<unknown> {
 	return w.callTool(name, args);
+}
+
+async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const { WorkshopWindow } = await import("./workshop/workshopWindow");
+	const { galleries, galleryConfigs } = await import("./workshop");
+	const ed = w.editorView.webContents;
+	const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	const until = async <T>(what: string, fn: () => Promise<T | undefined | false>, ms = 30_000): Promise<T> => {
+		const end = Date.now() + ms;
+		for (;;) {
+			const v = await fn();
+			if (v) return v as T;
+			if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+			await pause(250);
+		}
+	};
+	const shot = async (name: string, wc: Electron.WebContents) => fs.writeFileSync(path.join(config.out, name), (await wc.capturePage()).toPNG());
+	log("mirror", process.env.OMNIDRAW_GALLERY_MIRROR ?? null);
+
+	// the default galleries become palettes in the shapes sidebar
+	const palettes: string[] = await until("gallery palettes", async () => {
+		const p: string[] = await ed.executeJavaScript("window.omnidrawShapes ? window.omnidrawShapes.palettes() : []");
+		return ["theSVG", "Tech logos", "UI icons"].every((t) => p.some((x) => x.startsWith(t))) ? p : undefined;
+	});
+	log("palettes", palettes.filter((p) => /theSVG|Tech logos|UI icons/.test(p)));
+	await shot("sidebar-galleries.png", ed);
+
+	// draw.io's own search finds gallery shapes
+	const found: string[] = await ed.executeJavaScript(`window.omnidrawShapes.search("kubernetes")`);
+	const fromGallery = (await galleries().search(galleryConfigs(), "kubernetes", { limit: 50 })).map((h) => h.item.title);
+	log("drawioSearch", { results: found.length, galleryTitlesFound: fromGallery.filter((t) => found.includes(t + " (gallery)")) });
+
+	// the Workshop: search with previews, click to add to the diagram
+	WorkshopWindow.open(server, "gallery");
+	const ww = await until("the Workshop window", async () => WorkshopWindow.window?.isVisible() && WorkshopWindow.window);
+	const wc = ww.webContents;
+	await until("gallery counts", async () => wc.executeJavaScript(`document.querySelectorAll("#galleryList .gallery .num").length >= 3 && !document.querySelector("#galleryList .dot-loader")`));
+	log("galleries", (await import("./workshop")).galleries().status(galleryConfigs()).map((g) => ({ id: g.id, count: g.count, error: g.error ?? null })));
+	await shot("workshop-empty-light.png", wc);
+	await wc.executeJavaScript(`(() => { const q = document.getElementById("q"); q.value = "server"; q.dispatchEvent(new Event("input")); })()`);
+	const tiles = await until("results with previews", async () => {
+		const r = await wc.executeJavaScript(`({ tiles: document.querySelectorAll("#grid .tile").length, imgs: document.querySelectorAll("#grid .tile img").length })`);
+		return r.tiles > 0 && r.imgs >= Math.min(3, r.tiles) ? r : undefined;
+	});
+	log("workshopSearch", tiles);
+	await shot("workshop-search-light.png", wc);
+	const before = (await w.client.getXml()).split("galleryItem=").length - 1;
+	await wc.executeJavaScript(`document.querySelector("#grid .tile").click()`);
+	const after = await until("the inserted shape", async () => {
+		const n = (await w.client.getXml()).split("galleryItem=").length - 1;
+		return n > before ? n : undefined;
+	});
+	log("inserted", { before, after });
+
+	// a hostile SVG from a source arrives cleaned (the devicon fixture for docker has a script)
+	const tech = galleryConfigs().find((g) => g.id === "tech-logos")!;
+	const docker = (await galleries().items(tech)).find((i) => i.id === "devicon:docker")!;
+	const cleaned = await galleries().svg(tech, docker);
+	log("hostileSvgCleaned", !!cleaned && !/script|onload|evil/i.test(cleaned));
+
+	// a GitHub gallery, and a collection
+	await wc.executeJavaScript(`window.omnidrawWorkshop.post({ type: "addGithub", url: "acme/icons/tree/main/icons" })`);
+	const gh = await until("the GitHub gallery", async () => (await import("./workshop")).galleries().status(galleryConfigs()).find((g) => g.kinds.includes("github") && (g.count ?? 0) > 0));
+	log("githubGallery", { title: gh.title, count: gh.count });
+	await wc.executeJavaScript(`window.omnidrawWorkshop.post({ type: "newCollection", title: "Network kit" })`);
+	const col = await until("the collection", async () => galleryConfigs().find((g) => g.title === "Network kit"));
+	const ghItems = await galleries().items(galleryConfigs().find((g) => g.id === gh.id)!);
+	await wc.executeJavaScript(`window.omnidrawWorkshop.post({ type: "addToCollection", collectionId: ${JSON.stringify(col.id)}, galleryId: ${JSON.stringify(gh.id)}, itemId: ${JSON.stringify(ghItems[0].id)} })`);
+	const colCount = await until("the collection's shape", async () => {
+		const n = (await galleries().items(galleryConfigs().find((g) => g.id === col.id)!, true)).length;
+		return n > 0 ? n : undefined;
+	});
+	log("collection", { title: col.title, count: colCount, file: fs.existsSync(galleries().collectionFile(col.id)) });
+	await pause(600);
+	await shot("workshop-galleries-light.png", wc);
+
+	// dark
+	process.env.DRAWAI_THEME = "dark";
+	updateSettings({ appearance: { ...settings().appearance, theme: "dark" } });
+	await pause(800);
+	await shot("workshop-search-dark.png", wc);
+	process.env.DRAWAI_THEME = "light";
+	updateSettings({ appearance: { ...settings().appearance, theme: "light" } });
+	ww.close();
 }

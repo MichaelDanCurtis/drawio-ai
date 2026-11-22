@@ -158,6 +158,46 @@ connected agent keeps working across app restarts. To register it by hand:
 claude mcp add --scope user draw-ai-desktop -- ~/.drawio-ai/bin/draw-ai-desktop-mcp
 ```
 
+## Shape Workshop
+
+**Shapes → Shape Workshop…** (Cmd/Ctrl+Alt+K, or the shapes button in the toolbar) opens one
+window for finding and collecting shapes. This release has the **Shape Gallery**; Shape
+Shifter (find by words or image, import stencils, restyle) and Shape Creator (an agent draws
+an icon) come next.
+
+- **Galleries** start with three you can turn off, remove and restore:
+  - theSVG, open licences only (CC0, MIT, Apache-2.0); not its AWS, Azure or Google Cloud sets, whose labels there don't match the vendors' terms
+  - Tech logos: devicon + Simple Icons (logos with a non-open licence of their own are left out)
+  - UI icons: Lucide + Tabler
+- **Add your own:** a public GitHub repository or one folder of it, a folder on this
+  computer, or a draw.io library file. **New collection** makes an empty gallery you fill
+  from any search (⋯ on a shape); it is a draw.io library you can export.
+- **Search** runs across every gallery that is on; pick a gallery to browse it. Click a shape
+  to add it to the diagram you used last (selected, in the middle of the view).
+- **In the editor:** each gallery is a palette in the shapes sidebar (a first page; the rest
+  is found by search), and draw.io's own sidebar search finds gallery shapes too.
+- **Downloads** happen in the app's main process, only from jsDelivr (npm and GitHub's CDN)
+  and, for theSVG's licence data, raw.githubusercontent.com. Every redirect is checked
+  against those hosts and every answer is size-capped (`src/main/workshop/fetch.ts`).
+  Indexes are cached for a week, then refreshed in the background while search keeps using
+  the old one (Sync now refreshes them at once); SVGs are fetched when shown and cached;
+  **Make available offline** downloads a whole gallery (removing the gallery stops it).
+  Everything lives in the app's data folder (`galleries/`, `collections/`).
+- **Every SVG is cleaned** before it is cached or used: no scripts, animations, event
+  handlers, external links (quoted, unquoted or encoded), embedded HTML or DTDs
+  (`src/main/workshop/svgSanitize.ts`). Images from libraries, folders and collections are
+  checked the same way. Each shape keeps its source and licence, also in the shape's style
+  (`galleryItem=…;licence=…`).
+- **GitHub galleries** without a branch in their address use `main`, then `master`, then the
+  newest tag. A branch with a "/" in its name can't be told apart from a folder in an
+  address, so such a repository can't be added by branch yet.
+
+Code: `src/main/workshop/` (`sources.ts` parses each source, `galleries.ts` caches and
+searches, `workshopWindow.ts`), `src/renderer/workshop.html`, and the palettes, search and
+insertion in `src/renderer/desktop-toolbar.js`. Tests: `test/workshop.test.js` and
+`scripts/e2e.mjs --workshop`, both on fixtures (`test/fixtures/galleries/mirror`, served by
+the e2e script as a stand-in for jsDelivr: test runs never download anything).
+
 ## Presentation mode
 
 **View → Presentation Mode** (F5, Cmd/Ctrl+Shift+Enter, or the screen button in the

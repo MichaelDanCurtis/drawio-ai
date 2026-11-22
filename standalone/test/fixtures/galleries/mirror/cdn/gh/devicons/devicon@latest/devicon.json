@@ -1,0 +1,153 @@
+[
+ {
+  "name": "docker",
+  "altnames": [],
+  "tags": [
+   "platform",
+   "deploy"
+  ],
+  "versions": {
+   "svg": [
+    "original",
+    "original-wordmark",
+    "plain",
+    "plain-wordmark"
+   ],
+   "font": [
+    "plain",
+    "plain-wordmark"
+   ]
+  },
+  "color": "#019bc6",
+  "aliases": []
+ },
+ {
+  "name": "kubernetes",
+  "altnames": [],
+  "tags": [
+   "container",
+   "deployment"
+  ],
+  "versions": {
+   "svg": [
+    "original",
+    "original-wordmark",
+    "plain",
+    "plain-wordmark",
+    "line",
+    "line-wordmark"
+   ],
+   "font": [
+    "plain",
+    "plain-wordmark",
+    "line",
+    "line-wordmark"
+   ]
+  },
+  "color": "#326ce5",
+  "aliases": []
+ },
+ {
+  "name": "nginx",
+  "altnames": [],
+  "tags": [
+   "server"
+  ],
+  "versions": {
+   "svg": [
+    "original"
+   ],
+   "font": [
+    "original"
+   ]
+  },
+  "color": "#090",
+  "aliases": [
+   {
+    "base": "original",
+    "alias": "original-wordmark"
+   },
+   {
+    "base": "original",
+    "alias": "plain"
+   },
+   {
+    "base": "original",
+    "alias": "plain-wordmark"
+   }
+  ]
+ },
+ {
+  "name": "postgresql",
+  "altnames": [],
+  "tags": [
+   "database"
+  ],
+  "versions": {
+   "svg": [
+    "original",
+    "original-wordmark",
+    "plain",
+    "plain-wordmark"
+   ],
+   "font": [
+    "plain",
+    "plain-wordmark"
+   ]
+  },
+  "color": "#336791",
+  "aliases": []
+ },
+ {
+  "name": "python",
+  "altnames": [],
+  "tags": [
+   "programming",
+   "language"
+  ],
+  "versions": {
+   "svg": [
+    "original",
+    "original-wordmark",
+    "plain",
+    "plain-wordmark"
+   ],
+   "font": [
+    "plain",
+    "plain-wordmark"
+   ]
+  },
+  "color": "#ffd845",
+  "aliases": []
+ },
+ {
+  "name": "react",
+  "altnames": [
+   "reactjs"
+  ],
+  "tags": [
+   "framework"
+  ],
+  "versions": {
+   "svg": [
+    "original",
+    "original-wordmark"
+   ],
+   "font": [
+    "original",
+    "original-wordmark"
+   ]
+  },
+  "color": "#61dafb",
+  "aliases": [
+   {
+    "base": "original",
+    "alias": "plain"
+   },
+   {
+    "base": "original-wordmark",
+    "alias": "plain-wordmark"
+   }
+  ]
+ }
+]

@@ -1,0 +1,20 @@
+{
+ "default": null,
+ "files": [
+  {
+   "name": "/README.md"
+  },
+  {
+   "name": "/icons/rack.svg"
+  },
+  {
+   "name": "/icons/switch.svg"
+  },
+  {
+   "name": "/icons/.hidden.svg"
+  },
+  {
+   "name": "/other/x.svg"
+  }
+ ]
+}

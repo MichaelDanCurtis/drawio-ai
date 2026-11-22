@@ -1,0 +1,62 @@
+[
+ {
+  "title": "Docker",
+  "hex": "2496ED",
+  "source": "https://www.docker.com/company/newsroom/media-resources",
+  "slug": "docker"
+ },
+ {
+  "title": "Kubernetes",
+  "hex": "326CE5",
+  "source": "https://github.com/kubernetes/kubernetes/tree/cac53883f4714452f3084a22e4be20d042a9df33/logo",
+  "slug": "kubernetes"
+ },
+ {
+  "title": "PostgreSQL",
+  "hex": "4169E1",
+  "source": "https://wiki.postgresql.org/wiki/Logo",
+  "guidelines": "https://www.postgresql.org/about/policies/trademarks/",
+  "slug": "postgresql"
+ },
+ {
+  "title": "React",
+  "hex": "61DAFB",
+  "source": "https://github.com/facebook/create-react-app/blob/282c03f9525fdf8061ffa1ec50dce89296d916bd/test/fixtures/relative-paths/src/logo.svg",
+  "aliases": {
+   "dup": [
+    {
+     "title": "React Native",
+     "source": "https://reactnative.dev"
+    }
+   ]
+  },
+  "slug": "react"
+ },
+ {
+  "title": "Redis",
+  "hex": "FF4438",
+  "source": "https://redis.io/brand-guidelines",
+  "guidelines": "https://redis.io/brand-guidelines",
+  "slug": "redis"
+ },
+ {
+  "title": "Broadcom",
+  "hex": "E31837",
+  "source": "https://www.broadcom.com/support",
+  "license": {
+   "type": "custom",
+   "url": "https://logorequest.broadcom.com/Home.aspx"
+  },
+  "slug": "broadcom"
+ },
+ {
+  "title": "Bioconductor",
+  "hex": "1A81C2",
+  "source": "https://github.com/Bioconductor/BiocStickers/blob/2e3af2dd45ce43e18110c91b687ebcb996cffae9/Bioconductor/Bioconductor-note.svg",
+  "guidelines": "https://bioconductor.org/about/logo/",
+  "license": {
+   "type": "CC-BY-SA-4.0"
+  },
+  "slug": "bioconductor"
+ }
+]
