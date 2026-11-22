@@ -1,6 +1,6 @@
 import { digDeeperRequest } from "../../common";
 import type { FieldOption, Recipe } from "../../../types";
-import { collectAws } from "./collect";
+import { collectAws, profileRegion } from "./collect";
 import { awsInventoryToGraph } from "./graph";
 
 export { awsInventoryToGraph, publicSubnets, collapseCrowds } from "./graph";
@@ -24,9 +24,10 @@ export const awsEnvironmentRecipe: Recipe = {
 		},
 		{
 			id: "regions",
-			label: "Regions",
-			type: "text",
-			placeholder: "us-east-1, eu-west-1  (empty: the profile's region; \"all\": every enabled region)",
+			label: "Region",
+			type: "select",
+			dynamic: true,
+			help: "The profile's own region, every region enabled for the account, or one region (from `aws ec2 describe-regions`).",
 		},
 		{
 			id: "services",
@@ -36,7 +37,26 @@ export const awsEnvironmentRecipe: Recipe = {
 			help: "Networks (VPCs, subnets, gateways, security groups) are always read.",
 		},
 	],
-	async loadOptions(fieldId, _input, ctx): Promise<FieldOption[]> {
+	async loadOptions(fieldId, input, ctx): Promise<FieldOption[]> {
+		if (fieldId === "regions") {
+			const profile = (input.profile ?? "").trim();
+			const home = await profileRegion(ctx, profile);
+			const options: FieldOption[] = [
+				{ value: "", label: home ? `The profile's region (${home})` : "The profile's region (us-east-1 if it has none)" },
+				{ value: "all", label: "All enabled regions" },
+			];
+			const r = await ctx
+				.exec("aws", ["ec2", "describe-regions", "--output", "json", "--region", home ?? "us-east-1", ...(profile ? ["--profile", profile] : [])], { timeoutMs: 30_000 })
+				.catch(() => undefined);
+			let names: string[] = [];
+			try {
+				names = r && r.code === 0 ? ((JSON.parse(r.stdout).Regions ?? []) as any[]).map((x) => String(x.RegionName)).filter((n) => /^[a-z]{2}(-gov)?-[a-z]+-\d$/.test(n)).sort() : [];
+			} catch {
+				names = [];
+			}
+			if (!names.length) options.push({ value: "", label: "(Could not list regions: sign in with aws sso login / aws login, then ↻)" });
+			return [...options, ...names.map((n) => ({ value: n, label: n === home ? `${n} · the profile's region` : n }))];
+		}
 		if (fieldId !== "profile") return [];
 		const r = await ctx.exec("aws", ["configure", "list-profiles"], { timeoutMs: 30_000 });
 		const profiles = r.code === 0 ? r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [];

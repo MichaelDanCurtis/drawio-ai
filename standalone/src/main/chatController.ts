@@ -8,7 +8,8 @@ import { AcpAgentSession, AuthRequiredError, SessionInfo } from "./acpSession";
 import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./agents";
 import type { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
-import { settings, settingsPath, updateSettings } from "./settings";
+import { KnownModel, settings, settingsPath, updateSettings } from "./settings";
+import { versionedName } from "./modelNames";
 import type { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
 
 type TranscriptItem =
@@ -51,6 +52,12 @@ export interface ChatHost {
 	pageMaps?(): { maps: number; findings: number };
 	mapAction?(action: string, text: string): void;
 	reportAction?(action: unknown): void;
+	/** Opens the Settings window. */
+	openSettings?(): void;
+	/** Slides the chat out of the window. */
+	collapseChat?(): void;
+	/** The chat's edge is dragged to `screenX` (screen coordinates); `done` when released. */
+	resizeChatTo?(screenX: number, done: boolean): void;
 }
 
 const MAX_IMAGES = 4;
@@ -79,7 +86,7 @@ export class ChatController {
 	/** Options of the requests waiting for an answer, to approve them all at once. */
 	private permissionOptions = new Map<string, acp.PermissionOption[]>();
 	/** "Allow all": approve every request in this chat until New Chat, switching agents, or turning it off. */
-	private allowAll = false;
+	private allowAll = settings().chat.allowAllByDefault;
 	private nextPermission = 1;
 	private toolSummaries: { name: string; result: ToolResult }[] = [];
 	/** This window's agent; the saved setting is only the default for new windows. */
@@ -186,6 +193,15 @@ export class ChatController {
 			case "reportAction":
 				this.host.reportAction?.(msg.action);
 				break;
+			case "collapseChat":
+				this.host.collapseChat?.();
+				break;
+			case "resizeChat":
+				if (typeof msg.screenX === "number" && isFinite(msg.screenX)) this.host.resizeChatTo?.(msg.screenX, !!msg.done);
+				break;
+			case "openSettings":
+				this.host.openSettings?.();
+				break;
 		}
 	}
 
@@ -213,8 +229,11 @@ export class ChatController {
 				this.push({ kind: "note", text: "Install command copied to the clipboard." });
 				break;
 			case "drawai.openSettings":
-				if (!fs.existsSync(settingsPath())) updateSettings({});
-				void shell.openPath(settingsPath());
+				if (this.host.openSettings) this.host.openSettings();
+				else {
+					if (!fs.existsSync(settingsPath())) updateSettings({});
+					void shell.openPath(settingsPath());
+				}
 				break;
 		}
 	}
@@ -247,7 +266,7 @@ export class ChatController {
 		this.sessionError = undefined;
 		this.authMethods = [];
 		this.firstPrompt = true;
-		this.allowAll = false;
+		this.allowAll = settings().chat.allowAllByDefault;
 		for (const resolve of this.permissions.values()) resolve({ outcome: "cancelled" });
 	}
 
@@ -287,6 +306,7 @@ export class ChatController {
 		this.starting = (async () => {
 			try {
 				await session.start();
+				await this.applyPreferredModel(session);
 				this.postState();
 				return session;
 			} catch (e: any) {
@@ -337,6 +357,56 @@ export class ChatController {
 		if (e instanceof AuthRequiredError) return e.methods.length ? { title: "Sign In", command: "drawai.signIn" } : { title: "Retry", command: "drawai.retry" };
 		if (status && !status.installed) return { title: "Copy Install Command", command: "drawai.copyInstall" };
 		return { title: "Retry", command: "drawai.retry" };
+	}
+
+	/** Switches a new session to the model chosen in Settings, if the agent offers it. */
+	private async applyPreferredModel(session: AcpAgentSession): Promise<void> {
+		const preferred = settings().models[this.agentId]?.preferred;
+		if (!preferred || !session.info) return;
+		const { models, current } = this.modelList(session.info);
+		const target = models.find((m) => m.value === preferred);
+		if (!target || current === preferred) return;
+		try {
+			const [kind, id, ...rest] = target.id.split(":");
+			if (kind === "opt") await session.setConfigOption(id, rest.join(":"));
+			else if (kind === "mode") await session.setMode([id, ...rest].join(":"));
+		} catch {
+			// keep the agent's own default
+		}
+	}
+
+	/**
+	 * The models (or modes) the agent offers, with versions in their names. `value` is what
+	 * Settings stores (hidden / preferred); `id` is what pickModel takes.
+	 */
+	private modelList(info: SessionInfo | undefined): { models: (KnownModel & { id: string })[]; current?: string; currentId?: string } {
+		const models: (KnownModel & { id: string })[] = [];
+		const modelOption = info?.configOptions?.find((o) => o.type === "select" && (o.category === "model" || /model/i.test(o.id)));
+		if (modelOption && modelOption.type === "select") {
+			for (const entry of modelOption.options as any[]) {
+				const opts = "group" in entry ? entry.options : [entry];
+				for (const o of opts) {
+					const value = String(o.value);
+					models.push({ id: `opt:${modelOption.id}:${value}`, value, name: versionedName(String(o.name ?? value), value, o.description), description: o.description ?? undefined });
+				}
+			}
+			const current = String(modelOption.currentValue);
+			return { models, current, currentId: `opt:${modelOption.id}:${current}` };
+		}
+		if (info?.modes?.availableModes?.length) {
+			for (const m of info.modes.availableModes) models.push({ id: `mode:${m.id}`, value: `mode:${m.id}`, name: `Mode: ${m.name}`, description: m.description ?? undefined });
+			return { models, current: `mode:${info.modes.currentModeId}`, currentId: `mode:${info.modes.currentModeId}` };
+		}
+		return { models };
+	}
+
+	/** Remembers what the agent offers, so Settings can list it while the agent is not running. */
+	private rememberModels(models: KnownModel[]): void {
+		if (!models.length) return;
+		const known = settings().modelCatalog[this.agentId] ?? [];
+		const slim = models.map((m) => ({ value: m.value, name: m.name, ...(m.description ? { description: m.description } : {}) }));
+		if (JSON.stringify(known) === JSON.stringify(slim)) return;
+		updateSettings({ modelCatalog: { ...settings().modelCatalog, [this.agentId]: slim } });
 	}
 
 	private async pickModel(value: string): Promise<void> {
@@ -614,19 +684,12 @@ export class ChatController {
 		const client = this.host.client();
 		const info: SessionInfo | undefined = this.session?.info;
 		const status = this.status();
-		const models: { id: string; name: string }[] = [];
-		let modelId: string | undefined;
-		const modelOption = info?.configOptions?.find((o) => o.type === "select" && (o.category === "model" || /model/i.test(o.id)));
-		if (modelOption && modelOption.type === "select") {
-			for (const entry of modelOption.options as any[]) {
-				const opts = "group" in entry ? entry.options : [entry];
-				for (const o of opts) models.push({ id: `opt:${modelOption.id}:${o.value}`, name: o.name });
-			}
-			modelId = `opt:${modelOption.id}:${modelOption.currentValue}`;
-		} else if (info?.modes?.availableModes?.length) {
-			for (const m of info.modes.availableModes) models.push({ id: `mode:${m.id}`, name: `Mode: ${m.name}` });
-			modelId = `mode:${info.modes.currentModeId}`;
-		}
+		const list = this.modelList(info);
+		this.rememberModels(list.models);
+		// Models hidden in Settings stay out of the picker, except the one in use.
+		const hidden = new Set(settings().models[this.agentId]?.hidden ?? []);
+		const models = list.models.filter((m) => !hidden.has(m.value) || m.value === list.current).map((m) => ({ id: m.id, name: m.name, description: m.description }));
+		const modelId = list.currentId;
 		const providers = this.statuses.map((s) => ({
 			id: s.id,
 			label: `${s.label}${!s.installed ? " — not installed" : !s.signedIn ? " — sign-in?" : ""}`,
@@ -659,6 +722,8 @@ export class ChatController {
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
+				iconStyle: settings().appearance.iconStyle,
+				chatSide: settings().chat.side,
 			},
 		});
 	}
@@ -729,3 +794,4 @@ function sanitizeImages(raw: unknown): ImageData[] {
 		.slice(0, MAX_IMAGES)
 		.map((i) => ({ mimeType: i.mimeType, base64: i.base64 }));
 }
+

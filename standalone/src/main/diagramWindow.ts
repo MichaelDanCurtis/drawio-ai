@@ -1,4 +1,4 @@
-import { app, BaseWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
+import { app, BaseWindow, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
@@ -18,7 +18,8 @@ import { MapperService } from "./mapper/service";
 import { MapActions } from "./mapActions";
 import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
-import { settings, updateSettings } from "./settings";
+import { onSettingsChanged, settings, updateSettings, type Settings } from "./settings";
+import { shapeLibraries } from "./shapeLocations";
 import type { StaticServer } from "./staticServer";
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
@@ -66,7 +67,13 @@ export class DiagramWindow {
 	private dirty = false;
 	private loaded = false;
 	private loadedWaiters: (() => void)[] = [];
-	private chatVisible = true;
+	private chatVisible = !settings().chat.startCollapsed;
+	/** 0 = chat tucked away, 1 = shown; in between while it slides. */
+	private chatShown = this.chatVisible ? 1 : 0;
+	private chatAnim: NodeJS.Timeout | undefined;
+	/** The chat width while its edge is dragged (saved when the drag ends). */
+	private dragWidth: number | undefined;
+	private offSettings: (() => void) | undefined;
 	/** Presentation mode: only the diagram, read-only, full screen. */
 	public presenting = false;
 	/** The diagram's content when presenting started: view-only changes while presenting are not edits. */
@@ -83,7 +90,7 @@ export class DiagramWindow {
 	/** Content for a new, unsaved window (an imported diagram), and the name to suggest when saving it. */
 	private initial: { xml: string; name: string } | undefined;
 	/** App-level commands the in-editor File menu can run. Set by main.ts. */
-	public static appCommands: { newDiagram(): void; open(): void } = { newDiagram: () => undefined, open: () => undefined };
+	public static appCommands: { newDiagram(): void; open(): void; settings(section?: string): void } = { newDiagram: () => undefined, open: () => undefined, settings: () => undefined };
 
 	public static async open(server: StaticServer, file?: string, initial?: { xml: string; name: string }): Promise<DiagramWindow> {
 		if (file) {
@@ -122,8 +129,7 @@ export class DiagramWindow {
 	private constructor(private readonly server: StaticServer, file: string | undefined) {
 		this.file = file;
 		this.win = new BaseWindow({
-			width: 1500,
-			height: 950,
+			...DiagramWindow.placement(),
 			minWidth: 800,
 			minHeight: 500,
 			title: "Draw.AI",
@@ -205,6 +211,9 @@ export class DiagramWindow {
 					void this.mapActions.run(action, text);
 				},
 				reportAction: (action) => void this.mapActions.action(action),
+				openSettings: () => DiagramWindow.appCommands.settings(),
+				collapseChat: () => this.setChatVisible(false),
+				resizeChatTo: (screenX, done) => this.resizeChatTo(screenX, done),
 			},
 			this.mcp
 		);
@@ -233,8 +242,42 @@ export class DiagramWindow {
 			DiagramWindow.lastFocused = this;
 			this.chat.postState();
 		});
+		this.offSettings = onSettingsChanged((s, patch) => this.applySettings(s, patch));
 		this.layout();
 		this.updateTitle();
+	}
+
+	/**
+	 * Where a new window goes: on the display the pointer is on, inside its work area (never
+	 * partly off screen), a little down and right of the windows already open there.
+	 */
+	private static placement(): { x: number; y: number; width: number; height: number } {
+		const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+		const width = Math.min(1500, Math.max(800, area.width - 48));
+		const height = Math.min(950, Math.max(500, area.height - 48));
+		const cascade = (DiagramWindow.all.size % 6) * 28;
+		const x = Math.min(area.x + Math.round((area.width - width) / 2) + cascade, area.x + area.width - width);
+		const y = Math.min(area.y + Math.round((area.height - height) / 2) + cascade, area.y + area.height - height);
+		return { x: Math.max(area.x, x), y: Math.max(area.y, y), width, height };
+	}
+
+	/** Settings changed (in the Settings window): follow them in this window. */
+	private applySettings(_s: Settings, patch: Partial<Settings>): void {
+		if (this.win.isDestroyed()) return;
+		if ("chat" in patch || "chatWidth" in patch) this.layout();
+		if ("appearance" in patch || "shapes" in patch || "chat" in patch) this.sendEditorPrefs();
+		if ("models" in patch || "modelCatalog" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.postState();
+	}
+
+	/** Icon style, the user's shape folders and the chat's state, for the editor's plugins. */
+	private sendEditorPrefs(): void {
+		if (this.editorView.webContents.isDestroyed()) return;
+		const s = settings();
+		const send = (msg: unknown) => {
+			if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.send("drawio:toWebview", JSON.stringify(msg));
+		};
+		send({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, chatVisible: this.chatVisible, chatSide: s.chat.side });
+		void shapeLibraries(s.shapes.locations).then((libraries) => send({ action: "desktopShapes", libraries }));
 	}
 
 	private async start(server: StaticServer): Promise<void> {
@@ -242,7 +285,7 @@ export class DiagramWindow {
 		const dark = nativeTheme.shouldUseDarkColors;
 		this.win.show();
 		this.editorView.webContents.focus();
-		void this.editorView.webContents.loadURL(server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() }));
+		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() })}?icons=${settings().appearance.iconStyle}`);
 		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
 		void dark;
 	}
@@ -318,6 +361,7 @@ export class DiagramWindow {
 			}
 			await c.whenLoaded(30_000);
 			this.loaded = true;
+			this.sendEditorPrefs();
 			this.setDirty(!!this.initial && !this.file);
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
@@ -384,6 +428,9 @@ export class DiagramWindow {
 			case "importDiagram": return void this.importFromOtherTool();
 			case "print": return void this.print();
 			case "exitPresentation": return this.setPresenting(false);
+			case "present": return this.togglePresentation();
+			case "toggleChat": return this.toggleChat();
+			case "settings": return DiagramWindow.appCommands.settings();
 		}
 	}
 
@@ -417,12 +464,19 @@ export class DiagramWindow {
 
 	// ----- layout -----
 
+	private chatWidth(total: number): number {
+		return Math.min(Math.max(280, this.dragWidth ?? settings().chatWidth), Math.floor(total * 0.6));
+	}
+
 	private layout(): void {
 		const { width, height } = this.win.getContentBounds();
-		const chatWidth = this.chatVisible && !this.presenting ? Math.min(Math.max(280, settings().chatWidth), Math.floor(width * 0.6)) : 0;
-		this.editorView.setBounds({ x: 0, y: 0, width: width - chatWidth, height });
-		this.chatView.setBounds({ x: width - chatWidth, y: 0, width: chatWidth, height });
-		this.chatView.setVisible(this.chatVisible && !this.presenting);
+		const full = this.chatWidth(width);
+		const shown = this.presenting ? 0 : Math.round(full * easeOut(this.chatShown));
+		const left = settings().chat.side === "left";
+		// The chat keeps its full width while it slides, so its contents do not reflow.
+		this.editorView.setBounds({ x: left ? shown : 0, y: 0, width: width - shown, height });
+		this.chatView.setBounds({ x: left ? shown - full : width - shown, y: 0, width: full, height });
+		this.chatView.setVisible(shown > 0);
 	}
 
 	/** Shows only the diagram, read-only and full screen, with page dots; Esc leaves. */
@@ -466,8 +520,47 @@ export class DiagramWindow {
 	}
 
 	public toggleChat(): void {
-		this.chatVisible = !this.chatVisible;
+		this.setChatVisible(!this.chatVisible);
+	}
+
+	/** Slides the chat in or out (about 220 ms; at once in tests). */
+	public setChatVisible(visible: boolean): void {
+		if (visible === this.chatVisible && !this.chatAnim) return;
+		this.chatVisible = visible;
+		clearInterval(this.chatAnim);
+		this.chatAnim = undefined;
+		const target = visible ? 1 : 0;
+		if (process.env.DRAWAI_E2E) {
+			this.chatShown = target;
+			this.layout();
+		} else {
+			const from = this.chatShown, start = Date.now(), dur = 220;
+			this.chatAnim = setInterval(() => {
+				const t = Math.min(1, (Date.now() - start) / dur);
+				this.chatShown = from + (target - from) * t;
+				if (!this.win.isDestroyed()) this.layout();
+				if (t >= 1) {
+					clearInterval(this.chatAnim);
+					this.chatAnim = undefined;
+				}
+			}, 16);
+		}
+		this.sendEditorPrefs();
+		if (visible && !this.chatView.webContents.isDestroyed()) this.chatView.webContents.focus();
+	}
+
+	/** The chat's edge is being dragged to `screenX`; the width is saved when the drag ends. */
+	private resizeChatTo(screenX: number, done: boolean): void {
+		const b = this.win.getContentBounds();
+		const left = settings().chat.side === "left";
+		const w = Math.round(left ? screenX - b.x : b.x + b.width - screenX);
+		this.dragWidth = Math.max(280, Math.min(900, Math.floor(b.width * 0.6), w));
 		this.layout();
+		if (done) {
+			const final = this.dragWidth;
+			this.dragWidth = undefined;
+			updateSettings({ chatWidth: final });
+		}
 	}
 
 	public resizeChat(delta: number): void {
@@ -610,6 +703,8 @@ export class DiagramWindow {
 
 	private dispose(): void {
 		clearTimeout(this.mappedTimer);
+		clearInterval(this.chatAnim);
+		this.offSettings?.();
 		this.mapActions.dispose();
 		this.mapper.close();
 		this.chat.dispose();
@@ -635,4 +730,8 @@ function drawioConfig(): DrawioConfig {
 		hideMenuItems: ["exportAs", "importFrom", "print", "saveAndExit", "plugins", "exit"],
 		hideMenus: ["language", "help"],
 	} as DrawioConfig;
+}
+
+function easeOut(t: number): number {
+	return 1 - Math.pow(1 - Math.max(0, Math.min(1, t)), 3);
 }

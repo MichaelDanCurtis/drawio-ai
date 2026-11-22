@@ -60,7 +60,7 @@ export class StaticServer {
 			.replace("$$lang$$", JSON.stringify("en"))
 			.replace("$$simpleLabels$$", "false")
 			.replace("$$chrome$$", JSON.stringify("1"))
-			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/presentation.js`]))
+			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/ui/icons.js`, `${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/desktop-toolbar.js`, `${base}/plugin/presentation.js`]))
 			.replace("$$localStorage$$", JSON.stringify(o.localStorage))
 			.replace("$$additionalCode$$", "[]");
 	}
@@ -81,7 +81,7 @@ export class StaticServer {
 			res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-store" });
 			return void res.end(this.editorHtml(o));
 		}
-		if (p === "/chat.html" || p === "/mapper.html") {
+		if (p === "/chat.html" || p === "/mapper.html" || p === "/settings.html") {
 			const nonce = crypto.randomBytes(16).toString("hex");
 			const html = fs
 				.readFileSync(path.join(paths.out, p.slice(1)), "utf8")
@@ -91,7 +91,7 @@ export class StaticServer {
 			return void res.end(html);
 		}
 		let file: string | undefined;
-		if (["/plugin/theme.js", "/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/presentation.js"].includes(p)) {
+		if (["/plugin/theme.js", "/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/desktop-toolbar.js", "/plugin/presentation.js"].includes(p)) {
 			file = path.join(paths.out, path.basename(p));
 		} else if (p.startsWith("/ui/")) {
 			// the app's own look: theme CSS, the dot modules, fonts (see build.mjs)

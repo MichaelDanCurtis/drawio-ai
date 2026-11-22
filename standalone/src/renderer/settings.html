@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; font-src $$cspSource$$; style-src 'nonce-$$nonce$$' $$cspSource$$; script-src 'nonce-$$nonce$$' $$cspSource$$;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Settings</title>
+<!--
+	Draw.AI desktop: Settings. Every change saves at once (settings.json in the app's data
+	folder) and reaches open windows straight away: theme, icon style, chat side, models.
+-->
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<style nonce="$$nonce$$">
+	body { display: flex; flex-direction: column; }
+	.head { position: relative; isolation: isolate; flex: none; padding: 20px 24px 14px; border-bottom: 1px solid var(--border); }
+	.head > :not(.backdrop) { position: relative; z-index: 1; }
+	.head .backdrop { height: 100%; }
+	.head .label { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+	.head h1 { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; margin: 0; }
+	main { flex: 1; display: grid; grid-template-columns: 184px 1fr; min-height: 0; }
+	nav { border-right: 1px solid var(--border); padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+	nav button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 1px solid transparent; background: none; color: var(--ink-2); font: inherit; padding: 7px 10px; border-radius: var(--radius); cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+	nav button:hover { background: var(--surface-3); color: var(--ink); }
+	nav button.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
+	nav button svg { flex: none; }
+	nav .foot { margin-top: auto; padding: 10px 6px 0; }
+	#panes { overflow: auto; padding: 22px 28px 28px; }
+	section { display: none; max-width: 640px; animation: rise var(--dur) var(--ease-enter); }
+	section.active { display: block; }
+	section h2 { font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; margin: 0 0 4px; }
+	section > p.lead { color: var(--muted); margin: 0 0 18px; }
+	.group { margin: 0 0 22px; }
+	.group > .label { display: block; margin-bottom: 8px; }
+	.row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+	.row:first-of-type { border-top: 0; }
+	.row .what { flex: 1; min-width: 0; }
+	.row .what b { display: block; font-weight: 500; }
+	.row .what span { display: block; color: var(--muted); font-size: 12px; }
+	.card-list { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 2px 14px; }
+	.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--surface-3); border-radius: var(--radius-pill); }
+	.seg button { border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; padding: 5px 14px; border-radius: var(--radius-pill); cursor: pointer; transition: background var(--dur) var(--ease-out), color var(--dur) var(--ease-out); }
+	.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+	.styles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+	.style { text-align: left; border: 1px solid var(--border); background: var(--surface); color: inherit; font: inherit; border-radius: 12px; padding: 12px 14px; cursor: pointer; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+	.style:hover { border-color: var(--control-line); }
+	.style[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+	.style b { display: block; font-weight: 500; margin-bottom: 8px; }
+	.style .preview { display: flex; gap: 10px; color: var(--ink); flex-wrap: wrap; }
+	.agent { border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); margin-bottom: 12px; overflow: hidden; animation: rise var(--dur) var(--ease-enter) backwards; }
+	.agent > header { display: flex; align-items: center; gap: 10px; padding: 12px 14px; }
+	.agent > header b { font-weight: 500; }
+	.agent .models { border-top: 1px solid var(--border); padding: 4px 14px 8px; }
+	.agent .models .empty { color: var(--muted); font-size: 12px; padding: 8px 0; }
+	.model { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--border); }
+	.model:first-child { border-top: 0; }
+	.model .name { min-width: 0; }
+	.model .name span { display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.model.hidden-model .name > :first-child { color: var(--faint); text-decoration: line-through; }
+	.default-btn { border: 1px solid transparent; background: none; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 2px 8px; border-radius: var(--radius-pill); cursor: pointer; }
+	.default-btn:hover { color: var(--ink); background: var(--surface-3); }
+	.default-btn[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent); }
+	.agent details { border-top: 1px solid var(--border); padding: 8px 14px 12px; }
+	.agent details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+	.agent details .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+	.field label { display: block; margin-bottom: 4px; }
+	.field input { width: 100%; padding: 6px 10px; min-height: 32px; }
+	.loc { display: grid; grid-template-columns: 22px 1fr auto; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--border); }
+	.loc:first-child { border-top: 0; }
+	.loc .path { color: var(--muted); font-size: 11.5px; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.loc input[type="text"] { padding: 3px 8px; min-height: 28px; width: 100%; }
+	.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+	input[type="number"] { width: 90px; padding: 5px 8px; min-height: 30px; }
+	.saved { position: fixed; right: 18px; bottom: 16px; animation: fade-in var(--dur) var(--ease-out); }
+</style>
+</head>
+<body>
+	<div class="head" data-dot-host>
+		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
+		<div class="label"><span class="brandmark" aria-hidden="true"><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i></i><i data-on></i><i data-on></i><i></i><i></i><i data-signal></i><i></i><i></i><i></i></span><span class="label" id="version">Draw.AI</span></div>
+		<h1>Settings</h1>
+	</div>
+	<main>
+		<nav aria-label="Settings sections">
+			<button data-section="appearance" class="active"><span data-icon="gear"></span>Appearance</button>
+			<button data-section="agents"><span data-icon="sparkle"></span>Agents &amp; models</button>
+			<button data-section="chat"><span data-icon="chatPanel"></span>Chat</button>
+			<button data-section="editor"><span data-icon="pen"></span>Editor</button>
+			<button data-section="shapes"><span data-icon="shapes"></span>Shapes</button>
+			<div class="foot"><button class="btn btn-sm btn-ghost" id="openFile" title="">Open settings.json</button></div>
+		</nav>
+		<div id="panes">
+			<section id="appearance" class="active">
+				<h2>Appearance</h2>
+				<p class="lead">How Draw.AI looks: the chat, the Mapper, Settings and draw.io's own toolbars and panels. Diagrams keep their own colours.</p>
+				<div class="group">
+					<span class="label">Theme</span>
+					<div class="seg" role="group" aria-label="Theme" id="theme">
+						<button data-value="system" aria-pressed="false">System</button>
+						<button data-value="light" aria-pressed="false">Light</button>
+						<button data-value="dark" aria-pressed="false">Dark</button>
+					</div>
+				</div>
+				<div class="group">
+					<span class="label">Icons</span>
+					<div class="styles" id="iconStyles"></div>
+				</div>
+			</section>
+
+			<section id="agents">
+				<h2>Agents &amp; models</h2>
+				<p class="lead">Choose which models each agent shows in the chat's picker, and the one a new chat starts with. An agent lists its models the first time it runs.</p>
+				<div id="agentList"></div>
+			</section>
+
+			<section id="chat">
+				<h2>Chat</h2>
+				<p class="lead">The agent chat next to the diagram.</p>
+				<div class="card-list">
+					<div class="row"><div class="what"><b>Side</b><span>Where the chat docks in each window.</span></div>
+						<div class="seg" role="group" aria-label="Chat side" id="chatSide"><button data-value="left" aria-pressed="false">Left</button><button data-value="right" aria-pressed="false">Right</button></div></div>
+					<div class="row"><div class="what"><b>Width</b><span>In pixels. You can also drag the chat's edge.</span></div>
+						<input type="number" id="chatWidth" min="280" max="900" step="10"></div>
+					<div class="row"><div class="what"><b>Start tucked away</b><span>New windows open with the chat hidden; ⌘J or the chat button brings it back.</span></div>
+						<input type="checkbox" id="startCollapsed"></div>
+					<div class="row"><div class="what"><b>Allow all by default</b><span>New chats approve every request the agent makes without asking. You can still turn it off per chat.</span></div>
+						<input type="checkbox" id="allowAllByDefault"></div>
+				</div>
+			</section>
+
+			<section id="editor">
+				<h2>Editor</h2>
+				<p class="lead">How agent edits arrive in the diagram.</p>
+				<div class="card-list">
+					<div class="row"><div class="what"><b>Review AI changes</b><span>Changes wait for Accept or Reject instead of being kept straight away.</span></div><input type="checkbox" data-editor="drawio-ai.reviewChanges"></div>
+					<div class="row"><div class="what"><b>Flash changed shapes</b><span>Briefly highlight what an edit touched.</span></div><input type="checkbox" data-editor="drawio-ai.flashChanges"></div>
+					<div class="row"><div class="what"><b>Select changed shapes</b><span>Select what an edit touched, ready for the next request.</span></div><input type="checkbox" data-editor="drawio-ai.selectChangedCells"></div>
+					<div class="row"><div class="what"><b>Shapes sent as context</b><span>The most shapes the agent gets described at once.</span></div><input type="number" data-editor="drawio-ai.maxCellsInContext" min="50" max="5000" step="50"></div>
+				</div>
+			</section>
+
+			<section id="shapes">
+				<h2>Shapes</h2>
+				<p class="lead">Your own shapes in the shapes sidebar: a folder of SVG or PNG files becomes a palette, and a draw.io library file (.xml) opens as one.</p>
+				<div class="card-list" id="locations"></div>
+				<div class="actions">
+					<button class="btn btn-sm" id="addFolder">Add a folder…</button>
+					<button class="btn btn-sm" id="addLibrary">Add a library file…</button>
+				</div>
+			</section>
+		</div>
+	</main>
+	<span class="tag hidden saved" data-tone="ok" id="saved">Saved</span>
+<script type="module" nonce="$$nonce$$">
+	import { mountDotField } from "/ui/dots.js";
+	mountDotField(document.getElementById("field"), { density: 0.4, grid: 7 });
+</script>
+<script nonce="$$nonce$$">
+(function () {
+	const bridge = window.drawaiSettings;
+	const $ = (id) => document.getElementById(id);
+	const I = window.DrawAIIcons;
+	let state = null;
+	const post = (m) => bridge.post(m);
+	let savedTimer;
+	function saved() {
+		$("saved").classList.remove("hidden");
+		clearTimeout(savedTimer);
+		savedTimer = setTimeout(() => $("saved").classList.add("hidden"), 1200);
+	}
+	function set(patch) { post({ type: "set", patch }); saved(); }
+
+	// sections
+	function show(id) {
+		for (const b of document.querySelectorAll("nav [data-section]")) b.classList.toggle("active", b.dataset.section === id);
+		for (const s of document.querySelectorAll("section")) s.classList.toggle("active", s.id === id);
+	}
+	for (const b of document.querySelectorAll("nav [data-section]")) b.addEventListener("click", () => show(b.dataset.section));
+	if (location.hash) show(decodeURIComponent(location.hash.slice(1)));
+
+	function seg(el, value, onPick) {
+		for (const b of el.querySelectorAll("button")) {
+			b.setAttribute("aria-pressed", String(b.dataset.value === value));
+			b.onclick = () => onPick(b.dataset.value);
+		}
+	}
+
+	const PREVIEW = ["zoomIn", "undo", "layers", "map", "sparkle", "gear"];
+	function renderAppearance(s) {
+		seg($("theme"), s.appearance.theme, (v) => set({ appearance: { ...state.settings.appearance, theme: v } }));
+		const box = $("iconStyles");
+		box.textContent = "";
+		for (const style of I.styles) {
+			const b = document.createElement("button");
+			b.className = "style";
+			b.setAttribute("aria-pressed", String(style === s.appearance.iconStyle));
+			const t = document.createElement("b");
+			t.textContent = I.labels[style];
+			const p = document.createElement("span");
+			p.className = "preview";
+			p.innerHTML = PREVIEW.map((n) => I.svg(n, style, { size: 22 })).join("");
+			b.append(t, p);
+			b.onclick = () => set({ appearance: { ...state.settings.appearance, iconStyle: style } });
+			box.appendChild(b);
+		}
+		I.apply(s.appearance.iconStyle);
+	}
+
+	let agentsShown = false;
+	function renderAgents(s) {
+		const list = $("agentList");
+		const open = new Set([...list.querySelectorAll("details[open]")].map((d) => d.dataset.agent));
+		list.textContent = "";
+		state.agents.forEach((a, i) => {
+			const card = document.createElement("div");
+			card.className = "agent";
+			if (agentsShown) card.style.animation = "none";
+			else card.style.animationDelay = i * 30 + "ms";
+			const head = document.createElement("header");
+			const name = document.createElement("b");
+			name.textContent = a.label;
+			const tag = document.createElement("span");
+			tag.className = "tag";
+			tag.dataset.tone = !a.installed ? "warn" : a.signedIn ? "ok" : "warn";
+			tag.textContent = !a.installed ? "Not installed" : a.signedIn ? "Ready" : "Sign-in?";
+			if (a.problem) tag.title = a.problem;
+			const sp = document.createElement("span");
+			sp.className = "spacer";
+			head.append(name, sp, tag);
+			card.appendChild(head);
+
+			const models = document.createElement("div");
+			models.className = "models";
+			const known = (s.modelCatalog || {})[a.id] || [];
+			const prefs = (s.models || {})[a.id] || {};
+			const hidden = new Set(prefs.hidden || []);
+			if (!known.length) {
+				const e = document.createElement("div");
+				e.className = "empty";
+				e.textContent = a.installed ? "Pick " + a.label + " in a chat once and its models appear here." : "Install " + a.label + " to use it.";
+				models.appendChild(e);
+			}
+			for (const m of known) {
+				const row = document.createElement("div");
+				row.className = "model" + (hidden.has(m.value) ? " hidden-model" : "");
+				const cb = document.createElement("input");
+				cb.type = "checkbox";
+				cb.checked = !hidden.has(m.value);
+				cb.title = "Show in the chat's model picker";
+				cb.onchange = () => { post({ type: "setModelVisible", agent: a.id, value: m.value, visible: cb.checked }); saved(); };
+				const nm = document.createElement("div");
+				nm.className = "name";
+				const t = document.createElement("div");
+				t.textContent = m.name;
+				nm.appendChild(t);
+				if (m.description) {
+					const d = document.createElement("span");
+					d.textContent = m.description;
+					d.title = m.description;
+					nm.appendChild(d);
+				}
+				const def = document.createElement("button");
+				def.className = "default-btn";
+				const isDefault = prefs.preferred === m.value;
+				def.setAttribute("aria-pressed", String(isDefault));
+				def.textContent = isDefault ? "Default" : "Make default";
+				def.onclick = () => { post({ type: "setPreferredModel", agent: a.id, value: isDefault ? "" : m.value }); saved(); };
+				row.append(cb, nm, def);
+				models.appendChild(row);
+			}
+			card.appendChild(models);
+
+			const adv = document.createElement("details");
+			adv.dataset.agent = a.id;
+			if (open.has(a.id)) adv.open = true;
+			const sum = document.createElement("summary");
+			sum.textContent = "Launch command" + (a.launch ? " · " + a.launch : "");
+			adv.appendChild(sum);
+			const fields = document.createElement("div");
+			fields.className = "fields";
+			const cur = (s.agents || {})[a.id] || {};
+			const mk = (label, value, placeholder, onSave) => {
+				const f = document.createElement("div");
+				f.className = "field";
+				const l = document.createElement("label");
+				l.className = "label";
+				l.textContent = label;
+				const inp = document.createElement("input");
+				inp.type = "text";
+				inp.value = value || "";
+				inp.placeholder = placeholder;
+				inp.onchange = () => onSave(inp.value.trim());
+				f.append(l, inp);
+				return f;
+			};
+			const saveLaunch = (command, args) => {
+				const agents = { ...(state.settings.agents || {}) };
+				if (command) agents[a.id] = { ...cur, command, args: args ? args.split(/\s+/).filter(Boolean) : [] };
+				else delete agents[a.id];
+				set({ agents });
+			};
+			const cmd = mk("Command", cur.command, "default", (v) => saveLaunch(v, (cur.args || []).join(" ")));
+			const args = mk("Arguments", (cur.args || []).join(" "), "none", (v) => saveLaunch(cur.command || "", v));
+			fields.append(cmd, args);
+			adv.appendChild(fields);
+			card.appendChild(adv);
+			list.appendChild(card);
+		});
+		agentsShown = true;
+	}
+
+	function renderChat(s) {
+		seg($("chatSide"), s.chat.side, (v) => set({ chat: { ...state.settings.chat, side: v } }));
+		$("chatWidth").value = s.chatWidth;
+		$("startCollapsed").checked = s.chat.startCollapsed;
+		$("allowAllByDefault").checked = s.chat.allowAllByDefault;
+	}
+	$("chatWidth").addEventListener("change", (e) => {
+		const v = Math.max(280, Math.min(900, Number(e.target.value) || 400));
+		set({ chatWidth: v });
+	});
+	$("startCollapsed").addEventListener("change", (e) => set({ chat: { ...state.settings.chat, startCollapsed: e.target.checked } }));
+	$("allowAllByDefault").addEventListener("change", (e) => set({ chat: { ...state.settings.chat, allowAllByDefault: e.target.checked } }));
+
+	function renderEditor(s) {
+		for (const el of document.querySelectorAll("[data-editor]")) {
+			const v = s.editor[el.dataset.editor];
+			if (el.type === "checkbox") el.checked = !!v;
+			else el.value = v;
+		}
+	}
+	for (const el of document.querySelectorAll("[data-editor]")) {
+		el.addEventListener("change", () => {
+			const v = el.type === "checkbox" ? el.checked : Number(el.value);
+			set({ editor: { ...state.settings.editor, [el.dataset.editor]: v } });
+		});
+	}
+
+	function renderShapes(s) {
+		const box = $("locations");
+		box.textContent = "";
+		const locs = s.shapes.locations;
+		if (!locs.length) {
+			const e = document.createElement("div");
+			e.className = "row";
+			e.innerHTML = '<div class="what"><span>No shape folders or libraries yet.</span></div>';
+			box.appendChild(e);
+		}
+		locs.forEach((l, i) => {
+			const row = document.createElement("div");
+			row.className = "loc";
+			const on = document.createElement("input");
+			on.type = "checkbox";
+			on.checked = l.enabled;
+			on.title = "Show in the shapes sidebar";
+			const mid = document.createElement("div");
+			const nm = document.createElement("input");
+			nm.type = "text";
+			nm.value = l.name || "";
+			nm.placeholder = l.path.split(/[\\/]/).pop();
+			const p = document.createElement("div");
+			p.className = "path";
+			p.textContent = l.path;
+			p.title = l.path;
+			mid.append(nm, p);
+			const btns = document.createElement("span");
+			const reveal = document.createElement("button");
+			reveal.className = "btn btn-sm btn-ghost";
+			reveal.textContent = "Show";
+			reveal.onclick = () => post({ type: "revealShapeLocation", path: l.path });
+			const rm = document.createElement("button");
+			rm.className = "btn btn-sm btn-ghost";
+			rm.textContent = "Remove";
+			const update = (patch) => set({ shapes: { locations: state.settings.shapes.locations.map((x, j) => (j === i ? { ...x, ...patch } : x)) } });
+			on.onchange = () => update({ enabled: on.checked });
+			nm.onchange = () => update({ name: nm.value.trim() || undefined });
+			rm.onclick = () => set({ shapes: { locations: state.settings.shapes.locations.filter((_, j) => j !== i) } });
+			btns.append(reveal, rm);
+			row.append(on, mid, btns);
+			box.appendChild(row);
+		});
+	}
+	$("addFolder").onclick = () => post({ type: "addShapeLocation", kind: "folder" });
+	$("addLibrary").onclick = () => post({ type: "addShapeLocation", kind: "file" });
+	$("openFile").onclick = () => post({ type: "openSettingsFile" });
+
+	bridge.onMessage((m) => {
+		if (m.type === "state") {
+			state = m;
+			$("version").textContent = "Draw.AI " + (m.version || "");
+			$("openFile").title = m.file;
+			renderAppearance(m.settings);
+			renderAgents(m.settings);
+			renderChat(m.settings);
+			renderEditor(m.settings);
+			renderShapes(m.settings);
+		} else if (m.type === "section") show(m.section);
+	});
+	post({ type: "ready" });
+})();
+</script>
+</body>
+</html>

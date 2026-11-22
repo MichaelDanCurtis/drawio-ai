@@ -158,7 +158,8 @@ claude mcp add --scope user draw-ai-desktop -- ~/.drawio-ai/bin/draw-ai-desktop-
 
 ## Presentation mode
 
-**View → Presentation Mode** (F5, or Cmd/Ctrl+Shift+Enter) shows only the diagram, full
+**View → Presentation Mode** (F5, Cmd/Ctrl+Shift+Enter, or the screen button in the
+toolbar) shows only the diagram, full
 screen and read-only. Drag with either mouse button to move around, scroll or pinch to
 zoom, F to fit. Pages are dots in the bottom left: click one, or use Tab / Shift+Tab or
 the arrow keys. Esc returns to the editor. Presenting never edits or marks the diagram
@@ -181,6 +182,16 @@ rise in. Under *reduce motion* nothing moves.
   (`build.mjs` copies them).
 - draw.io's chrome: `src/renderer/theme.js`, a draw.io plugin that only changes
   draw.io's theme variables, its UI font and its primary buttons, never diagrams.
+- Icons: `src/renderer/ui/icons.js` draws every icon (the chat's, Settings' and draw.io's
+  toolbar) from one flat glyph set in four styles: classic (flat), isometric line,
+  dot-matrix 3D and soft extruded. Each glyph is stood up in 3D, given depth and turned
+  a little; `src/renderer/desktop-toolbar.js` swaps draw.io's own toolbar images.
+- The toolbar: the Draw.AI mark before File (opens Settings); Layers, Tags, Outline and
+  Presentation mode as buttons; a chat button at the right end. The panel menu keeps
+  only Shapes, Ruler and Fullscreen (Format and Find/Replace have their own places).
+- The chat slides away and back (the button in its head, the toolbar's chat button, or
+  Cmd/Ctrl+J), docks left or right, and resizes by dragging its inner edge. Its agent
+  and model pickers are in-app menus that show each model's version and description.
 - `DRAWAI_THEME=light|dark` forces the appearance (for checks and screenshots).
 
 ## How it works
@@ -238,14 +249,31 @@ the packaged app.
 
 ## Settings
 
-**Draw.AI → Settings…** opens `settings.json` in the app's data folder. Everything
-is optional:
+**Draw.AI → Settings…** (Cmd/Ctrl+, or the dot mark before File) opens the Settings
+window. Changes save at once and reach open windows straight away:
+
+- **Appearance:** System, Light or Dark; the icon style.
+- **Agents & models:** for each agent, the models its picker shows (an agent lists its
+  models the first time it runs), the model a new chat starts with, and the command that
+  launches it.
+- **Chat:** which side it docks on, its width, starting tucked away, and "Allow all" by
+  default.
+- **Editor:** reviewing AI changes, flashing and selecting changed shapes, how many
+  shapes the agent gets as context.
+- **Shapes:** folders of SVG/PNG files and draw.io library files (`.xml`), shown as
+  palettes in the shapes sidebar (up to 400 images per folder, two levels deep; links
+  out of a folder are skipped).
+
+Everything lives in `settings.json` in the app's data folder ("Open settings.json" in
+the window), for example:
 
 ```json
 {
+	"appearance": { "theme": "dark", "iconStyle": "isometric" },
+	"chat": { "side": "right", "startCollapsed": false, "allowAllByDefault": false },
+	"models": { "claude": { "hidden": ["haiku"], "preferred": "opus" } },
 	"agents": { "codex": { "command": "/opt/tools/codex-acp", "args": [], "env": {} } },
-	"chatWidth": 420,
-	"editor": { "drawio-ai.reviewChanges": true, "drawio-ai.flashChanges": true }
+	"shapes": { "locations": [{ "path": "/Users/me/Icons", "enabled": true }] }
 }
 ```
 
