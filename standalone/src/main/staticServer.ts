@@ -71,6 +71,8 @@ export class StaticServer {
 			// function, so "$" in it is not read as a replacement pattern, and "<" is escaped, so it cannot
 			// end the page's script. The page keeps the object where the app's plugin can update it.
 			.replace("$$localStorage$$", () => `(Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true }), (window.omnidrawStorage = ${storageLiteral(typeof o.localStorage === "function" ? o.localStorage() : o.localStorage)}))`)
+			// (the look and the toolbar's place are in the page's address: see DiagramWindow)
+			.replace("$$omniConfig$$", "null")
 			.replace("$$additionalCode$$", "[]");
 	}
 

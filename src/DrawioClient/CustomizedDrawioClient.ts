@@ -106,6 +106,53 @@ export class CustomizedDrawioClient extends DrawioClient<
 		this.sendCustomAction({ action: "aiResolveReview", decision, cellIds });
 	}
 
+	private readonly onEditorCommandEmitter = new EventEmitter<{ command: string }>();
+	/** A button or key of the editor tools shared with the desktop app ("present", "exitPresentation", "settings"). */
+	public readonly onEditorCommand = this.onEditorCommandEmitter.asEvent();
+
+	/** Changes icons, the matrix or the toolbar's place in the open editor. */
+	public setEditorPrefs(prefs: { iconStyle?: string; toolbar?: string; matrix?: string }): void {
+		this.sendCustomAction({ action: "desktopPrefs", ...prefs });
+	}
+
+	public setPresenting(enabled: boolean): void {
+		this.sendCustomAction({ action: "desktopPresentation", enabled });
+	}
+
+	private lookState: DesktopLookState | undefined;
+	private lookStateRequest = 0;
+	private readonly lookStateWaiters = new Map<number, (state: DesktopLookState) => void>();
+
+	private readonly onEditorToolsLoadedEmitter = new EventEmitter<{ state: DesktopLookState }>();
+	/** The editor tools have loaded in the editor's page (again after each time the page loads). */
+	public readonly onEditorToolsLoaded = this.onEditorToolsLoadedEmitter.asEvent();
+
+	/** True once the editor tools have loaded in this editor's page. */
+	public get editorToolsLoaded(): boolean {
+		return this.lookState !== undefined;
+	}
+
+	/**
+	 * What the editor tools show now; undefined when they are not loaded (turned off, a
+	 * read-only editor, a page still loading) or do not answer in time.
+	 */
+	public async editorLookState(timeoutMs = 3000): Promise<DesktopLookState | undefined> {
+		if (!this.editorToolsLoaded) {
+			return undefined;
+		}
+		// (the page gets every message twice and answers twice: the answer names its request)
+		const reqId = ++this.lookStateRequest;
+		const answer = new Promise<DesktopLookState>((resolve) => this.lookStateWaiters.set(reqId, resolve));
+		this.sendCustomAction({ action: "desktopReportState", reqId });
+		try {
+			return await withTimeout(answer, timeoutMs, "The editor tools did not answer.");
+		} catch {
+			return undefined;
+		} finally {
+			this.lookStateWaiters.delete(reqId);
+		}
+	}
+
 	private selectedCellIds: string[] = [];
 	public get currentSelection(): readonly string[] {
 		return this.selectedCellIds;
@@ -354,6 +401,23 @@ export class CustomizedDrawioClient extends DrawioClient<
 	}
 
 	protected async handleEvent(evt: CustomDrawioEvent): Promise<void> {
+		// The shared editor tools' messages. They are not consumed here: the desktop app,
+		// which uses this client too, takes them from onUnknownMessage (see the end).
+		if (evt.event === "desktopCommand") {
+			if (typeof evt.command === "string") {
+				this.onEditorCommandEmitter.emit({ command: evt.command });
+			}
+		} else if (evt.event === "desktopState") {
+			if (evt.state && typeof evt.state === "object") {
+				this.lookState = evt.state;
+				if (evt.loaded) {
+					this.onEditorToolsLoadedEmitter.emit({ state: evt.state });
+				} else if (typeof evt.reqId === "number") {
+					this.lookStateWaiters.get(evt.reqId)?.(evt.state);
+				}
+			}
+		}
+
 		if (evt.event === "nodeSelected") {
 			this.onNodeSelectedEmitter.emit({
 				label: evt.label,
@@ -361,6 +425,9 @@ export class CustomizedDrawioClient extends DrawioClient<
 			});
 		} else if (evt.event === "pluginLoaded") {
 			if (evt.pluginId === "ai") {
+				// A page has loaded. The editor tools load after this plugin and report
+				// themselves then: until they do, this page has none.
+				this.lookState = undefined;
 				this.aiPluginLoaded = true;
 				this.latestReview = undefined;
 				this.aiPluginWaiters.splice(0).forEach((resolve) => resolve());
@@ -388,6 +455,7 @@ export class CustomizedDrawioClient extends DrawioClient<
 			this.onAiReviewEmitter.emit(evt);
 		} else if (evt.event === "invokeCommand") {
 			this.onInvokeCommandEmitter.emit({ command: evt.command });
+
 		} else if (evt.event === "selectedRectangleChanged") {
 			this.onSelectedRectangleChangedEmitter.emit({
 				rectangle: evt.rect,

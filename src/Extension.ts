@@ -12,6 +12,7 @@ import { DrawioClientFactory } from "./DrawioClient";
 import { registerFailableCommand } from "./utils/registerFailableCommand";
 import { registerImportCommands } from "./features/importDiagram";
 import { SidebarFeature } from "./features/SidebarFeature";
+import { EditorLookFeature } from "./features/EditorLookFeature";
 
 export class Extension {
 	public readonly dispose = Disposable.fn();
@@ -42,6 +43,9 @@ export class Extension {
 		new AiFeature(this.context, this.editorService)
 	);
 	private readonly sidebarFeature = this.dispose.track(new SidebarFeature());
+	private readonly editorLookFeature = this.dispose.track(
+		new EditorLookFeature(this.editorService, this.context.extension.id)
+	);
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		for (const d of registerImportCommands(

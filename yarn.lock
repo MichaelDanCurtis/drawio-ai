@@ -183,6 +183,16 @@
     minimatch "^3.0.4"
     strip-json-comments "^3.1.1"
 
+"@fontsource/space-grotesk@^5.3.0":
+  version "5.3.0"
+  resolved "https://registry.yarnpkg.com/@fontsource/space-grotesk/-/space-grotesk-5.3.0.tgz#248f33358ba78cee84832832f7a79c77a096c7e0"
+  integrity sha512-ksnGizDPXIDuvqcTYTSrmZ+evx9sDlS8rp7+42BQ7wU+spt3twEoXfbJz672C+5CLg6VeUQwRy5RXshWb67LcQ==
+
+"@fontsource/space-mono@^5.3.0":
+  version "5.3.0"
+  resolved "https://registry.yarnpkg.com/@fontsource/space-mono/-/space-mono-5.3.0.tgz#6e45e0284066e6f637c35bd7af0469ce13817c60"
+  integrity sha512-FrpBMOVWn3PRdRHlrZWC55X3kZG/2BTH7SM5ZyS/bky3iKya2BturI5lk+t0RoDQL2JyHzURsVq/EisCsxpI5A==
+
 "@hediet/json-to-dictionary@^0.2.1":
   version "0.2.1"
   resolved "https://registry.yarnpkg.com/@hediet/json-to-dictionary/-/json-to-dictionary-0.2.1.tgz#930357c9f001389bd7cf0004107a0b6f1b864af2"

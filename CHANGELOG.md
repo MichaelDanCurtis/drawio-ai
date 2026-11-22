@@ -13,9 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The diagram editor gets the editor tools and the look of the OmniDraw desktop app:
+  - **Toolbar buttons** for Layers, Tags, Outline, the ruler and presentation mode. The first toolbar button now opens and closes the Shapes panel with one click, and the dot mark at the start of the toolbar opens these settings.
+  - **Presentation mode** (the toolbar button, or **Draw.AI: Presentation Mode**): only the diagram, read-only, filling the editor. **Exit** is at the bottom left, **Previous** / **Next** and the page count at the bottom right, pages are dots; the arrow keys, Tab and Space step through pages and Esc leaves. Nothing in the file changes.
+  - **The look**: warm paper in light mode and black in dark mode, with the dot matrix behind the toolbars and panels (dots near the pointer brighten and lean away; it is never drawn over the diagram), four icon styles (Classic, Dot matrix 2D, Dot matrix 3D, Realistic 3D), the toolbar at the top, left, right or bottom, and quick tooltips.
+  - Settings under **Draw.AI › Look**: `drawio-ai.look.theme` (`omni` or `drawio` for draw.io's standard colours and font), `drawio-ai.look.icons`, `drawio-ai.look.matrix`, `drawio-ai.look.toolbar`. Icons, the matrix and the toolbar's place change in the open editor without loading it again. `drawio-ai.look.editorTools: false` gives the editor as it was. Light or dark still follows `drawio-ai.appearance`.
+  - With draw.io's `min`, `simple` and `sketch` themes, which have toolbars of their own, the editor gets presentation mode (from the command) and quick tooltips only.
 - The Draw.AI icon is back in the activity bar, with two views:
   - **Start**: New Diagram, Open Draw.AI in Chat, Diagram from Code…, Diagram from Sketch…, Import from Another Tool…, Export to PDF…, Design Templates… and Connect Claude Code / Codex…
   - **Diagrams**: every diagram in the workspace (`.drawio`, `.dio`, `.drawio.svg`, `.drawio.png`), kept up to date as files are added or removed. A diagram opens in Draw.AI whatever the default editor for its type is; **Open to the Side** and **Reveal in Explorer View** are on each row
+
+### Fixed
+
+- Text in draw.io's stored settings (the Scratchpad, custom libraries) or in a plugin file could change the editor page when it held `$&`, `$1` or `</script>`: the page is now filled in one pass and such text is written as script literals.
+- The editor's plugins load in a fixed order.
 
 ## [0.3.0]
 

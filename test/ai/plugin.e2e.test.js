@@ -40,6 +40,7 @@ function editorHtml() {
 		.replace("$$chrome$$", JSON.stringify("1"))
 		.replace("$$customPluginPaths$$", JSON.stringify([`${base}/plugin.js`]))
 		.replace("$$localStorage$$", "{}")
+		.replace("$$omniConfig$$", "null")
 		.replace("$$additionalCode$$", "[]");
 }
 

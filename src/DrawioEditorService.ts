@@ -197,7 +197,7 @@ export class DrawioEditorService {
 		);
 		closed.catch(() => undefined);
 		try {
-			const client = await this.drawioClientFactory.createDrawioClientInWebview(forUri, panel, { isReadOnly: false });
+			const client = await this.drawioClientFactory.createDrawioClientInWebview(forUri, panel, { isReadOnly: false, editorTools: false });
 			client.onInit.sub(() => void client.loadXmlLike(""));
 			return await Promise.race([task(client), closed]);
 		} finally {

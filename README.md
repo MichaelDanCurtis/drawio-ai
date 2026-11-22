@@ -172,6 +172,24 @@ the diagram will stay visible.
 
 ![](./docs/demo-code-link.gif)
 
+## Editor Tools and Look
+
+The diagram editor has the editor tools and the look of the OmniDraw desktop app:
+
+-   **Toolbar buttons** for Layers, Tags, Outline, the ruler and presentation mode. The first button opens and closes the Shapes panel with one click; the dot mark at the start of the toolbar opens the settings below.
+-   **Presentation mode** (the toolbar button, or **Draw.AI: Presentation Mode** in the Command Palette): only the diagram, read-only, filling the editor. **Exit** is at the bottom left, **Previous** / **Next** at the bottom right, and pages are dots. The arrow keys, Tab and Space step through the pages; Esc leaves. Presenting changes nothing in the file. For the whole screen, use VS Code's own full screen or Zen Mode with it.
+-   **The look**: warm paper in light mode, black in dark mode, a dot matrix behind the toolbars and panels (never over the diagram), and quick tooltips.
+
+| Setting | What it does |
+| --- | --- |
+| `drawio-ai.look.theme` | `omni` (default) or `drawio` for draw.io's standard colours and font. Light or dark follows `drawio-ai.appearance` either way; set that to `automatic` to follow VS Code's theme. |
+| `drawio-ai.look.icons` | `classic`, `dots2d` (default), `dots` or `real`. |
+| `drawio-ai.look.matrix` | `grey` (default), `green` or `off`. |
+| `drawio-ai.look.toolbar` | `top` (default), `left`, `right` or `bottom`. |
+| `drawio-ai.look.editorTools` | `false` turns all of the above off: the editor as it was before 0.4. |
+
+Icons, the matrix and the toolbar's place change in the open editor; the theme and `editorTools` load the editor again. With draw.io's `min`, `simple` and `sketch` themes (`drawio-ai.theme`), which have toolbars of their own, the editor gets presentation mode and quick tooltips only. Read-only views (a diff, an old version) are not changed.
+
 ## Themes
 
 <details>

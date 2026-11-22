@@ -18,6 +18,7 @@ import { autorun, observable, runInAction, untracked } from "mobx";
 import { sha256 } from "js-sha256";
 import { getDrawioExtensions } from "../DrawioExtensionApi";
 import { BufferImpl } from "../utils/buffer";
+import { editorPluginPaths, fillTemplate, OMNI_DIR, omniConfig, scriptLiteral } from "../features/editorLook";
 
 export class DrawioClientFactory {
 	constructor(
@@ -67,6 +68,10 @@ export class DrawioClientFactory {
 				config.theme;
 				config.appearance;
 				config.appearanceFollowsSystem;
+				// Which plugins the page loads (the look's theme, the editor tools). Icons,
+				// the matrix and the toolbar's place change in the open editor instead
+				// (EditorLookFeature), so they are read untracked in getOfflineHtml.
+				config.lookPlugins;
 				const html =
 					this.getHtml(config, options, webview, plugins) +
 					" ".repeat(i++);
@@ -280,6 +285,12 @@ export class DrawioClientFactory {
 		);
 
 		const localStorage = untracked(() => config.localStorage);
+		// The desktop app's editor tools and look (see features/editorLook.ts).
+		const look = untracked(() => config.look);
+		const omniBase = webview
+			.asWebviewUri(Uri.joinPath(this.extensionUri, OMNI_DIR))
+			.toString()
+			.replace(/\/$/, "");
 
 		// Read theme values UNTRACKED so a system dark-mode change (which flips
 		// vscodeTheme.kind via resolvedTheme) does NOT trigger a full webview
@@ -294,28 +305,36 @@ export class DrawioClientFactory {
 			};
 		});
 
-		// TODO use template engine
-		// Prevent injection attacks by using JSON.stringify.
-		const patchedHtml = html
-			.replace(/\$\$literal-vsuri\$\$/g, vsuri.toString())
-			.replace("$$theme$$", JSON.stringify(themeVals.theme))
-			.replace("$$appearance$$", JSON.stringify(themeVals.appearance))
-			.replace("$$dark$$", JSON.stringify(themeVals.dark))
-			.replace("$$lang$$", JSON.stringify(config.drawioLanguage))
-			.replace("$$simpleLabels$$", JSON.stringify(config.simpleLabels))
-			.replace(
-				"$$chrome$$",
-				JSON.stringify(options.isReadOnly ? "0" : "1")
-			)
-			.replace(
-				"$$customPluginPaths$$",
-				JSON.stringify([customPluginsPath.toString()])
-			)
-			.replace("$$localStorage$$", JSON.stringify(localStorage))
-			.replace(
-				"$$additionalCode$$",
-				JSON.stringify(plugins.map((p) => p.jsCode))
-			);
+		const pageKind = {
+			readOnly: options.isReadOnly || options.editorTools === false,
+			drawioTheme: themeVals.theme,
+		};
+
+		// Values that hold text from outside (draw.io's storage, plugin code) go in as
+		// script literals: "</script>" in them cannot end the page's script. One pass
+		// over the template, through a function: a value is never searched for
+		// placeholders itself, and "$&" or "$1" in it is not read as a pattern.
+		const values: Record<string, string> = {
+			"literal-vsuri": vsuri.toString(),
+			theme: scriptLiteral(themeVals.theme),
+			appearance: scriptLiteral(themeVals.appearance),
+			dark: scriptLiteral(themeVals.dark),
+			lang: scriptLiteral(config.drawioLanguage),
+			simpleLabels: scriptLiteral(config.simpleLabels),
+			chrome: scriptLiteral(options.isReadOnly ? "0" : "1"),
+			customPluginPaths: scriptLiteral(
+				editorPluginPaths(
+					look,
+					omniBase,
+					customPluginsPath.toString(),
+					pageKind
+				)
+			),
+			localStorage: scriptLiteral(localStorage),
+			omniConfig: scriptLiteral(omniConfig(look, omniBase, pageKind)),
+			additionalCode: scriptLiteral(plugins.map((p) => p.jsCode)),
+		};
+		const patchedHtml = fillTemplate(html, values);
 		return patchedHtml;
 	}
 
@@ -387,6 +406,8 @@ export class DrawioClientFactory {
 
 export interface DrawioClientOptions {
 	isReadOnly: boolean;
+	/** False for a page nobody looks at: it loads without the editor tools and the look. */
+	editorTools?: boolean;
 }
 
 function getNonce(): string {

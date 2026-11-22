@@ -1058,6 +1058,12 @@
 				"icon": "$(sparkle)"
 			},
 			{
+				"command": "drawio-ai.present",
+				"title": "Presentation Mode",
+				"category": "Draw.AI",
+				"icon": "$(play)"
+			},
+			{
 				"command": "drawio-ai.useForDiagrams",
 				"title": "Use Draw.AI for Diagram Files",
 				"category": "Draw.AI"
@@ -1386,6 +1392,94 @@
 						"default": 400,
 						"minimum": 20,
 						"description": "Maximum number of cells sent to the model when it reads the diagram."
+					}
+				}
+			},
+			{
+				"title": "Look and editor tools",
+				"order": 7,
+				"properties": {
+					"drawio-ai.look.editorTools": {
+						"type": "boolean",
+						"default": true,
+						"order": 10,
+						"markdownDescription": "The editor tools Draw.AI shares with the OmniDraw desktop app: toolbar buttons for Layers, Tags, Outline, the ruler and presentation mode, a Shapes panel that opens and closes with one click, quick tooltips, the dot matrix and the look chosen below. Turn this off for the editor as it was before 0.4."
+					},
+					"drawio-ai.look.theme": {
+						"type": "string",
+						"default": "omni",
+						"enum": [
+							"omni",
+							"drawio"
+						],
+						"order": 20,
+						"enumItemLabels": [
+							"Draw.AI",
+							"draw.io"
+						],
+						"enumDescriptions": [
+							"Draw.AI's own look: warm paper in light mode, black in dark mode.",
+							"draw.io's standard colours and font."
+						],
+						"markdownDescription": "The colours and font of the editor's toolbars and panels. Diagrams are never changed. Light or dark still follows `#drawio-ai.appearance#` (set it to `automatic` to follow VS Code's theme)."
+					},
+					"drawio-ai.look.icons": {
+						"type": "string",
+						"default": "dots2d",
+						"enum": [
+							"classic",
+							"dots2d",
+							"dots",
+							"real"
+						],
+						"order": 30,
+						"enumItemLabels": [
+							"Classic",
+							"Dot matrix 2D",
+							"Dot matrix 3D",
+							"Realistic 3D"
+						],
+						"enumDescriptions": [
+							"draw.io's flat icons.",
+							"Icons drawn in dots.",
+							"Icons drawn in dots, with depth.",
+							"Small coloured objects."
+						],
+						"description": "The style of the toolbar's icons."
+					},
+					"drawio-ai.look.matrix": {
+						"type": "string",
+						"default": "grey",
+						"enum": [
+							"grey",
+							"green",
+							"off"
+						],
+						"order": 40,
+						"enumItemLabels": [
+							"Grey",
+							"Green",
+							"Off"
+						],
+						"description": "The dot matrix behind the toolbars and panels: dots near the pointer brighten and lean away. It is never drawn over the diagram."
+					},
+					"drawio-ai.look.toolbar": {
+						"type": "string",
+						"default": "top",
+						"enum": [
+							"top",
+							"left",
+							"right",
+							"bottom"
+						],
+						"order": 50,
+						"enumItemLabels": [
+							"Top",
+							"Left",
+							"Right",
+							"Bottom"
+						],
+						"description": "Where the editor's toolbar is."
 					}
 				}
 			},
@@ -1902,8 +1996,8 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js",
-		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js test/ai/look.test.js",
+		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js test/ai/look.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"
 	},
@@ -1935,6 +2029,8 @@
 	"devDependencies": {
 		"@actions/exec": "^1.0.4",
 		"@actions/github": "^2.2.0",
+		"@fontsource/space-grotesk": "^5.3.0",
+		"@fontsource/space-mono": "^5.3.0",
 		"@hediet/semver": "^0.2.1",
 		"@types/copy-webpack-plugin": "^8.0.1",
 		"@types/mithril": "^2.0.4",
