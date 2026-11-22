@@ -3,6 +3,16 @@
  * In OmniDraw they are switches in the Shape Workshop, next to the galleries; the editor
  * reports them and the app passes the list on.
  */
+/**
+ * draw.io's saved storage, ready for an editor page: with a Scratchpad in it. A profile from
+ * before the Scratchpad was kept here names it in draw.io's settings but has no shapes for it;
+ * draw.io then fails to load it and drops it from the sidebar for good. An empty one loads.
+ */
+export function withScratchpad(storage: Record<string, string>): Record<string, string> {
+	if (typeof storage[".scratchpad"] !== "string" || !/^\s*<mxlibrary[\s>]/.test(storage[".scratchpad"])) storage[".scratchpad"] = "<mxlibrary>[]</mxlibrary>";
+	return storage;
+}
+
 export interface ShapeSetGroup {
 	title: string;
 	entries: { id: string; title: string; on: boolean }[];

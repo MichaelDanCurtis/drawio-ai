@@ -160,3 +160,11 @@ test("draw.io's shape sets from the editor are passed on as plain short values o
 	assert.deepEqual(out[1].entries, [{ id: ".scratchpad", title: ".scratchpad", on: true }]);
 	assert.equal(out.length, 2, "groups without usable entries are left out");
 });
+
+test("an editor page always gets a Scratchpad, also with a profile from before it was kept here", () => {
+	const { withScratchpad } = require("../src/main/shapeSets");
+	assert.equal(withScratchpad({})[".scratchpad"], "<mxlibrary>[]</mxlibrary>");
+	const kept = '<mxlibrary>[{"xml":"x","w":90,"h":40}]</mxlibrary>';
+	assert.equal(withScratchpad({ ".scratchpad": kept })[".scratchpad"], kept, "shapes that are there stay");
+	assert.equal(withScratchpad({ ".scratchpad": "<mxfile/>" })[".scratchpad"], "<mxlibrary>[]</mxlibrary>", "something that is not a library is replaced");
+});

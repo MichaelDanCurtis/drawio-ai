@@ -1,4 +1,4 @@
-import { cleanShapeSets, type ShapeSetGroup } from "./shapeSets";
+import { cleanShapeSets, withScratchpad, type ShapeSetGroup } from "./shapeSets";
 import { app, BaseWindow, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
@@ -40,7 +40,7 @@ export function drawioLocalStorage(): Record<string, string> {
 			localStorage = {};
 		}
 	}
-	return localStorage!;
+	return withScratchpad(localStorage!);
 }
 
 /** One diagram: a window with the draw.io editor on the left and the agent chat on the right. */

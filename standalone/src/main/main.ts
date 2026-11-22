@@ -45,6 +45,11 @@ function applyTheme(): void {
 // collide with a copy of the app that is already running.
 if (process.env.DRAWAI_E2E) {
 	app.setPath("userData", fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-data-")));
+	// It starts like a profile from an earlier version: draw.io's settings name the Scratchpad, nothing is kept for it yet.
+	fs.writeFileSync(
+		path.join(app.getPath("userData"), "drawio-local-storage.json"),
+		JSON.stringify({ ".drawio-config@undefined": JSON.stringify({ language: "", customFonts: [], libraries: "general", customLibraries: ["L.scratchpad"], plugins: [], recentColors: [], formatWidth: 0, sidebarWidth: 232, pageFormat: { x: 0, y: 0, width: 850, height: 1100 }, search: true, darkMode: "auto", autosave: true, openCounter: 0, version: 18, unit: 1, isRulerOn: true, ui: "" }) })
+	);
 	// Nor the user's ~/.drawio-ai (the desktop MCP endpoint's address file and launcher).
 	process.env.DRAWIO_AI_HOME ||= fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-home-"));
 }

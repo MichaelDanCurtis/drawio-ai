@@ -591,6 +591,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	(second as any).win?.destroy?.();
 	await pause(300);
 	log("scratchpad", { before: scratch0, after: scratch1, keptByApp: kept.includes("kept shape") || /mxlibrary/.test(kept), keptBytes: kept.length, inNewWindow: scratch2 });
+	if (!scratch0.open || scratch1.items !== scratch0.items + 1 || !/mxlibrary/.test(kept) || scratch2.items !== scratch1.items) throw new Error("The Scratchpad does not keep its shapes (see the scratchpad line above).");
 
 	// the Format panel has the chat's live dot field in its top right corner
 	await pause(600);
@@ -813,6 +814,7 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	const reopened = await until("the Workshop from More Shapes", async () => (ww.isVisible() ? true : undefined)).catch(() => false);
 	const drawioDialog = await ed.executeJavaScript(`!!document.querySelector(".geDialog")`);
 	log("shapeSets", { listed: sets, uml: { before: umlBefore, switchedOn: umlSwitch, paletteShown: umlOn, remembered: keptOn }, scratchpad: { before: padBefore, off: padOff, back: padBack }, galleriesKept: ["theSVG", "Tech logos", "UI icons"].every((t) => stillThere.some((x) => x.startsWith(t))), moreShapesOpensWorkshop: reopened, drawioDialog });
+	if (!umlOn || !keptOn || !padOff || !padBack || !reopened || drawioDialog) throw new Error("The Workshop does not switch draw.io's shape sets as it should (see the shapeSets line above).");
 
 	// dark
 	process.env.DRAWAI_THEME = "dark";
