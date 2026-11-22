@@ -531,6 +531,27 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	undo?.click();
 	await pause(800);
 	log("menuUndo", { found: !!undo, before: c0, afterAdd: c1, afterUndo: await cells() });
+	// with the new shape selected (draw.io then keeps a hidden text field focused), Undo still works
+	await rpcTool(w, "drawio_apply_operations", { ops: [{ op: "addShape", label: "selected", x: 120, y: 10, width: 80, height: 40 }] });
+	await pause(500);
+	const added = JSON.parse(((await rpcTool(w, "drawio_find_cells", { query: "selected" })) as any).text ?? "{}");
+	const addedId = (added.cells ?? added.matches ?? added)[0]?.id;
+	if (addedId) await rpcTool(w, "drawio_select_cells", { ids: [addedId] });
+	ed.focus();
+	await pause(400);
+	const s1 = await cells();
+	const focusIsShim = await ed.executeJavaScript(`(() => { const a = document.activeElement; return a ? (a.className || a.tagName) : null; })()`);
+	Menu.getApplicationMenu()!.items.find((i) => i.label === "Edit")?.submenu?.items.find((i) => /^Undo/.test(i.label))?.click();
+	await pause(800);
+	log("menuUndoWithSelection", { selected: !!addedId, focus: focusIsShim, before: s1, afterUndo: await cells() });
+	// a draw.io shortcut that reaches the menu while the chat has focus does nothing to the diagram
+	const dup = Menu.getApplicationMenu()!.items.find((i) => i.label === "Edit")?.submenu?.items.find((i) => /^Duplicate/.test(i.label));
+	const d0 = await cells();
+	chat.focus();
+	await pause(200);
+	(dup as any)?.click({ triggeredByAccelerator: true }, undefined, { triggeredByAccelerator: true });
+	await pause(800);
+	log("menuKeyFromChatIgnored", { found: !!dup, before: d0, after: await cells() });
 
 	await ed.executeJavaScript(`(() => { const b = document.querySelector(".geToolbarContainer a.geButton:not(.drawai-mark)"); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); })()`);
 	await pause(400);

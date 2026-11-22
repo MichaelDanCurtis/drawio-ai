@@ -10,11 +10,10 @@
 	var NAMES = ["file", "edit", "view", "arrange", "extras"];
 
 	Draw.loadPlugin(function (ui) {
-		var nextId = 1;
+		// Items are named by their place and label ("view/3/Grid"), so the same item keeps its id
+		// from one snapshot to the next: the app rebuilds the menu bar only when something
+		// changed, and a click from a menu built a moment ago still finds its item.
 		var fns = {};
-		// The menu bar is rebuilt a moment after each snapshot: keep the last few snapshots'
-		// items runnable, so a click from a menu built just before a newer snapshot still works.
-		var older = [];
 
 		function post(msg) {
 			window.VsCodeApi.postMessage(JSON.stringify(msg));
@@ -32,9 +31,11 @@
 				if (parent && parent.__drawaiNode) return parent.__drawaiNode.children || (parent.__drawaiNode.children = []);
 				return root;
 			};
+			var prefixFor = function (parent) { return parent && parent.__drawaiNode ? parent.__drawaiNode.id : name; };
 			popup.addItem = function (title, image, funct, parent, iconCls, enabled) {
 				var tr = mxPopupMenu.prototype.addItem.apply(this, arguments);
-				var node = { id: nextId++, label: title == null ? "" : String(title), enabled: enabled !== false, checked: false };
+				var label = title == null ? "" : String(title);
+				var node = { id: prefixFor(parent) + "/" + listFor(parent).length + "/" + label, label: label, enabled: enabled !== false, checked: false };
 				if (typeof funct === "function") fns[node.id] = funct;
 				listFor(parent).push(node);
 				if (tr) tr.__drawaiNode = node;
@@ -88,13 +89,7 @@
 			return out;
 		}
 
-		function snapshot(keep) {
-			if (keep) {
-				var saved = fns, savedId = nextId;
-				try { return snapshot(false); } finally { fns = saved; nextId = savedId; older.shift(); }
-			}
-			older.unshift(fns);
-			if (older.length > 5) older.pop();
+		function snapshot() {
 			fns = {};
 			var menus = {};
 			for (var i = 0; i < NAMES.length; i++) {
@@ -130,6 +125,9 @@
 			/** Text is being typed (a label, a panel field): the system's copy/paste/undo apply. */
 			isTextFocus: function () {
 				var a = document.activeElement;
+				// draw.io keeps a hidden text field focused while shapes are selected (for typing
+				// and the clipboard): that is the diagram, not text
+				if (a && (a === ui.typingShim || a === ui.clipboardElt)) return graph.isEditing();
 				return !!(graph.isEditing() || (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)));
 			},
 			/** Runs a draw.io action by name (undo, copy, …) if it can run now. */
@@ -142,7 +140,7 @@
 			/** Tests: whether the grid is on. */
 			gridEnabled: function () { return graph.isGridEnabled(); },
 			/** The menus as they would be built now, without changing what the menu bar runs (tests). */
-			peek: function () { return snapshot(true); },
+			peek: function () { return snapshot(); },
 		};
 
 		var lastSeq = 0;
@@ -157,7 +155,6 @@
 				if (data.seq <= lastSeq) return;
 				lastSeq = data.seq;
 				var fn = fns[data.id];
-				for (var i = 0; !fn && i < older.length; i++) fn = older[i][data.id];
 				if (fn) {
 					try { fn(new MouseEvent("mouseup")); } catch (e) { ui.handleError(e); }
 				}

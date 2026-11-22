@@ -130,15 +130,17 @@ export class DesktopMcp {
 
 /** The launcher the agents run: this app's runtime (Electron as Node) with the stdio proxy in desktop mode. */
 export function writeLauncher(): string {
-	const file = launcherPath();
 	const proxy = paths.stdioProxy;
-	if (process.platform === "win32") {
-		writePrivate(file, ["@echo off", "set ELECTRON_RUN_AS_NODE=1", `"${process.execPath}" "${proxy}" --desktop %*`, ""].join("\r\n"), 0o700);
-	} else {
-		const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-		writePrivate(file, ["#!/bin/sh", "# Written by OmniDraw: connects an agent to it over MCP (stdio).", `ELECTRON_RUN_AS_NODE=1 exec ${q(process.execPath)} ${q(proxy)} --desktop "$@"`, ""].join("\n"), 0o700);
+	// The launcher, and the one an agent connected before the rename still runs (draw-ai-desktop-mcp).
+	for (const file of [launcherPath(), path.join(home(), "bin", process.platform === "win32" ? "draw-ai-desktop-mcp.cmd" : "draw-ai-desktop-mcp")]) {
+		if (process.platform === "win32") {
+			writePrivate(file, ["@echo off", "set ELECTRON_RUN_AS_NODE=1", `"${process.execPath}" "${proxy}" --desktop %*`, ""].join("\r\n"), 0o700);
+		} else {
+			const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+			writePrivate(file, ["#!/bin/sh", "# Written by OmniDraw: connects an agent to it over MCP (stdio).", `ELECTRON_RUN_AS_NODE=1 exec ${q(process.execPath)} ${q(proxy)} --desktop "$@"`, ""].join("\n"), 0o700);
+		}
 	}
-	return file;
+	return launcherPath();
 }
 
 /** Registers (or removes) the desktop app as an MCP server in Claude Code and Codex, with their own CLIs. */

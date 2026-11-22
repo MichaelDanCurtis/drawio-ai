@@ -91,14 +91,32 @@ export class DiagramWindow {
 	private initial: { xml: string; name: string } | undefined;
 	/** draw.io's menus as the editor last reported them (for the system menu bar). */
 	public drawioMenus: Record<string, DrawioMenuItem[] | null> | undefined;
+	private drawioMenusJson: string | undefined;
+	/** Called after a window closes (main.ts rebuilds the menu bar for the next one). */
+	public static onClosed: (() => void) | undefined;
 	/** Called when a window's draw.io menus change (main.ts rebuilds the menu bar). */
 	public static onMenus: ((w: DiagramWindow) => void) | undefined;
 
 	/** Runs a draw.io menu item from the system menu bar. */
 	private menuSeq = 0;
-	public invokeDrawioMenu(id: number): void {
+	public invokeDrawioMenu(id: string): void {
 		// (the page can see a message twice; the sequence number makes a toggle run once)
 		this.sendToEditor({ action: "desktopMenuInvoke", id, seq: ++this.menuSeq });
+	}
+
+	/**
+	 * A draw.io item's shortcut was pressed somewhere the page did not handle it (on macOS a
+	 * menu shortcut is always live): run it only for the diagram itself, never for keys typed
+	 * in the chat, Settings, a dialog or one of draw.io's own fields.
+	 */
+	public async invokeDrawioMenuFromKey(id: string, focused: Electron.WebContents | null): Promise<void> {
+		if (focused !== this.editorView.webContents) return;
+		try {
+			if (await this.editorView.webContents.executeJavaScript("!!(window.drawaiMenubar && window.drawaiMenubar.isTextFocus())")) return;
+		} catch {
+			return;
+		}
+		this.invokeDrawioMenu(id);
 	}
 
 	/** Runs a draw.io action by name (undo, copy, …) unless text is being typed; says whether it did. */
@@ -445,6 +463,9 @@ export class DiagramWindow {
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
 			} else if (m?.event === "desktopMenus" && m.menus && typeof m.menus === "object") {
+				const json = JSON.stringify(m.menus);
+				if (json === this.drawioMenusJson) return;
+				this.drawioMenusJson = json;
 				this.drawioMenus = m.menus;
 				DiagramWindow.onMenus?.(this);
 			} else if (m?.event === "desktopCommand") {
@@ -750,6 +771,7 @@ export class DiagramWindow {
 	}
 
 	private dispose(): void {
+		setTimeout(() => DiagramWindow.onClosed?.(), 0);
 		clearTimeout(this.mappedTimer);
 		clearInterval(this.chatAnim);
 		this.offSettings?.();
@@ -782,7 +804,7 @@ function drawioConfig(): DrawioConfig {
 
 /** One draw.io menu entry, as desktop-menubar.js records it. */
 export interface DrawioMenuItem {
-	id?: number;
+	id?: string;
 	label?: string;
 	enabled?: boolean;
 	checked?: boolean;

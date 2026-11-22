@@ -136,17 +136,32 @@ function drawioItems(win: DiagramWindow, nodes: DrawioMenuItem[] | null | undefi
 		const label = (n.label ?? "").replace(/\.\.\.$/, "…");
 		if (n.children) return { label, enabled: n.enabled !== false, submenu: drawioItems(win, n.children) };
 		if (n.key && ROUTED[n.key]) return { label, accelerator: ROUTED[n.key].accelerator, click: () => void routedEdit(DiagramWindow.focused(), n.key!) };
+		const accelerator = toAccelerator(n.shortcut);
 		return {
 			label,
 			enabled: n.enabled !== false,
 			type: n.checked ? "checkbox" : "normal",
 			checked: !!n.checked,
-			accelerator: toAccelerator(n.shortcut),
-			// shown only: draw.io's own key handler keeps doing the work
+			// The app's and the system's own keys win (⌘M minimizes, ⌘W closes…).
+			accelerator: accelerator && !RESERVED_KEYS.has(normalizeAccelerator(accelerator)) ? accelerator : undefined,
+			// Windows/Linux: shown only (draw.io's key handler does the work). macOS has no such
+			// option, so a key the page did not handle arrives here: see invokeDrawioMenuFromKey.
 			registerAccelerator: false,
-			click: () => n.id !== undefined && win.invokeDrawioMenu(n.id),
+			click: (_item, _window, event) => {
+				if (n.id === undefined) return;
+				if (event?.triggeredByAccelerator) void win.invokeDrawioMenuFromKey(n.id, webContents.getFocusedWebContents());
+				else win.invokeDrawioMenu(n.id);
+			},
 		};
 	});
+}
+
+/** Keys the app or macOS own: draw.io's items never take them in the menu bar. */
+const RESERVED_KEYS = new Set(
+	["Cmd+M", "Cmd+H", "Cmd+Alt+H", "Cmd+Q", "Cmd+W", "Cmd+N", "Cmd+O", "Cmd+S", "Cmd+Shift+S", "Cmd+P", "Cmd+,", "Cmd+J", "Cmd+Shift+N", "Cmd+.", "Cmd+Shift+M", "Cmd+Shift+D", "Cmd+Shift+T", "Cmd+Shift+E", "Cmd+Ctrl+F", "Cmd+`", "F5", "Cmd+Alt+]", "Cmd+Alt+["].map(normalizeAccelerator)
+);
+function normalizeAccelerator(a: string): string {
+	return a.replace(/CmdOrCtrl|CommandOrControl|Command/g, "Cmd").split("+").map((k) => k.trim()).sort().join("+").toLowerCase();
 }
 
 let menuTimer: NodeJS.Timeout | undefined;
@@ -326,6 +341,7 @@ app.whenReady().then(async () => {
 	DiagramWindow.onMenus = (w) => {
 		if (w === DiagramWindow.focused()) scheduleMenu();
 	};
+	DiagramWindow.onClosed = () => scheduleMenu();
 	ready = true;
 
 	if (process.env.DRAWAI_E2E) {
