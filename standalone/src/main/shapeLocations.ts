@@ -1,6 +1,13 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { ShapeLocation } from "./settings";
+
+/** A folder of SVG/PNG shapes, or a draw.io library file (.xml), shown in the shapes sidebar. */
+export interface ShapeLocation {
+	path: string;
+	/** Shown as the palette's title; defaults to the folder or file name. */
+	name?: string;
+	enabled: boolean;
+}
 
 /** One palette for the shapes sidebar: images from a folder, or a draw.io library file. */
 export type ShapeLibrary =

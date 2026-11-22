@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import type { GallerySource } from "../settings";
+import type { GallerySource } from "./types";
 import { safeImageData } from "./svgSanitize";
 
 /** One shape in a gallery's index. SVGs from the internet are fetched (and cached) when shown. */
