@@ -60,7 +60,7 @@ export class StaticServer {
 			.replace("$$lang$$", JSON.stringify("en"))
 			.replace("$$simpleLabels$$", "false")
 			.replace("$$chrome$$", JSON.stringify("1"))
-			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/ui/icons.js`, `${base}/ui/brandmark.js`, `${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/desktop-toolbar.js`, `${base}/plugin/desktop-menubar.js`, `${base}/plugin/presentation.js`]))
+			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/ui/icons.js`, `${base}/ui/brandmark.js`, `${base}/ui/tips.js`, `${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/desktop-toolbar.js`, `${base}/plugin/desktop-menubar.js`, `${base}/plugin/presentation.js`]))
 			.replace("$$localStorage$$", JSON.stringify(o.localStorage))
 			.replace("$$additionalCode$$", "[]");
 	}

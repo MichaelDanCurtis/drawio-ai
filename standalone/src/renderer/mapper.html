@@ -11,6 +11,9 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
 <script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
+<script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<script nonce="$$nonce$$" src="/ui/tips.js"></script>
+<script nonce="$$nonce$$" src="/ui/brands.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; }
 	.head { position: relative; isolation: isolate; flex: none; padding: 22px 24px 16px; border-bottom: 1px solid var(--border); }
@@ -19,23 +22,27 @@
 	.head .label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 	.head h1 { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 6px; }
 	.head p { margin: 0; color: var(--muted); max-width: 640px; }
-	main { flex: 1; display: grid; grid-template-columns: 196px 290px 1fr; min-height: 0; }
+	main { flex: 1; display: grid; grid-template-columns: 196px 236px 1fr; min-height: 0; }
 	nav, #recipes { border-right: 1px solid var(--border); overflow: auto; padding: 12px 10px; }
 	nav { display: flex; flex-direction: column; gap: 2px; }
 	#recipes { background: var(--surface-2); }
 	.cat { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 1px solid transparent; background: none; color: var(--ink-2); font: inherit; padding: 8px 10px; border-radius: var(--radius); cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 	.cat:hover { background: var(--surface-3); color: var(--ink); }
 	.cat.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
-	.cat .ico { width: 34px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--surface-3); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; color: var(--ink-2); }
+	.cat .ico { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: var(--radius); background: var(--surface-3); color: var(--ink-2); }
 	.cat.active .ico { background: var(--accent); color: var(--accent-ink); }
+	/* a vendor's own logo keeps its colours, on white in both themes */
+	.cat .ico.brand, .cat.active .ico.brand { background: #ffffff; border: 1px solid var(--border); }
+	.cat .ico.brand img { width: 24px; height: 24px; object-fit: contain; display: block; }
+	.cat.active .ico.brand { border-color: var(--ink); }
 	.cat small { display: block; color: var(--faint); font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.5; }
-	.recipe { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface); color: inherit; font: inherit; padding: 10px 12px; border-radius: 12px; margin-bottom: 8px; cursor: pointer; animation: rise var(--dur) var(--ease-enter) backwards; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
+	.recipe { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--surface); color: inherit; font: inherit; padding: 8px 11px; border-radius: 10px; margin-bottom: 6px; cursor: pointer; animation: rise var(--dur) var(--ease-enter) backwards; transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out); }
 	.recipe:nth-child(2) { animation-delay: 30ms; } .recipe:nth-child(3) { animation-delay: 60ms; } .recipe:nth-child(4) { animation-delay: 90ms; } .recipe:nth-child(n + 5) { animation-delay: 120ms; }
 	#recipes.settled .recipe { animation: none; }
 	.recipe:hover { border-color: var(--control-line); }
 	.recipe.active { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
-	.recipe b { display: flex; align-items: center; gap: 8px; font-weight: 500; margin-bottom: 3px; }
-	.recipe > span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+	.recipe b { display: flex; align-items: center; gap: 8px; font-weight: 500; font-size: 13px; line-height: 1.3; }
+	.recipe > span { display: block; color: var(--muted); font-size: 12px; line-height: 1.35; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.badge { display: inline-flex; padding: 1px 7px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); font-family: var(--font-mono); font-size: 9.5px; font-weight: 400; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-2); }
 	#form { overflow: auto; padding: 20px 24px 24px; }
 	#form h2 { font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; margin: 0 0 4px; }
@@ -99,7 +106,16 @@
 		for (const kid of kids.flat()) if (kid !== undefined && kid !== null) e.append(kid);
 		return e;
 	};
-	const ICONS = { software: "SW", database: "DB", azure: "AZ", aws: "AWS", gcp: "GCP", ml: "ML" };
+	// Categories show what they are: the vendors' own logos, and drawn icons for the rest.
+	const GLYPHS = { software: "code", database: "database", ml: "ml" };
+	const BRANDS = window.DrawAIBrands || {};
+	let iconStyle = "dots2d";
+	function catIcon(id) {
+		if (BRANDS[id]) return el("span", { class: "ico brand" }, el("img", { src: BRANDS[id], alt: "" }));
+		const ico = el("span", { class: "ico" });
+		if (window.DrawAIIcons && GLYPHS[id]) ico.innerHTML = window.DrawAIIcons.svg(GLYPHS[id], iconStyle, { size: 20 });
+		return ico;
+	}
 	const state = { animateRecipes: true, animateForm: true, catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, running: false };
 
 	const recipes = () => (state.catalog?.recipes ?? []).filter((r) => r.category === state.category);
@@ -122,11 +138,16 @@
 				return el(
 					"button",
 					{ class: "cat" + (c.id === state.category ? " active" : ""), title: c.description, onclick: () => selectCategory(c.id) },
-					el("span", { class: "ico", text: ICONS[c.id] ?? "··" }),
+					catIcon(c.id),
 					el("span", {}, el("span", { text: c.title }), el("small", { text: count ? `${count} map${count === 1 ? "" : "s"}` : "coming soon" }))
 				);
 			})
 		);
+	}
+
+	/** A card's title: the name without what the full title adds after ":" or in brackets. */
+	function shortTitle(t) {
+		return t.split(":")[0].replace(/\s*\(.*\)\s*$/, "").trim() || t;
 	}
 
 	function renderRecipes() {
@@ -143,8 +164,8 @@
 				el(
 					"button",
 					{ class: "recipe" + (r.id === state.recipeId ? " active" : ""), onclick: () => selectRecipe(r.id) },
-					el("b", {}, r.title, r.mode === "agent" ? el("span", { class: "badge", text: "with agent" }) : null),
-					el("span", { text: r.description })
+					el("b", {}, shortTitle(r.title), r.mode === "agent" ? el("span", { class: "badge", text: "with agent" }) : null),
+					el("span", { text: r.blurb || "" })
 				)
 			)
 		);
@@ -333,6 +354,7 @@
 		switch (msg.type) {
 			case "catalog":
 				state.catalog = msg.catalog;
+				iconStyle = msg.iconStyle || iconStyle;
 				state.saved = msg.saved ?? {};
 				state.cwd = msg.cwd ?? "";
 				renderCats();

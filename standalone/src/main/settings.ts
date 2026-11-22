@@ -5,8 +5,10 @@ import type { AgentId } from "./agents";
 
 export type ThemeChoice = "system" | "light" | "dark";
 /** The app's icons: draw.io's own flat ones, or one of three 3D styles drawn by ui/icons.js. */
-export type IconStyle = "classic" | "isometric" | "dots" | "extruded";
-export const ICON_STYLES: IconStyle[] = ["classic", "isometric", "dots", "extruded"];
+export type IconStyle = "classic" | "dots2d" | "dots" | "real";
+export const ICON_STYLES: IconStyle[] = ["classic", "dots2d", "dots", "real"];
+/** Styles of earlier versions, and what took their place. */
+const OLD_ICON_STYLES: Record<string, IconStyle> = { isometric: "dots2d", extruded: "real" };
 /** Where draw.io's toolbar sits in the editor. */
 export type ToolbarSide = "top" | "left" | "right" | "bottom";
 
@@ -99,7 +101,7 @@ const DEFAULTS: Settings = {
 		"drawio-ai.selectChangedCells": false,
 		"drawio-ai.maxCellsInContext": 400,
 	},
-	appearance: { theme: "system", iconStyle: "isometric", toolbar: "top" },
+	appearance: { theme: "system", iconStyle: "dots2d", toolbar: "top" },
 	chat: { side: "right", startCollapsed: false, allowAllByDefault: false },
 	models: {},
 	modelCatalog: {},
@@ -119,7 +121,7 @@ function merge(user: any): Settings {
 	const obj = (v: any) => (v && typeof v === "object" && !Array.isArray(v) ? v : {});
 	const appearance = { ...DEFAULTS.appearance, ...obj(user.appearance) };
 	if (!["system", "light", "dark"].includes(appearance.theme)) appearance.theme = DEFAULTS.appearance.theme;
-	if (!ICON_STYLES.includes(appearance.iconStyle)) appearance.iconStyle = DEFAULTS.appearance.iconStyle;
+	if (!ICON_STYLES.includes(appearance.iconStyle)) appearance.iconStyle = OLD_ICON_STYLES[String(appearance.iconStyle)] ?? DEFAULTS.appearance.iconStyle;
 	if (!["top", "left", "right", "bottom"].includes(appearance.toolbar)) appearance.toolbar = DEFAULTS.appearance.toolbar;
 	const chat = { ...DEFAULTS.chat, ...obj(user.chat) };
 	if (chat.side !== "left") chat.side = "right";

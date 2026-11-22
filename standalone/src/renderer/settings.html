@@ -16,6 +16,7 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
 <script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
 <script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<script nonce="$$nonce$$" src="/ui/tips.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; }
 	.head { position: relative; isolation: isolate; flex: none; padding: 20px 24px 14px; border-bottom: 1px solid var(--border); }
@@ -62,9 +63,10 @@
 	.model .name { min-width: 0; }
 	.model .name span { display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 	.model.hidden-model .name > :first-child { color: var(--faint); text-decoration: line-through; }
-	.default-btn { border: 1px solid transparent; background: none; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 2px 8px; border-radius: var(--radius-pill); cursor: pointer; }
-	.default-btn:hover { color: var(--ink); background: var(--surface-3); }
-	.default-btn[aria-pressed="true"] { color: var(--accent-ink); background: var(--accent); }
+	.refresh-btn { border: 1px solid transparent; background: none; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); padding: 2px 8px; border-radius: var(--radius-pill); cursor: pointer; }
+	.refresh-btn:hover:not(:disabled) { color: var(--ink); background: var(--surface-3); }
+	.refresh-btn:disabled { cursor: default; }
+	.model .last { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
 	.agent details { border-top: 1px solid var(--border); padding: 8px 14px 12px; }
 	.agent details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 	.agent details .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
@@ -123,7 +125,7 @@
 
 			<section id="agents">
 				<h2>Agents &amp; models</h2>
-				<p class="lead">Choose which models each agent shows in the chat's picker, and the one a new chat starts with. An agent lists its models the first time it runs.</p>
+				<p class="lead">Each agent is asked for its own models when you open this page (Refresh asks again). Untick a model to leave it out of the chat's picker. A new chat starts with the model you picked last.</p>
 				<div id="agentList"></div>
 			</section>
 
@@ -253,7 +255,15 @@
 			if (a.problem) tag.title = a.problem;
 			const sp = document.createElement("span");
 			sp.className = "spacer";
-			head.append(name, sp, tag);
+			if (a.installed && a.signedIn) {
+				const refresh = document.createElement("button");
+				refresh.className = "refresh-btn";
+				refresh.disabled = !!a.loadingModels;
+				refresh.textContent = a.loadingModels ? "Asking…" : "Refresh";
+				refresh.title = "Ask " + a.label + " which models it offers now";
+				refresh.onclick = () => post({ type: "refreshModels", agent: a.id });
+				head.append(name, sp, refresh, tag);
+			} else head.append(name, sp, tag);
 			card.appendChild(head);
 
 			const models = document.createElement("div");
@@ -264,7 +274,12 @@
 			if (!known.length) {
 				const e = document.createElement("div");
 				e.className = "empty";
-				e.textContent = a.installed ? "Pick " + a.label + " in a chat once and its models appear here." : "Install " + a.label + " to use it.";
+				e.textContent = !a.installed ? "Install " + a.label + " to use it." : a.loadingModels ? "Asking " + a.label + " for its models…" : a.modelError ? "Its models could not be read: " + a.modelError : !a.signedIn ? "Sign in to " + a.label + " to see its models." : "No models listed yet. Press Refresh.";
+				models.appendChild(e);
+			} else if (a.modelError && !a.loadingModels) {
+				const e = document.createElement("div");
+				e.className = "empty";
+				e.textContent = "Showing the last list: " + a.modelError;
 				models.appendChild(e);
 			}
 			for (const m of known) {
@@ -286,13 +301,10 @@
 					d.title = m.description;
 					nm.appendChild(d);
 				}
-				const def = document.createElement("button");
-				def.className = "default-btn";
-				const isDefault = prefs.preferred === m.value;
-				def.setAttribute("aria-pressed", String(isDefault));
-				def.textContent = isDefault ? "Default" : "Make default";
-				def.onclick = () => { post({ type: "setPreferredModel", agent: a.id, value: isDefault ? "" : m.value }); saved(); };
-				row.append(cb, nm, def);
+				const last = document.createElement("span");
+				last.className = "last";
+				if (prefs.preferred === m.value) { last.textContent = "Picked last"; last.title = "A new chat with " + a.label + " starts with this model"; }
+				row.append(cb, nm, last);
 				models.appendChild(row);
 			}
 			card.appendChild(models);

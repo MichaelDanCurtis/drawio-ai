@@ -17,6 +17,7 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
 <script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<script nonce="$$nonce$$" src="/ui/tips.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; border-left: 1px solid var(--border); position: relative; }
 	body.side-left { border-left: 0; border-right: 1px solid var(--border); }
@@ -50,23 +51,27 @@
 	#pickMenu [role="menuitemradio"][aria-disabled="true"] { color: var(--faint); }
 	#pickMenu .more { color: var(--muted); }
 
-	/* The toolbar: ghost pills that come forward (surface + hairline) when on. */
-	#context { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-height: 40px; padding: 6px 8px; border-bottom: 1px solid var(--border); container-type: inline-size; }
+	/* The chat closes from the edge it shares with the diagram: an arrow pointing the way it goes. */
+	#collapse { margin-left: -2px; margin-right: 2px; border: 1px solid var(--border-strong); border-radius: 7px; width: 26px; height: 26px; color: var(--ink-2); }
+	#collapse:hover { border-color: var(--control-line); color: var(--ink); }
+	body.side-left #collapse { order: 99; margin-left: 2px; margin-right: -2px; }
+
+	/* The toolbar: a row of tabs standing on the line under it; one that is on joins the page below. */
+	#context { display: flex; align-items: flex-end; gap: 3px; min-height: 44px; padding: 7px 8px 0; border-bottom: 1px solid var(--border); container-type: inline-size; overflow-x: auto; scrollbar-width: none; }
 	#context::-webkit-scrollbar { display: none; }
 	#context > * { flex: none; }
-	.tb { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-pill); background: transparent; color: var(--ink-2); font: inherit; font-size: 12.5px; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out); }
-	.tb svg { width: 14px; height: 14px; flex: none; }
-	.tb:hover { background: var(--surface-3); color: var(--ink); }
-	.tb:active { transform: translateY(1px); }
-	.tb.active { background: var(--surface); border-color: var(--border-strong); color: var(--ink); }
+	.tb { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 11px; margin-bottom: -1px; border: 1px solid var(--border); border-bottom-color: transparent; border-radius: 9px 9px 0 0; background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+	.tb svg { width: 16px; height: 16px; flex: none; }
+	.tb:hover { background: var(--surface-3); color: var(--ink); border-color: var(--border-strong); border-bottom-color: transparent; }
+	.tb.active { background: var(--bg); border-color: var(--border-strong); border-bottom-color: var(--bg); color: var(--ink); box-shadow: inset 0 2px 0 var(--ink); }
 	.tb:disabled { opacity: 0.45; cursor: not-allowed; }
 	.tb .count { font-family: var(--font-mono); font-size: 10.5px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--signal); color: #fff; display: inline-grid; place-items: center; letter-spacing: 0; }
-	#selection { margin-left: auto; }
+	#selection { margin-left: auto; align-self: center; margin-bottom: 6px; }
 	/* Narrow chat: the toolbar shows icons only (each keeps its tooltip and name for screen readers). */
-	@container (max-width: 360px) { .tb .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } .tb { padding: 0 7px; } }
+	@container (max-width: 400px) { .tb .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } #context > .tb { flex: 1 1 0; justify-content: center; padding: 0; } }
 
 	/* ---------- the map menu ---------- */
-	#mapMenu { position: absolute; z-index: 40; left: 8px; right: 8px; top: 88px; }
+	#mapMenu { position: absolute; z-index: 40; left: 8px; right: 8px; top: 92px; }
 	#mapMenu [role="menuitem"] .hint { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--faint); text-transform: uppercase; }
 
 	/* ---------- transcript ---------- */
@@ -168,6 +173,7 @@
 	<div class="top" data-dot-host>
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
 		<header>
+			<button id="collapse" class="icon-btn" title="Close the chat (⌘J opens it again)" aria-label="Close the chat"><span data-icon="chevronRight"></span></button>
 			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Coding agent"><span id="providerLabel">Agent</span></button>
 			<button id="modelBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Model or mode"><span id="modelLabel">Model</span></button>
 			<span class="spacer"></span>
@@ -175,7 +181,6 @@
 			<span id="status" class="state" data-state="off" role="img" aria-label="Agent status" title=""></span>
 			<button id="newChat" class="icon-btn" title="New chat (starts a new agent session)" aria-label="New chat"><span data-icon="plus"></span></button>
 			<button id="settingsBtn" class="icon-btn" title="Settings (⌘,)" aria-label="Settings"><span data-icon="gear"></span></button>
-			<button id="collapse" class="icon-btn" title="Tuck the chat away (⌘J brings it back)" aria-label="Hide the chat"><span data-icon="collapseRight"></span></button>
 		</header>
 		<div id="context">
 			<button id="lasso" class="tb" title="Lasso: draw around shapes in the diagram to select them (Alt+L)"><span data-icon="lasso"></span><span class="lbl">Lasso</span></button>
@@ -509,10 +514,10 @@
 		if (state.chatSide !== side) {
 			side = state.chatSide || "right";
 			document.body.classList.toggle("side-left", side === "left");
-			$("collapse").querySelector("[data-icon]").setAttribute("data-icon", side === "left" ? "collapseLeft" : "collapseRight");
+			$("collapse").querySelector("[data-icon]").setAttribute("data-icon", side === "left" ? "chevronLeft" : "chevronRight");
 			iconStyle = null;
 		}
-		const style = state.iconStyle || "isometric";
+		const style = state.iconStyle || "dots2d";
 		if (style !== iconStyle && window.DrawAIIcons) {
 			iconStyle = style;
 			window.DrawAIIcons.apply(style);

@@ -49,7 +49,8 @@ export class AcpAgentSession {
 		private readonly def: AgentDef,
 		private readonly launch: LaunchSpec,
 		private readonly cwd: string,
-		private readonly mcp: McpEndpoint,
+		/** This window's OmniDraw tools; undefined for a session that only asks what the agent offers. */
+		private readonly mcp: McpEndpoint | undefined,
 		private readonly handlers: SessionHandlers
 	) {}
 
@@ -111,20 +112,25 @@ export class AcpAgentSession {
 	private async newSession(): Promise<SessionInfo> {
 		const init = this.init!;
 		const http = !!init.agentCapabilities?.mcpCapabilities?.http;
-		const mcpServer: acp.McpServer = http
-			? { type: "http", name: "omnidraw", url: this.mcp.url, headers: [{ name: "Authorization", value: `Bearer ${this.mcp.token}` }] }
-			: {
-					name: "omnidraw",
-					command: process.execPath,
-					args: [this.mcp.stdioProxy, this.mcp.url],
-					env: [
-						{ name: "ELECTRON_RUN_AS_NODE", value: "1" },
-						{ name: "DRAWAI_MCP_TOKEN", value: this.mcp.token },
-					],
-			  };
+		const mcp = this.mcp;
+		const mcpServers: acp.McpServer[] = !mcp
+			? []
+			: http
+			? [{ type: "http", name: "omnidraw", url: mcp.url, headers: [{ name: "Authorization", value: `Bearer ${mcp.token}` }] }]
+			: [
+					{
+						name: "omnidraw",
+						command: process.execPath,
+						args: [mcp.stdioProxy, mcp.url],
+						env: [
+							{ name: "ELECTRON_RUN_AS_NODE", value: "1" },
+							{ name: "DRAWAI_MCP_TOKEN", value: mcp.token },
+						],
+					},
+			  ];
 		let created: acp.NewSessionResponse;
 		try {
-			created = await this.withExit(this.connection!.agent.request("session/new", { cwd: this.cwd, mcpServers: [mcpServer] }), "session/new");
+			created = await this.withExit(this.connection!.agent.request("session/new", { cwd: this.cwd, mcpServers }), "session/new");
 		} catch (e: any) {
 			// -32000 is ACP's auth_required. Keep the agent's own words: they say what is wrong
 			// (expired sign-in, unsupported account type, missing API key, ...).

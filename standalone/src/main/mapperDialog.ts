@@ -9,6 +9,7 @@ import { catalog, recipeById } from "./mapper/registry";
 import { agentRequest } from "./mapper/recipes/common";
 import { CollectResult, MapInput, MapperError, Recipe } from "./mapper/types";
 import { paths } from "./paths";
+import { settings } from "./settings";
 import { safeInputs } from "./mapper/redact";
 import type { StaticServer } from "./staticServer";
 
@@ -119,7 +120,7 @@ export class MapperDialog {
 	private async onMessage(msg: any): Promise<void> {
 		switch (msg?.type) {
 			case "ready":
-				this.post({ type: "catalog", catalog: catalog(), saved: loadSavedInputs(), cwd: this.host.cwd() });
+				this.post({ type: "catalog", catalog: catalog(), saved: loadSavedInputs(), cwd: this.host.cwd(), iconStyle: settings().appearance.iconStyle });
 				break;
 			case "loadOptions": {
 				const recipe = recipeById(String(msg.recipeId));

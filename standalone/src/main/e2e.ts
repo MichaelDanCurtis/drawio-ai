@@ -557,16 +557,29 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(800);
 	log("menuKeyFromChatIgnored", { found: !!dup, before: d0, after: await cells() });
 
-	await ed.executeJavaScript(`(() => { const b = document.querySelector(".geToolbarContainer a.geButton:not(.drawai-mark)"); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); })()`);
-	await pause(400);
-	log("panelMenu", await ed.executeJavaScript(`Array.from(document.querySelectorAll(".mxPopupMenu .mxPopupMenuItem")).map((e) => e.textContent.trim()).filter(Boolean)`));
-	await save("panel-menu.png", ed, { x: 0, y: 0, width: 360, height: 260 });
-	await ed.executeJavaScript(`document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));`);
+	// the first toolbar button shows and hides the Shapes panel directly (no menu)
+	const shapesShown = `(() => { const sb = document.querySelector(".geSidebarContainer:not(.geFormatContainer)"); return !!sb && sb.offsetWidth > 20 && getComputedStyle(sb).display !== "none"; })()`;
+	const clickShapes = `(() => { const b = document.querySelector('.geToolbarContainer [data-drawai="shapes-toggle"]'); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); return !!b; })()`;
+	const shapes0 = await ed.executeJavaScript(shapesShown);
+	const hasShapesBtn = await ed.executeJavaScript(clickShapes);
+	await pause(500);
+	const shapes1 = await ed.executeJavaScript(shapesShown);
+	const menuOpened = await ed.executeJavaScript(`document.querySelectorAll(".mxPopupMenu .mxPopupMenuItem").length`);
+	await ed.executeJavaScript(clickShapes);
+	await pause(500);
+	log("shapesToggle", { button: hasShapesBtn, before: shapes0, afterOneClick: shapes1, afterTwo: await ed.executeJavaScript(shapesShown), menuOpened });
+	// Ruler is a toolbar button; the chat's arrow says which way the chat goes; tooltips are quick
+	log("toolbarExtras", await ed.executeJavaScript(`(() => {
+		const ruler = document.querySelector('.geToolbarContainer [data-drawai="ruler"]');
+		const arrow = document.querySelector(".drawai-chat-toggle");
+		return { ruler: !!ruler, chatArrow: arrow ? arrow.getAttribute("data-chat") : null, tips: !!window.DrawAITips && window.DrawAITips.delay };
+	})()`));
+	await save("toolbar-buttons.png", ed, await top());
 
 	// icon styles, in both themes
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
-		for (const style of ["isometric", "dots", "extruded", "classic"] as const) {
+		for (const style of ["dots2d", "dots", "real", "classic"] as const) {
 			updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: style } });
 			await pause(700);
 			await save(`toolbar-${theme}-${style}.png`, ed, await top());
@@ -576,7 +589,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
 	}
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "isometric", toolbar: "top" } });
+	updateSettings({ appearance: { theme: "light", iconStyle: "dots2d", toolbar: "top" } });
 	await pause(600);
 	// the toolbar on each side
 	for (const side of ["left", "right", "bottom", "top"] as const) {
@@ -639,7 +652,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(800);
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
-		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "isometric" } });
+		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "dots2d" } });
 		await pause(500);
 		for (const section of ["appearance", "agents", "chat", "editor", "shapes"]) {
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
@@ -650,7 +663,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
 	sw.close();
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "isometric" } });
+	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "dots2d" } });
 }
 
 /** Calls a diagram tool on the window's MCP server, as an agent would. */

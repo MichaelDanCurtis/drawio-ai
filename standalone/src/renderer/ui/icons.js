@@ -1,12 +1,12 @@
 /*
- * OmniDraw: the app's icons, drawn in one of four styles.
+ * OmniDraw: the app's icons, drawn in one of four styles that look nothing alike.
  *
- * Every icon is a flat glyph on a 16×16 grid (lines, closed outlines, filled shapes).
- * The engine stands it up in 3D, gives it depth, turns it a little and draws it as:
- *   classic    flat ink lines (no depth), like draw.io's own icons
- *   isometric  thin ink lines with their back edges and depth edges: a small wire object
- *   dots       the same object in dots, near dots larger and darker (the dot-matrix look)
- *   extruded   solid side walls shaded by the way they face, ink on the front: small blocks
+ * Every icon is a flat glyph on a 16×16 grid (lines, closed outlines, filled shapes), drawn as:
+ *   classic  flat ink lines, like draw.io's own icons
+ *   dots2d   the flat glyph on a square grid of dots, like a dot-matrix display seen head on
+ *   dots     the glyph stood up in 3D and turned, in dots: near dots larger and darker
+ *   real     a small coloured object: each icon in the colours of the real thing (blue glass,
+ *            steel, a yellow pencil…), solid, turned in 3D, with shaded sides and a shadow
  * One glyph set, so an icon reads the same in every style.
  *
  * A classic script (no module): the chat, Settings and the Mapper load it with
@@ -98,6 +98,20 @@
 		present: [rect(1.5, 2, 13, 9), L(8, 11, 8, 14.5), L(5, 14.5, 11, 14.5), F(6.6, 4.6, 10.6, 6.5, 6.6, 8.4)],
 		workshop: [rect(1.6, 7.6, 6.2, 6.2), circle(11.4, 10.7, 3.1), P(4.7, 1.6, 7.8, 6.2, 1.6, 6.2), star(12.3, 3.8, 2.6, 0.3)],
 		dots: [circle(3.5, 8, 1.1), circle(8, 8, 1.1), circle(12.5, 8, 1.1)],
+		ruler: [P(1.5, 10.5, 10.5, 1.5, 14.5, 5.5, 5.5, 14.5), L(3.75, 8.25, 4.95, 9.45), L(6, 6, 7.7, 7.7), L(8.25, 3.75, 9.45, 4.95)],
+		chevronLeft: [L(10, 3.5, 5.5, 8, 10, 12.5)],
+		chevronRight: [L(6, 3.5, 10.5, 8, 6, 12.5)],
+		// the Mapper's categories
+		code: [L(5.5, 4, 1.8, 8, 5.5, 12), L(10.5, 4, 14.2, 8, 10.5, 12), L(9.3, 2.8, 6.7, 13.2)],
+		database: [
+			{ k: "poly", pts: [[2.5, 4]].concat(arc(8, 12, 5.5, 2.2, Math.PI, 0, 12), [[13.5, 4]], arc(8, 4, 5.5, 2.2, 0, -Math.PI, 12)) },
+			curve(arc(8, 4, 5.5, 2.2, 0, Math.PI, 12)),
+			curve(arc(8, 8, 5.5, 2.2, 0, Math.PI, 12)),
+		],
+		ml: [
+			L(3, 4.5, 8, 4.5), L(3, 4.5, 8, 11.5), L(3, 11.5, 8, 4.5), L(3, 11.5, 8, 11.5), L(8, 4.5, 13, 8), L(8, 11.5, 13, 8),
+			circle(3, 4.5, 1.7), circle(3, 11.5, 1.7), circle(8, 4.5, 1.7), circle(8, 11.5, 1.7), circle(13, 8, 1.7),
+		],
 	};
 
 	// ---------- 3D: stand the glyph up, give it depth, turn it ----------
@@ -169,40 +183,87 @@
 		}).join("");
 	}
 
-	function isometric(items, c) {
-		var back = "", edges = "", front = "";
+	// ----- dots2d: the flat glyph on a square dot grid -----
+
+	var GRID = 13, PITCH = 16 / (GRID - 1), REACH = 0.68;
+	function distToSegment(p, a, b) {
+		var dx = b[0] - a[0], dy = b[1] - a[1], len2 = dx * dx + dy * dy;
+		var t = len2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2)) : 0;
+		return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+	}
+	function dots2d(items, c) {
+		var segs = [], fills = [];
 		items.forEach(function (it) {
-			var f = it.pts.map(function (p) { return view(p[0], p[1], 0); });
-			var b = it.pts.map(function (p) { return view(p[0], p[1], DEPTH); });
-			var closed = it.k !== "line";
-			back += '<path d="' + path(b, closed) + '" stroke="' + c + '" stroke-opacity="0.32" stroke-width="1"' + (it.dash ? ' stroke-dasharray="2 2.2"' : "") + "/>";
-			corners(it).forEach(function (p) {
-				var a = view(p[0], p[1], 0), z = view(p[0], p[1], DEPTH);
-				edges += '<path d="M' + n(a[0]) + " " + n(a[1]) + "L" + n(z[0]) + " " + n(z[1]) + '" stroke="' + c + '" stroke-opacity="0.55" stroke-width="1"/>';
-			});
-			if (it.k === "fill") front += '<path d="' + path(f, true) + '" fill="' + c + '" fill-opacity="0.92" stroke="' + c + '" stroke-width="1.1"/>';
-			else front += '<path d="' + path(f, closed) + '" stroke="' + c + '" stroke-width="1.55"' + (it.dash ? ' stroke-dasharray="2.6 2.4"' : "") + "/>";
+			segments(it).forEach(function (s) { segs.push(s); });
+			if (it.k === "fill") fills.push(it.pts);
 		});
-		return back + edges + front;
+		var out = "";
+		for (var i = 0; i < GRID; i++) {
+			for (var j = 0; j < GRID; j++) {
+				var p = [i * PITCH, j * PITCH], lit = false;
+				for (var f = 0; f < fills.length && !lit; f++) lit = inside(p, fills[f]);
+				for (var k = 0; k < segs.length && !lit; k++) lit = distToSegment(p, segs[k][0], segs[k][1]) <= REACH;
+				if (lit) { var v = flat(p[0], p[1]); out += '<circle cx="' + n(v[0]) + '" cy="' + n(v[1]) + '" r="0.8" fill="' + c + '"/>'; }
+			}
+		}
+		return out;
 	}
 
-	function extruded(items, c) {
+	// ----- real: a small coloured object -----
+
+	// Each icon's colours, one per glyph item in order (the last one covers the rest):
+	// what the real thing looks like, not the theme.
+	var STEEL = "#8b96a5", SLATE = "#6b7684", BLUE = "#4d8ef0", SKY = "#7cc4f0", GLASS = "#6f97c9", GREEN = "#2fa866", RED = "#e0524f", GOLD = "#f4b730", ORANGE = "#f2a33a", VIOLET = "#9b6be0", TEAL = "#35a8a0", WHITE = "#ffffff";
+	var MATERIAL = {
+		lasso: ["#c99a4e"], sparkle: [GOLD, "#f7cf5b"], pen: [ORANGE], check: [GREEN, WHITE], map: ["#58b06c"],
+		search: [SKY, SLATE], zoomIn: [SKY, SLATE], zoomOut: [SKY, SLATE], plus: [GREEN], minus: [RED],
+		image: ["#5aaee8", "#ffd65c", WHITE], gear: [STEEL], chatPanel: [GLASS], collapseRight: [GLASS], collapseLeft: [GLASS],
+		send: [BLUE], panels: [GLASS], format: [GLASS], formatOpen: [GLASS], undo: [BLUE], redo: [BLUE], trash: [STEEL],
+		toFront: ["#c7ced8", ORANGE], toBack: [ORANGE, "#c7ced8"], fillColor: ["#c7ced8", RED, RED], strokeColor: [ORANGE, ORANGE, BLUE],
+		shadow: [GLASS, "#3a3f47"], shapes: [RED, BLUE, GREEN, GOLD], table: ["#3fae74", WHITE], freehand: [VIOLET], layout: [TEAL],
+		fullscreen: [SLATE], fullscreenExit: [SLATE], layers: [BLUE, TEAL, VIOLET], tags: [ORANGE, WHITE], outline: [GLASS, WHITE],
+		present: ["#3a4250", STEEL, STEEL, WHITE], workshop: [BLUE, RED, GREEN, GOLD], dots: [STEEL], ruler: ["#f4c542"],
+		chevronLeft: [SLATE], chevronRight: [SLATE], code: ["#6f7ce8"], database: [BLUE, WHITE], ml: [VIOLET],
+	};
+	/** A colour mixed toward white (f > 0) or black (f < 0). */
+	function shade(hexColor, f) {
+		var v = parseInt(hexColor.slice(1), 16), to = f > 0 ? 255 : 0, k = Math.abs(f);
+		var ch = function (shift) { var x = (v >> shift) & 255; return Math.round(x + (to - x) * k); };
+		return "#" + ((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1);
+	}
+	function centre(pts) {
+		var x = 0, y = 0;
+		pts.forEach(function (p) { x += p[0]; y += p[1]; });
+		return [x / pts.length, y / pts.length];
+	}
+	function real(items, _c, name) {
+		var pal = MATERIAL[name] || [STEEL];
+		var bodies = items.filter(function (it) { return it.k === "poly"; });
+		var within = function (it) {
+			var m = it.k === "line" ? it.pts[Math.floor(it.pts.length / 2)] : centre(it.pts);
+			return bodies.some(function (b) { return b !== it && inside(m, b.pts) && (it.k !== "poly" || b.pts.length >= 3); });
+		};
 		var walls = [], fronts = "";
-		items.forEach(function (it) {
+		items.forEach(function (it, i) {
+			var own = i < pal.length, col = pal[Math.min(i, pal.length - 1)], inner = within(it);
+			var face, edge;
+			if (it.k === "line") face = own || !inner ? col : shade(pal[0], -0.55);
+			else if (it.k === "fill") face = own || !inner ? col : shade(pal[0], -0.5);
+			else face = own || !inner ? col : shade(pal[0], 0.6);
+			edge = shade(face, -0.38);
 			segments(it).forEach(function (s) {
 				var a = view(s[0][0], s[0][1], 0), b = view(s[1][0], s[1][1], 0), b2 = view(s[1][0], s[1][1], DEPTH), a2 = view(s[0][0], s[0][1], DEPTH);
-				// how the wall faces: its glyph-space direction decides the shade (light from above left)
 				var dx = s[1][0] - s[0][0], dy = s[1][1] - s[0][1], len = Math.hypot(dx, dy) || 1;
-				var nx = dy / len, ny = -dx / len; // a normal of the segment in the glyph plane
-				var light = Math.abs(nx * 0.55 + ny * 0.83);
-				walls.push({ z: (a[2] + b[2] + a2[2] + b2[2]) / 4, d: path([a, b, b2, a2], true), o: 0.16 + 0.34 * (1 - light) });
+				var light = Math.abs((dy / len) * 0.55 + (-dx / len) * 0.83); // light from above left
+				walls.push({ z: (a[2] + b[2] + a2[2] + b2[2]) / 4, d: path([a, b, b2, a2], true), c: shade(face, -(0.3 + 0.3 * (1 - light))) });
 			});
 			var f = it.pts.map(function (p) { return view(p[0], p[1], 0); });
-			if (it.k === "fill") fronts += '<path d="' + path(f, true) + '" fill="' + c + '" stroke="' + c + '" stroke-width="1"/>';
-			else fronts += '<path d="' + path(f, it.k === "poly") + '" stroke="' + c + '" stroke-width="2.1"' + (it.dash ? ' stroke-dasharray="2.6 2.4"' : "") + "/>";
+			if (it.k === "line") fronts += '<path d="' + path(f, false) + '" stroke="' + face + '" stroke-width="' + (inner ? 1.5 : 2.2) + '"' + (it.dash ? ' stroke-dasharray="2.6 2.4"' : "") + "/>";
+			else fronts += '<path d="' + path(f, true) + '" fill="' + face + '" stroke="' + edge + '" stroke-width="0.9"/>';
 		});
 		walls.sort(function (p, q) { return q.z - p.z; });
-		return walls.map(function (w) { return '<path d="' + w.d + '" fill="' + c + '" fill-opacity="' + n(w.o) + '" stroke="' + c + '" stroke-opacity="0.35" stroke-width="0.5"/>'; }).join("") + fronts;
+		return '<ellipse cx="12.6" cy="21.4" rx="8.2" ry="1.5" fill="#000000" fill-opacity="0.2"/>' +
+			walls.map(function (w) { return '<path d="' + w.d + '" fill="' + w.c + '" stroke="' + w.c + '" stroke-width="0.4"/>'; }).join("") + fronts;
 	}
 
 	function sample(pts, closed, step) {
@@ -243,21 +304,24 @@
 		return c;
 	}
 
-	var RENDER = { classic: classic, isometric: isometric, dots: dots, extruded: extruded };
+	// (isometric and extruded were earlier styles: settings that still name them get their successors)
+	var RENDER = { classic: classic, dots2d: dots2d, dots: dots, real: real, isometric: dots2d, extruded: real };
 	var cache = {};
 
 	var api = {
-		styles: ["classic", "isometric", "dots", "extruded"],
-		labels: { classic: "Classic (flat)", isometric: "Isometric line", dots: "Dot-matrix 3D", extruded: "Soft extruded" },
+		styles: ["classic", "dots2d", "dots", "real"],
+		labels: { classic: "Classic (flat)", dots2d: "Dot-matrix 2D", dots: "Dot-matrix 3D", real: "Realistic 3D" },
+		/** True for a style whose icons carry their own colours (not to be inverted or tinted). */
+		coloured: function (style) { return RENDER[style] === real; },
 		names: Object.keys(G),
 		/** The icon as SVG markup. opts: { size (px, default 16), color (default currentColor) }. */
 		svg: function (name, style, opts) {
 			opts = opts || {};
 			var glyph = G[name];
 			if (!glyph) return "";
-			var render = RENDER[style] || RENDER.isometric;
+			var render = RENDER[style] || RENDER.dots2d;
 			var key = name + "|" + style + "|" + (opts.color || "") + "|" + (opts.size || "");
-			if (!cache[key]) cache[key] = svgWrap(render(glyph, opts.color || "currentColor"), opts);
+			if (!cache[key]) cache[key] = svgWrap(render(glyph, opts.color || "currentColor", name), opts);
 			return cache[key];
 		},
 		/** The icon as a data: URI (for CSS backgrounds and draw.io's toolbar). */
