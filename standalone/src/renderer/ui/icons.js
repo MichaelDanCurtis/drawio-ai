@@ -1,5 +1,5 @@
 /*
- * Draw.AI desktop: the app's icons, drawn in one of four styles.
+ * OmniDraw: the app's icons, drawn in one of four styles.
  *
  * Every icon is a flat glyph on a 16×16 grid (lines, closed outlines, filled shapes).
  * The engine stands it up in 3D, gives it depth, turns it a little and draws it as:

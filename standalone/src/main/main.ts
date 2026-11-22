@@ -1,8 +1,9 @@
-import { app, dialog, Menu, MenuItemConstructorOptions, nativeTheme, session, shell } from "electron";
+import { app, dialog, Menu, MenuItemConstructorOptions, nativeTheme, session, shell, webContents, type WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { AGENTS } from "./agents";
-import { DiagramWindow } from "./diagramWindow";
+import { DiagramWindow, type DrawioMenuItem } from "./diagramWindow";
+import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
 import { CATEGORIES } from "./mapper/types";
@@ -12,7 +13,27 @@ import { onSettingsChanged, settings } from "./settings";
 import { SettingsWindow } from "./settingsWindow";
 import { StaticServer } from "./staticServer";
 
-app.setName("Draw.AI");
+app.setName("OmniDraw");
+/**
+ * Before the rename the app was "Draw.AI", with its data in a folder of that name: carry the
+ * user's settings, draw.io preferences and Mapper inputs over once (the old folder is kept).
+ */
+function adoptDrawAiData(): void {
+	if (process.env.DRAWAI_E2E) return;
+	try {
+		const now = app.getPath("userData");
+		const before = path.join(app.getPath("appData"), "Draw.AI");
+		if (path.resolve(now) === path.resolve(before) || !fs.existsSync(before) || fs.existsSync(path.join(now, "settings.json"))) return;
+		fs.mkdirSync(now, { recursive: true });
+		for (const f of ["settings.json", "drawio-local-storage.json", "mapper-inputs.json"]) {
+			const from = path.join(before, f);
+			if (fs.existsSync(from) && !fs.existsSync(path.join(now, f))) fs.copyFileSync(from, path.join(now, f));
+		}
+	} catch (e) {
+		console.warn("OmniDraw: could not carry over the Draw.AI settings:", e);
+	}
+}
+adoptDrawAiData();
 /** Settings → Appearance → Theme; DRAWAI_THEME=light|dark (checks and screenshots) wins. */
 function applyTheme(): void {
 	const forced = process.env.DRAWAI_THEME;
@@ -36,11 +57,11 @@ async function connectExternalAgents(connect: boolean): Promise<void> {
 	const ok = results.some((r) => r.ok);
 	await dialog.showMessageBox({
 		type: ok ? "info" : "warning",
-		message: connect ? "Claude Code and Codex can use Draw.AI" : "Claude Code and Codex disconnected",
+		message: connect ? "Claude Code and Codex can use OmniDraw" : "Claude Code and Codex disconnected",
 		detail:
 			results.map((r) => `${r.ok ? "✓" : "✕"} ${r.agent}: ${r.message}`).join("\n") +
 			(connect && ok
-				? "\n\nIn a new Claude Code or Codex session, the draw-ai-desktop tools work on the diagrams open here (pass `file` to pick one) and on their maps: mapper_maps, mapper_find, mapper_show, mapper_path, mapper_run, mapper_findings… Keep Draw.AI open while they work."
+				? "\n\nIn a new Claude Code or Codex session, the omnidraw tools work on the diagrams open here (pass `file` to pick one) and on their maps: mapper_maps, mapper_find, mapper_show, mapper_path, mapper_run, mapper_findings… Keep OmniDraw open while they work."
 				: ""),
 	});
 }
@@ -85,13 +106,80 @@ app.on("second-instance", (_e, argv) => {
 	else DiagramWindow.focused()?.win.focus();
 });
 
+/**
+ * Edit commands whose keys must keep working everywhere: in draw.io's canvas they are its
+ * own actions (undo, redo and select all go through its key handler, which a menu shortcut
+ * would bypass); in text (the chat, a label being edited, Settings) the system's.
+ * Cut, copy and paste are always the system's: draw.io handles their clipboard events.
+ */
+const ROUTED: Record<string, { accelerator: string; native: (wc: WebContents) => void; drawio?: boolean }> = {
+	undo: { accelerator: "CmdOrCtrl+Z", native: (wc) => wc.undo(), drawio: true },
+	redo: { accelerator: "Shift+CmdOrCtrl+Z", native: (wc) => wc.redo(), drawio: true },
+	cut: { accelerator: "CmdOrCtrl+X", native: (wc) => wc.cut() },
+	copy: { accelerator: "CmdOrCtrl+C", native: (wc) => wc.copy() },
+	paste: { accelerator: "CmdOrCtrl+V", native: (wc) => wc.paste() },
+	selectAll: { accelerator: "CmdOrCtrl+A", native: (wc) => wc.selectAll(), drawio: true },
+};
+
+async function routedEdit(win: DiagramWindow | undefined, key: string): Promise<void> {
+	const r = ROUTED[key];
+	const wc = webContents.getFocusedWebContents() ?? win?.editorView.webContents;
+	if (!wc) return;
+	if (r.drawio && win && wc === win.editorView.webContents && (await win.runDrawioAction(key))) return;
+	r.native(wc);
+}
+
+/** draw.io's menu entries (from desktop-menubar.js) as native menu items. */
+function drawioItems(win: DiagramWindow, nodes: DrawioMenuItem[] | null | undefined): MenuItemConstructorOptions[] {
+	return (nodes ?? []).map((n): MenuItemConstructorOptions => {
+		if (n.separator) return { type: "separator" };
+		const label = (n.label ?? "").replace(/\.\.\.$/, "…");
+		if (n.children) return { label, enabled: n.enabled !== false, submenu: drawioItems(win, n.children) };
+		if (n.key && ROUTED[n.key]) return { label, accelerator: ROUTED[n.key].accelerator, click: () => void routedEdit(DiagramWindow.focused(), n.key!) };
+		const accelerator = toAccelerator(n.shortcut);
+		return {
+			label,
+			enabled: n.enabled !== false,
+			type: n.checked ? "checkbox" : "normal",
+			checked: !!n.checked,
+			// The app's and the system's own keys win (⌘M minimizes, ⌘W closes…).
+			accelerator: accelerator && !RESERVED_KEYS.has(normalizeAccelerator(accelerator)) ? accelerator : undefined,
+			// Windows/Linux: shown only (draw.io's key handler does the work). macOS has no such
+			// option, so a key the page did not handle arrives here: see invokeDrawioMenuFromKey.
+			registerAccelerator: false,
+			click: (_item, _window, event) => {
+				if (n.id === undefined) return;
+				if (event?.triggeredByAccelerator) void win.invokeDrawioMenuFromKey(n.id, webContents.getFocusedWebContents());
+				else win.invokeDrawioMenu(n.id);
+			},
+		};
+	});
+}
+
+/** Keys the app or macOS own: draw.io's items never take them in the menu bar. */
+const RESERVED_KEYS = new Set(
+	["Cmd+M", "Cmd+H", "Cmd+Alt+H", "Cmd+Q", "Cmd+W", "Cmd+N", "Cmd+O", "Cmd+S", "Cmd+Shift+S", "Cmd+P", "Cmd+,", "Cmd+J", "Cmd+Shift+N", "Cmd+.", "Cmd+Shift+M", "Cmd+Shift+D", "Cmd+Shift+T", "Cmd+Shift+E", "Cmd+Ctrl+F", "Cmd+`", "F5", "Cmd+Alt+]", "Cmd+Alt+["].map(normalizeAccelerator)
+);
+function normalizeAccelerator(a: string): string {
+	return a.replace(/CmdOrCtrl|CommandOrControl|Command/g, "Cmd").split("+").map((k) => k.trim()).sort().join("+").toLowerCase();
+}
+
+let menuTimer: NodeJS.Timeout | undefined;
+function scheduleMenu(): void {
+	clearTimeout(menuTimer);
+	menuTimer = setTimeout(buildMenu, 120);
+}
+
 function buildMenu(): void {
 	const w = () => DiagramWindow.focused();
+	const front = DiagramWindow.focused();
+	const dm = front?.drawioMenus;
+	const pick = (menu: string, keys: string[]) => drawioItems(front!, (dm?.[menu] ?? []).filter((n) => n.key && keys.includes(n.key)));
 	const template: MenuItemConstructorOptions[] = [
 		...(process.platform === "darwin"
 			? [
 					{
-						label: "Draw.AI",
+						label: app.name,
 						submenu: [
 							{ role: "about" },
 							{ type: "separator" },
@@ -123,16 +211,19 @@ function buildMenu(): void {
 					submenu: EXPORT_FORMATS.map((f) => ({ label: f.label, click: () => void w()?.exportInteractive(f.format) })),
 				},
 				{ label: "Open from Another Tool…", click: () => void w()?.importFromOtherTool() },
+				...(dm ? pick("file", ["vscode.import"]) : []),
 				{ type: "separator" },
+				...(dm ? pick("file", ["properties", "pageSetup"]) : []),
 				{ label: "Print…", accelerator: "CmdOrCtrl+P", click: () => void w()?.print() },
 				{ type: "separator" },
 				{ role: "close" },
 			],
 		},
-		{ role: "editMenu" },
+		dm?.edit?.length ? { label: "Edit", submenu: drawioItems(front!, dm.edit) } : { role: "editMenu" },
 		{
 			label: "View",
 			submenu: [
+				...(dm?.view?.length ? [...drawioItems(front!, dm.view), { type: "separator" } as MenuItemConstructorOptions] : []),
 				{ label: "Presentation Mode", accelerator: "F5", click: () => w()?.togglePresentation() },
 				// Same, for keyboards without easy F-keys (hidden; its shortcut still works).
 				{ label: "Presentation Mode", accelerator: "CmdOrCtrl+Shift+Enter", visible: false, acceleratorWorksWhenHidden: true, click: () => w()?.togglePresentation() },
@@ -148,6 +239,8 @@ function buildMenu(): void {
 				{ role: "togglefullscreen" },
 			],
 		},
+		...(dm?.arrange?.length ? [{ label: "Arrange", submenu: drawioItems(front!, dm.arrange) }] : []),
+		...(dm?.extras?.length ? [{ label: "Extras", submenu: drawioItems(front!, dm.extras) }] : []),
 		{
 			label: "Agent",
 			submenu: [
@@ -160,7 +253,7 @@ function buildMenu(): void {
 				{ label: "Stop", accelerator: "CmdOrCtrl+.", click: () => w()?.chat.stop() },
 				{ label: "Restart Agent", click: () => void w()?.chat.onMessage({ type: "command", command: "drawai.retry" }) },
 				{ type: "separator" },
-				{ label: "Connect Claude Code / Codex to Draw.AI…", click: () => void connectExternalAgents(true) },
+				{ label: "Connect Claude Code / Codex to OmniDraw…", click: () => void connectExternalAgents(true) },
 				{ label: "Disconnect Claude Code / Codex", click: () => void connectExternalAgents(false) },
 				{ type: "separator" },
 				{ label: "Allow All Requests in This Chat", click: () => w()?.chat.setAllowAll(true) },
@@ -242,8 +335,13 @@ app.whenReady().then(async () => {
 		focused: () => DiagramWindow.focused(),
 		open: (file) => DiagramWindow.open(server, file),
 	});
-	await desktopMcp.start().catch((e) => console.error("Draw.AI: desktop MCP endpoint did not start:", e));
+	await desktopMcp.start().catch((e) => console.error("OmniDraw: desktop MCP endpoint did not start:", e));
 	buildMenu();
+	// draw.io's menus in the menu bar follow the diagram window in front.
+	DiagramWindow.onMenus = (w) => {
+		if (w === DiagramWindow.focused()) scheduleMenu();
+	};
+	DiagramWindow.onClosed = () => scheduleMenu();
 	ready = true;
 
 	if (process.env.DRAWAI_E2E) {

@@ -1,11 +1,13 @@
-# Draw.AI desktop (standalone)
+# OmniDraw (desktop app)
+
+*Formerly the Draw.AI desktop app. The VS Code extension keeps the name Draw.AI.*
 
 A desktop app for draw.io diagrams with an AI chat beside the editor. It does not
 use its own model API keys: the chat drives a coding agent you already have
 installed and signed in to — **Claude Code**, **Gemini** (Google's Antigravity CLI, or
 Gemini CLI), **Codex**, **GitHub Copilot** or **Kimi** — over the
 [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
-open diagram live through Draw.AI's diagram tools, and you keep or revert its
+open diagram live through OmniDraw's diagram tools, and you keep or revert its
 changes.
 
 ## Run it
@@ -24,7 +26,7 @@ or use **File → Open Example…**.
 Requirements: Node 20+, macOS (Linux and Windows should work but are untested), and
 at least one agent:
 
-| Agent | Install | Sign in | How Draw.AI starts it |
+| Agent | Install | Sign in | How OmniDraw starts it |
 | --- | --- | --- | --- |
 | Claude Code | `npm i -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp` | `claude` → `/login` | `claude-agent-acp` (or `npx -y @agentclientprotocol/claude-agent-acp`) |
 | Gemini (Antigravity CLI) | `agy`, from [antigravity.google](https://antigravity.google) | `agy acp --login` (or sign in from `agy`) | `agy acp` |
@@ -140,7 +142,7 @@ The agents reach the maps through MCP tools on each window's server: lookups
 ### Use the maps from Claude Code and Codex
 
 While the app runs, it serves the same diagram and Mapper tools to coding agents
-anywhere on this computer. **Agent → Connect Claude Code / Codex to Draw.AI…** registers
+anywhere on this computer. **Agent → Connect Claude Code / Codex to OmniDraw…** registers
 a `draw-ai-desktop` MCP server in both (user scope, with `claude mcp add` and `codex mcp
 add`); **Disconnect** removes it. Then, in a terminal session, an agent can ask the map
 before grepping ("what talks to orders-db?", "map this repo and describe it"). Every
@@ -186,12 +188,20 @@ rise in. Under *reduce motion* nothing moves.
   toolbar) from one flat glyph set in four styles: classic (flat), isometric line,
   dot-matrix 3D and soft extruded. Each glyph is stood up in 3D, given depth and turned
   a little; `src/renderer/desktop-toolbar.js` swaps draw.io's own toolbar images.
-- The toolbar: the Draw.AI mark before File (opens Settings); Layers, Tags, Outline and
+- The toolbar: the OmniDraw dot mark first (opens Settings; every few seconds its dots draw a circle, a face, a diamond, a plus, a wave, a heart or a spiral and come back to the square, `ui/brandmark.js`); Layers, Tags, Outline and
   Presentation mode as buttons; a chat button at the right end. The panel menu keeps
   only Shapes, Ruler and Fullscreen (Format and Find/Replace have their own places).
 - The chat slides away and back (the button in its head, the toolbar's chat button, or
   Cmd/Ctrl+J), docks left or right, and resizes by dragging its inner edge. Its agent
   and model pickers are in-app menus that show each model's version and description.
+- **Menus are in the system menu bar**, like any Mac app: File, Edit, View, Arrange and
+  Extras come from draw.io (`src/renderer/desktop-menubar.js` records draw.io's menus with a
+  popup that is never shown, whenever the editor's state may change, and the app builds the
+  native menus from that). draw.io's own in-window menu bar is hidden. Undo, Redo and Select
+  All act on the diagram when it has focus and on text otherwise; draw.io's other shortcuts
+  are shown in the menus and still handled by draw.io.
+- The toolbar can sit on any side (Settings → Appearance → Toolbar); draw.io lays its editor
+  out with a CSS grid, and `desktop-toolbar.js` moves the toolbar's area.
 - `DRAWAI_THEME=light|dark` forces the appearance (for checks and screenshots).
 
 ## How it works
@@ -238,21 +248,21 @@ Electron main process                          agent subprocess (cwd = diagram f
 yarn dist:mac
 ```
 
-builds `dist/Draw.AI-<version>-arm64.dmg` and a `.zip` with electron-builder (`yarn dist`
+builds `dist/OmniDraw-<version>-arm64.dmg` and a `.zip` with electron-builder (`yarn dist`
 for the current platform). The draw.io webapp and the examples ship as resources. Agents
 run the stdio MCP proxy from `app.asar.unpacked`. The macOS build has an ad-hoc
 signature (`build.mac.identity: "-"`), not a Developer ID: without one, a downloaded copy
 counts as damaged on Apple silicon. Set `build.mac.identity` to the Developer ID (and add
 notarization) once a certificate is available. `node scripts/e2e.mjs --app
-dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI` runs the end-to-end check against
+dist/mac-arm64/OmniDraw.app/Contents/MacOS/OmniDraw` runs the end-to-end check against
 the packaged app.
 
 ## Settings
 
-**Draw.AI → Settings…** (Cmd/Ctrl+, or the dot mark before File) opens the Settings
+**OmniDraw → Settings…** (Cmd/Ctrl+, or the dot mark at the start of the toolbar) opens the Settings
 window. Changes save at once and reach open windows straight away:
 
-- **Appearance:** System, Light or Dark; the icon style.
+- **Appearance:** System, Light or Dark; the toolbar on the top, left, right or bottom; the icon style.
 - **Agents & models:** for each agent, the models its picker shows (an agent lists its
   models the first time it runs), the model a new chat starts with, and the command that
   launches it.

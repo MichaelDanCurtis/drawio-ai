@@ -89,6 +89,46 @@ export class DiagramWindow {
 	private mappedTimer: NodeJS.Timeout | undefined;
 	/** Content for a new, unsaved window (an imported diagram), and the name to suggest when saving it. */
 	private initial: { xml: string; name: string } | undefined;
+	/** draw.io's menus as the editor last reported them (for the system menu bar). */
+	public drawioMenus: Record<string, DrawioMenuItem[] | null> | undefined;
+	private drawioMenusJson: string | undefined;
+	/** Called after a window closes (main.ts rebuilds the menu bar for the next one). */
+	public static onClosed: (() => void) | undefined;
+	/** Called when a window's draw.io menus change (main.ts rebuilds the menu bar). */
+	public static onMenus: ((w: DiagramWindow) => void) | undefined;
+
+	/** Runs a draw.io menu item from the system menu bar. */
+	private menuSeq = 0;
+	public invokeDrawioMenu(id: string): void {
+		// (the page can see a message twice; the sequence number makes a toggle run once)
+		this.sendToEditor({ action: "desktopMenuInvoke", id, seq: ++this.menuSeq });
+	}
+
+	/**
+	 * A draw.io item's shortcut was pressed somewhere the page did not handle it (on macOS a
+	 * menu shortcut is always live): run it only for the diagram itself, never for keys typed
+	 * in the chat, Settings, a dialog or one of draw.io's own fields.
+	 */
+	public async invokeDrawioMenuFromKey(id: string, focused: Electron.WebContents | null): Promise<void> {
+		if (focused !== this.editorView.webContents) return;
+		try {
+			if (await this.editorView.webContents.executeJavaScript("!!(window.drawaiMenubar && window.drawaiMenubar.isTextFocus())")) return;
+		} catch {
+			return;
+		}
+		this.invokeDrawioMenu(id);
+	}
+
+	/** Runs a draw.io action by name (undo, copy, …) unless text is being typed; says whether it did. */
+	public async runDrawioAction(key: string): Promise<boolean> {
+		if (this.editorView.webContents.isDestroyed() || !this.loaded) return false;
+		try {
+			return !!(await this.editorView.webContents.executeJavaScript(`(() => { const m = window.drawaiMenubar; if (!m || m.isTextFocus()) return false; return m.run(${JSON.stringify(key)}); })()`));
+		} catch {
+			return false;
+		}
+	}
+
 	/** App-level commands the in-editor File menu can run. Set by main.ts. */
 	public static appCommands: { newDiagram(): void; open(): void; settings(section?: string): void } = { newDiagram: () => undefined, open: () => undefined, settings: () => undefined };
 
@@ -132,7 +172,7 @@ export class DiagramWindow {
 			...DiagramWindow.placement(),
 			minWidth: 800,
 			minHeight: 500,
-			title: "Draw.AI",
+			title: "OmniDraw",
 			backgroundColor: nativeTheme.shouldUseDarkColors ? "#1e1e22" : "#ffffff",
 			show: false,
 		});
@@ -240,6 +280,7 @@ export class DiagramWindow {
 		this.win.on("closed", () => this.dispose());
 		this.win.on("focus", () => {
 			DiagramWindow.lastFocused = this;
+			DiagramWindow.onMenus?.(this);
 			this.chat.postState();
 		});
 		this.offSettings = onSettingsChanged((s, patch) => this.applySettings(s, patch));
@@ -252,7 +293,8 @@ export class DiagramWindow {
 	 * partly off screen), a little down and right of the windows already open there.
 	 */
 	private static placement(): { x: number; y: number; width: number; height: number } {
-		const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+		// (test runs use the primary display: another one may be asleep and not capturable)
+		const area = (process.env.DRAWAI_E2E ? screen.getPrimaryDisplay() : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())).workArea;
 		const width = Math.min(1500, Math.max(800, area.width - 48));
 		const height = Math.min(950, Math.max(500, area.height - 48));
 		const cascade = (DiagramWindow.all.size % 6) * 28;
@@ -278,7 +320,7 @@ export class DiagramWindow {
 	/** Icon style and the chat's state, for the editor's plugins. */
 	private sendEditorPrefs(): void {
 		const s = settings();
-		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, chatVisible: this.chatVisible, chatSide: s.chat.side });
+		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, toolbar: s.appearance.toolbar, chatVisible: this.chatVisible, chatSide: s.chat.side });
 	}
 
 	private shapesSeq = 0;
@@ -295,7 +337,7 @@ export class DiagramWindow {
 		const dark = nativeTheme.shouldUseDarkColors;
 		this.win.show();
 		this.editorView.webContents.focus();
-		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() })}?icons=${settings().appearance.iconStyle}`);
+		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() })}?icons=${settings().appearance.iconStyle}&toolbar=${settings().appearance.toolbar}`);
 		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
 		void dark;
 	}
@@ -420,6 +462,12 @@ export class DiagramWindow {
 				localStorage = m.newLocalStorage;
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "desktopMenus" && m.menus && typeof m.menus === "object") {
+				const json = JSON.stringify(m.menus);
+				if (json === this.drawioMenusJson) return;
+				this.drawioMenusJson = json;
+				this.drawioMenus = m.menus;
+				DiagramWindow.onMenus?.(this);
 			} else if (m?.event === "desktopCommand") {
 				this.runDesktopCommand(String(m.command));
 			} else if (m?.event === "openLink" && typeof m.url === "string" && /^https?:/.test(m.url)) {
@@ -598,7 +646,7 @@ export class DiagramWindow {
 
 	private updateTitle(): void {
 		if (this.win.isDestroyed()) return;
-		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — Draw.AI`);
+		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — OmniDraw`);
 		this.win.setDocumentEdited(this.dirty);
 		if (this.file) this.win.setRepresentedFilename(this.file);
 	}
@@ -723,6 +771,7 @@ export class DiagramWindow {
 	}
 
 	private dispose(): void {
+		setTimeout(() => DiagramWindow.onClosed?.(), 0);
 		clearTimeout(this.mappedTimer);
 		clearInterval(this.chatAnim);
 		this.offSettings?.();
@@ -751,6 +800,18 @@ function drawioConfig(): DrawioConfig {
 		hideMenuItems: ["exportAs", "importFrom", "print", "saveAndExit", "plugins", "exit"],
 		hideMenus: ["language", "help"],
 	} as DrawioConfig;
+}
+
+/** One draw.io menu entry, as desktop-menubar.js records it. */
+export interface DrawioMenuItem {
+	id?: string;
+	label?: string;
+	enabled?: boolean;
+	checked?: boolean;
+	shortcut?: string;
+	key?: string;
+	separator?: boolean;
+	children?: DrawioMenuItem[] | null;
 }
 
 function easeOut(t: number): number {

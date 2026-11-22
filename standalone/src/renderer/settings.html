@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Settings</title>
 <!--
-	Draw.AI desktop: Settings. Every change saves at once (settings.json in the app's data
+	OmniDraw: Settings. Every change saves at once (settings.json in the app's data
 	folder) and reaches open windows straight away: theme, icon style, chat side, models.
 -->
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
@@ -14,6 +14,7 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
 <script nonce="$$nonce$$" src="/ui/icons.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; }
@@ -81,7 +82,7 @@
 <body>
 	<div class="head" data-dot-host>
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
-		<div class="label"><span class="brandmark" aria-hidden="true"><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i></i><i data-on></i><i data-on></i><i></i><i></i><i data-signal></i><i></i><i></i><i></i></span><span class="label" id="version">Draw.AI</span></div>
+		<div class="label"><span class="brandmark" aria-hidden="true"><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i></i><i data-on></i><i data-on></i><i></i><i></i><i data-signal></i><i></i><i></i><i></i></span><span class="label" id="version">OmniDraw</span></div>
 		<h1>Settings</h1>
 	</div>
 	<main>
@@ -96,13 +97,22 @@
 		<div id="panes">
 			<section id="appearance" class="active">
 				<h2>Appearance</h2>
-				<p class="lead">How Draw.AI looks: the chat, the Mapper, Settings and draw.io's own toolbars and panels. Diagrams keep their own colours.</p>
+				<p class="lead">How OmniDraw looks: the chat, the Mapper, Settings and draw.io's own toolbars and panels. Diagrams keep their own colours.</p>
 				<div class="group">
 					<span class="label">Theme</span>
 					<div class="seg" role="group" aria-label="Theme" id="theme">
 						<button data-value="system" aria-pressed="false">System</button>
 						<button data-value="light" aria-pressed="false">Light</button>
 						<button data-value="dark" aria-pressed="false">Dark</button>
+					</div>
+				</div>
+				<div class="group">
+					<span class="label">Toolbar</span>
+					<div class="seg" role="group" aria-label="Toolbar position" id="toolbarSide">
+						<button data-value="top" aria-pressed="false">Top</button>
+						<button data-value="left" aria-pressed="false">Left</button>
+						<button data-value="right" aria-pressed="false">Right</button>
+						<button data-value="bottom" aria-pressed="false">Bottom</button>
 					</div>
 				</div>
 				<div class="group">
@@ -158,6 +168,9 @@
 <script type="module" nonce="$$nonce$$">
 	import { mountDotField } from "/ui/dots.js";
 	mountDotField(document.getElementById("field"), { density: 0.4, grid: 7 });
+	// the live dot mark in the head
+	const mark = document.querySelector(".head .brandmark");
+	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
 </script>
 <script nonce="$$nonce$$">
 (function () {
@@ -199,6 +212,7 @@
 	const PREVIEW = ["zoomIn", "undo", "layers", "map", "sparkle", "gear"];
 	function renderAppearance(s) {
 		seg($("theme"), s.appearance.theme, (v) => set({ appearance: { ...state.settings.appearance, theme: v } }));
+		seg($("toolbarSide"), s.appearance.toolbar, (v) => set({ appearance: { ...state.settings.appearance, toolbar: v } }));
 		const box = $("iconStyles");
 		box.textContent = "";
 		for (const style of I.styles) {
@@ -402,7 +416,7 @@
 	bridge.onMessage((m) => {
 		if (m.type === "state") {
 			state = m;
-			$("version").textContent = "Draw.AI " + (m.version || "");
+			$("version").textContent = "OmniDraw " + (m.version || "");
 			$("openFile").title = m.file;
 			renderAppearance(m.settings);
 			renderAgents(m.settings);

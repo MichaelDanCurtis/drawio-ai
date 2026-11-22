@@ -1,5 +1,5 @@
-// Draw.AI desktop: draw.io's in-editor File menu for a desktop app. Loaded as a
-// draw.io plugin after the Draw.AI plugin (drawio-custom-plugins), whose File menu
+// OmniDraw: draw.io's in-editor File menu for a desktop app. Loaded as a
+// draw.io plugin after the Draw.AI plugin (drawio-custom-plugins, shared with the VS Code extension), whose File menu
 // entries are written for VS Code. This replaces that menu with desktop commands,
 // which the app handles ({ event: "desktopCommand", command }).
 (function () {

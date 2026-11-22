@@ -1,7 +1,18 @@
-# Changelog: Draw.AI desktop
+# Changelog: OmniDraw (formerly the Draw.AI desktop app)
 
 ## [Unreleased]
 
+- **OmniDraw**: the desktop app's new name. Settings, draw.io preferences and Mapper inputs
+  carry over from the Draw.AI data folder on first launch. Claude Code and Codex connect to
+  it as the `omnidraw` MCP server; Connect and Disconnect also remove the old
+  `draw-ai-desktop` entry.
+- **Menus in the system menu bar**: draw.io's File, Edit, View, Arrange and Extras menus are
+  native menus, with their shortcuts, checkmarks and submenus; draw.io's in-window menu bar
+  is gone. Undo, Redo and Select All act on the diagram or on the text you are typing in.
+- **Toolbar on any side**: top, left, right or bottom (Settings → Appearance).
+- **A living mark**: the dot mark at the start of the toolbar (and in the Settings and Mapper
+  heads) now and then draws a circle, a face, a diamond, a plus, a wave, a heart or a spiral
+  and comes back to the square. It holds still under reduce motion.
 - **Settings window** (Cmd/Ctrl+, or the dot mark before File) instead of a JSON file:
   System / Light / Dark, the icon style, which models each agent shows and which one a
   new chat starts with, the chat's side, width and defaults, the editor's review options,
@@ -9,8 +20,8 @@
 - **Icons in four styles**: classic (flat), isometric line, dot-matrix 3D and soft
   extruded, for the chat, Settings and draw.io's toolbar.
 - **Toolbar**: Layers, Tags, Outline and Presentation mode are buttons; the panel menu
-  keeps only Shapes, Ruler and Fullscreen; a chat button at the right end; the Draw.AI
-  mark sits before File.
+  keeps only Shapes, Ruler and Fullscreen; a chat button at the right end; the dot mark
+  sits before File.
 - **Chat**: slides away and back (its own button, the toolbar's, or Cmd/Ctrl+J), docks
   left or right, resizes by dragging its edge, and keeps its whole button row visible at
   any width. The agent and model pickers are in-app menus (the native ones opened on the

@@ -51,7 +51,7 @@ function mssqlConfig(sql: any, spec: ConnSpec): any {
 	} else {
 		config = { server: spec.host, port: spec.port, database: spec.database, user: spec.user, password: spec.password, options: {} };
 	}
-	config.options = { ...(config.options ?? {}), readOnlyIntent: true, appName: "Draw.AI Mapper (read-only)" };
+	config.options = { ...(config.options ?? {}), readOnlyIntent: true, appName: "OmniDraw Mapper (read-only)" };
 	if (spec.tls === "on") Object.assign(config.options, { encrypt: true, trustServerCertificate: false });
 	if (spec.tls === "on-trust") Object.assign(config.options, { encrypt: true, trustServerCertificate: true });
 	if (spec.tls === "off") Object.assign(config.options, { encrypt: false });

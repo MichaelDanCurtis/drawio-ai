@@ -7,7 +7,7 @@ import { exportDiagram } from "./exporter";
 import { diagramContent } from "./xmlContent";
 import { settings, updateSettings } from "./settings";
 import { SettingsWindow } from "./settingsWindow";
-import { screen } from "electron";
+import { Menu, screen } from "electron";
 import type { StaticServer } from "./staticServer";
 
 export interface E2eConfig {
@@ -447,7 +447,7 @@ async function runInsights(w: DiagramWindow, config: E2eConfig, log: (k: string,
 	const dmaps = JSON.parse((await rpc("tools/call", { name: "mapper_maps", arguments: { file: config.file } })).result.content[0].text);
 	log("desktopMaps", dmaps.maps.length);
 	// The launcher, over stdio, exactly as an agent starts it.
-	const launcher = path.join(home, "bin", "draw-ai-desktop-mcp");
+	const launcher = path.join(home, "bin", "omnidraw-mcp");
 	const out = await new Promise<string>((resolve) => {
 		const child = spawn(launcher, [], { env: { ...process.env, DRAWIO_AI_HOME: home } });
 		let buf = "";
@@ -489,17 +489,71 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	log(
 		"toolbar",
 		await ed.executeJavaScript(`(() => {
-			const bar = document.querySelector(".geMenubar");
-			const first = bar && bar.firstElementChild;
+			const menubar = document.querySelector(".geMenubarContainer");
+			const first = document.querySelector(".geToolbarContainer").firstElementChild;
 			const titles = Array.from(document.querySelectorAll(".geToolbarContainer a.geButton")).map((a) => a.getAttribute("title") || "").filter(Boolean);
 			return {
-				markBeforeFile: !!(first && first.classList.contains("drawai-mark")) && /File/.test(first.nextElementSibling ? first.nextElementSibling.textContent : ""),
+				markFirstInToolbar: !!(first && first.classList.contains("drawai-mark")),
+				drawioMenubarHidden: !menubar || getComputedStyle(menubar).display === "none",
 				layers: titles.some((t) => /^Layers/.test(t)), tags: titles.some((t) => /^Tags/.test(t)), outline: titles.some((t) => /^Outline/.test(t)),
 				present: titles.some((t) => /Presentation/.test(t)), chatToggle: !!document.querySelector(".drawai-chat-toggle"),
 			};
 		})()`)
 	);
-	await ed.executeJavaScript(`(() => { const b = document.querySelector(".geToolbarContainer a.geButton"); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); })()`);
+	// draw.io's menus in the system menu bar
+	await pause(800);
+	const appMenu = Menu.getApplicationMenu()!;
+	const sub = (label: string) => appMenu.items.find((i) => i.label === label)?.submenu;
+	const labels = (label: string) => (sub(label)?.items ?? []).filter((i) => i.type !== "separator").map((i) => i.label);
+	log("menuSnapshot", await ed.executeJavaScript(`(() => { const out = {}; const errs = []; const ow = console.warn; console.warn = (...a) => errs.push(a.map(String).join(" ")); try { const m = window.drawaiMenubar.peek(); for (const k in m) out[k] = (m[k] || []).map((n) => n.separator ? "-" : n.label + (n.children ? "▸" : "") + (n.key ? "[" + n.key + "]" : "")); } finally { console.warn = ow; } out.errors = errs; return out; })()`));
+	log("menuBar", { top: appMenu.items.map((i) => i.label), edit: labels("Edit").length, view: labels("View").length, arrange: labels("Arrange").length, extras: labels("Extras").length, file: labels("File") });
+	const gridItem = sub("View")?.items.find((i) => /^Grid$/.test(i.label));
+	const gridBefore = await ed.executeJavaScript(`window.drawaiMenubar && document.querySelector(".geDiagramContainer") ? !!(window.drawaiTestUi || null) : null`);
+	void gridBefore;
+	const gridState = () => ed.executeJavaScript(`window.drawaiMenubar.gridEnabled()`);
+	const g0 = await gridState();
+	gridItem?.click();
+	await pause(600);
+	const g1 = await gridState();
+	gridItem && sub("View")?.items.find((i) => /^Grid$/.test(i.label))?.click();
+	log("menuGridToggles", { found: !!gridItem, before: g0, after: g1 });
+	await pause(600);
+	// Edit → Undo from the menu bar undoes a canvas edit (draw.io's own undo, not the text field's)
+	const cells = async () => JSON.parse(((await rpcTool(w, "drawio_get_diagram", {})) as any).text ?? "{}").totalCells;
+	const c0 = await cells();
+	await ed.executeJavaScript(`(() => { const ui = window.drawaiMenubar; return !!ui; })()`);
+	await rpcTool(w, "drawio_apply_operations", { ops: [{ op: "addShape", label: "undo me", x: 10, y: 10, width: 80, height: 40 }] });
+	await pause(600);
+	const c1 = await cells();
+	ed.focus();
+	await ed.executeJavaScript(`document.querySelector(".geDiagramContainer").focus()`);
+	const undo = Menu.getApplicationMenu()!.items.find((i) => i.label === "Edit")?.submenu?.items.find((i) => /^Undo/.test(i.label));
+	undo?.click();
+	await pause(800);
+	log("menuUndo", { found: !!undo, before: c0, afterAdd: c1, afterUndo: await cells() });
+	// with the new shape selected (draw.io then keeps a hidden text field focused), Undo still works
+	await rpcTool(w, "drawio_apply_operations", { ops: [{ op: "addShape", label: "selected", x: 120, y: 10, width: 80, height: 40 }] });
+	await pause(500);
+	const added = JSON.parse(((await rpcTool(w, "drawio_find_cells", { query: "selected" })) as any).text ?? "{}");
+	const addedId = (added.cells ?? added.matches ?? added)[0]?.id;
+	if (addedId) await rpcTool(w, "drawio_select_cells", { ids: [addedId] });
+	ed.focus();
+	await pause(400);
+	const s1 = await cells();
+	const focusIsShim = await ed.executeJavaScript(`(() => { const a = document.activeElement; return a ? (a.className || a.tagName) : null; })()`);
+	Menu.getApplicationMenu()!.items.find((i) => i.label === "Edit")?.submenu?.items.find((i) => /^Undo/.test(i.label))?.click();
+	await pause(800);
+	log("menuUndoWithSelection", { selected: !!addedId, focus: focusIsShim, before: s1, afterUndo: await cells() });
+	// a draw.io shortcut that reaches the menu while the chat has focus does nothing to the diagram
+	const dup = Menu.getApplicationMenu()!.items.find((i) => i.label === "Edit")?.submenu?.items.find((i) => /^Duplicate/.test(i.label));
+	const d0 = await cells();
+	chat.focus();
+	await pause(200);
+	(dup as any)?.click({ triggeredByAccelerator: true }, undefined, { triggeredByAccelerator: true });
+	await pause(800);
+	log("menuKeyFromChatIgnored", { found: !!dup, before: d0, after: await cells() });
+
+	await ed.executeJavaScript(`(() => { const b = document.querySelector(".geToolbarContainer a.geButton:not(.drawai-mark)"); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); })()`);
 	await pause(400);
 	log("panelMenu", await ed.executeJavaScript(`Array.from(document.querySelectorAll(".mxPopupMenu .mxPopupMenuItem")).map((e) => e.textContent.trim()).filter(Boolean)`));
 	await save("panel-menu.png", ed, { x: 0, y: 0, width: 360, height: 260 });
@@ -509,7 +563,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
 		for (const style of ["isometric", "dots", "extruded", "classic"] as const) {
-			updateSettings({ appearance: { theme, iconStyle: style } });
+			updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: style } });
 			await pause(700);
 			await save(`toolbar-${theme}-${style}.png`, ed, await top());
 			await save(`chat-${theme}-${style}.png`, chat);
@@ -518,8 +572,18 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
 	}
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "isometric" } });
+	updateSettings({ appearance: { theme: "light", iconStyle: "isometric", toolbar: "top" } });
 	await pause(600);
+	// the toolbar on each side
+	for (const side of ["left", "right", "bottom", "top"] as const) {
+		updateSettings({ appearance: { ...settings().appearance, toolbar: side } });
+		await pause(700);
+		log(
+			`toolbar-${side}`,
+			await ed.executeJavaScript(`(() => { const t = document.querySelector(".geToolbarContainer").getBoundingClientRect(), d = document.querySelector(".geDiagramContainer").getBoundingClientRect(); const visible = Array.from(document.querySelectorAll(".geToolbarContainer a.geButton")).filter((b) => b.offsetParent && b.getBoundingClientRect().width > 0).length; return { toolbar: [Math.round(t.left), Math.round(t.top), Math.round(t.width), Math.round(t.height)], diagram: [Math.round(d.left), Math.round(d.top), Math.round(d.width), Math.round(d.height)], buttons: visible }; })()`)
+		);
+		await save(`layout-toolbar-${side}.png`, ed);
+	}
 	log("chatIconsDrawn", await chat.executeJavaScript(`document.querySelectorAll("[data-icon] svg.icon").length`));
 	log("chatToolbarOneRow", await chat.executeJavaScript(`(() => { const tops = new Set(Array.from(document.querySelectorAll("#context > .tb:not(.hidden)")).map((b) => Math.round(b.getBoundingClientRect().top))); return tops.size === 1; })()`));
 
@@ -571,7 +635,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(800);
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
-		updateSettings({ appearance: { theme, iconStyle: "isometric" } });
+		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "isometric" } });
 		await pause(500);
 		for (const section of ["appearance", "agents", "chat", "editor", "shapes"]) {
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
@@ -582,5 +646,10 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
 	sw.close();
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "isometric" } });
+	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "isometric" } });
+}
+
+/** Calls a diagram tool on the window's MCP server, as an agent would. */
+async function rpcTool(w: DiagramWindow, name: string, args: unknown): Promise<unknown> {
+	return w.callTool(name, args);
 }

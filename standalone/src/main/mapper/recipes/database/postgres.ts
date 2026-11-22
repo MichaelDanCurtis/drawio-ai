@@ -79,7 +79,7 @@ function pgConfig(spec: ConnSpec): any {
 	const base: any = {
 		connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
 		query_timeout: QUERY_TIMEOUT_MS,
-		application_name: "Draw.AI Mapper (read-only)",
+		application_name: "OmniDraw Mapper (read-only)",
 	};
 	const ssl = spec.tls === "on" ? { rejectUnauthorized: true } : spec.tls === "on-trust" ? { rejectUnauthorized: false } : spec.tls === "off" ? false : undefined;
 	if (spec.url) {

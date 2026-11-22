@@ -42,7 +42,7 @@ export interface ChatHost {
 	fileName(): string | undefined;
 	/** Folder the agent works in: the diagram's folder. */
 	cwd(): string;
-	/** The diagram is loaded and the Draw.AI plugin is ready. */
+	/** The diagram is loaded and the Draw.AI draw.io plugin is ready. */
 	ready(): boolean;
 	/** Mapper: open its dialog, and the number of mapped shapes in the selection. */
 	openMapper?(): void;
@@ -733,7 +733,7 @@ export class ChatController {
 				modelsError: this.sessionError ?? (!starting && !info && status?.problem ? status.problem.split("\n")[0] : undefined),
 				agentState: info ? "ready" : starting ? "starting" : this.sessionError || status?.problem ? "problem" : "",
 				agentInfo: info
-					? `${info.agentName} · ACP session ready · Draw.AI tools over MCP (${info.mcpTransport})${status?.viaNpx ? " · adapter via npx" : ""}`
+					? `${info.agentName} · ACP session ready · OmniDraw tools over MCP (${info.mcpTransport})${status?.viaNpx ? " · adapter via npx" : ""}`
 					: starting
 					? `Starting ${agentDef(this.agentId).label}${status?.viaNpx ? " (fetching the ACP adapter with npx)" : ""}…`
 					: undefined,
@@ -748,8 +748,8 @@ export class ChatController {
 
 function firstPromptNote(fileName: string | undefined): string {
 	return [
-		`You are working inside the Draw.AI desktop app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
-		"Read and change it ONLY with the drawio_* tools of the \"draw-ai\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
+		`You are working inside the OmniDraw app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
+		"Read and change it ONLY with the drawio_* tools of the \"omnidraw\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
 		"Reply with a brief summary of what you changed.",
 	].join("\n");
 }
@@ -785,10 +785,10 @@ function toolTitle(title: string, _input?: unknown): string {
 	return title.length > 120 ? title.slice(0, 117) + "…" : title;
 }
 
-/** "mcp__draw-ai__drawio_get_diagram" → "use Draw.AI's drawio_get_diagram (reading diagram)". */
+/** "mcp__draw-ai__drawio_get_diagram" → "use OmniDraw's drawio_get_diagram (reading diagram)". */
 function permissionTitle(title: string): string {
 	const name = /drawio_[a-z_]+/.exec(title)?.[0];
-	if (name) return `use Draw.AI's ${name}${TOOL_LABELS[name] ? ` (${TOOL_LABELS[name].replace(/…$/, "").toLowerCase()})` : ""}`;
+	if (name) return `use OmniDraw's ${name}${TOOL_LABELS[name] ? ` (${TOOL_LABELS[name].replace(/…$/, "").toLowerCase()})` : ""}`;
 	return `run: ${title.length > 120 ? title.slice(0, 117) + "…" : title}`;
 }
 

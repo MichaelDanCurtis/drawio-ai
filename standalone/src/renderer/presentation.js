@@ -1,4 +1,4 @@
-// Draw.AI desktop: presentation mode, as a draw.io plugin. Shows only the diagram
+// OmniDraw: presentation mode, as a draw.io plugin. Shows only the diagram
 // (no menus, toolbars, panels, grid or AI overlays), read-only: nothing can be
 // selected or edited, dragging with either mouse button moves the view, the wheel
 // scrolls and Ctrl/Cmd+wheel or a pinch zooms. Pages are dots in the bottom left;
@@ -454,7 +454,7 @@
 					if (data.enabled) enter();
 					else leave();
 				} catch (e) {
-					console.error("Draw.AI presentation mode:", e);
+					console.error("OmniDraw presentation mode:", e);
 					try {
 						leave();
 					} catch (e2) {

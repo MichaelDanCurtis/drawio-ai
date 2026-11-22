@@ -20,7 +20,7 @@ function target(): { url: URL; token: string } {
 	try {
 		info = JSON.parse(fs.readFileSync(file, "utf8"));
 	} catch {
-		throw new Error("the Draw.AI desktop app is not running. Open it, then try again");
+		throw new Error("OmniDraw is not running. Open it, then try again");
 	}
 	return { url: new URL(info.url), token: String(info.token ?? "") };
 }
@@ -71,7 +71,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
 			if (answer.trim()) process.stdout.write(answer.trim().replace(/\n/g, " ") + "\n");
 		} catch (e: any) {
 			if (id !== null) {
-				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32603, message: `Draw.AI is not reachable: ${e?.message ?? e}` } }) + "\n");
+				process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code: -32603, message: `OmniDraw is not reachable: ${e?.message ?? e}` } }) + "\n");
 			}
 		}
 	});

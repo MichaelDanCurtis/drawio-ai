@@ -35,7 +35,7 @@ export class AuthRequiredError extends Error {
 
 /**
  * One coding agent, started in ACP mode, with one session whose cwd is the
- * diagram's folder and whose MCP servers include this window's Draw.AI tools.
+ * diagram's folder and whose MCP servers include this window's OmniDraw tools.
  */
 export class AcpAgentSession {
 	private child: ChildProcess | undefined;
@@ -87,7 +87,7 @@ export class AcpAgentSession {
 			Readable.toWeb(child.stdout!) as unknown as ReadableStream<Uint8Array>
 		);
 		const app = acp
-			.client({ name: "Draw.AI" })
+			.client({ name: "OmniDraw" })
 			.onNotification("session/update", ({ params }) => {
 				if (params.sessionId === this.info?.sessionId) this.handlers.onUpdate(params.update);
 			})
@@ -101,7 +101,7 @@ export class AcpAgentSession {
 			agent.request("initialize", {
 				protocolVersion: acp.PROTOCOL_VERSION,
 				clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-				clientInfo: { name: "draw-ai-desktop", title: "Draw.AI", version: "0.1.0" },
+				clientInfo: { name: "omnidraw", title: "OmniDraw", version: "0.1.0" },
 			}),
 			"initialize"
 		);
@@ -112,9 +112,9 @@ export class AcpAgentSession {
 		const init = this.init!;
 		const http = !!init.agentCapabilities?.mcpCapabilities?.http;
 		const mcpServer: acp.McpServer = http
-			? { type: "http", name: "draw-ai", url: this.mcp.url, headers: [{ name: "Authorization", value: `Bearer ${this.mcp.token}` }] }
+			? { type: "http", name: "omnidraw", url: this.mcp.url, headers: [{ name: "Authorization", value: `Bearer ${this.mcp.token}` }] }
 			: {
-					name: "draw-ai",
+					name: "omnidraw",
 					command: process.execPath,
 					args: [this.mcp.stdioProxy, this.mcp.url],
 					env: [

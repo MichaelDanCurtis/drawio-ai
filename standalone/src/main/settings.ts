@@ -7,6 +7,8 @@ export type ThemeChoice = "system" | "light" | "dark";
 /** The app's icons: draw.io's own flat ones, or one of three 3D styles drawn by ui/icons.js. */
 export type IconStyle = "classic" | "isometric" | "dots" | "extruded";
 export const ICON_STYLES: IconStyle[] = ["classic", "isometric", "dots", "extruded"];
+/** Where draw.io's toolbar sits in the editor. */
+export type ToolbarSide = "top" | "left" | "right" | "bottom";
 
 /** A model or mode an agent offered, remembered so Settings can list it while the agent is not running. */
 export interface KnownModel {
@@ -25,7 +27,7 @@ export interface ShapeLocation {
 }
 
 /**
- * User settings, in <userData>/settings.json, edited in Draw.AI → Settings….
+ * User settings, in <userData>/settings.json, edited in OmniDraw → Settings….
  * Everything has a default; the file only holds what the user changed.
  */
 export interface Settings {
@@ -35,9 +37,9 @@ export interface Settings {
 	agents: Partial<Record<AgentId, { command: string; args?: string[]; env?: Record<string, string> }>>;
 	/** Width of the chat panel in pixels. */
 	chatWidth: number;
-	/** Draw.AI editor settings, with the same keys as the VS Code extension's `drawio-ai.*` settings. */
+	/** OmniDraw editor settings, with the same keys as the VS Code extension's `drawio-ai.*` settings. */
 	editor: Record<string, unknown>;
-	appearance: { theme: ThemeChoice; iconStyle: IconStyle };
+	appearance: { theme: ThemeChoice; iconStyle: IconStyle; toolbar: ToolbarSide };
 	chat: {
 		/** Which side of the window the chat docks on. */
 		side: "right" | "left";
@@ -63,7 +65,7 @@ const DEFAULTS: Settings = {
 		"drawio-ai.selectChangedCells": false,
 		"drawio-ai.maxCellsInContext": 400,
 	},
-	appearance: { theme: "system", iconStyle: "isometric" },
+	appearance: { theme: "system", iconStyle: "isometric", toolbar: "top" },
 	chat: { side: "right", startCollapsed: false, allowAllByDefault: false },
 	models: {},
 	modelCatalog: {},
@@ -83,6 +85,7 @@ function merge(user: any): Settings {
 	const appearance = { ...DEFAULTS.appearance, ...obj(user.appearance) };
 	if (!["system", "light", "dark"].includes(appearance.theme)) appearance.theme = DEFAULTS.appearance.theme;
 	if (!ICON_STYLES.includes(appearance.iconStyle)) appearance.iconStyle = DEFAULTS.appearance.iconStyle;
+	if (!["top", "left", "right", "bottom"].includes(appearance.toolbar)) appearance.toolbar = DEFAULTS.appearance.toolbar;
 	const chat = { ...DEFAULTS.chat, ...obj(user.chat) };
 	if (chat.side !== "left") chat.side = "right";
 	chat.startCollapsed = !!chat.startCollapsed;

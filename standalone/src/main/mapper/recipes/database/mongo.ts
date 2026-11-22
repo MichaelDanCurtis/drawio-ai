@@ -39,7 +39,7 @@ export const mongoEngine: Engine = {
 			...(has("connectTimeoutMS") ? {} : { connectTimeoutMS: CONNECT_TIMEOUT_MS }),
 			socketTimeoutMS: QUERY_TIMEOUT_MS + 5000,
 			readPreference: "secondaryPreferred",
-			appName: "Draw.AI Mapper (read-only)",
+			appName: "OmniDraw Mapper (read-only)",
 			maxPoolSize: 2,
 			retryWrites: false,
 			...(spec.tls === "on" ? { tls: true } : spec.tls === "on-trust" ? { tls: true, tlsAllowInvalidCertificates: true } : spec.tls === "off" ? { tls: false } : {}),

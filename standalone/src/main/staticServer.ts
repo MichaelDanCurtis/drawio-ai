@@ -30,7 +30,7 @@ export interface EditorPageOptions {
 }
 
 /**
- * Serves the bundled draw.io webapp, the Draw.AI plugin and the editor page on
+ * Serves the bundled draw.io webapp, the Draw.AI draw.io plugin and the editor page on
  * 127.0.0.1 (draw.io expects an http(s) origin). Read-only static files only.
  */
 export class StaticServer {
@@ -60,7 +60,7 @@ export class StaticServer {
 			.replace("$$lang$$", JSON.stringify("en"))
 			.replace("$$simpleLabels$$", "false")
 			.replace("$$chrome$$", JSON.stringify("1"))
-			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/ui/icons.js`, `${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/desktop-toolbar.js`, `${base}/plugin/presentation.js`]))
+			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/ui/icons.js`, `${base}/ui/brandmark.js`, `${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/desktop-toolbar.js`, `${base}/plugin/desktop-menubar.js`, `${base}/plugin/presentation.js`]))
 			.replace("$$localStorage$$", JSON.stringify(o.localStorage))
 			.replace("$$additionalCode$$", "[]");
 	}
@@ -91,7 +91,7 @@ export class StaticServer {
 			return void res.end(html);
 		}
 		let file: string | undefined;
-		if (["/plugin/theme.js", "/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/desktop-toolbar.js", "/plugin/presentation.js"].includes(p)) {
+		if (["/plugin/theme.js", "/plugin/drawio-plugin.js", "/plugin/drawio-plugin.js.map", "/plugin/desktop-menu.js", "/plugin/desktop-toolbar.js", "/plugin/desktop-menubar.js", "/plugin/presentation.js"].includes(p)) {
 			file = path.join(paths.out, path.basename(p));
 		} else if (p.startsWith("/ui/")) {
 			// the app's own look: theme CSS, the dot modules, fonts (see build.mjs)

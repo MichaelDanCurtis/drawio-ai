@@ -1,5 +1,5 @@
 /*
- * Draw.AI desktop: shared base for the app's own pages (chat, Mapper), in the
+ * OmniDraw: shared base for the app's own pages (chat, Mapper), in the
  * omni-design language (tokens.css, motion.css, depth.css from the skill).
  * Load order: fonts.css → tokens.css → motion.css → depth.css → app.css.
  * Only tokens here; no colours of its own except the status mapping below.
