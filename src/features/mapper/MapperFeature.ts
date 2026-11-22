@@ -109,6 +109,10 @@ export class MapperFeature {
 			vscode.commands.registerCommand("drawio-ai.maps.run", (args: MapRunArgs) => this.runForCommand(args)),
 			vscode.commands.registerCommand("drawio-ai.maps.tool", (args: { name: string; args?: unknown }) => this.callTool(args?.name, args?.args)),
 			vscode.commands.registerCommand("drawio-ai.maps.state", () => this.state()),
+			vscode.commands.registerCommand("drawio-ai.maps.makeTarget", async (file: string) => {
+				const editor = [...this.deps.editorService.openedEditors].find((e) => e.uri.fsPath === file);
+				return editor ? this.makeTarget(editor) : false;
+			}),
 		]);
 		track(this.registerLanguageModelTools());
 	}
@@ -189,8 +193,27 @@ export class MapperFeature {
 		return rt.createContext({ cwd: nodePath.dirname(this.fileOf(editor)), env: process.env, signal, progress });
 	}
 
+	/**
+	 * Makes `editor` the diagram used last. The agent's tools work on that one, so a request
+	 * about a diagram (from its Map Something panel, say, after the user went to another
+	 * diagram) has to make it the target again before it is sent.
+	 */
+	private async makeTarget(editor: DrawioEditor): Promise<boolean> {
+		const service = this.deps.editorService;
+		if (!service.openedEditors.has(editor)) return false;
+		if (service.targetDrawioEditor === editor) return true;
+		editor.webviewPanel.reveal();
+		// (VS Code says the panel is active a moment later)
+		for (let i = 0; i < 40 && service.targetDrawioEditor !== editor; i++) await new Promise((r) => setTimeout(r, 50));
+		return service.targetDrawioEditor === editor;
+	}
+
 	/** Sends a request to the agent; the facts a map collected go along as an attachment, not as chat text. */
-	private ask(editor: DrawioEditor, request: string, extras: { selection?: SelectionContext } = {}): Promise<boolean> {
+	private async ask(editor: DrawioEditor, request: string, extras: { selection?: SelectionContext } = {}): Promise<boolean> {
+		if (!(await this.makeTarget(editor))) {
+			void vscode.window.showWarningMessage(`Draw.AI Mapper: ${fileName(editor)} is not open any more, so the request was not sent to the agent.`);
+			return false;
+		}
 		const { text, facts } = splitFacts(request);
 		return this.deps.ask(text, editor, {
 			attachments: facts?.trim() ? [{ name: "map-facts", text: facts }] : undefined,
@@ -596,9 +619,10 @@ export class MapperFeature {
 
 	private async state() {
 		const editor = this.deps.editorService.targetDrawioEditor;
-		if (!editor || !this.onDisk(editor.uri)) return { maps: [], panelOpen: false };
+		if (!editor || !this.onDisk(editor.uri)) return { maps: [], panelOpen: false, target: editor?.uri.fsPath };
 		const service = await this.service(editor);
 		return {
+			target: editor.uri.fsPath,
 			maps: service.records().map((r) => service.summary(r)),
 			panelOpen: this.panels.has(editor),
 			panelPage: this.panels.has(editor) ? this.panelPages.get(this.panels.get(editor)!) : undefined,

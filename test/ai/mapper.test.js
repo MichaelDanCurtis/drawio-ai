@@ -116,7 +116,7 @@ test("the Mapper's commands, view and menus are contributed, and what needs a cl
 	const feature = read("src/features/mapper/MapperFeature.ts");
 	const registered = [...feature.matchAll(/(?:command|registerCommand)\("(drawio-ai\.[\w.]+)"/g)].map((m) => m[1]);
 	const contributed = new Set(pkg.contributes.commands.map((c) => c.command));
-	const internal = ["drawio-ai.maps.run", "drawio-ai.maps.tool", "drawio-ai.maps.state"];
+	const internal = ["drawio-ai.maps.run", "drawio-ai.maps.tool", "drawio-ai.maps.state", "drawio-ai.maps.makeTarget"];
 	for (const c of registered) assert.equal(contributed.has(c), !internal.includes(c), `${c}: registered ${internal.includes(c) ? "for tests only, but contributed" : "but not contributed"}`);
 	for (const c of [...contributed].filter((c) => c === "drawio-ai.mapSomething" || c.startsWith("drawio-ai.maps."))) assert.ok(registered.includes(c), `${c} is contributed but not registered`);
 	assert.ok(pkg.contributes.views["drawio-ai"].some((v) => v.id === "drawio-ai.maps"));

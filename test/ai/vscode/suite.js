@@ -715,6 +715,18 @@ async function runSteps() {
 		assert.deepEqual([loaded.sheets, loaded.scripts, loaded.modules, loaded.font], [5, true, true, true], JSON.stringify(loaded));
 		assert.equal(vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => /^Map Something: /.test(t.label)).length, 1);
 
+		// A request from a diagram's panel is about that diagram: with another one in front, it becomes the target again first
+		// (the agent's map tools work on the diagram used last).
+		const mapped = diagram.uri.fsPath;
+		assert.equal((await mapsState()).target, mapped);
+		await vscode.commands.executeCommand("vscode.openWith", file, "drawio-ai-text");
+		await waitFor(async () => ((await mapsState()).target === file.fsPath ? true : undefined), "the first diagram to be the one used last");
+		assert.deepEqual((await mapsState()).maps, [], "the other diagram has no maps");
+		assert.equal(await vscode.commands.executeCommand("drawio-ai.maps.makeTarget", mapped), true);
+		const back = await mapsState();
+		assert.equal(back.target, mapped);
+		assert.ok(back.maps.some((m) => m.id === mapId));
+
 		// the same tools over the MCP server, as Claude Code and Codex reach them
 		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("port", 0, vscode.ConfigurationTarget.Global);
 		const info = await vscode.commands.executeCommand("drawio-ai.mcpSetup", { enable: true, show: false });
