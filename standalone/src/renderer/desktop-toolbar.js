@@ -7,7 +7,25 @@
 //  - the icons follow Settings → Appearance → Icons (ui/icons.js draws them)
 //  - the user's own shape folders and libraries (Settings → Shapes) become palettes
 // The app sends { action: "desktopPrefs" | "desktopShapes", ... } as window messages.
+//
+// The VS Code extension loads this file in its editor too. It sets window.omnidrawConfig
+// before the plugins load: { host: "vscode", name, base, icons, toolbar, matrix, features }.
+// `base` is where /ui is served from; a feature set to false is left out (the extension has
+// no Shape Workshop or chat of its own here, and VS Code owns the keyboard shortcuts; with
+// draw.io's min, simple and sketch themes, which have toolbars of their own, it also leaves
+// out "toolbar" (the buttons, the icons, the toolbar's place) and "matrix").
 (function () {
+	var CFG = window.omnidrawConfig || {};
+	var BASE = CFG.base || "";
+	var HOST = CFG.host || "desktop";
+	var NAME = CFG.name || "OmniDraw";
+	function has(feature) {
+		return !CFG.features || CFG.features[feature] !== false;
+	}
+	/** " (F5)" where the host has that shortcut, nothing where it does not. */
+	function keyHint(keys) {
+		return has("shortcuts") ? " (" + keys + ")" : "";
+	}
 	function send(command) {
 		window.VsCodeApi.postMessage(JSON.stringify({ event: "desktopCommand", command: command }));
 	}
@@ -27,8 +45,8 @@
 	var EXTRA = { present: null, chatArrow: null, workshop: null, ruler: null };
 	// which glyph each of them shows now (the chat's arrow changes with the chat)
 	var EXTRA_GLYPH = { present: "present", chatArrow: "sparkle", workshop: "workshop", ruler: "ruler" };
-	var style = (/[?&]icons=([a-z0-9]+)/.exec(location.search) || [])[1] || "dots2d";
-	var side = (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
+	var style = CFG.icons || (/[?&]icons=([a-z0-9]+)/.exec(location.search) || [])[1] || "dots2d";
+	var side = CFG.toolbar || (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
 
 	/**
 	 * Toolbar on the top, left, right or bottom: draw.io lays the editor out with a CSS grid
@@ -85,6 +103,7 @@
 	/** Sets every Editor icon for the style, and swaps the images already on screen. */
 	function setStyle(s, ui) {
 		style = s;
+		if (!has("toolbar")) return;
 		var swaps = [];
 		for (var key in ORIGINAL) {
 			var next = uriFor(key, s);
@@ -130,17 +149,18 @@
 		mxResources.parse("desktop.present=Presentation Mode");
 		mxResources.parse("desktop.toggleChat=Show or Hide the Chat");
 		mxResources.parse("desktop.settings=Settings");
-		ui.actions.addAction("desktop.present", function () { send("present"); }, null, null, "F5");
-		ui.actions.addAction("desktop.toggleChat", function () { send("toggleChat"); }, null, null, ctrl + "+J");
-		ui.actions.addAction("desktop.settings", function () { send("settings"); }, null, null, ctrl + "+,");
+		var keys = has("shortcuts");
+		ui.actions.addAction("desktop.present", function () { send("present"); }, null, null, keys ? "F5" : null);
+		ui.actions.addAction("desktop.toggleChat", function () { send("toggleChat"); }, null, null, keys ? ctrl + "+J" : null);
+		ui.actions.addAction("desktop.settings", function () { send("settings"); }, null, null, keys ? ctrl + "+," : null);
 		mxResources.parse("desktop.workshop=Shape Workshop");
-		ui.actions.addAction("desktop.workshop", function () { send("workshop"); }, null, null, ctrl + "+Alt+K");
+		ui.actions.addAction("desktop.workshop", function () { send("workshop"); }, null, null, keys ? ctrl + "+Alt+K" : null);
 		setStyle(style, ui);
 
 		// The first button shows and hides the Shapes panel: one click, no menu.
 		// (draw.io builds it as a menu of panels: swap it for a plain button.)
 		var oldBtn = null;
-		var candidates = ui.toolbar && ui.toolbar.container ? ui.toolbar.container.querySelectorAll("a.geButton") : [];
+		var candidates = has("toolbar") && ui.toolbar && ui.toolbar.container ? ui.toolbar.container.querySelectorAll("a.geButton") : [];
 		for (var c = 0; c < candidates.length && !oldBtn; c++) if (candidates[c].style.backgroundImage.indexOf(current.dockRightImage) >= 0) oldBtn = candidates[c];
 		if (oldBtn) {
 			var shapesBtn = document.createElement("a");
@@ -159,7 +179,7 @@
 		}
 
 		// Layers, Tags, Outline and Presentation mode as toolbar buttons, after the layout menu.
-		var tb = ui.toolbar;
+		var tb = has("toolbar") ? ui.toolbar : null;
 		if (tb && tb.container) {
 			tb.addSeparator();
 			var group = tb.addItems(["layers", "tags", "outline"], null, null, [Editor.layersImage, Editor.tagsImage, Editor.outlineImage]);
@@ -173,18 +193,19 @@
 			tb.addSeparator();
 			var present = tb.addItems(["desktop.present"], null, null, [glyphUri("present", style)])[0];
 			if (present) {
-				present.setAttribute("title", "Presentation mode (F5): only the diagram, pages as dots, Esc leaves");
+				present.setAttribute("title", "Presentation mode" + keyHint("F5") + ": only the diagram, pages as dots, Esc leaves");
+				present.setAttribute("data-drawai", "present");
 				EXTRA.present = present;
 			}
-			var workshop = tb.addItems(["desktop.workshop"], null, null, [glyphUri("workshop", style)])[0];
+			var workshop = has("workshop") ? tb.addItems(["desktop.workshop"], null, null, [glyphUri("workshop", style)])[0] : null;
 			if (workshop) {
-				workshop.setAttribute("title", "Shape Workshop (" + ctrl + "+Alt+K): galleries of icons and logos, and your own collections");
+				workshop.setAttribute("title", "Shape Workshop" + keyHint(ctrl + "+Alt+K") + ": galleries of icons and logos, and your own collections");
 				EXTRA.workshop = workshop;
 			}
 		}
 
 		// The chat button, at the right end of the toolbar.
-		var end = document.querySelector(".geToolbarEnd");
+		var end = has("chat") && has("toolbar") ? document.querySelector(".geToolbarEnd") : null;
 		if (end) {
 			var chat = document.createElement("a");
 			chat.className = "geButton drawai-chat-toggle";
@@ -198,12 +219,12 @@
 		}
 
 		// The mark at the start of the toolbar (draw.io's menus are in the system menu bar): it opens Settings.
-		var bar = ui.toolbar && ui.toolbar.container;
+		var bar = has("toolbar") && ui.toolbar && ui.toolbar.container;
 		if (bar) {
 			var mark = document.createElement("a");
 			mark.className = "geButton drawai-mark";
-			mark.setAttribute("title", "OmniDraw · Settings (" + ctrl + "+,)");
-			mark.setAttribute("aria-label", "OmniDraw settings");
+			mark.setAttribute("title", NAME + " · Settings" + keyHint(ctrl + "+,"));
+			mark.setAttribute("aria-label", NAME + " settings");
 			var dotsEl = document.createElement("span");
 			dotsEl.className = "drawai-brandmark";
 			mark.appendChild(dotsEl);
@@ -227,7 +248,7 @@
 		var sideCss = document.createElement("style");
 		sideCss.textContent = SIDE_CSS;
 		document.head.appendChild(sideCss);
-		setSide(side, ui);
+		if (has("toolbar")) setSide(side, ui);
 		markOwn();
 
 		var css = document.createElement("style");
@@ -247,8 +268,9 @@
 			// everything in them (buttons, tabs, fields, shapes) is in front of it. Controls with an
 			// outline get the panel's colour, so no dots show inside them.
 			":root:not([data-drawai-matrix='off']) .geToolbarContainer, :root:not([data-drawai-matrix='off']) .geToolbar, :root:not([data-drawai-matrix='off']) .geSidebarContainer, :root:not([data-drawai-matrix='off']) .geSidebar, :root:not([data-drawai-matrix='off']) .geTabContainer { background-color: transparent !important; }",
-			".geSidebarFooter, .geSidebarFooter .geBtn.gePrimaryBtn { background-color: light-dark(#f3f2ef, #000000) !important; }",
-			".geTabContainer .geTab, .geTabContainer .geControlTab { background-color: light-dark(#f3f2ef, #000000); }",
+			// (the panel's colour is draw.io's own variable: the app's theme sets it to its paper and black)
+			".geSidebarFooter, .geSidebarFooter .geBtn.gePrimaryBtn { background-color: light-dark(var(--ge-panel-color, #f3f2ef), var(--ge-dark-panel-color, #000000)) !important; }",
+			".geTabContainer .geTab, .geTabContainer .geControlTab { background-color: light-dark(var(--ge-panel-color, #f3f2ef), var(--ge-dark-panel-color, #000000)); }",
 			".drawai-dots-host { position: relative; isolation: isolate; }",
 			".drawai-backdrop { position: absolute; top: 0; left: 0; right: 0; height: 150px; z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); -webkit-mask-composite: source-in; mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); mask-composite: intersect; }",
 			".drawai-backdrop canvas { display: block; width: 100%; height: 100%; }",
@@ -259,7 +281,7 @@
 		// ----- the live dot field in the top right of the Format panel, like the chat's head -----
 		// (dots near the pointer brighten and lean; it drifts slowly; still under reduced motion)
 		(function formatDots() {
-			var box = ui.format && ui.format.container;
+			var box = has("matrix") && ui.format && ui.format.container;
 			if (!box) return;
 			box.setAttribute("data-dot-host", "");
 			box.classList.add("drawai-dots-host");
@@ -281,7 +303,7 @@
 				box.insertBefore(back, box.firstChild);
 			};
 			box.insertBefore(back, box.firstChild);
-			import("/ui/dots.js").then(function (m) {
+			import(BASE + "/ui/dots.js").then(function (m) {
 				var fieldLayer = m.mountDotField(canvas, { density: 0.42, grid: 7, anchor: "viewport" });
 				if (!fieldLayer) return;
 				window.omnidrawFormatDots = fieldLayer;
@@ -291,8 +313,10 @@
 
 		// ----- the matrix: the chat's dot field over all of the editor's chrome, never over the diagram -----
 		var matrixLayer = null;
-		var matrixMode = document.documentElement.getAttribute("data-drawai-matrix") || "grey";
-		import("/ui/matrix.js").then(function (m) {
+		var matrixMode = has("matrix") ? document.documentElement.getAttribute("data-drawai-matrix") || CFG.matrix || "grey" : "off";
+		// (the theme plugin sets the attribute; a host that leaves the theme out still gets the matrix)
+		document.documentElement.setAttribute("data-drawai-matrix", matrixMode);
+		(has("matrix") ? import(BASE + "/ui/matrix.js") : Promise.reject()).then(function (m) {
 			var diagram = ui.diagramContainer;
 			matrixLayer = m.mountMatrix({
 				mode: matrixMode,
@@ -348,10 +372,12 @@
 			setTimeout(postShapeSets, 900); // (the Scratchpad opens a moment later)
 		}
 		// "+ More Shapes" under the sidebar opens the Workshop: one place for every kind of shape
-		var moreShapes = ui.actions.get("shapes");
+		var moreShapes = has("workshop") ? ui.actions.get("shapes") : null;
 		if (moreShapes) moreShapes.funct = function () { send("shapeSets"); };
-		postShapeSets();
-		setTimeout(postShapeSets, 1500);
+		if (has("workshop")) {
+			postShapeSets();
+			setTimeout(postShapeSets, 1500);
+		}
 
 		// ----- a shape from the Workshop: in the middle of the view, selected -----
 		function insertShape(shape) {
@@ -386,7 +412,7 @@
 		var sidebarSearch = ui.sidebar.searchEntries;
 		ui.sidebar.searchEntries = function (terms, count, page, success, error, closedLibs, imagesOnly) {
 			var self = this;
-			if (imagesOnly || page > 0 || !terms || !String(terms).trim()) return sidebarSearch.apply(this, arguments);
+			if (!has("workshop") || imagesOnly || page > 0 || !terms || !String(terms).trim()) return sidebarSearch.apply(this, arguments);
 			return sidebarSearch.call(this, terms, count, page, function (results, len, more, words) {
 				var id = ++searchSeq;
 				var done = false;
@@ -449,6 +475,37 @@
 			},
 		};
 
+		/** What the editor shows now. The host gets it when the tools have loaded, and when it asks ({ action: "desktopReportState" }). */
+		function lookState() {
+			var q = function (sel) { return !!document.querySelector(sel); };
+			return {
+				host: HOST,
+				icons: style,
+				toolbar: side,
+				matrix: matrixMode,
+				matrixMounted: !!matrixLayer,
+				formatDots: !!window.omnidrawFormatDots,
+				themed: q("#drawai-theme"),
+				tips: !!window.DrawAITips,
+				presenting: !!(window.drawaiPresentation && window.drawaiPresentation.isActive()),
+				buttons: {
+					mark: q(".drawai-mark"),
+					shapes: q("[data-drawai='shapes-toggle']"),
+					panels: document.querySelectorAll("[data-drawai='panel']").length,
+					ruler: q("[data-drawai='ruler']"),
+					present: !!EXTRA.present,
+					workshop: !!EXTRA.workshop,
+					chat: !!EXTRA.chatArrow,
+				},
+			};
+		}
+		window.omnidrawLook = { state: lookState };
+		function postState() {
+			window.VsCodeApi.postMessage(JSON.stringify({ event: "desktopState", state: lookState() }));
+		}
+		// once the toolbar is there (the matrix and the dot field arrive a moment later: ask again for them)
+		postState();
+
 		// ----- the user's shape folders and libraries -----
 		var palettes = [];
 		function showShapes(libraries) {
@@ -497,14 +554,14 @@
 		window.addEventListener("message", function (evt) {
 			var data = evt.data;
 			if (typeof data === "string") {
-				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0 && data.indexOf('"desktopStorage"') < 0 && data.indexOf('"desktopReportShapeSets"') < 0) return;
+				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0 && data.indexOf('"desktopStorage"') < 0 && data.indexOf('"desktopReportShapeSets"') < 0 && data.indexOf('"desktopReportState"') < 0) return;
 				try { data = JSON.parse(data); } catch (e) { return; }
 			}
 			if (!data) return;
 			if (data.action === "desktopPrefs") {
 				if (data.iconStyle && data.iconStyle !== style) setStyle(data.iconStyle, ui);
-				if (data.toolbar && data.toolbar !== side) setSide(data.toolbar, ui);
-				if (data.matrix && data.matrix !== matrixMode) {
+				if (data.toolbar && data.toolbar !== side && has("toolbar")) setSide(data.toolbar, ui);
+				if (data.matrix && data.matrix !== matrixMode && has("matrix")) {
 					matrixMode = data.matrix;
 					document.documentElement.setAttribute("data-drawai-matrix", matrixMode);
 					if (matrixLayer) matrixLayer.setMode(matrixMode);
@@ -524,6 +581,8 @@
 				try { insertShape(data.shape); } catch (e) { ui.handleError(e); }
 			} else if (data.action === "desktopReportShapeSets") {
 				postShapeSets();
+			} else if (data.action === "desktopReportState") {
+				postState();
 			} else if (data.action === "desktopStorage" && data.changes && window.omnidrawStorage) {
 				// another window changed draw.io's storage: this page takes it over, so it does not write its old copy back
 				var store = window.omnidrawStorage, settingsChanged = false, padChanged = false;

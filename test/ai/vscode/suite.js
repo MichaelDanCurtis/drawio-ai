@@ -156,6 +156,35 @@ async function runSteps() {
 		assert.equal(model.page.name, "Page-1");
 	});
 
+	await step("the editor has the desktop app's tools and look, and presentation mode starts and leaves", async () => {
+		// (the tools are draw.io plugins loaded from the extension's folder: the modules and
+		// fonts they load themselves only work if the webview may read that folder)
+		const look = () => vscode.commands.executeCommand("drawio-ai.editorLookState");
+		const state = await waitFor(async () => {
+			const s = await look();
+			return s && s.matrixMounted && s.formatDots ? s : undefined;
+		}, "the editor tools, the matrix and the dot field");
+		assert.equal(state.host, "vscode");
+		assert.equal(state.themed, true);
+		assert.equal(state.tips, true);
+		assert.deepEqual(state.buttons, { mark: true, shapes: true, panels: 3, ruler: true, present: true, workshop: false, chat: false });
+		assert.equal(state.icons, "dots2d");
+
+		// a setting changes the open editor (it is not loaded again: the plugin answers with the new style)
+		const config = vscode.workspace.getConfiguration("drawio-ai");
+		await config.update("look.icons", "classic", vscode.ConfigurationTarget.Global);
+		await waitFor(async () => ((await look())?.icons === "classic" ? true : undefined), "the icon style to change");
+		await config.update("look.icons", undefined, vscode.ConfigurationTarget.Global);
+		await waitFor(async () => ((await look())?.icons === "dots2d" ? true : undefined), "the icon style to change back");
+
+		await vscode.commands.executeCommand("drawio-ai.present");
+		await waitFor(async () => ((await look())?.presenting ? true : undefined), "presentation mode to start");
+		await vscode.commands.executeCommand("drawio-ai.present");
+		await waitFor(async () => ((await look())?.presenting === false ? true : undefined), "presentation mode to end");
+		// presenting changes nothing in the diagram
+		assert.equal(JSON.parse(await invoke("drawio_get_diagram", {})).totalCells, 0);
+	});
+
 	let ids;
 	await step("apply_operations edits the diagram and the change reaches the .drawio document", async () => {
 		const result = JSON.parse(

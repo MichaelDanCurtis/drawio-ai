@@ -23,6 +23,7 @@ import {
 	VsCodeSetting,
 } from "./vscode-utils/VsCodeSetting";
 import * as packageJson from "../package.json";
+import { cleanLook, EditorLook } from "./features/editorLook";
 
 const extensionId = "drawio-ai";
 const experimentalFeaturesEnabled = "drawio-ai.experimentalFeaturesEnabled";
@@ -776,6 +777,53 @@ export class DiagramConfig {
 	@computed
 	public get showConnectHandle(): boolean {
 		return this._showConnectHandle.get();
+	}
+
+	// #endregion
+
+	// #region Look and editor tools
+
+	private readonly _lookEditorTools = new VsCodeSetting(
+		`${extensionId}.look.editorTools`,
+		{ scope: this.uri, serializer: serializerWithDefault<unknown>(undefined) }
+	);
+	private readonly _lookTheme = new VsCodeSetting(
+		`${extensionId}.look.theme`,
+		{ scope: this.uri, serializer: serializerWithDefault<unknown>(undefined) }
+	);
+	private readonly _lookIcons = new VsCodeSetting(
+		`${extensionId}.look.icons`,
+		{ scope: this.uri, serializer: serializerWithDefault<unknown>(undefined) }
+	);
+	private readonly _lookMatrix = new VsCodeSetting(
+		`${extensionId}.look.matrix`,
+		{ scope: this.uri, serializer: serializerWithDefault<unknown>(undefined) }
+	);
+	private readonly _lookToolbar = new VsCodeSetting(
+		`${extensionId}.look.toolbar`,
+		{ scope: this.uri, serializer: serializerWithDefault<unknown>(undefined) }
+	);
+
+	/** The editor's look and tools (see features/editorLook.ts). */
+	@computed
+	public get look(): EditorLook {
+		return cleanLook({
+			editorTools: this._lookEditorTools.get(),
+			theme: this._lookTheme.get(),
+			icons: this._lookIcons.get(),
+			matrix: this._lookMatrix.get(),
+			toolbar: this._lookToolbar.get(),
+		});
+	}
+
+	/**
+	 * The part of the look that needs the editor page loaded again: which plugins it loads.
+	 * (Icons, the matrix and the toolbar's place change in the open editor.)
+	 */
+	@computed
+	public get lookPlugins(): string {
+		const look = this.look;
+		return `${look.editorTools}/${look.theme}`;
 	}
 
 	// #endregion

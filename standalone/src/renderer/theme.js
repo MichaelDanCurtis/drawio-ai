@@ -3,8 +3,14 @@
  * and the chat read as one app. Only draw.io's theme variables, its UI font and its
  * blue buttons change: diagrams, their fonts and their colours are never touched.
  * Loaded as a draw.io plugin, before the others.
+ *
+ * Also loaded by the VS Code extension's editor. A host that cannot put the look in the
+ * page's address sets window.omnidrawConfig first: { base, matrix, ... } (base is where
+ * /ui and /plugin are served from; the desktop app serves them from the page's own address).
  */
 (function () {
+	var CFG = window.omnidrawConfig || {};
+	var BASE = CFG.base || "";
 	var STYLE = [
 		"@font-face { font-family: 'Space Grotesk'; font-weight: 400; font-display: swap; src: url('/ui/fonts/space-grotesk-latin-400-normal.woff2') format('woff2'); }",
 		"@font-face { font-family: 'Space Grotesk'; font-weight: 500; font-display: swap; src: url('/ui/fonts/space-grotesk-latin-500-normal.woff2') format('woff2'); }",
@@ -40,12 +46,12 @@
 		"@keyframes drawai-rise { from { opacity: 0; transform: translateY(6px); } }",
 		".mxPopupMenu, .geDialog { animation: drawai-rise 220ms cubic-bezier(0.16, 0.84, 0.3, 1); }",
 		"@media (prefers-reduced-motion: reduce) { .mxPopupMenu, .geDialog, .geBtn { animation: none !important; transition: none !important; } }",
-	].join("\n");
+	].join("\n").replace(/url\('\/ui\//g, function () { return "url('" + BASE + "/ui/"; });
 	var style = document.createElement("style");
 	style.id = "drawai-theme";
 	style.textContent = STYLE;
 	(document.head || document.documentElement).appendChild(style);
-	var matrix = (/[?&]matrix=([a-z]+)/.exec(location.search) || [])[1];
+	var matrix = CFG.matrix || (/[?&]matrix=([a-z]+)/.exec(location.search) || [])[1];
 	if (matrix) document.documentElement.setAttribute("data-drawai-matrix", matrix);
 	if (typeof Draw !== "undefined") Draw.loadPlugin(function () {});
 })();

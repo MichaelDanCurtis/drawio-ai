@@ -39,6 +39,11 @@
 					value: bridgedLocalStorage,
 				});
 
+				// How the editor looks and which of the shared editor tools it shows
+				// (standalone/src/renderer/desktop-toolbar.js reads it). The desktop
+				// app passes the same things in the page's address and leaves this null.
+				window.omnidrawConfig = $$omniConfig$$;
+
 				// Fix draw.io tries to access unavailable cookie prop
 				Object.defineProperty(document, "cookie", { value: "" });
 
@@ -453,6 +458,9 @@
 					console.log("load custom plugin:", url);
 					const pluginScript = document.createElement("script");
 					pluginScript.type = "text/javascript";
+					// In the order given (a script added by code otherwise runs
+					// whenever it arrives): the toolbar plugin needs the icons first.
+					pluginScript.async = false;
 					pluginScript.src = url;
 					document
 						.getElementsByTagName("head")[0]

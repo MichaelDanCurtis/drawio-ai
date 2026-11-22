@@ -247,6 +247,14 @@ rise in. Under *reduce motion* nothing moves.
 - Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
   skill), served at `/ui/`. The fonts are self-hosted from `@fontsource` packages
   (`build.mjs` copies them).
+- Shared with the VS Code extension: `src/renderer/theme.js`, `desktop-toolbar.js`,
+  `presentation.js` and `ui/{icons,brandmark,tips,dots,matrix}.js` are also the extension's
+  editor tools (its plugin build copies them: `drawio-custom-plugins/webpack.config.ts`,
+  `src/features/editorLook.ts`). A host that cannot put the look in the page's address sets
+  `window.omnidrawConfig` first (`{ host, name, base, icons, toolbar, matrix, features }`);
+  the app leaves it `null` and nothing changes for it. In these files, load modules and fonts
+  through that `base`, switch app-only things off with `has("feature")`, and keep messages
+  safe to receive twice (a VS Code webview delivers each one twice).
 - draw.io's chrome: `src/renderer/theme.js`, a draw.io plugin that only changes
   draw.io's theme variables, its UI font and its primary buttons, never diagrams.
 - Icons: `src/renderer/ui/icons.js` draws every icon (the chat's, Settings' and draw.io's

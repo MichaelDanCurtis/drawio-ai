@@ -3,7 +3,8 @@
 // selected or edited, dragging with either mouse button moves the view, the wheel
 // scrolls and Ctrl/Cmd+wheel or a pinch zooms. Pages are dots in the bottom left;
 // Tab / Shift+Tab, the arrow keys, Page Up/Down and Space step through them.
-// Esc leaves. The app turns it on with { action: "desktopPresentation", enabled }.
+// Esc leaves. The host (the desktop app, or the VS Code extension) turns it on with
+// { action: "desktopPresentation", enabled }.
 // It never changes settings draw.io saves in the file (grid, page view, connect,
 // arrows): changing those would auto-save them and mark the diagram as edited.
 (function () {
@@ -63,7 +64,8 @@
 		"#drawai-tour-caption > :nth-child(2) { animation-delay: 45ms; } #drawai-tour-caption > :nth-child(3) { animation-delay: 90ms; } #drawai-tour-caption > :nth-child(4) { animation-delay: 135ms; }",
 		"@media (prefers-reduced-motion: reduce) { #drawai-present-exit, #drawai-present-nav, #drawai-page-dots, #drawai-tour-caption, #drawai-tour-caption > *, #drawai-page-dots button { animation: none !important; transition: none !important; } }",
 		"#drawai-present-hint { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 20000; padding: 6px 14px; border-radius: 999px; font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--dp-surface); background: var(--dp-ink); pointer-events: none; transition: opacity .6s; }",
-	].join("\n");
+		// (the fonts are served by the host: next to the page in the desktop app, from the extension's folder in VS Code)
+	].join("\n").replace(/url\('\/ui\//g, function () { return "url('" + ((window.omnidrawConfig || {}).base || "") + "/ui/"; });
 
 	Draw.loadPlugin(function (ui) {
 		var graph = ui.editor.graph;

@@ -4,11 +4,58 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
-    | AiPagesAction | AiExportPdfAction;
+    | AiPagesAction | AiExportPdfAction
+    | DesktopPrefsAction | DesktopPresentationAction | DesktopReportStateAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent;
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
+    | DesktopCommandEvent | DesktopStateEvent;
+
+// The editor tools shared with the desktop app (standalone/src/renderer/desktop-toolbar.js and
+// presentation.js, loaded as plugins): their messages keep the desktop app's names.
+
+/** Changes the look of the open editor: nothing in it is loaded again. */
+declare interface DesktopPrefsAction {
+    action: "desktopPrefs";
+    iconStyle?: string;
+    toolbar?: string;
+    matrix?: string;
+}
+
+declare interface DesktopPresentationAction {
+    action: "desktopPresentation";
+    enabled: boolean;
+}
+
+declare interface DesktopReportStateAction {
+    action: "desktopReportState";
+}
+
+/** A toolbar button or key of the shared editor tools: "present", "exitPresentation", "settings", ... */
+declare interface DesktopCommandEvent {
+    event: "desktopCommand";
+    command: string;
+}
+
+declare interface DesktopStateEvent {
+    event: "desktopState";
+    state: DesktopLookState;
+}
+
+/** What the editor's toolbar plugin shows now (its answer to "desktopReportState"). */
+declare interface DesktopLookState {
+    host: string;
+    icons: string;
+    toolbar: string;
+    matrix: string;
+    matrixMounted: boolean;
+    formatDots: boolean;
+    themed: boolean;
+    tips: boolean;
+    presenting: boolean;
+    buttons: { mark: boolean; shapes: boolean; panels: number; ruler: boolean; present: boolean; workshop: boolean; chat: boolean };
+}
 
 // ---------------------------------------------------------------------------
 // AI protocol
