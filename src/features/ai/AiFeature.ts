@@ -209,8 +209,9 @@ export class AiFeature {
 
 	/**
 	 * Every request made from the diagram (Alt+K, lasso, markup, Convert image, lint
-	 * fixes, Diagram from Code/Image, code link fixes) goes through here, to `@drawio`
-	 * in VS Code's chat. Returns whether the request was sent.
+	 * fixes, Diagram from Code/Image, code link fixes) goes through here, to the Draw.AI
+	 * agent in VS Code's chat (or `@drawio`: setting drawio-ai.chat.target). Returns whether
+	 * the request was sent.
 	 */
 	private async ask(text: string, selection: SelectionContext | undefined, extras: SendExtras): Promise<boolean> {
 		if (!(await this.ensureChatAvailable())) {

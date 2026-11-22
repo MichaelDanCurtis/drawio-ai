@@ -7,7 +7,7 @@
 ## Getting Started
 
 1. Open or create a diagram: any `.drawio`, `.drawio.svg` or `.drawio.png` file, or **Draw.io: New Draw.io Diagram**.
-2. Open the chat: the ✦ button in the editor title bar, or **Draw.AI: Open Draw.AI in Chat**. This is VS Code's own chat with `@drawio` typed in. It uses the model you pick in the chat (GitHub Copilot, or any other chat model extension).
+2. Open the chat: the ✦ button in the editor title bar, or **Draw.AI: Open Draw.AI in Chat**. This is VS Code's own chat with the **Draw.AI** agent chosen. It uses the model you pick in the chat (GitHub Copilot, or any other chat model extension).
 3. Describe a change. Every answer ends with buttons: **Keep Changes** / **Revert Changes** while AI edits are pending, **Lasso Select**, **Mark Up**, **Review**, **Export PDF** and **Export…**, plus suggestions such as *Tidy up the layout*. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
 
 In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts the lasso, `Alt+M` starts markup.
@@ -16,8 +16,8 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 
 | Surface | How |
 | --- | --- |
-| VS Code chat, `@drawio` | `@drawio` with `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch`. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here, with the selection described; images and code analyses travel with the request. Answers end with action buttons |
-| VS Code chat, **Draw.AI** agent | Pick **Draw.AI** in the chat's agent picker (VS Code 1.142 or later). It has the diagram tools and Draw.AI's instructions |
+| VS Code chat, **Draw.AI** agent | The default. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here with the **Draw.AI** agent chosen and the selection described; images and code analyses travel with the request. Or pick **Draw.AI** in the chat's agent picker and type. Needs VS Code 1.142 or later: older versions keep using `@drawio`. Keep or revert its pending changes with the buttons in the diagram's title bar |
+| VS Code chat, `@drawio` | Only with VS Code's Local chat runtime, which is removed in February 2027 (the Copilot runtime does not run chat participants). Set `drawio-ai.chat.target` to `participant` to send diagram requests to it. `@drawio` has `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch`, and its answers end with action buttons |
 | VS Code chat, Agent mode | The `drawio_*` tools appear under Draw.AI in **Configure Tools** (reference one with `#drawio-…`). Instructions shipped with the extension tell the agent to change `.drawio` files with these tools, not by rewriting their XML |
 | Claude Code and Codex | **Draw.AI: Connect Claude Code / Codex…** installs Draw.AI's plugin (skills and the `drawio_*` tools); see [below](#claude-code-and-codex) |
 | Other agents | Cursor and other MCP clients through **Draw.AI: Set Up MCP Server for External Agents…** |

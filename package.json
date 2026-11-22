@@ -1316,6 +1316,19 @@
 				"title": "AI",
 				"order": 5,
 				"properties": {
+					"drawio-ai.chat.target": {
+						"type": "string",
+						"enum": [
+							"agent",
+							"participant"
+						],
+						"enumDescriptions": [
+							"The Draw.AI agent in VS Code's chat. Works with VS Code's Copilot runtime.",
+							"The @drawio chat participant. Only works with the Local chat runtime, which VS Code removes in February 2027."
+						],
+						"default": "agent",
+						"markdownDescription": "Where requests from a diagram (`Alt+K`, lasso, markup, review, sketch) go in VS Code's chat. Pending changes are kept or reverted with the buttons in the diagram's title bar. VS Code older than 1.142 does not know the agent and always uses `@drawio`."
+					},
 					"drawio-ai.maxToolRounds": {
 						"type": "number",
 						"default": 16,

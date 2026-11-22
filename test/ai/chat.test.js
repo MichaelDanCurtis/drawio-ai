@@ -62,7 +62,7 @@ Module._resolveFilename = function (request, ...rest) {
 require.cache.vscode = { id: "vscode", filename: "vscode", loaded: true, exports: vscodeStub };
 
 const src = (p) => path.resolve(root, "src/features/ai", p);
-const { NATIVE_AGENT, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat, splitDiagramRequest } = require(src("nativeChat.ts"));
+const { NATIVE_AGENT, agentSupported, chatTarget, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat, splitDiagramRequest } = require(src("nativeChat.ts"));
 const { diagramButtons, startButtons, followups } = require(src("copilotIntegration.ts"));
 const { TOOL_SCHEMAS } = require(src("toolSchemas.ts"));
 const { SYSTEM_PROMPT, NATIVE_AGENT_NOTES } = require(src("systemPrompt.ts"));
@@ -112,13 +112,56 @@ test("VS Code's chat is used when AI features are on and some extension provides
 	delete settings["agent.enabled"];
 });
 
-test("Open Draw.AI in Chat types @drawio into VS Code's chat without sending", async () => {
+test("Open Draw.AI in Chat opens VS Code's chat with the Draw.AI agent chosen, without sending", async () => {
 	commands.length = 0;
 	await openNativeChat();
-	assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "ask", query: "@drawio ", isPartialQuery: true }]]);
+	assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "Draw.AI", query: "", isPartialQuery: true }]]);
+	assert.equal(NATIVE_AGENT, "Draw.AI");
 });
 
-test("a lasso request is sent to @drawio in VS Code's chat; images and texts are named, not attached", async () => {
+test("a VS Code too old for the Draw.AI agent (before 1.142) keeps using @drawio", async () => {
+	assert.equal(agentSupported("1.105.0"), false);
+	assert.equal(agentSupported("1.141.2"), false);
+	assert.equal(agentSupported("1.142.0"), true);
+	assert.equal(agentSupported("1.147.0-insider"), true);
+	assert.equal(agentSupported("2.0.0"), true);
+	assert.equal(agentSupported("not a version"), true, "an unknown version is taken as new");
+	const now = vscodeStub.version;
+	vscodeStub.version = "1.105.0";
+	try {
+		assert.equal(chatTarget(), "participant");
+		commands.length = 0;
+		await openNativeChat();
+		assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "ask", query: "@drawio ", isPartialQuery: true }]]);
+		commands.length = 0;
+		const editor = { uri: new Uri("/ws/a.drawio"), drawioClient: { currentSelection: [] } };
+		await sendToNativeChat(new Uri("/storage"), "tidy up", undefined, { editor });
+		assert.equal(commands[0][1].mode, "ask");
+		assert.match(commands[0][1].query, /^@drawio tidy up\n---\n/);
+	} finally {
+		vscodeStub.version = now;
+	}
+	assert.equal(chatTarget(), "agent");
+});
+
+test("with drawio-ai.chat.target = participant, requests still go to @drawio (the Local chat runtime)", async () => {
+	settings["chat.target"] = "participant";
+	try {
+		commands.length = 0;
+		await openNativeChat();
+		assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "ask", query: "@drawio ", isPartialQuery: true }]]);
+		commands.length = 0;
+		const editor = { uri: new Uri("/ws/a.drawio"), drawioClient: { currentSelection: [] } };
+		await sendToNativeChat(new Uri("/storage"), "tidy up", undefined, { editor });
+		assert.equal(commands[0][1].mode, "ask");
+		assert.match(commands[0][1].query, /^@drawio tidy up\n---\nOpen diagram: a\.drawio/);
+	} finally {
+		delete settings["chat.target"];
+	}
+	assert.equal(pkg.contributes.configuration.flatMap((c) => Object.entries(c.properties)).find(([k]) => k === "drawio-ai.chat.target")[1].default, "agent");
+});
+
+test("a lasso request is sent to the Draw.AI agent in VS Code's chat (no @drawio: the Copilot runtime has no participants); images and texts are named, not attached", async () => {
 	commands.length = 0;
 	files.clear();
 	const editor = { uri: new Uri("/ws/docs/arch.drawio"), drawioClient: { currentSelection: ["x"] } };
@@ -137,9 +180,10 @@ test("a lasso request is sent to @drawio in VS Code's chat; images and texts are
 	const [id, args] = commands[0];
 	assert.equal(id, "workbench.action.chat.open");
 	assert.deepEqual(Object.keys(args).sort(), ["isPartialQuery", "mode", "query"]);
-	assert.equal(args.mode, "ask");
+	assert.equal(args.mode, "Draw.AI");
 	assert.equal(args.isPartialQuery, false);
-	assert.match(args.query, /^@drawio make these blue\n---\nOpen diagram: arch\.drawio\nThe user circled \(lasso-selected\) 2 item\(s\) with ids: api, db\./);
+	assert.doesNotMatch(args.query, /@drawio/);
+	assert.match(args.query, /^make these blue\n---\nOpen diagram: arch\.drawio\nThe user circled \(lasso-selected\) 2 item\(s\) with ids: api, db\./);
 	const ids = [...args.query.matchAll(/"(\d+-[a-z0-9]+\/\d+\.\w+)"/g)].map((m) => m[1]);
 	assert.equal(ids.length, 2, "the non-image is dropped; the image and the text are named");
 	assert.match(args.query, /drawio_get_attachment/);
@@ -147,8 +191,8 @@ test("a lasso request is sent to @drawio in VS Code's chat; images and texts are
 	assert.match(args.query, /\(code analysis of src \(3 files\)\)/);
 	assert.equal(r.query, args.query);
 
-	// The participant sees the prompt without "@drawio" and splits off the context.
-	const sent = splitDiagramRequest(args.query.replace(/^@drawio /, ""));
+	// The participant (when it is used) sees the same prompt and splits off the context.
+	const sent = splitDiagramRequest(args.query);
 	assert.equal(sent.text, "make these blue");
 	assert.match(sent.context, /^Open diagram: arch\.drawio\nThe user circled/);
 	assert.match(sent.context, /drawio_get_attachment/);
