@@ -112,9 +112,9 @@ test("the vendors' logos for the Mapper are plain embedded SVGs", () => {
 
 test("the chat's dot object: every shape it turns into has the same dots, all inside the stage", async () => {
 	const m = await import("../src/renderer/ui/dot-object.js");
-	assert.deepEqual(m.MORPH_SHAPES.slice(0, 5), ["planes", "face", "tetrahedron", "spiral", "galaxy"], "it starts as the square of layers");
+	assert.deepEqual(m.MORPH_SHAPES.slice(0, 5), ["planes", "bust", "tetrahedron", "spiral", "galaxy"], "it starts as the square of layers");
 	const n = m.planes().length / 3;
-	for (const make of [m.face, m.tetrahedron, m.spiral, m.galaxy, m.saturn, m.helix, m.heart, m.wave]) {
+	for (const make of [m.bust, m.tetrahedron, m.spiral, m.galaxy, m.saturn, m.helix, m.heart, m.wave]) {
 		const pts = make();
 		assert.ok(pts.length > 300, `${make.name} has enough dots to read`);
 		const fit = m.fitShape(pts, n);

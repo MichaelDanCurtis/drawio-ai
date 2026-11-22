@@ -28,6 +28,12 @@
 		// the blue "+ More Shapes" and dialog primary buttons become ink pills
 		".gePrimaryBtn, .geBtn.gePrimaryBtn, .geSidebarContainer .geBtn.gePrimaryBtn { background: light-dark(#141414, #ededed) !important; color: light-dark(#ffffff, #000000) !important; border-color: transparent !important; border-radius: 999px !important; box-shadow: none !important; }",
 		".gePrimaryBtn:hover { background: light-dark(#000000, #ffffff) !important; }",
+		// "+ More Shapes" under the shapes: a hairline row across the sidebar, in the labels' mono caps
+		".geSidebarFooter { padding: 8px 10px 10px !important; height: auto !important; box-sizing: border-box; border-top: 1px solid light-dark(#e6e4df, #222222); }",
+		".geSidebarFooter .geBtn.gePrimaryBtn { width: 100%; padding: 7px 12px !important; display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: transparent !important; color: light-dark(#3a3936, #c8c8c8) !important; border: 1px solid light-dark(#d2cfc8, #333333) !important; border-radius: 8px !important; font: 11px 'Space Mono', ui-monospace, monospace !important; letter-spacing: 0.08em; text-transform: uppercase; box-shadow: none !important; }",
+		".geSidebarFooter .geBtn.gePrimaryBtn:hover { background: light-dark(#ecebe7, #1c1c1c) !important; border-color: light-dark(#8b8984, #6b6b6b) !important; color: light-dark(#141414, #ededed) !important; }",
+		".geSidebarFooter .geBtn.gePrimaryBtn span { font-size: 14px !important; margin: 0 !important; line-height: 1; }",
+		"@font-face { font-family: 'Space Mono'; font-weight: 400; font-display: swap; src: url('/ui/fonts/space-mono-latin-400-normal.woff2') format('woff2'); }",
 		".geBtn { border-radius: 999px !important; transition: background 140ms cubic-bezier(0.25, 0.1, 0.25, 1), transform 90ms cubic-bezier(0.25, 0.1, 0.25, 1); }",
 		".geBtn:active { transform: translateY(1px); }",
 		// floating layers rise in, like the chat's menus

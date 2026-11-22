@@ -228,7 +228,7 @@ findings count, the current tour step). Depth comes from dots: a live dot field 
 the chat and Mapper heads that leans away from the pointer and ripples when you switch
 agents or start a new chat, and a 3D dot object in the empty chat that keeps changing
 shape: it starts as a square of stacked layers, then every dot travels to its place in a
-face, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
+human bust, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
 more (`ui/dot-object.js`). When you start to type it shoots to the top right corner of
 the chat and stays there, small, during the conversation; in a new, empty chat it comes
 back. The dots near the pointer brighten and lean, in the object, in every head's dot

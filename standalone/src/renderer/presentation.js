@@ -8,8 +8,11 @@
 // arrows): changing those would auto-save them and mark the diagram as edited.
 (function () {
 	var STYLE = [
-		"body.drawai-presenting > *:not(.geDiagramContainer):not(#drawai-page-dots):not(#drawai-present-hint):not(#drawai-tour-caption) { display: none !important; }",
+		"body.drawai-presenting > *:not(.geDiagramContainer):not(#drawai-page-dots):not(#drawai-present-hint):not(#drawai-tour-caption):not(#drawai-present-exit):not(#drawai-present-nav) { display: none !important; }",
 		"body.drawai-presenting .geDiagramContainer { position: fixed !important; left: 0 !important; top: 0 !important; right: 0 !important; bottom: 0 !important; width: auto !important; height: auto !important; border: 0 !important; scrollbar-width: none; }",
+		// No rulers either (they are fixed strips of their own, and the diagram keeps a margin for them).
+		"body.drawai-presenting .geRuler { display: none !important; }",
+		"body.drawai-presenting .geDiagramContainer.geRulerContainer { margin: 0 !important; }",
 		// Scrollbars stay on (draw.io positions the view with them) but are not shown.
 		"body.drawai-presenting .geDiagramContainer::-webkit-scrollbar { display: none; }",
 		// No paper: the whole area takes the page's colour (draw.io redraws the page element, so CSS hides it).
@@ -29,7 +32,17 @@
 		"html.drawai-dark { --dp-surface: #0f0f0f; --dp-ink: #ededed; --dp-muted: #9b9b9b; --dp-faint: #6b6b6b; --dp-line: #333333; --dp-signal: #e5262f; --dp-shadow: 0 18px 48px rgb(0 0 0 / 70%), 0 0 0 1px rgb(255 255 255 / 6%); }",
 		"@keyframes drawai-rise { from { opacity: 0; transform: translateY(6px); } }",
 		"@keyframes drawai-rise-x { from { opacity: 0; transform: translate(-50%, 6px); } }",
-		"#drawai-page-dots { position: fixed; left: 18px; bottom: 16px; z-index: 20000; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 999px; background: var(--dp-surface); border: 1px solid var(--dp-line); box-shadow: var(--dp-shadow); animation: drawai-rise 220ms var(--dp-ease); }",
+		// the two buttons: leave (bottom left) and the pages one after another (bottom right)
+		"#drawai-present-exit, #drawai-present-nav { position: fixed; bottom: 16px; z-index: 20000; display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 4px; border-radius: 999px; background: var(--dp-surface); border: 1px solid var(--dp-line); box-shadow: var(--dp-shadow); animation: drawai-rise 220ms var(--dp-ease); font: 500 12.5px 'Space Grotesk', system-ui, sans-serif; color: var(--dp-ink); }",
+		"#drawai-present-exit { left: 18px; padding: 0; }",
+		"#drawai-present-nav { right: 18px; }",
+		"#drawai-present-exit button, #drawai-present-nav button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 28px; min-width: 28px; padding: 0 9px; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; cursor: pointer; transition: background 140ms ease-out; }",
+		"#drawai-present-exit button { height: 32px; padding: 0 14px 0 12px; }",
+		"#drawai-present-exit button:hover, #drawai-present-nav button:hover:not(:disabled) { background: color-mix(in srgb, var(--dp-ink) 10%, transparent); }",
+		"#drawai-present-nav button:disabled { opacity: 0.3; cursor: default; }",
+		"#drawai-present-nav .count { font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .08em; color: var(--dp-muted); padding: 0 6px; min-width: 44px; text-align: center; }",
+		"#drawai-present-exit svg, #drawai-present-nav svg { width: 12px; height: 12px; flex: none; }",
+		"#drawai-page-dots { position: fixed; left: 116px; bottom: 16px; z-index: 20000; display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-radius: 999px; background: var(--dp-surface); border: 1px solid var(--dp-line); box-shadow: var(--dp-shadow); animation: drawai-rise 220ms var(--dp-ease); }",
 		"#drawai-page-dots button { width: 8px; height: 8px; padding: 0; border-radius: 50%; border: 0; background: var(--dp-line); cursor: pointer; transition: transform 140ms var(--dp-ease), background 140ms ease-out; }",
 		"#drawai-page-dots button:hover { transform: scale(1.35); background: var(--dp-faint); }",
 		"#drawai-page-dots button.current { background: var(--dp-ink); transform: scale(1.25); }",
@@ -48,7 +61,7 @@
 		"#drawai-tour-caption .keys { font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .04em; color: var(--dp-faint); margin-top: 10px; }",
 		"#drawai-tour-caption > * { animation: drawai-rise 380ms var(--dp-ease) backwards; }",
 		"#drawai-tour-caption > :nth-child(2) { animation-delay: 45ms; } #drawai-tour-caption > :nth-child(3) { animation-delay: 90ms; } #drawai-tour-caption > :nth-child(4) { animation-delay: 135ms; }",
-		"@media (prefers-reduced-motion: reduce) { #drawai-page-dots, #drawai-tour-caption, #drawai-tour-caption > *, #drawai-page-dots button { animation: none !important; transition: none !important; } }",
+		"@media (prefers-reduced-motion: reduce) { #drawai-present-exit, #drawai-present-nav, #drawai-page-dots, #drawai-tour-caption, #drawai-tour-caption > *, #drawai-page-dots button { animation: none !important; transition: none !important; } }",
 		"#drawai-present-hint { position: fixed; left: 50%; top: 18px; transform: translateX(-50%); z-index: 20000; padding: 6px 14px; border-radius: 999px; font: 10.5px 'Space Mono', ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--dp-surface); background: var(--dp-ink); pointer-events: none; transition: opacity .6s; }",
 	].join("\n");
 
@@ -250,6 +263,49 @@
 			name.className = "name";
 			name.textContent = (ui.currentPage && ui.currentPage.getName && ui.currentPage.getName()) || "";
 			dots.appendChild(name);
+			renderNav();
+		}
+
+		// The buttons: leave at the bottom left; previous page, "2 / 5" and next page at the bottom right.
+		var exitBtn = null, nav = null;
+		var ICON = {
+			close: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg>',
+			prev: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7.5 2.5L4 6l3.5 3.5"/></svg>',
+			next: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 2.5L8 6 4.5 9.5"/></svg>',
+		};
+		function button(html, title, run) {
+			var b = document.createElement("button");
+			b.innerHTML = html;
+			b.title = title;
+			b.setAttribute("aria-label", title);
+			b.addEventListener("click", function (evt) { evt.stopPropagation(); run(); });
+			return b;
+		}
+		function makeButtons() {
+			exitBtn = document.createElement("div");
+			exitBtn.id = "drawai-present-exit";
+			exitBtn.appendChild(button(ICON.close + "<span>Exit</span>", "Leave presentation mode (Esc)", function () { send("exitPresentation"); }));
+			document.body.appendChild(exitBtn);
+			nav = document.createElement("div");
+			nav.id = "drawai-present-nav";
+			var prev = button(ICON.prev, "Previous page (←)", function () { step(-1); });
+			prev.className = "prev";
+			var count = document.createElement("span");
+			count.className = "count";
+			var next = button("<span>Next</span>" + ICON.next, "Next page (→ or Tab)", function () { step(1); });
+			next.className = "next";
+			nav.appendChild(prev);
+			nav.appendChild(count);
+			nav.appendChild(next);
+			document.body.appendChild(nav);
+			renderNav();
+		}
+		function renderNav() {
+			if (!nav) return;
+			var list = pages(), i = list.indexOf(ui.currentPage);
+			// one page: nothing to step through
+			nav.style.display = list.length > 1 ? "flex" : "none";
+			nav.querySelector(".count").textContent = i + 1 + " / " + list.length;
 		}
 
 		function showHint(text) {
@@ -367,6 +423,7 @@
 			dots.id = "drawai-page-dots";
 			document.body.appendChild(dots);
 			renderDots();
+			makeButtons();
 			pageListener = function () { renderDots(); };
 			ui.editor.addListener("pageSelected", pageListener);
 			window.addEventListener("keydown", onKey, true);
@@ -389,6 +446,9 @@
 			pageListener = null;
 			if (dots) dots.remove();
 			dots = null;
+			if (exitBtn) exitBtn.remove();
+			if (nav) nav.remove();
+			exitBtn = nav = null;
 			if (hint) hint.remove();
 			hint = null;
 			document.body.classList.remove("drawai-presenting");

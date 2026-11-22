@@ -52,9 +52,11 @@
 	#pickMenu .more { color: var(--muted); }
 
 	/* The chat closes from the edge it shares with the diagram: an arrow pointing the way it goes. */
-	#collapse { margin-left: -2px; margin-right: 2px; border: 1px solid var(--border-strong); border-radius: 7px; width: 26px; height: 26px; color: var(--ink-2); }
-	#collapse:hover { border-color: var(--control-line); color: var(--ink); }
-	body.side-left #collapse { order: 99; margin-left: 2px; margin-right: -2px; }
+	/* The AI symbol: the chat's mark, in the corner the chat shares with the diagram. Clicking it
+	   closes the chat; the same symbol at the end of the editor's toolbar opens it again. */
+	#collapse { margin-left: -2px; margin-right: 0; color: var(--ink); }
+	#collapse svg { width: 17px; height: 17px; }
+	body.side-left #collapse { order: 99; margin-left: 0; margin-right: -2px; }
 
 	/* The toolbar: a row of tabs standing on the line under it; one that is on joins the page below. */
 	#context { display: flex; align-items: flex-end; gap: 4px 3px; flex-wrap: wrap; min-height: 44px; padding: 7px 8px 0; border-bottom: 1px solid var(--border); container-type: inline-size; }
@@ -132,7 +134,7 @@
 	.report .ractions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 	.report .rfooter { color: var(--muted); font-size: 11.5px; white-space: pre-wrap; border-top: 1px solid var(--border); background: var(--surface-2); padding: 10px 14px; }
 
-	/* ---------- empty: a 3D dot object that changes shape (a square of layers, a face, a galaxy…) ---------- */
+	/* ---------- empty: a 3D dot object that changes shape (a square of layers, a human bust, a galaxy…) ---------- */
 	#empty { padding: 4px 4px 8px; display: flex; flex-direction: column; gap: 12px; }
 	#empty .dotobject-stage { aspect-ratio: 16 / 10; margin: 0 -6px; max-height: 460px; overflow: hidden; transition: max-height var(--dur-slow, 380ms) var(--ease-out), margin-bottom var(--dur-slow, 380ms) var(--ease-out); }
 	/* once the object has left for the corner, its place closes up */
@@ -179,7 +181,7 @@
 	<div class="top" data-dot-host>
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
 		<header>
-			<button id="collapse" class="icon-btn" title="Close the chat (⌘J opens it again)" aria-label="Close the chat"><span data-icon="chevronRight"></span></button>
+			<button id="collapse" class="icon-btn" title="Close the AI chat (⌘J opens it again)" aria-label="Close the AI chat"><span data-icon="sparkle"></span></button>
 			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Coding agent"><span id="providerLabel">Agent</span></button>
 			<button id="modelBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Model or mode"><span id="modelLabel">Model</span></button>
 			<span class="spacer"></span>
@@ -226,7 +228,7 @@
 			</div>
 		</div>
 	</div>
-	<div id="orb"><canvas class="dotobject" id="emptyObject" aria-label="A shape drawn in dots that keeps changing: stacked layers, a face, a galaxy and more"></canvas></div>
+	<div id="orb"><canvas class="dotobject" id="emptyObject" aria-label="A shape drawn in dots that keeps changing: stacked layers, a human bust, a galaxy and more"></canvas></div>
 	<footer>
 		<div id="review" class="hidden" role="status">
 			<span class="counts"><span class="label">Pending changes</span><span id="reviewCounts" class="counts"></span></span>
@@ -260,7 +262,7 @@
 	// shoots to the top right corner and lives there, small; in a new, empty chat it comes back.
 	const orb = document.getElementById("orb"), stage = document.getElementById("emptyStage"), empty = document.getElementById("empty");
 	const input = document.getElementById("input"), row = document.getElementById("context");
-	const SHAPES = ["planes", "face", "tetrahedron", "spiral", "galaxy", "saturn", "helix", "heart", "cube", "torus", "wave", "sphere"];
+	const SHAPES = ["planes", "bust", "tetrahedron", "spiral", "galaxy", "saturn", "helix", "heart", "cube", "torus", "wave", "sphere"];
 	const DOCK = 42, FLY_MS = 560;
 	const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	let object = null, docked = false, flight = null, at = null;
@@ -572,7 +574,6 @@
 		if (state.chatSide !== side) {
 			side = state.chatSide || "right";
 			document.body.classList.toggle("side-left", side === "left");
-			$("collapse").querySelector("[data-icon]").setAttribute("data-icon", side === "left" ? "chevronLeft" : "chevronRight");
 			iconStyle = null;
 		}
 		document.documentElement.dataset.matrix = state.matrix || "grey";

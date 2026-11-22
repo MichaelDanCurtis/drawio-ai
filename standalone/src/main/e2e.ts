@@ -291,6 +291,13 @@ async function runPresent(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 		throw e;
 	}
 	log("presenting", s1);
+	// the buttons: leave at the bottom left; the pages at the bottom right (only when there are several); no rulers
+	const chrome = await wc.executeJavaScript(`(() => {
+		const box = (id) => { const e = document.getElementById(id); if (!e) return null; const r = e.getBoundingClientRect(); return { shown: getComputedStyle(e).display !== "none", left: Math.round(r.left), fromRight: Math.round(innerWidth - r.right), fromBottom: Math.round(innerHeight - r.bottom) }; };
+		return { exit: box("drawai-present-exit"), nav: box("drawai-present-nav"), rulersShown: Array.from(document.querySelectorAll(".geRuler")).filter((r) => getComputedStyle(r).display !== "none").length };
+	})()`);
+	log("presentButtons", chrome);
+	if (!chrome.exit?.shown || chrome.exit.left > 40 || chrome.exit.fromBottom > 40 || !chrome.nav || chrome.rulersShown) throw new Error("Presentation mode lacks its Exit button, or shows rulers (see presentButtons above).");
 	await shot("present-page1.png");
 	await key("Tab");
 	const s2 = await state();

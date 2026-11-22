@@ -26,7 +26,7 @@
 	// Our own buttons' classic look: the flat glyphs.
 	var EXTRA = { present: null, chatArrow: null, workshop: null, ruler: null };
 	// which glyph each of them shows now (the chat's arrow changes with the chat)
-	var EXTRA_GLYPH = { present: "present", chatArrow: "chevronRight", workshop: "workshop", ruler: "ruler" };
+	var EXTRA_GLYPH = { present: "present", chatArrow: "sparkle", workshop: "workshop", ruler: "ruler" };
 	var style = (/[?&]icons=([a-z0-9]+)/.exec(location.search) || [])[1] || "dots2d";
 	var side = (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
 
@@ -188,9 +188,9 @@
 		if (end) {
 			var chat = document.createElement("a");
 			chat.className = "geButton drawai-chat-toggle";
-			chat.setAttribute("title", "Close the chat (" + ctrl + "+J)");
-			chat.setAttribute("aria-label", "Close or open the chat");
-			chat.style.backgroundImage = "url('" + glyphUri("chevronRight", style) + "')";
+			chat.setAttribute("title", "Open the AI chat (" + ctrl + "+J)");
+			chat.setAttribute("aria-label", "Open or close the AI chat");
+			chat.style.backgroundImage = "url('" + glyphUri("sparkle", style) + "')";
 			mxEvent.addListener(chat, "click", function (evt) { send("toggleChat"); mxEvent.consume(evt); });
 			mxEvent.preventDefault(chat);
 			end.appendChild(chat);
@@ -238,10 +238,9 @@
 			".drawai-brandmark i[data-on] { background: light-dark(#141414, #ededed); }",
 			".drawai-brandmark i[data-signal] { background: light-dark(#d71921, #e5262f); }",
 			".drawai-mark:hover .drawai-brandmark i[data-on] { background: light-dark(#000000, #ffffff); }",
-			// the arrow that closes and opens the chat: a small tab of its own at the end of the toolbar
-			".drawai-chat-toggle { border: 1px solid light-dark(#d2cfc8, #333333) !important; border-radius: 7px !important; margin-left: 4px !important; }",
-			".drawai-chat-toggle:hover { border-color: light-dark(#8b8984, #6b6b6b) !important; }",
-			// while the chat is open its own arrow (next to this one, across the edge) closes it: one arrow at a time
+			// the AI symbol opens the chat: an ordinary toolbar button, at the edge the chat comes from
+			".drawai-chat-toggle { margin-left: 2px !important; }",
+			// while the chat is open the same symbol sits in the chat's own corner (next to this spot) and closes it
 			".drawai-chat-toggle[data-chat='open'] { display: none !important; }",
 			".drawai-coloured { filter: none !important; }",
 			".drawai-dots-host { position: relative; isolation: isolate; }",
@@ -507,13 +506,8 @@
 				}
 				if (matrixLayer) matrixLayer.check();
 				if (EXTRA.chatArrow) {
-					// the arrow points the way the chat goes: away to close it, back to open it
-					var right = data.chatSide !== "left";
-					var glyph = !!data.chatVisible === right ? "chevronRight" : "chevronLeft";
-					EXTRA_GLYPH.chatArrow = glyph;
-					EXTRA.chatArrow.style.backgroundImage = "url('" + glyphUri(glyph, style) + "')";
 					EXTRA.chatArrow.removeAttribute("data-tip");
-					EXTRA.chatArrow.setAttribute("title", (data.chatVisible ? "Close" : "Open") + " the chat (" + ctrl + "+J)");
+					EXTRA.chatArrow.setAttribute("title", (data.chatVisible ? "Close" : "Open") + " the AI chat (" + ctrl + "+J)");
 					EXTRA.chatArrow.setAttribute("data-chat", data.chatVisible ? "open" : "closed");
 					markOwn();
 				}

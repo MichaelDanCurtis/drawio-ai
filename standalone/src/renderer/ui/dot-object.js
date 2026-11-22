@@ -23,7 +23,7 @@
  * entrance, no lean, no morphing; drag and keys still work, because the
  * person moves it. Stops when hidden or scrolled away.
  *
- * OmniDraw's addition: `morph: ["planes", "face", "tetrahedron", …]` makes the
+ * OmniDraw's addition: `morph: ["planes", "bust", "tetrahedron", …]` makes the
  * object a shape-shifter. It holds each shape for a few seconds, then every dot
  * travels to its place in the next one (staggered, with a little swirl), and it
  * sways slowly so each shape reads as 3D. At most ~30 frames a second.
@@ -119,40 +119,102 @@ export function planes(layers = 3, m = 13, gap = 0.55) {
 
 /* ---------- more shapes (OmniDraw): each a list of [x, y, z], unit radius ---------- */
 
-/** A head with a face on it: eyes, brows, a nose that stands out and a smile, facing +z. */
-export function face() {
+/**
+ * A human bust, like a sculpture: a head (narrower toward the chin, with the brow, the eye
+ * sockets, the nose, the lips and the chin modelled in its surface), a neck and shoulders cut
+ * off flat across the chest. It faces +z. No drawn-on features: the face is all relief.
+ */
+export function bust() {
   const out = [];
-  const A = 0.6, B = 0.78, C = 0.62; // half width, height, depth of the head
-  const on = (x, y, lift = 1) => {
-    // the point of the head's front surface over (x, y), pushed out by `lift`
-    const q = 1 - (x / A) ** 2 - (y / B) ** 2;
-    return [x * lift, y * lift, Math.sqrt(Math.max(0, q)) * C * lift];
-  };
+  const HY = 0.3; // the head's centre
   const g = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < 250; i++) {
-    const y = 1 - (2 * (i + 0.5)) / 250, r = Math.sqrt(1 - y * y);
-    out.push([Math.cos(g * i) * r * A, y * B, Math.sin(g * i) * r * C]);
+  /** How far the face stands out (or in) at (x, y), in front of the plain head. */
+  const relief = (x, y) => {
+    const bump = (cx, cy, sx, sy) => Math.exp(-(((Math.abs(x) - cx) / sx) ** 2) - ((y - cy) / sy) ** 2);
+    return (
+      0.085 * bump(0, HY - 0.035, 0.042, 0.075) + // the nose
+      0.03 * bump(0, HY - 0.105, 0.05, 0.02) + // its tip
+      0.022 * bump(0, HY + 0.1, 0.2, 0.03) + // the brow
+      -0.04 * bump(0.115, HY + 0.045, 0.05, 0.032) + // the eye sockets
+      0.02 * bump(0.115, HY + 0.045, 0.028, 0.014) + // the closed lids in them
+      0.03 * bump(0, HY - 0.165, 0.075, 0.022) + // the lips
+      -0.012 * bump(0, HY - 0.21, 0.07, 0.014) + // the hollow under them
+      0.03 * bump(0, HY - 0.275, 0.07, 0.04) + // the chin
+      0.018 * bump(0.17, HY - 0.06, 0.05, 0.07) // the cheekbones
+    );
+  };
+  /** A point of the head: (a, t) around and down it. */
+  const head = (ux, uy, uz) => {
+    // an egg: fuller at the back and the top, narrowing to the jaw and chin
+    const down = Math.max(0, -uy);
+    const narrow = 1 - 0.34 * down ** 1.6;
+    const x = ux * 0.285 * narrow;
+    const y = HY + uy * (uy > 0 ? 0.36 : 0.4);
+    let z = uz * (uz < 0 ? 0.35 : 0.31) * (1 - 0.18 * down ** 2);
+    if (uz > 0) z += relief(x, y) * Math.min(1, uz * 2.2);
+    return [x, y, z];
+  };
+  for (let i = 0; i < 300; i++) {
+    const uy = 1 - (2 * (i + 0.5)) / 300, r = Math.sqrt(1 - uy * uy);
+    out.push(head(Math.cos(g * i) * r, uy, Math.sin(g * i) * r));
   }
+  // the lines a sculptor would cut deepest: brow, nose ridge, the closed eyes, the mouth, the jaw
+  const front = (x, y) => {
+    const uy = (y - HY) / (y > HY ? 0.36 : 0.4), down = Math.max(0, -uy), narrow = 1 - 0.34 * down ** 1.6;
+    const ux = Math.max(-0.999, Math.min(0.999, x / (0.285 * narrow)));
+    const uz = Math.sqrt(Math.max(0, 1 - ux * ux - uy * uy));
+    return head(ux, uy, uz);
+  };
+  for (let i = 0; i < 10; i++) out.push(front(0, HY + 0.06 - i * 0.017)); // nose ridge
+  for (let i = 0; i < 5; i++) out.push(front((i / 4 - 0.5) * 0.07, HY - 0.112)); // under the nose
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 44; i++) {
-      // an eye: a small filled disc
-      const rr = 0.085 * Math.sqrt((i + 0.5) / 44), a = g * i;
-      out.push(on(side * 0.23 + Math.cos(a) * rr * 1.25, 0.2 + Math.sin(a) * rr, 1.05));
+    for (let i = 0; i < 7; i++) out.push(front(side * (0.06 + i * 0.019), HY + 0.1 + 0.008 * Math.sin((i / 6) * Math.PI))); // brow
+    for (let i = 0; i < 7; i++) out.push(front(side * (0.075 + i * 0.0125), HY + 0.043 - 0.007 * Math.sin((i / 6) * Math.PI))); // closed eye
+    for (let i = 0; i < 10; i++) {
+      // the ear
+      const a = (i / 10) * TAU;
+      out.push([side * (0.275 + 0.012 * Math.cos(a)), HY - 0.01 + 0.06 * Math.sin(a), -0.02 + 0.03 * Math.cos(a)]);
     }
-    for (let i = 0; i < 20; i++) out.push(on(side * (0.11 + 0.24 * (i / 19)), 0.37 + 0.035 * Math.sin((i / 19) * Math.PI), 1.05)); // a brow
+  }
+  for (let i = 0; i < 8; i++) out.push(front((i / 7 - 0.5) * 0.115, HY - 0.168 + 0.003 * Math.cos((i / 7 - 0.5) * Math.PI))); // the mouth, at rest
+  // hair: a closer cap of dots over the top and the back of the head
+  for (let i = 0; i < 90; i++) {
+    const uy = 1 - (1.25 * (i + 0.5)) / 90, r = Math.sqrt(Math.max(0, 1 - uy * uy)), a = g * i * 1.7;
+    const ux = Math.cos(a) * r, uz = Math.sin(a) * r;
+    if (uz > 0.25 && uy < 0.55) continue; // not over the face
+    const p = head(ux, uy, Math.min(uz, 0));
+    out.push([p[0] * 1.07, HY + (p[1] - HY) * 1.06 + 0.012, (uz > 0 ? uz * 0.31 : p[2]) * 1.07]);
+  }
+  // the neck
+  for (let ring = 0; ring < 4; ring++) {
+    const y = -0.07 - ring * 0.045, grow = 1 + ring * 0.07;
+    for (let i = 0; i < 13; i++) {
+      const a = (i / 13) * TAU + ring * 0.2;
+      out.push([Math.cos(a) * 0.15 * grow, y, Math.sin(a) * 0.155 * grow - 0.03]);
+    }
+  }
+  // the shoulders and chest, cut off flat
+  const rings = 8;
+  for (let ring = 0; ring < rings; ring++) {
+    const t = ring / (rings - 1); // 0 at the neck, 1 at the cut
+    const y = -0.23 - t * 0.4;
+    const wide = 0.2 + 0.47 * (1 - (1 - t) ** 2); // the shoulders slope out from the neck, then fall straight
+    const deep = 0.16 + 0.13 * t;
+    const count = 14 + Math.round(t * 14);
+    for (let i = 0; i < count; i++) {
+      const a = (i / count) * TAU + ring * 0.11;
+      // a rounded box across the shoulders (a superellipse), a little forward at the chest
+      const cx = Math.cos(a), cz = Math.sin(a);
+      out.push([Math.sign(cx) * Math.abs(cx) ** 0.75 * wide, y - 0.11 * Math.abs(cx) ** 1.6 * (1 - t), Math.sign(cz) * Math.abs(cz) ** 0.8 * deep + 0.02 * t - 0.02]);
+    }
   }
   for (let i = 0; i < 26; i++) {
-    // the nose: a ridge that stands out from the face
-    const t = i / 25, p = on(0, 0.14 - t * 0.3);
-    out.push([p[0], p[1], p[2] + 0.04 + 0.12 * Math.sin(t * Math.PI * 0.85)]);
+    // the flat cut underneath
+    const r = Math.sqrt((i + 0.5) / 26), a = g * i;
+    out.push([Math.cos(a) * r * 0.6, -0.635, Math.sin(a) * r * 0.26 + 0.02]);
   }
-  for (let row = 0; row < 2; row++)
-    for (let i = 0; i < 37; i++) {
-      // the smile
-      const t = i / 36, x = (t * 2 - 1) * 0.3;
-      out.push(on(x, -0.36 - row * 0.03 + 0.11 * (x / 0.3) ** 2, 1.05));
-    }
-  return out;
+  // centred on the stage
+  return out.map(([x, y, z]) => [x, y - 0.03, z]);
 }
 
 /** A tetrahedron: dots along its six edges and across its four faces. */
@@ -268,7 +330,7 @@ const SHAPES = { sphere, cube, torus, planes };
 /** Shapes to morph through: their dots, and the angle each is best seen from. */
 const MORPHS = {
   planes: { make: () => triples(planes()), yaw: 0.65, pitch: 0.42 },
-  face: { make: face, yaw: 0.3, pitch: 0.06 },
+  bust: { make: bust, yaw: 0.42, pitch: 0.08 },
   tetrahedron: { make: tetrahedron, yaw: 0.5, pitch: 0.3 },
   spiral: { make: spiral, yaw: 0.4, pitch: 0.3 },
   galaxy: { make: galaxy, yaw: 0.3, pitch: 0.85 },
