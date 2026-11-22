@@ -145,6 +145,11 @@ test("the gallery service: index cache, cleaned SVG cache, search, insertables, 
 	const before = calls.length;
 	await s.items(tech);
 	assert.equal(calls.length, before, "a fresh cached index is not fetched again");
+	const cacheFile = path.join(root, "galleries", "tech-logos", "index.json");
+	const cached = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+	fs.writeFileSync(cacheFile, JSON.stringify({ items: cached.items, syncedAt: cached.syncedAt }));
+	await new GalleryService(root, fetcher).items(tech);
+	assert.ok(calls.length > before, "a cache from an older version is read again from its sources");
 
 	const docker = items.find((i) => i.id === "devicon:docker");
 	const svg = await s.svg(tech, docker);

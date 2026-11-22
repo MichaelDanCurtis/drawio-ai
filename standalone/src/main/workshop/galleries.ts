@@ -28,6 +28,8 @@ const RETRY_AFTER_MS = 10 * 60 * 1000;
 const LOCAL_TTL_MS = 15 * 1000;
 const FETCH_CONCURRENCY = 8;
 const MAX_INDEX_BYTES = 12 * 1024 * 1024;
+/** Bumped when items in a cached index change shape or address (an older cache is read again from its sources). */
+const INDEX_FORMAT = 2;
 
 export interface GalleryStatus {
 	id: string;
@@ -129,9 +131,10 @@ export class GalleryService {
 	private readCachedIndex(id: string): { items: GalleryItem[]; syncedAt: string } | undefined {
 		try {
 			const j = JSON.parse(fs.readFileSync(path.join(this.dir(id), "index.json"), "utf8"));
-			if (Array.isArray(j.items) && typeof j.syncedAt === "string") {
-				this.indexes.set(id, j);
-				return j;
+			if (j.format === INDEX_FORMAT && Array.isArray(j.items) && typeof j.syncedAt === "string") {
+				const idx = { items: j.items, syncedAt: j.syncedAt };
+				this.indexes.set(id, idx);
+				return idx;
 			}
 		} catch {
 			// not synced yet
@@ -178,7 +181,7 @@ export class GalleryService {
 				this.retryAt.delete(g.id);
 				if (!local) {
 					fs.mkdirSync(this.dir(g.id), { recursive: true });
-					fs.writeFileSync(path.join(this.dir(g.id), "index.json"), JSON.stringify(idx));
+					fs.writeFileSync(path.join(this.dir(g.id), "index.json"), JSON.stringify({ format: INDEX_FORMAT, ...idx }));
 				}
 				return items;
 			} catch (e: any) {
