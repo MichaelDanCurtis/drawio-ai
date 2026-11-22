@@ -162,13 +162,13 @@
 			EXTRA.chatPanel = chat;
 		}
 
-		// The Draw.AI mark before File: it opens Settings.
-		var bar = ui.menubar && ui.menubar.container;
+		// The mark at the start of the toolbar (draw.io's menus are in the system menu bar): it opens Settings.
+		var bar = ui.toolbar && ui.toolbar.container;
 		if (bar) {
 			var mark = document.createElement("a");
-			mark.className = "geItem drawai-mark";
-			mark.setAttribute("title", "Draw.AI · Settings (" + ctrl + "+,)");
-			mark.setAttribute("aria-label", "Draw.AI settings");
+			mark.className = "geButton drawai-mark";
+			mark.setAttribute("title", "OmniDraw · Settings (" + ctrl + "+,)");
+			mark.setAttribute("aria-label", "OmniDraw settings");
 			mark.innerHTML = '<span class="drawai-brandmark" aria-hidden="true">' + [1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 0, 0, 0].map(function (v) { return "<i" + (v === 1 ? " data-on" : v === 2 ? " data-signal" : "") + "></i>"; }).join("") + "</span>";
 			mxEvent.addListener(mark, "click", function (evt) { send("settings"); mxEvent.consume(evt); });
 			bar.insertBefore(mark, bar.firstChild);
@@ -181,7 +181,7 @@
 
 		var css = document.createElement("style");
 		css.textContent = [
-			".drawai-mark { display: inline-flex !important; align-items: center; padding: 0 8px 0 4px !important; cursor: pointer; }",
+			".drawai-mark { display: inline-flex !important; align-items: center; justify-content: center; width: 28px !important; flex: none; margin-right: 4px; cursor: pointer; background: none !important; }",
 			".drawai-brandmark { display: inline-grid; grid-template-columns: repeat(4, 3px); gap: 2px; }",
 			".drawai-brandmark i { display: block; width: 3px; height: 3px; border-radius: 50%; background: light-dark(#d2cfc8, #333333); }",
 			".drawai-brandmark i[data-on] { background: light-dark(#141414, #ededed); }",

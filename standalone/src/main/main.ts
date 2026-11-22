@@ -1,8 +1,9 @@
-import { app, dialog, Menu, MenuItemConstructorOptions, nativeTheme, session, shell } from "electron";
+import { app, dialog, Menu, MenuItemConstructorOptions, nativeTheme, session, shell, webContents, type WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { AGENTS } from "./agents";
-import { DiagramWindow } from "./diagramWindow";
+import { DiagramWindow, type DrawioMenuItem } from "./diagramWindow";
+import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
 import { CATEGORIES } from "./mapper/types";
@@ -85,13 +86,65 @@ app.on("second-instance", (_e, argv) => {
 	else DiagramWindow.focused()?.win.focus();
 });
 
+/**
+ * Edit commands whose keys must keep working everywhere: in draw.io's canvas they are its
+ * own actions (undo, redo and select all go through its key handler, which a menu shortcut
+ * would bypass); in text (the chat, a label being edited, Settings) the system's.
+ * Cut, copy and paste are always the system's: draw.io handles their clipboard events.
+ */
+const ROUTED: Record<string, { accelerator: string; native: (wc: WebContents) => void; drawio?: boolean }> = {
+	undo: { accelerator: "CmdOrCtrl+Z", native: (wc) => wc.undo(), drawio: true },
+	redo: { accelerator: "Shift+CmdOrCtrl+Z", native: (wc) => wc.redo(), drawio: true },
+	cut: { accelerator: "CmdOrCtrl+X", native: (wc) => wc.cut() },
+	copy: { accelerator: "CmdOrCtrl+C", native: (wc) => wc.copy() },
+	paste: { accelerator: "CmdOrCtrl+V", native: (wc) => wc.paste() },
+	selectAll: { accelerator: "CmdOrCtrl+A", native: (wc) => wc.selectAll(), drawio: true },
+};
+
+async function routedEdit(win: DiagramWindow | undefined, key: string): Promise<void> {
+	const r = ROUTED[key];
+	const wc = webContents.getFocusedWebContents() ?? win?.editorView.webContents;
+	if (!wc) return;
+	if (r.drawio && win && wc === win.editorView.webContents && (await win.runDrawioAction(key))) return;
+	r.native(wc);
+}
+
+/** draw.io's menu entries (from desktop-menubar.js) as native menu items. */
+function drawioItems(win: DiagramWindow, nodes: DrawioMenuItem[] | null | undefined): MenuItemConstructorOptions[] {
+	return (nodes ?? []).map((n): MenuItemConstructorOptions => {
+		if (n.separator) return { type: "separator" };
+		const label = (n.label ?? "").replace(/\.\.\.$/, "…");
+		if (n.children) return { label, enabled: n.enabled !== false, submenu: drawioItems(win, n.children) };
+		if (n.key && ROUTED[n.key]) return { label, accelerator: ROUTED[n.key].accelerator, click: () => void routedEdit(DiagramWindow.focused(), n.key!) };
+		return {
+			label,
+			enabled: n.enabled !== false,
+			type: n.checked ? "checkbox" : "normal",
+			checked: !!n.checked,
+			accelerator: toAccelerator(n.shortcut),
+			// shown only: draw.io's own key handler keeps doing the work
+			registerAccelerator: false,
+			click: () => n.id !== undefined && win.invokeDrawioMenu(n.id),
+		};
+	});
+}
+
+let menuTimer: NodeJS.Timeout | undefined;
+function scheduleMenu(): void {
+	clearTimeout(menuTimer);
+	menuTimer = setTimeout(buildMenu, 120);
+}
+
 function buildMenu(): void {
 	const w = () => DiagramWindow.focused();
+	const front = DiagramWindow.focused();
+	const dm = front?.drawioMenus;
+	const pick = (menu: string, keys: string[]) => drawioItems(front!, (dm?.[menu] ?? []).filter((n) => n.key && keys.includes(n.key)));
 	const template: MenuItemConstructorOptions[] = [
 		...(process.platform === "darwin"
 			? [
 					{
-						label: "Draw.AI",
+						label: app.name,
 						submenu: [
 							{ role: "about" },
 							{ type: "separator" },
@@ -123,16 +176,19 @@ function buildMenu(): void {
 					submenu: EXPORT_FORMATS.map((f) => ({ label: f.label, click: () => void w()?.exportInteractive(f.format) })),
 				},
 				{ label: "Open from Another Tool…", click: () => void w()?.importFromOtherTool() },
+				...(dm ? pick("file", ["vscode.import"]) : []),
 				{ type: "separator" },
+				...(dm ? pick("file", ["properties", "pageSetup"]) : []),
 				{ label: "Print…", accelerator: "CmdOrCtrl+P", click: () => void w()?.print() },
 				{ type: "separator" },
 				{ role: "close" },
 			],
 		},
-		{ role: "editMenu" },
+		dm?.edit?.length ? { label: "Edit", submenu: drawioItems(front!, dm.edit) } : { role: "editMenu" },
 		{
 			label: "View",
 			submenu: [
+				...(dm?.view?.length ? [...drawioItems(front!, dm.view), { type: "separator" } as MenuItemConstructorOptions] : []),
 				{ label: "Presentation Mode", accelerator: "F5", click: () => w()?.togglePresentation() },
 				// Same, for keyboards without easy F-keys (hidden; its shortcut still works).
 				{ label: "Presentation Mode", accelerator: "CmdOrCtrl+Shift+Enter", visible: false, acceleratorWorksWhenHidden: true, click: () => w()?.togglePresentation() },
@@ -148,6 +204,8 @@ function buildMenu(): void {
 				{ role: "togglefullscreen" },
 			],
 		},
+		...(dm?.arrange?.length ? [{ label: "Arrange", submenu: drawioItems(front!, dm.arrange) }] : []),
+		...(dm?.extras?.length ? [{ label: "Extras", submenu: drawioItems(front!, dm.extras) }] : []),
 		{
 			label: "Agent",
 			submenu: [
@@ -244,6 +302,10 @@ app.whenReady().then(async () => {
 	});
 	await desktopMcp.start().catch((e) => console.error("Draw.AI: desktop MCP endpoint did not start:", e));
 	buildMenu();
+	// draw.io's menus in the menu bar follow the diagram window in front.
+	DiagramWindow.onMenus = (w) => {
+		if (w === DiagramWindow.focused()) scheduleMenu();
+	};
 	ready = true;
 
 	if (process.env.DRAWAI_E2E) {

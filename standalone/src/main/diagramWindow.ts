@@ -89,6 +89,28 @@ export class DiagramWindow {
 	private mappedTimer: NodeJS.Timeout | undefined;
 	/** Content for a new, unsaved window (an imported diagram), and the name to suggest when saving it. */
 	private initial: { xml: string; name: string } | undefined;
+	/** draw.io's menus as the editor last reported them (for the system menu bar). */
+	public drawioMenus: Record<string, DrawioMenuItem[] | null> | undefined;
+	/** Called when a window's draw.io menus change (main.ts rebuilds the menu bar). */
+	public static onMenus: ((w: DiagramWindow) => void) | undefined;
+
+	/** Runs a draw.io menu item from the system menu bar. */
+	private menuSeq = 0;
+	public invokeDrawioMenu(id: number): void {
+		// (the page can see a message twice; the sequence number makes a toggle run once)
+		this.sendToEditor({ action: "desktopMenuInvoke", id, seq: ++this.menuSeq });
+	}
+
+	/** Runs a draw.io action by name (undo, copy, …) unless text is being typed; says whether it did. */
+	public async runDrawioAction(key: string): Promise<boolean> {
+		if (this.editorView.webContents.isDestroyed() || !this.loaded) return false;
+		try {
+			return !!(await this.editorView.webContents.executeJavaScript(`(() => { const m = window.drawaiMenubar; if (!m || m.isTextFocus()) return false; return m.run(${JSON.stringify(key)}); })()`));
+		} catch {
+			return false;
+		}
+	}
+
 	/** App-level commands the in-editor File menu can run. Set by main.ts. */
 	public static appCommands: { newDiagram(): void; open(): void; settings(section?: string): void } = { newDiagram: () => undefined, open: () => undefined, settings: () => undefined };
 
@@ -240,6 +262,7 @@ export class DiagramWindow {
 		this.win.on("closed", () => this.dispose());
 		this.win.on("focus", () => {
 			DiagramWindow.lastFocused = this;
+			DiagramWindow.onMenus?.(this);
 			this.chat.postState();
 		});
 		this.offSettings = onSettingsChanged((s, patch) => this.applySettings(s, patch));
@@ -421,6 +444,9 @@ export class DiagramWindow {
 				localStorage = m.newLocalStorage;
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "desktopMenus" && m.menus && typeof m.menus === "object") {
+				this.drawioMenus = m.menus;
+				DiagramWindow.onMenus?.(this);
 			} else if (m?.event === "desktopCommand") {
 				this.runDesktopCommand(String(m.command));
 			} else if (m?.event === "openLink" && typeof m.url === "string" && /^https?:/.test(m.url)) {
@@ -752,6 +778,18 @@ function drawioConfig(): DrawioConfig {
 		hideMenuItems: ["exportAs", "importFrom", "print", "saveAndExit", "plugins", "exit"],
 		hideMenus: ["language", "help"],
 	} as DrawioConfig;
+}
+
+/** One draw.io menu entry, as desktop-menubar.js records it. */
+export interface DrawioMenuItem {
+	id?: number;
+	label?: string;
+	enabled?: boolean;
+	checked?: boolean;
+	shortcut?: string;
+	key?: string;
+	separator?: boolean;
+	children?: DrawioMenuItem[] | null;
 }
 
 function easeOut(t: number): number {
