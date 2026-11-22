@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Shape Workshop** (Shapes → Shape Workshop…, Cmd/Ctrl+Alt+K) with the **Shape Gallery**:
+  theSVG (open licences only), Tech logos (devicon + Simple Icons) and UI icons (Lucide +
+  Tabler) to start; add GitHub repositories, folders and draw.io libraries; make your own
+  collections; search across galleries and click to add a shape. Galleries are also palettes
+  in the shapes sidebar, and draw.io's search finds their shapes. Downloads come only from
+  jsDelivr, are cached for offline use, and every SVG is cleaned of scripts and external links.
 - **OmniDraw**: the desktop app's new name. Settings, draw.io preferences and Mapper inputs
   carry over from the Draw.AI data folder on first launch. Claude Code and Codex connect to
   it as the `omnidraw` MCP server; Connect and Disconnect also remove the old

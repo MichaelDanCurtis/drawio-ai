@@ -20,6 +20,8 @@ import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings, type Settings } from "./settings";
 import { shapeLibraries } from "./shapeLocations";
+import { galleries, galleryConfigs, paletteItems, searchForEditor } from "./workshop";
+import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
@@ -130,7 +132,7 @@ export class DiagramWindow {
 	}
 
 	/** App-level commands the in-editor File menu can run. Set by main.ts. */
-	public static appCommands: { newDiagram(): void; open(): void; settings(section?: string): void } = { newDiagram: () => undefined, open: () => undefined, settings: () => undefined };
+	public static appCommands: { newDiagram(): void; open(): void; settings(section?: string): void; workshop?(mode?: string): void } = { newDiagram: () => undefined, open: () => undefined, settings: () => undefined };
 
 	public static async open(server: StaticServer, file?: string, initial?: { xml: string; name: string }): Promise<DiagramWindow> {
 		if (file) {
@@ -308,7 +310,7 @@ export class DiagramWindow {
 		if (this.win.isDestroyed()) return;
 		if ("chat" in patch || "chatWidth" in patch) this.layout();
 		if ("appearance" in patch || "chat" in patch) this.sendEditorPrefs();
-		if ("shapes" in patch) this.sendShapes();
+		if ("shapes" in patch || "workshop" in patch) this.sendShapes();
 		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw)
 		if ("models" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.settingsChanged("agents" in patch);
 	}
@@ -327,9 +329,27 @@ export class DiagramWindow {
 	/** The user's shape folders and libraries as palettes (only the newest read is shown). */
 	private sendShapes(): void {
 		const seq = ++this.shapesSeq;
-		void shapeLibraries(settings().shapes.locations).then((libraries) => {
+		void (async () => {
+			const libraries: unknown[] = await shapeLibraries(settings().shapes.locations);
+			// each enabled gallery: a first page as a palette (the rest is found by search)
+			for (const g of galleryConfigs().filter((x) => x.enabled)) {
+				try {
+					const items = await paletteItems(g);
+					const shapes = (await Promise.all(items.map((i) => galleries().insertable(g, i).catch(() => undefined)))).filter((x): x is Insertable => !!x);
+					if (shapes.length) libraries.push({ title: g.title, path: `gallery:${g.id}`, kind: "gallery", shapes, more: (await galleries().items(g)).length - shapes.length });
+				} catch {
+					// a gallery that cannot be read now is left out; the Workshop says why
+				}
+			}
 			if (seq === this.shapesSeq) this.sendToEditor({ action: "desktopShapes", libraries });
-		});
+		})();
+	}
+
+	/** Puts a shape from the Workshop in this diagram (in the middle of the view, selected). */
+	public insertShape(shape: Insertable): void {
+		// (the page can see a message twice; the sequence number makes it insert once)
+		this.sendToEditor({ action: "desktopInsertShape", shape, seq: ++this.menuSeq });
+		if (!this.win.isDestroyed()) this.win.focus();
 	}
 
 	private async start(server: StaticServer): Promise<void> {
@@ -462,6 +482,12 @@ export class DiagramWindow {
 				localStorage = m.newLocalStorage;
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "desktopGallerySearch" && typeof m.query === "string") {
+				// draw.io's own search asks for gallery shapes too
+				const query = m.query.slice(0, 200), reqId = m.reqId;
+				void searchForEditor(query, Math.min(48, Number(m.limit) || 24))
+					.catch(() => [])
+					.then((shapes) => this.sendToEditor({ action: "desktopGalleryResults", reqId, shapes }));
 			} else if (m?.event === "desktopMenus" && m.menus && typeof m.menus === "object") {
 				const json = JSON.stringify(m.menus);
 				if (json === this.drawioMenusJson) return;
@@ -490,6 +516,7 @@ export class DiagramWindow {
 			case "present": return this.togglePresentation();
 			case "toggleChat": return this.toggleChat();
 			case "settings": return DiagramWindow.appCommands.settings();
+			case "workshop": return DiagramWindow.appCommands.workshop?.();
 		}
 	}
 

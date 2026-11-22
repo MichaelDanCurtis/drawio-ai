@@ -1,0 +1,284 @@
+[
+ {
+  "slug": "docker",
+  "title": "Docker",
+  "aliases": [],
+  "hex": "2496ED",
+  "categories": [
+   "DevTool",
+   "Software"
+  ],
+  "variants": {
+   "default": "/icons/docker/default.svg",
+   "mono": "/icons/docker/mono.svg",
+   "wordmark": "/icons/docker/wordmark.svg"
+  },
+  "license": "CC0-1.0",
+  "url": "https://www.docker.com/",
+  "guidelines": "https://www.docker.com/company/newsroom/media-resources/",
+  "dateAdded": "2026-03-07",
+  "collection": "brands"
+ },
+ {
+  "slug": "github",
+  "title": "GitHub",
+  "aliases": [],
+  "hex": "181717",
+  "categories": [
+   "DevTool",
+   "Software"
+  ],
+  "variants": {
+   "default": "/icons/github/default.svg",
+   "mono": "/icons/github/mono.svg",
+   "light": "/icons/github/light.svg",
+   "dark": "/icons/github/dark.svg",
+   "wordmark": "/icons/github/wordmark.svg",
+   "wordmarkLight": "/icons/github/wordmark-light.svg",
+   "wordmarkDark": "/icons/github/wordmark-dark.svg"
+  },
+  "license": "CC0-1.0",
+  "url": "https://github.com/",
+  "guidelines": "https://brand.github.com/",
+  "dateAdded": "2026-03-07",
+  "collection": "brands",
+  "family": "microsoft"
+ },
+ {
+  "slug": "grafana",
+  "title": "Grafana",
+  "aliases": [],
+  "hex": "F46800",
+  "categories": [
+   "DevTool",
+   "Software"
+  ],
+  "variants": {
+   "default": "/icons/grafana/default.svg",
+   "mono": "/icons/grafana/mono.svg",
+   "wordmark": "/icons/grafana/wordmark.svg"
+  },
+  "license": "CC0-1.0",
+  "url": "https://grafana.com/",
+  "dateAdded": "2026-03-07",
+  "collection": "brands"
+ },
+ {
+  "slug": "k8s-pod",
+  "title": "Pod",
+  "aliases": [
+   "pod"
+  ],
+  "hex": "326CE5",
+  "categories": [
+   "Kubernetes",
+   "Compute"
+  ],
+  "variants": {
+   "default": "/icons/k8s-pod/default.svg"
+  },
+  "license": "Apache-2.0",
+  "url": "https://kubernetes.io",
+  "dateAdded": "2026-03-26",
+  "collection": "k8s",
+  "collectionVersion": "2026",
+  "collectionMeta": {
+   "type": "resource"
+  }
+ },
+ {
+  "slug": "kafka",
+  "title": "Apache Kafka",
+  "aliases": [],
+  "hex": "231F20",
+  "categories": [
+   "Software",
+   "Database"
+  ],
+  "variants": {
+   "default": "/icons/kafka/default.svg",
+   "wordmark": "/icons/kafka/wordmark.svg"
+  },
+  "license": "Apache-2.0",
+  "url": "https://kafka.apache.org",
+  "dateAdded": "2026-03-09",
+  "collection": "brands"
+ },
+ {
+  "slug": "nginx",
+  "title": "NGINX",
+  "aliases": [],
+  "hex": "009639",
+  "categories": [
+   "Software",
+   "Platform"
+  ],
+  "variants": {
+   "default": "/icons/nginx/default.svg",
+   "mono": "/icons/nginx/mono.svg",
+   "wordmark": "/icons/nginx/wordmark.svg"
+  },
+  "license": "CC0-1.0",
+  "url": "https://nginx.org/",
+  "guidelines": "https://www.nginx.com/press/",
+  "dateAdded": "2026-03-07",
+  "collection": "brands"
+ },
+ {
+  "slug": "postgresql",
+  "title": "PostgreSQL",
+  "aliases": [],
+  "hex": "4169E1",
+  "categories": [
+   "Database",
+   "Software"
+  ],
+  "variants": {
+   "default": "/icons/postgresql/default.svg",
+   "mono": "/icons/postgresql/mono.svg",
+   "wordmark": "/icons/postgresql/wordmark.svg",
+   "wordmarkLight": "/icons/postgresql/wordmark-light.svg",
+   "wordmarkDark": "/icons/postgresql/wordmark-dark.svg"
+  },
+  "license": "CC0-1.0",
+  "url": "https://www.postgresql.org/",
+  "guidelines": "https://www.postgresql.org/about/policies/trademarks/",
+  "dateAdded": "2026-03-07",
+  "collection": "brands"
+ },
+ {
+  "slug": "redis",
+  "title": "Redis",
+  "aliases": [],
+  "hex": "FF4438",
+  "categories": [
+   "Database",
+   "Software"
+  ],
+  "variants": {
+   "default": "/icons/redis/default.svg",
+   "mono": "/icons/redis/mono.svg",
+   "wordmark": "/icons/redis/wordmark.svg"
+  },
+  "license": "CC0-1.0",
+  "url": "https://redis.io/",
+  "guidelines": "https://redis.io/brand-guidelines",
+  "dateAdded": "2026-03-07",
+  "collection": "brands"
+ },
+ {
+  "slug": "azure-abs-member",
+  "title": "ABS Member",
+  "aliases": [],
+  "hex": "0078D4",
+  "categories": [
+   "Blockchain"
+  ],
+  "variants": {
+   "default": "/icons/azure-abs-member/default.svg"
+  },
+  "license": "MIT",
+  "url": "https://azure.microsoft.com/en-us/products/",
+  "dateAdded": "2026-03-23",
+  "collection": "azure",
+  "collectionVersion": "2026-Q1",
+  "collectionMeta": {
+   "type": "service"
+  }
+ },
+ {
+  "slug": "aws-amazon-api-gateway",
+  "title": "Amazon API Gateway",
+  "aliases": [],
+  "hex": "8C4FFF",
+  "categories": [
+   "Networking"
+  ],
+  "variants": {
+   "16": "/icons/aws-amazon-api-gateway/16.svg",
+   "32": "/icons/aws-amazon-api-gateway/32.svg",
+   "64": "/icons/aws-amazon-api-gateway/64.svg",
+   "default": "/icons/aws-amazon-api-gateway/default.svg"
+  },
+  "license": "CC-BY-ND-2.0",
+  "url": "https://aws.amazon.com/api-gateway/",
+  "dateAdded": "2026-03-17",
+  "collection": "aws",
+  "collectionVersion": "2026-Q1",
+  "collectionMeta": {
+   "type": "service"
+  }
+ },
+ {
+  "slug": "gcp-access-context-manager",
+  "title": "Access Context Manager",
+  "aliases": [],
+  "hex": "4285F4",
+  "categories": [
+   "Security"
+  ],
+  "variants": {
+   "default": "/icons/gcp-access-context-manager/default.svg"
+  },
+  "license": "Apache-2.0",
+  "url": "https://cloud.google.com/",
+  "dateAdded": "2026-03-23",
+  "collection": "gcp",
+  "collectionVersion": "2026-Q1",
+  "collectionMeta": {
+   "type": "service"
+  }
+ },
+ {
+  "slug": "ard",
+  "title": "ARD",
+  "aliases": [],
+  "hex": "003D7F",
+  "categories": [
+   "Entertainment",
+   "Media"
+  ],
+  "variants": {
+   "default": "/icons/ard/default.svg"
+  },
+  "license": "Proprietary",
+  "url": "https://ard.de",
+  "dateAdded": "2026-03-09",
+  "collection": "brands"
+ },
+ {
+  "slug": "bazarr",
+  "title": "Bazarr",
+  "aliases": [],
+  "hex": "162F40",
+  "categories": [
+   "Software"
+  ],
+  "variants": {
+   "default": "/icons/bazarr/default.svg"
+  },
+  "license": "GPL-3.0",
+  "dateAdded": "2026-06-29",
+  "collection": "community",
+  "url": "https://www.bazarr.media"
+ },
+ {
+  "slug": "bioconductor",
+  "title": "Bioconductor",
+  "aliases": [],
+  "hex": "1A81C2",
+  "categories": [
+   "DevTool",
+   "Community"
+  ],
+  "variants": {
+   "default": "/icons/bioconductor/default.svg",
+   "mono": "/icons/bioconductor/mono.svg"
+  },
+  "license": "CC-BY-SA-4.0",
+  "url": "https://github.com/Bioconductor/BiocStickers/blob/2e3af2dd45ce43e18110c91b687ebcb996cffae9/Bioconductor/Bioconductor-note.svg",
+  "guidelines": "https://bioconductor.org/about/logo/",
+  "dateAdded": "2026-03-07",
+  "collection": "brands"
+ }
+]

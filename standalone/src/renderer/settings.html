@@ -158,6 +158,7 @@
 				<p class="lead">Your own shapes in the shapes sidebar: a folder of SVG or PNG files becomes a palette, and a draw.io library file (.xml) opens as one.</p>
 				<div class="card-list" id="locations"></div>
 				<div class="actions">
+					<button class="btn btn-sm btn-primary" id="openGallery">Open the Shape Gallery…</button>
 					<button class="btn btn-sm" id="addFolder">Add a folder…</button>
 					<button class="btn btn-sm" id="addLibrary">Add a library file…</button>
 				</div>
@@ -410,6 +411,7 @@
 		});
 	}
 	$("addFolder").onclick = () => post({ type: "addShapeLocation", kind: "folder" });
+	$("openGallery").onclick = () => post({ type: "openWorkshop" });
 	$("addLibrary").onclick = () => post({ type: "addShapeLocation", kind: "file" });
 	$("openFile").onclick = () => post({ type: "openSettingsFile" });
 

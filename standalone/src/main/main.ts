@@ -11,6 +11,7 @@ import { connectAgents, DesktopMcp } from "./desktopMcp";
 import { paths } from "./paths";
 import { onSettingsChanged, settings } from "./settings";
 import { SettingsWindow } from "./settingsWindow";
+import { WorkshopWindow } from "./workshop/workshopWindow";
 import { StaticServer } from "./staticServer";
 
 app.setName("OmniDraw");
@@ -242,6 +243,15 @@ function buildMenu(): void {
 		...(dm?.arrange?.length ? [{ label: "Arrange", submenu: drawioItems(front!, dm.arrange) }] : []),
 		...(dm?.extras?.length ? [{ label: "Extras", submenu: drawioItems(front!, dm.extras) }] : []),
 		{
+			label: "Shapes",
+			submenu: [
+				{ label: "Shape Workshop…", accelerator: "CmdOrCtrl+Alt+K", click: () => WorkshopWindow.open(server, "gallery") },
+				{ label: "Shape Gallery…", click: () => WorkshopWindow.open(server, "gallery") },
+				{ type: "separator" },
+				{ label: "Your Shape Folders…", click: () => openSettings("shapes") },
+			],
+		},
+		{
 			label: "Agent",
 			submenu: [
 				...AGENTS.map((a) => ({
@@ -329,7 +339,21 @@ app.whenReady().then(async () => {
 	await server.start();
 	blockRemoteRequests();
 	DiagramWindow.installIpc();
-	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog(), settings: (section) => openSettings(section) };
+	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog(), settings: (section) => openSettings(section), workshop: (mode) => WorkshopWindow.open(server, mode ?? "gallery") };
+	SettingsWindow.openWorkshop = () => WorkshopWindow.open(server, "gallery");
+	WorkshopWindow.host = {
+		insert: async (shape) => {
+			const w = DiagramWindow.focused();
+			if (!w) return undefined;
+			await w.whenLoaded();
+			w.insertShape(shape);
+			return w.fileName() ?? "the untitled diagram";
+		},
+		diagramName: () => {
+			const w = DiagramWindow.focused();
+			return w ? w.fileName() ?? "the untitled diagram" : undefined;
+		},
+	};
 	desktopMcp = new DesktopMcp({
 		windows: () => [...DiagramWindow.all],
 		focused: () => DiagramWindow.focused(),

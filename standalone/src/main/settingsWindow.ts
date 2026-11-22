@@ -7,12 +7,14 @@ import { onSettingsChanged, settings, settingsPath, ShapeLocation, updateSetting
 import type { StaticServer } from "./staticServer";
 
 /** Top-level settings keys the window may change (the rest are the app's own bookkeeping). */
-const EDITABLE: (keyof Settings)[] = ["appearance", "chat", "chatWidth", "models", "editor", "agents", "shapes"];
+const EDITABLE: (keyof Settings)[] = ["appearance", "chat", "chatWidth", "models", "editor", "agents", "shapes", "workshop"];
 
 /** OmniDraw → Settings…: one window for the whole app. */
 export class SettingsWindow {
 	private static win: BrowserWindow | undefined;
 	private static installed = false;
+	/** Opens the Shape Workshop's gallery (main.ts sets it). */
+	public static openWorkshop: (() => void) | undefined;
 
 	public static open(server: StaticServer, section?: string): void {
 		SettingsWindow.install();
@@ -122,6 +124,9 @@ export class SettingsWindow {
 			}
 			case "revealShapeLocation":
 				if (typeof msg.path === "string" && fs.existsSync(msg.path)) shell.showItemInFolder(msg.path);
+				break;
+			case "openWorkshop":
+				SettingsWindow.openWorkshop?.();
 				break;
 			case "openSettingsFile":
 				if (!fs.existsSync(settingsPath())) updateSettings({});
