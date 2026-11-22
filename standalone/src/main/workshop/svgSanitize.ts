@@ -8,33 +8,75 @@
  */
 export const MAX_SVG_BYTES = 512 * 1024;
 
+/** Elements dropped with their content: they run code, embed documents or media, or (animations) can swap links. */
+const DROP_TAGS = ["script", "foreignObject", "iframe", "object", "embed", "audio", "video", "handler", "listener", "set", "animate", "animateMotion", "animateTransform", "animateColor", "discard"];
+
+/** Numeric and a few named character references, and CSS escapes, decoded: what a browser would see. */
+function decodeForCheck(s: string): string {
+	return s
+		.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16) || 32))
+		.replace(/&#(\d+);?/g, (_m, d) => String.fromCodePoint(Number(d) || 32))
+		.replace(/&(colon|lpar|rpar|sol|period|Tab|NewLine);/gi, (_m, n) => ({ colon: ":", lpar: "(", rpar: ")", sol: "/", period: ".", tab: "", newline: "" } as Record<string, string>)[n.toLowerCase()] ?? "")
+		.replace(/\\([0-9a-f]{1,6})\s?/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16) || 32))
+		.replace(/\\(.)/g, "$1")
+		.replace(/[\u0000-\u0020]+/g, " ");
+}
+
 export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string | undefined {
 	if (typeof input !== "string" || !input || input.length > MAX_SVG_BYTES) return undefined;
-	let s = input.replace(/^﻿/, "");
+	let s = input.replace(/^\uFEFF/, "");
 	// prolog, doctype (no entities), comments, processing instructions, CDATA
 	s = s.replace(/<\?[\s\S]*?\?>/g, "").replace(/<!DOCTYPE[\s\S]*?(\[[\s\S]*?\])?\s*>/gi, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
 	s = s.trim();
 	if (!/^<svg[\s>]/i.test(s) || !/<\/svg>\s*$/i.test(s)) return undefined;
-	// active or embedding elements, with their content
-	for (const tag of ["script", "foreignObject", "iframe", "object", "embed", "audio", "video", "handler", "listener"]) {
-		s = s.replace(new RegExp(`<${tag}\\b[\\s\\S]*?<\\/${tag}\\s*>`, "gi"), "").replace(new RegExp(`<${tag}\\b[^>]*\\/?>`, "gi"), "");
+	// dropped elements, with or without a namespace prefix (<s:script>)
+	for (const tag of DROP_TAGS) {
+		s = s.replace(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[\\s\\S]*?<\\/(?:[\\w-]+:)?${tag}\\s*>`, "gi"), "").replace(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>`, "gi"), "");
 	}
 	// event handler attributes
 	s = s.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
-	// links: keep same-document (#id) and embedded raster images only
-	s = s.replace(/\s+((?:xlink:)?href)\s*=\s*("([^"]*)"|'([^']*)')/gi, (m, _attr, _q, a, b) => {
-		const v = String(a ?? b ?? "").trim();
+	// links (quoted or not): keep same-document (#id) and embedded raster images only
+	s = s.replace(/\s+((?:[\w-]+:)?href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>"']+))/gi, (m, _attr, _q, a, b, c) => {
+		const v = String(a ?? b ?? c ?? "").trim();
 		return /^#[\w.:-]*$/.test(v) || /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(v) ? m : "";
 	});
-	// external resources in styles: url(http…), @import, expression()
-	s = s.replace(/@import[^;]*;?/gi, "").replace(/url\(\s*(['"]?)(?!#)[^)]*\1\s*\)/gi, "none").replace(/expression\s*\(/gi, "(");
-	// anything left that could run
-	if (/<\s*script|javascript:|vbscript:|data:text\/html/i.test(s)) return undefined;
+	// external resources in styles; same-document url(#id) / url('#id') stay
+	s = s.replace(/@import[^;]*;?/gi, "").replace(/url\(\s*(?!['"]?#)[^)]*\)/gi, "none").replace(/expression\s*\(/gi, "(");
+	// what is left, read the way a browser would: anything that could run or fetch rejects the SVG
+	const seen = decodeForCheck(s);
+	if (/<\s*(?:[\w-]+:)?script|javascript:|vbscript:|data:text\/html|url\(\s*(?!['"]?#)|@import/i.test(seen)) return undefined;
 	const root = /^<svg\b[^>]*>/i.exec(s)![0];
 	let head = root;
 	if (!/\sxmlns\s*=/.test(head)) head = head.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
 	if (opts.fill && /^#[0-9a-f]{3,8}$/i.test(opts.fill) && !/\sfill\s*=/.test(head)) head = head.replace(/^<svg\b/i, `<svg fill="${opts.fill}"`);
 	return head + s.slice(root.length);
+}
+
+/**
+ * An image a library, folder or collection supplies, made safe for a draw.io style: raster
+ * images as they are, SVGs decoded, cleaned and encoded again. Anything else (a web address,
+ * a broken or crafted data URI that could end the style's image= key) gives undefined.
+ */
+export function safeImageData(data: string): { style: string; img: string } | undefined {
+	if (typeof data !== "string") return undefined;
+	const d = data.trim();
+	const raster = /^data:image\/(png|jpe?g|gif|webp)(;base64)?,([A-Za-z0-9+/=]+)$/.exec(d);
+	if (raster) return { style: `data:image/${raster[1]},${raster[3]}`, img: `data:image/${raster[1]};base64,${raster[3]}` };
+	let svg: string | undefined;
+	const b64 = /^data:image\/svg\+xml(;base64)?,([A-Za-z0-9+/=]+)$/.exec(d);
+	if (b64) svg = Buffer.from(b64[2], "base64").toString("utf8");
+	else {
+		const utf = /^data:image\/svg\+xml(?:;charset=[\w-]+)?,(.*)$/s.exec(d);
+		if (utf) {
+			try {
+				svg = decodeURIComponent(utf[1]);
+			} catch {
+				return undefined;
+			}
+		}
+	}
+	const clean = svg ? sanitizeSvg(svg) : undefined;
+	return clean ? { style: svgStyleUri(clean), img: svgImgUri(clean) } : undefined;
 }
 
 /** An SVG as a data URI for a draw.io style (draw.io's own form: no ";base64", which would split the style). */

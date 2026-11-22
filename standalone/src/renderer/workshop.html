@@ -344,6 +344,9 @@
 				const tile = document.querySelector('.tile[data-key="' + CSS.escape(p.galleryId + "|" + p.id) + '"] .pic');
 				if (tile) { tile.textContent = ""; tile.append(el("img", { src: p.src, alt: "" })); }
 			}
+		} else if (m.type === "collectionChanged") {
+			// its shapes changed: what is on screen from it is out of date
+			if (!selected || selected === m.id) setTimeout(runSearch);
 		} else if (m.type === "notice") toast(m.message);
 		else if (m.type === "error") toast(m.message, true);
 		else if (m.type === "selectGallery") {

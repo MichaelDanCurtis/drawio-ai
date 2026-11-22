@@ -1,6 +1,6 @@
 import { app } from "electron";
-import { httpRequest } from "../mapper/recipes/ml/shared";
 import { settings, updateSettings, DEFAULT_GALLERIES, type GalleryConfig } from "../settings";
+import { workshopFetch } from "./fetch";
 import { GalleryService, type Insertable } from "./galleries";
 import type { GalleryItem } from "./sources";
 
@@ -9,10 +9,7 @@ let service: GalleryService | undefined;
 /** The app's one gallery service (indexes and SVGs cached in the app's data folder). */
 export function galleries(): GalleryService {
 	if (!service) {
-		service = new GalleryService(app.getPath("userData"), async (url, opts) => {
-			const r = await httpRequest(url, { timeoutMs: opts.timeoutMs, headers: { Accept: "application/json, image/svg+xml, */*" } });
-			return { ok: r.ok, status: r.status, text: r.text, json: r.json };
-		});
+		service = new GalleryService(app.getPath("userData"), workshopFetch);
 	}
 	return service;
 }
@@ -42,11 +39,16 @@ const PALETTE_WORDS: Record<string, string[]> = {
 	"ui-icons": ["user", "users", "server", "database", "cloud", "lock", "key", "file", "folder", "settings", "search", "mail", "bell", "home", "globe", "shield", "cpu", "network", "wifi", "smartphone", "laptop", "monitor", "chart", "calendar", "clock", "cart", "credit card", "message", "api", "code"],
 };
 
+const palettePicks = new Map<string, { items: GalleryItem[]; picked: GalleryItem[] }>();
+
 export async function paletteItems(g: GalleryConfig, max = 36): Promise<GalleryItem[]> {
 	const s = galleries();
 	const items = await s.items(g);
 	const words = PALETTE_WORDS[g.id];
 	if (!words || !items.length) return items.slice(0, max);
+	// the same index gives the same picks: only work them out again when it changes
+	const memo = palettePicks.get(g.id);
+	if (memo && memo.items === items) return memo.picked.slice(0, max);
 	const picked: GalleryItem[] = [];
 	const seen = new Set<string>();
 	for (const w of words) {
@@ -57,6 +59,7 @@ export async function paletteItems(g: GalleryConfig, max = 36): Promise<GalleryI
 		}
 		if (picked.length >= max) break;
 	}
+	palettePicks.set(g.id, { items, picked });
 	return picked;
 }
 

@@ -17,11 +17,17 @@ import {
 	SOURCE_INFO,
 	toMxLibrary,
 } from "./sources";
-import { sanitizeSvg, svgImgUri, svgSize, svgStyleUri } from "./svgSanitize";
+import { MAX_SVG_BYTES, safeImageData, sanitizeSvg, svgImgUri, svgSize, svgStyleUri } from "./svgSanitize";
+import type { FetchOptions, FetchResult } from "./fetch";
 
-/** An index is refreshed from its source after a week, or when the user syncs. */
+/** An index is refreshed from its source after a week (in the background), or when the user syncs. */
 const INDEX_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+/** After a failed refresh, the next try waits this long (searches keep the older index meanwhile). */
+const RETRY_AFTER_MS = 10 * 60 * 1000;
+/** Folders and libraries on this computer are read again at most this often (or when synced). */
+const LOCAL_TTL_MS = 15 * 1000;
 const FETCH_CONCURRENCY = 8;
+const MAX_INDEX_BYTES = 12 * 1024 * 1024;
 
 export interface GalleryStatus {
 	id: string;
@@ -51,12 +57,17 @@ export interface GalleryHit {
 /** What draw.io needs to put the shape in a diagram. */
 export type Insertable = { style: string; w: number; h: number; title: string } | { xml: string; w: number; h: number; title: string };
 
-type Fetcher = (url: string, opts: { binary?: boolean; timeoutMs?: number }) => Promise<{ ok: boolean; status: number; text: string; json?: any }>;
+type Fetcher = (url: string, opts: FetchOptions) => Promise<FetchResult>;
 
 /** Galleries: their indexes (cached in the app's data folder), their SVGs (fetched when shown), search, collections. */
 export class GalleryService {
 	private indexes = new Map<string, { items: GalleryItem[]; syncedAt: string }>();
 	private loading = new Map<string, Promise<GalleryItem[]>>();
+	/** When a local gallery was last read, and when a failed refresh may be tried again. */
+	private readAt = new Map<string, number>();
+	private retryAt = new Map<string, number>();
+	private svgLoading = new Map<string, Promise<string | undefined>>();
+	private offline = new Map<string, { ctrl: AbortController; run: Promise<{ done: number; failed: number }> }>();
 	private busy = new Map<string, string>();
 	private errors = new Map<string, string>();
 	private listeners = new Set<() => void>();
@@ -128,15 +139,32 @@ export class GalleryService {
 		return undefined;
 	}
 
-	/** The gallery's items: from memory, the cache, or its sources (fetched again after a week, or when `force`). */
+	/**
+	 * The gallery's items. Internet galleries answer from memory or the cache at once; a week-old
+	 * index is refreshed in the background (and after a failure, not again for ten minutes).
+	 * Folders and libraries are read again after a few seconds. `force` reads the sources now.
+	 */
 	async items(g: GalleryConfig, force = false): Promise<GalleryItem[]> {
-		const local = g.sources.every((s) => s.kind === "folder" || s.kind === "library" || s.kind === "collection");
-		if (!force && !local) {
-			const idx = this.indexes.get(g.id) ?? this.readCachedIndex(g.id);
-			if (idx && Date.now() - Date.parse(idx.syncedAt) < INDEX_MAX_AGE_MS) return idx.items;
+		const local = isLocal(g);
+		const idx = this.indexes.get(g.id) ?? (local ? undefined : this.readCachedIndex(g.id));
+		if (!force && idx) {
+			if (local) {
+				if (Date.now() - (this.readAt.get(g.id) ?? 0) < LOCAL_TTL_MS) return idx.items;
+			} else {
+				const stale = Date.now() - Date.parse(idx.syncedAt) >= INDEX_MAX_AGE_MS;
+				if (stale && Date.now() >= (this.retryAt.get(g.id) ?? 0)) void this.load(g);
+				return idx.items;
+			}
 		}
+		if (!force && !idx && Date.now() < (this.retryAt.get(g.id) ?? 0)) return [];
+		return this.load(g);
+	}
+
+	/** Reads a gallery's sources (one read at a time per gallery). */
+	private load(g: GalleryConfig): Promise<GalleryItem[]> {
 		const running = this.loading.get(g.id);
 		if (running) return running;
+		const local = isLocal(g);
 		const p = (async () => {
 			this.busy.set(g.id, "Reading the index…");
 			this.errors.delete(g.id);
@@ -146,6 +174,8 @@ export class GalleryService {
 				for (const s of g.sources) items.push(...(await this.readSource(g, s)));
 				const idx = { items, syncedAt: new Date().toISOString() };
 				this.indexes.set(g.id, idx);
+				this.readAt.set(g.id, Date.now());
+				this.retryAt.delete(g.id);
 				if (!local) {
 					fs.mkdirSync(this.dir(g.id), { recursive: true });
 					fs.writeFileSync(path.join(this.dir(g.id), "index.json"), JSON.stringify(idx));
@@ -153,6 +183,7 @@ export class GalleryService {
 				return items;
 			} catch (e: any) {
 				this.errors.set(g.id, String(e?.message ?? e));
+				this.retryAt.set(g.id, Date.now() + (local ? LOCAL_TTL_MS : RETRY_AFTER_MS));
 				// an older index is better than none
 				return this.indexes.get(g.id)?.items ?? [];
 			} finally {
@@ -166,8 +197,8 @@ export class GalleryService {
 	}
 
 	private async getJson(url: string): Promise<any> {
-		if (!allowedUrl(url)) throw new Error(`Downloads only come from jsDelivr (cdn.jsdelivr.net, data.jsdelivr.com), not ${new URL(url).host}.`);
-		const r = await this.fetcher(url, { timeoutMs: 60_000 });
+		if (!allowedUrl(url)) throw new Error(`Downloads only come from jsDelivr and GitHub (cdn.jsdelivr.net, data.jsdelivr.com, raw.githubusercontent.com), not ${new URL(url).host}.`);
+		const r = await this.fetcher(url, { timeoutMs: 60_000, maxBytes: MAX_INDEX_BYTES });
 		if (!r.ok) throw new Error(`${new URL(url).host} answered ${r.status} for ${new URL(url).pathname}.`);
 		if (r.json === undefined) throw new Error(`${new URL(url).pathname} is not JSON.`);
 		return r.json;
@@ -186,33 +217,55 @@ export class GalleryService {
 			case "tabler":
 				return parseTabler(await this.getJson(SOURCE_INFO.tabler.index()));
 			case "github": {
-				const ref = s.ref ?? (await this.defaultBranch(s.repo));
-				return parseGithubListing(await this.getJson(cdnData(`/v1/package/gh/${s.repo}@${encodeURIComponent(ref)}/flat`)), s.repo, ref, s.path);
+				if (s.ref) return parseGithubListing(await this.getJson(cdnData(`/v1/package/gh/${s.repo}@${encodeURIComponent(s.ref)}/flat`)), s.repo, s.ref, s.path);
+				const { ref, listing } = await this.defaultListing(s.repo);
+				return parseGithubListing(listing, s.repo, ref, s.path);
 			}
 			case "folder": {
 				const [lib] = await shapeLibraries([{ path: s.path, enabled: true }]);
 				if (!lib || lib.kind === "missing") throw new Error(lib && lib.kind === "missing" ? `${s.path}: ${lib.error}` : `${s.path} could not be read.`);
 				if (lib.kind !== "images") throw new Error(`${s.path} is not a folder.`);
-				return lib.images.map((img, i) => ({ id: `folder:${i}:${img.title}`, title: img.title, tags: img.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean), data: img.data, w: img.w, h: img.h, source: path.basename(s.path) }));
+				const out: GalleryItem[] = [];
+				for (const img of lib.images) {
+					// SVGs from a folder are cleaned like any other (a folder can hold anything)
+					const safe = safeImageData(img.data);
+					if (safe) out.push({ id: `folder:${img.title}:${out.length}`, title: img.title, tags: img.title.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean), data: safe.img, w: img.w, h: img.h, source: path.basename(s.path) });
+				}
+				return out;
 			}
 			case "library":
 				return parseMxLibrary(fs.readFileSync(s.path, "utf8"), path.basename(s.path));
-			case "collection": {
-				const file = this.collectionFile(g.id);
-				return fs.existsSync(file) ? parseMxLibrary(fs.readFileSync(file, "utf8"), g.title) : [];
-			}
+			case "collection":
+				return this.readCollection(g);
 		}
 	}
 
-	/** jsDelivr's default branch for a repository ("main", "master"…). */
-	private async defaultBranch(repo: string): Promise<string> {
+	/** A repository's file list when no branch was named: "main", then "master", then its newest tag. */
+	private async defaultListing(repo: string): Promise<{ ref: string; listing: unknown }> {
+		const tryRef = async (ref: string) => ({ ref, listing: await this.getJson(cdnData(`/v1/package/gh/${repo}@${encodeURIComponent(ref)}/flat`)) });
+		let first: unknown;
+		for (const ref of ["main", "master"]) {
+			try {
+				return await tryRef(ref);
+			} catch (e) {
+				first ??= e;
+			}
+		}
 		const j = await this.getJson(cdnData(`/v1/package/gh/${repo}`)).catch(() => undefined);
-		const versions: string[] = Array.isArray(j?.versions) ? j.versions : [];
-		return versions[0] ?? "main";
+		const tag = Array.isArray(j?.versions) ? j.versions.find((v: unknown) => typeof v === "string" && /^[\w.-]+$/.test(v)) : undefined;
+		if (tag) return tryRef(tag);
+		throw first instanceof Error ? new Error(`${repo} has no "main" or "master" branch on jsDelivr, and no tags. Add it with its branch (github.com/${repo}/tree/<branch>).`) : first;
+	}
+
+	/** A collection's shapes, read from its file. Throws when the file is there but cannot be read, so nothing overwrites it. */
+	private readCollection(g: GalleryConfig): GalleryItem[] {
+		const file = this.collectionFile(g.id);
+		if (!fs.existsSync(file)) return [];
+		return parseMxLibrary(fs.readFileSync(file, "utf8"), g.title);
 	}
 
 	/** An item's SVG: from the cache, or downloaded, cleaned and cached. Undefined when it cannot be had. */
-	async svg(g: GalleryConfig, item: GalleryItem): Promise<string | undefined> {
+	async svg(g: GalleryConfig, item: GalleryItem, signal?: AbortSignal): Promise<string | undefined> {
 		if (!item.url) return undefined;
 		const file = path.join(this.dir(g.id), "svg", `${createHash("sha1").update(item.id + "|" + item.url).digest("hex").slice(0, 20)}.svg`);
 		try {
@@ -221,18 +274,28 @@ export class GalleryService {
 			// not cached
 		}
 		if (!allowedUrl(item.url)) return undefined;
-		const r = await this.fetcher(item.url, { timeoutMs: 20_000 }).catch(() => undefined);
-		if (!r?.ok) return undefined;
-		const clean = sanitizeSvg(r.text, { fill: item.fill });
-		if (!clean) return undefined;
-		fs.mkdirSync(path.dirname(file), { recursive: true });
-		fs.writeFileSync(file, clean);
-		return clean;
+		// one download per file, however many ask for it at once
+		const running = this.svgLoading.get(file);
+		if (running) return running;
+		const url = item.url;
+		const p = (async () => {
+			const r = await this.fetcher(url, { timeoutMs: 20_000, maxBytes: MAX_SVG_BYTES, signal }).catch(() => undefined);
+			if (!r?.ok) return undefined;
+			const clean = sanitizeSvg(r.text, { fill: item.fill });
+			if (!clean) return undefined;
+			// a gallery removed while this downloaded keeps no files
+			if (signal?.aborted) return clean;
+			fs.mkdirSync(path.dirname(file), { recursive: true });
+			fs.writeFileSync(file, clean);
+			return clean;
+		})().finally(() => this.svgLoading.delete(file));
+		this.svgLoading.set(file, p);
+		return p;
 	}
 
 	/** A preview the Workshop page can show (<img src>), or undefined for shapes that are draw.io XML. */
 	async preview(g: GalleryConfig, item: GalleryItem): Promise<string | undefined> {
-		if (item.data) return /^data:image\//.test(item.data) ? item.data : undefined;
+		if (item.data) return safeImageData(item.data)?.img;
 		const svg = await this.svg(g, item);
 		return svg ? svgImgUri(svg) : undefined;
 	}
@@ -242,8 +305,10 @@ export class GalleryService {
 		if (item.xml) return { xml: item.xml, w: item.w ?? 48, h: item.h ?? 48, title: item.title };
 		let uri: string | undefined;
 		let size = { w: item.w ?? 48, h: item.h ?? 48 };
-		if (item.data) uri = item.data.replace(/^data:([^;,]+);base64,/, "data:$1,");
-		else {
+		if (item.data) {
+			uri = safeImageData(item.data)?.style;
+			if (!uri) return undefined;
+		} else {
 			const svg = await this.svg(g, item);
 			if (!svg) return undefined;
 			uri = svgStyleUri(svg);
@@ -253,30 +318,45 @@ export class GalleryService {
 		return { style: `shape=image;html=1;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=1;aspect=fixed;${meta};image=${uri};`, ...size, title: item.title };
 	}
 
-	/** Downloads every SVG of a gallery, `FETCH_CONCURRENCY` at a time, reporting progress. */
-	async makeOffline(g: GalleryConfig, signal?: AbortSignal): Promise<{ done: number; failed: number }> {
-		const items = (await this.items(g)).filter((i) => i.url);
-		let next = 0, done = 0, failed = 0;
-		const work = async () => {
-			while (next < items.length && !signal?.aborted) {
-				const item = items[next++];
-				if (await this.svg(g, item)) done++;
-				else failed++;
-				if ((done + failed) % 25 === 0) {
-					this.busy.set(g.id, `Downloading ${done + failed} of ${items.length}…`);
-					this.changed();
+	/**
+	 * Downloads every SVG of a gallery, `FETCH_CONCURRENCY` at a time, reporting progress. A second
+	 * call while it runs gets the same run; `stopOffline` (and removing the gallery) stops it.
+	 */
+	makeOffline(g: GalleryConfig): Promise<{ done: number; failed: number }> {
+		const running = this.offline.get(g.id);
+		if (running) return running.run;
+		const ctrl = new AbortController();
+		const run = (async () => {
+			const items = (await this.items(g)).filter((i) => i.url);
+			let next = 0, done = 0, failed = 0;
+			const work = async () => {
+				while (next < items.length && !ctrl.signal.aborted) {
+					const item = items[next++];
+					if (await this.svg(g, item, ctrl.signal)) done++;
+					else if (!ctrl.signal.aborted) failed++;
+					if ((done + failed) % 25 === 0 && !ctrl.signal.aborted) {
+						this.busy.set(g.id, `Downloading ${done + failed} of ${items.length}…`);
+						this.changed();
+					}
 				}
-			}
-		};
-		this.busy.set(g.id, `Downloading 0 of ${items.length}…`);
-		this.changed();
-		try {
-			await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, work));
-		} finally {
-			this.busy.delete(g.id);
+			};
+			this.busy.set(g.id, `Downloading 0 of ${items.length}…`);
 			this.changed();
-		}
-		return { done, failed };
+			try {
+				await Promise.all(Array.from({ length: FETCH_CONCURRENCY }, work));
+			} finally {
+				this.busy.delete(g.id);
+				this.offline.delete(g.id);
+				this.changed();
+			}
+			return { done, failed };
+		})();
+		this.offline.set(g.id, { ctrl, run });
+		return run;
+	}
+
+	stopOffline(id: string): void {
+		this.offline.get(id)?.ctrl.abort();
 	}
 
 	/** Ranked hits across galleries (AND over the words; title before tags; exact before word start before substring). */
@@ -306,17 +386,20 @@ export class GalleryService {
 	async addToCollection(collection: GalleryConfig, from: GalleryConfig, item: GalleryItem): Promise<void> {
 		const ins = await this.insertable(from, item);
 		if (!ins) throw new Error(`${item.title} could not be downloaded.`);
-		const current = await this.items(collection, true);
+		const current = this.readCollection(collection);
 		const entry = "xml" in ins ? { title: ins.title, xml: ins.xml, w: ins.w, h: ins.h } : { title: ins.title, data: dataFromStyle(ins.style), w: ins.w, h: ins.h };
 		this.writeCollection(collection.id, [...current.map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })), entry]);
-		this.indexes.delete(collection.id);
 		await this.items(collection, true);
 	}
 
-	removeFromCollection(collection: GalleryConfig, itemId: string): void {
-		const current = this.indexes.get(collection.id)?.items ?? [];
-		this.writeCollection(collection.id, current.filter((c) => c.id !== itemId).map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })));
-		this.indexes.delete(collection.id);
+	/** Takes a shape out of a collection by its id (ids come from the shape itself, so a stale list cannot remove the wrong one). */
+	async removeFromCollection(collection: GalleryConfig, itemId: string): Promise<boolean> {
+		const current = this.readCollection(collection);
+		const keep = current.filter((c) => c.id !== itemId);
+		if (keep.length === current.length) return false;
+		this.writeCollection(collection.id, keep.map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })));
+		await this.items(collection, true);
+		return true;
 	}
 
 	private writeCollection(id: string, items: { title: string; xml?: string; data?: string; w?: number; h?: number }[]): void {
@@ -327,7 +410,10 @@ export class GalleryService {
 
 	/** Forgets a gallery's cache (and a collection's file). */
 	remove(g: GalleryConfig): void {
+		this.stopOffline(g.id);
 		this.indexes.delete(g.id);
+		this.readAt.delete(g.id);
+		this.retryAt.delete(g.id);
 		this.errors.delete(g.id);
 		fs.rmSync(this.dir(g.id), { recursive: true, force: true });
 		if (g.sources.some((s) => s.kind === "collection")) fs.rmSync(this.collectionFile(g.id), { force: true });
@@ -357,6 +443,10 @@ export function rank(item: GalleryItem, terms: string[]): number {
 	}
 	// shorter titles first when equally good: "aws" before "aws-amplify"
 	return total / terms.length - Math.min(title.length, 60) / 6000;
+}
+
+function isLocal(g: GalleryConfig): boolean {
+	return g.sources.every((s) => s.kind === "folder" || s.kind === "library" || s.kind === "collection");
 }
 
 function describeSource(s: GallerySource): string {

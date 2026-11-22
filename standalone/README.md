@@ -176,13 +176,21 @@ an icon) come next.
   to add it to the diagram you used last (selected, in the middle of the view).
 - **In the editor:** each gallery is a palette in the shapes sidebar (a first page; the rest
   is found by search), and draw.io's own sidebar search finds gallery shapes too.
-- **Downloads** happen in the app's main process, only from jsDelivr (npm and GitHub's CDN).
-  Indexes are cached for a week (Sync now refreshes them); SVGs are fetched when shown and
-  cached; **Make available offline** downloads a whole gallery. Everything lives in the app's
-  data folder (`galleries/`, `collections/`).
-- **Every SVG is cleaned** before it is cached or used: no scripts, event handlers, external
-  links, embedded HTML or DTDs (`src/main/workshop/svgSanitize.ts`). Each shape keeps its
-  source and licence, also in the shape's style (`galleryItem=…;licence=…`).
+- **Downloads** happen in the app's main process, only from jsDelivr (npm and GitHub's CDN)
+  and, for theSVG's licence data, raw.githubusercontent.com. Every redirect is checked
+  against those hosts and every answer is size-capped (`src/main/workshop/fetch.ts`).
+  Indexes are cached for a week, then refreshed in the background while search keeps using
+  the old one (Sync now refreshes them at once); SVGs are fetched when shown and cached;
+  **Make available offline** downloads a whole gallery (removing the gallery stops it).
+  Everything lives in the app's data folder (`galleries/`, `collections/`).
+- **Every SVG is cleaned** before it is cached or used: no scripts, animations, event
+  handlers, external links (quoted, unquoted or encoded), embedded HTML or DTDs
+  (`src/main/workshop/svgSanitize.ts`). Images from libraries, folders and collections are
+  checked the same way. Each shape keeps its source and licence, also in the shape's style
+  (`galleryItem=…;licence=…`).
+- **GitHub galleries** without a branch in their address use `main`, then `master`, then the
+  newest tag. A branch with a "/" in its name can't be told apart from a folder in an
+  address, so such a repository can't be added by branch yet.
 
 Code: `src/main/workshop/` (`sources.ts` parses each source, `galleries.ts` caches and
 searches, `workshopWindow.ts`), `src/renderer/workshop.html`, and the palettes, search and

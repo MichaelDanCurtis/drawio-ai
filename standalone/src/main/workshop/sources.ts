@@ -1,4 +1,6 @@
+import { createHash } from "crypto";
 import type { GallerySource } from "../settings";
+import { safeImageData } from "./svgSanitize";
 
 /** One shape in a gallery's index. SVGs from the internet are fetched (and cached) when shown. */
 export interface GalleryItem {
@@ -37,20 +39,28 @@ export function cdnData(pathname: string): string {
 	return mirror ? `${mirror}/data${pathname}` : `https://data.jsdelivr.com${pathname}`;
 }
 
+/** A file in a GitHub repository, read directly (for an index too big a repository holds for jsDelivr). */
+export function raw(pathname: string): string {
+	const mirror = process.env.OMNIDRAW_GALLERY_MIRROR;
+	return mirror ? `${mirror}/raw${pathname}` : `https://raw.githubusercontent.com${pathname}`;
+}
+
 /** The only hosts the Workshop downloads from (and the test mirror). */
 export function allowedUrl(url: string): boolean {
 	try {
 		const u = new URL(url);
 		const mirror = process.env.OMNIDRAW_GALLERY_MIRROR;
 		if (mirror && url.startsWith(mirror + "/")) return true;
-		return u.protocol === "https:" && (u.hostname === "cdn.jsdelivr.net" || u.hostname === "data.jsdelivr.com");
+		return u.protocol === "https:" && (u.hostname === "cdn.jsdelivr.net" || u.hostname === "data.jsdelivr.com" || u.hostname === "raw.githubusercontent.com");
 	} catch {
 		return false;
 	}
 }
 
 export const SOURCE_INFO: Record<Exclude<GallerySource["kind"], "github" | "folder" | "library" | "collection">, { label: string; index: () => string; homepage: string; note: string }> = {
-	thesvg: { label: "theSVG", index: () => cdn("/gh/glincker/thesvg@main/src/data/icons.json"), homepage: "https://thesvg.org", note: "Only icons whose own licence is CC0, MIT or Apache-2.0, and not the AWS, Azure or Google Cloud sets (their real terms differ). Brand logos stay their owners' trademarks." },
+	// The licences are only in the repository's data file; the SVGs come from its npm package
+	// (the repository is over jsDelivr's 50 MB limit for GitHub, so files it has not cached fail).
+	thesvg: { label: "theSVG", index: () => raw("/glincker/thesvg/main/src/data/icons.json"), homepage: "https://thesvg.org", note: "Only icons whose own licence is CC0, MIT or Apache-2.0, and not the AWS, Azure or Google Cloud sets (their real terms differ). Brand logos stay their owners' trademarks." },
 	devicon: { label: "devicon", index: () => cdn("/gh/devicons/devicon@latest/devicon.json"), homepage: "https://devicon.dev", note: "MIT. Logos stay their owners' trademarks." },
 	simpleicons: { label: "Simple Icons", index: () => cdn("/npm/simple-icons@latest/data/simple-icons.json"), homepage: "https://simpleicons.org", note: "CC0, except logos with their own licence (kept only when open). Logos stay their owners' trademarks." },
 	lucide: { label: "Lucide", index: () => cdn("/npm/lucide-static@latest/tags.json"), homepage: "https://lucide.dev", note: "ISC." },
@@ -61,6 +71,13 @@ const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
 const uniq = (a: string[]) => [...new Set(a.map((x) => x.toLowerCase().trim()).filter(Boolean))];
 
 const VENDOR_COLLECTIONS = new Set(["aws", "azure", "gcp"]);
+
+/** Where one of theSVG's SVGs is published: country flags in @thesvg/flags (4:3), the rest in @thesvg/static. */
+function theSvgUrl(slug: string, collection: unknown, file: string): string {
+	const flag = collection === "flags" ? /^flag-([a-z0-9-]+)$/.exec(slug) : null;
+	if (flag) return cdn(`/npm/@thesvg/flags@latest/dist/svg/4x3/${flag[1]}.svg`);
+	return cdn(`/npm/@thesvg/static@latest/dist/svg${file.slice("/icons".length)}`);
+}
 
 /** theSVG's src/data/icons.json → open-licence items (its default variant), without the cloud vendors' sets. */
 export function parseTheSvg(json: unknown): GalleryItem[] {
@@ -78,7 +95,7 @@ export function parseTheSvg(json: unknown): GalleryItem[] {
 			id: `thesvg:${e.slug}`,
 			title: String(e.title ?? e.slug),
 			tags: uniq([...(e.aliases ?? []), ...(e.categories ?? []), e.collection ?? "", ...words(String(e.slug))]),
-			url: cdn(`/gh/glincker/thesvg@main/public${file}`),
+			url: theSvgUrl(e.slug, e.collection, file),
 			licence: String(e.license),
 			source: "theSVG",
 		});
@@ -108,20 +125,37 @@ export function parseDevicon(json: unknown): GalleryItem[] {
 	return out;
 }
 
+/**
+ * Simple Icons' slug for a title, when its data has none (their own rule: "+" plus, "." dot,
+ * "&" and, accents dropped, anything else that is not a letter or digit removed).
+ */
+export function simpleIconsSlug(title: string): string {
+	return title
+		.toLowerCase()
+		.replace(/\+/g, "plus")
+		.replace(/\./g, "dot")
+		.replace(/&/g, "and")
+		.normalize("NFD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/[^a-z0-9]/g, "");
+}
+
 /** Simple Icons' data → logos in their brand colour; logos with a non-open licence of their own are left out. */
 export function parseSimpleIcons(json: unknown): GalleryItem[] {
 	const list = Array.isArray(json) ? json : (json as any)?.icons;
 	if (!Array.isArray(list)) throw new Error("Simple Icons' index is not a list.");
 	const out: GalleryItem[] = [];
 	for (const e of list as any[]) {
-		if (!e || typeof e.slug !== "string" || !/^[\w.-]+$/.test(e.slug)) continue;
+		if (!e) continue;
+		const slug = typeof e.slug === "string" ? e.slug : typeof e.title === "string" ? simpleIconsSlug(e.title) : "";
+		if (!slug || !/^[\w.-]+$/.test(slug)) continue;
 		const lic = e.license?.type;
 		if (lic && !OPEN_LICENCES.has(lic) && lic !== "CC-BY-4.0") continue;
 		out.push({
-			id: `simpleicons:${e.slug}`,
-			title: String(e.title ?? e.slug),
-			tags: uniq([...(e.aliases?.aka ?? []), ...words(String(e.slug))]),
-			url: cdn(`/npm/simple-icons@latest/icons/${e.slug}.svg`),
+			id: `simpleicons:${slug}`,
+			title: String(e.title ?? slug),
+			tags: uniq([...(e.aliases?.aka ?? []), ...words(slug)]),
+			url: cdn(`/npm/simple-icons@latest/icons/${slug}.svg`),
 			licence: `${lic ?? "CC0-1.0"} · trademark`,
 			fill: typeof e.hex === "string" && /^[0-9a-f]{6}$/i.test(e.hex) ? `#${e.hex}` : undefined,
 			source: "Simple Icons",
@@ -186,7 +220,11 @@ export function parseGithubListing(json: unknown, repo: string, ref: string, pat
 	return out;
 }
 
-/** "https://github.com/owner/repo/tree/main/icons" (or "owner/repo") → its parts. */
+/**
+ * "https://github.com/owner/repo/tree/main/icons" (or "owner/repo") → its parts. A branch whose
+ * name has a "/" in it cannot be told apart from a folder in such an address: the first part is
+ * taken as the branch.
+ */
 export function parseGithubUrl(text: string): { repo: string; ref?: string; path?: string } | undefined {
 	const t = text.trim().replace(/\.git$/, "");
 	const m = /^(?:https?:\/\/github\.com\/)?([\w.-]+)\/([\w.-]+)(?:\/(?:tree|blob)\/([^/]+)(?:\/(.+?))?)?\/?$/.exec(t);
@@ -194,7 +232,16 @@ export function parseGithubUrl(text: string): { repo: string; ref?: string; path
 	return { repo: `${m[1]}/${m[2]}`, ...(m[3] ? { ref: decodeURIComponent(m[3]) } : {}), ...(m[4] ? { path: decodeURIComponent(m[4]) } : {}) };
 }
 
-/** A draw.io library (<mxlibrary>[…]</mxlibrary>) → items (images or shape XML). */
+/** An id for a library entry from what it holds, so it still names the same shape after others are added or removed. */
+export function libraryItemId(e: { title?: string; xml?: string; data?: string }): string {
+	return `lib:${createHash("sha1").update(`${e.title ?? ""}\u0000${e.xml ?? ""}\u0000${e.data ?? ""}`).digest("hex").slice(0, 16)}`;
+}
+
+/**
+ * A draw.io library (<mxlibrary>[…]</mxlibrary>) → items (images or shape XML). Images are
+ * checked (and SVGs cleaned): an entry whose image is not a plain embedded image is left out.
+ * Throws when the file is not a library.
+ */
 export function parseMxLibrary(xml: string, source: string): GalleryItem[] {
 	const m = /<mxlibrary[^>]*>([\s\S]*)<\/mxlibrary>/.exec(xml);
 	if (!m) throw new Error("Not a draw.io library (no <mxlibrary>).");
@@ -206,17 +253,26 @@ export function parseMxLibrary(xml: string, source: string): GalleryItem[] {
 		throw new Error("The library's contents could not be read.");
 	}
 	if (!Array.isArray(list)) throw new Error("The library's contents are not a list.");
-	return list
-		.filter((e) => e && (typeof e.xml === "string" || typeof e.data === "string"))
-		.map((e, i) => ({
-			id: `lib:${i}`,
-			title: typeof e.title === "string" && e.title ? e.title : `Shape ${i + 1}`,
-			tags: uniq(words(typeof e.title === "string" ? e.title : "")),
-			...(typeof e.xml === "string" ? { xml: e.xml } : { data: e.data }),
-			w: Number(e.w) > 0 ? Number(e.w) : 48,
-			h: Number(e.h) > 0 ? Number(e.h) : 48,
-			source,
-		}));
+	const out: GalleryItem[] = [];
+	const seen = new Map<string, number>();
+	list.forEach((e, i) => {
+		if (!e) return;
+		let content: { xml: string } | { data: string };
+		if (typeof e.xml === "string") content = { xml: e.xml };
+		else if (typeof e.data === "string") {
+			const img = safeImageData(e.data);
+			if (!img) return;
+			content = { data: img.img };
+		} else return;
+		const title = typeof e.title === "string" && e.title ? e.title : `Shape ${i + 1}`;
+		// the same shape twice in one library still gets two ids
+		let id = libraryItemId({ title, ...content });
+		const n = seen.get(id) ?? 0;
+		seen.set(id, n + 1);
+		if (n) id += `-${n + 1}`;
+		out.push({ id, title, tags: uniq(words(title)), ...content, w: Number(e.w) > 0 ? Number(e.w) : 48, h: Number(e.h) > 0 ? Number(e.h) : 48, source });
+	});
+	return out;
 }
 
 /** Items → a draw.io library file (for collections and Export). */

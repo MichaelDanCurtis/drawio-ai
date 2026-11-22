@@ -24,6 +24,7 @@ export class WorkshopWindow {
 	private static installed = false;
 	public static host: WorkshopHost | undefined;
 	private static searchSeq = 0;
+	private static offlineRuns = new Set<string>();
 
 	public static open(server: StaticServer, mode?: string): void {
 		WorkshopWindow.install();
@@ -134,8 +135,17 @@ export class WorkshopWindow {
 				await s.items(WorkshopWindow.config(msg.id), true);
 				break;
 			case "offline": {
-				const r = await s.makeOffline(WorkshopWindow.config(msg.id));
-				WorkshopWindow.post({ type: "notice", message: `${r.done} shapes are on this computer${r.failed ? `; ${r.failed} could not be downloaded` : ""}.` });
+				const id = String(msg.id);
+				if (WorkshopWindow.offlineRuns.has(id)) return;
+				WorkshopWindow.offlineRuns.add(id);
+				try {
+					const r = await s.makeOffline(WorkshopWindow.config(id));
+					// removed while it ran: nothing to report
+					if (!galleryConfigs().some((g) => g.id === id)) return;
+					WorkshopWindow.post({ type: "notice", message: `${r.done} shapes are on this computer${r.failed ? `; ${r.failed} could not be downloaded` : ""}.` });
+				} finally {
+					WorkshopWindow.offlineRuns.delete(id);
+				}
 				break;
 			}
 			case "remove": {
@@ -215,13 +225,17 @@ export class WorkshopWindow {
 				const item = (await s.items(g)).find((i) => i.id === msg.itemId);
 				if (!item) throw new Error("That shape is not in the gallery any more.");
 				await s.addToCollection(col, g, item);
+				WorkshopWindow.post({ type: "collectionChanged", id: col.id });
 				WorkshopWindow.post({ type: "notice", message: `Added ${item.title} to ${col.title}.` });
 				break;
 			}
-			case "removeFromCollection":
-				s.removeFromCollection(WorkshopWindow.config(msg.collectionId), String(msg.itemId));
-				await s.items(WorkshopWindow.config(msg.collectionId), true);
+			case "removeFromCollection": {
+				const col = WorkshopWindow.config(msg.collectionId);
+				const removed = await s.removeFromCollection(col, String(msg.itemId));
+				WorkshopWindow.post({ type: "collectionChanged", id: col.id });
+				if (!removed) WorkshopWindow.post({ type: "notice", message: "That shape was already gone." });
 				break;
+			}
 			case "openHomepage": {
 				const st = s.status(galleryConfigs()).find((x) => x.id === msg.id);
 				if (st?.homepage && /^https:\/\//.test(st.homepage)) void shell.openExternal(st.homepage);
