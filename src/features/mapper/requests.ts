@@ -20,3 +20,31 @@ export function splitFacts(request: string): { text: string; facts?: string } {
 	});
 	return facts === undefined ? { text: request } : { text: `${text.trimEnd()}\n\nThe facts the Mapper collected read-only are attached as "map-facts".`, facts };
 }
+
+/** The Mapper's tools that collect: they run inventory commands and may connect to a database, so the user says yes first. */
+export function collects(tool: string): boolean {
+	return tool === "mapper_run" || tool === "mapper_refresh";
+}
+
+/**
+ * What the user is asked before the agent starts a map. It names the map and the input
+ * fields given, never their values: an input can be a password or a connection string.
+ */
+export function runConfirmation(tool: string, input: unknown): { title: string; message: string } {
+	const args = (input && typeof input === "object" ? input : {}) as { recipe?: unknown; input?: unknown };
+	const again = tool === "mapper_refresh";
+	const recipe = typeof args.recipe === "string" ? args.recipe.replace(/[^\w.-]/g, "").slice(0, 60) : "";
+	const fields =
+		!again && args.input && typeof args.input === "object"
+			? Object.keys(args.input as object)
+					.map((k) => k.replace(/[^\w.-]/g, "").slice(0, 40))
+					.filter(Boolean)
+					.slice(0, 20)
+			: [];
+	return {
+		title: again ? "Map it again?" : "Map something into the diagram?",
+		message: `${again ? "The Mapper will run the same map again" : `The Mapper will run ${recipe ? `\`${recipe}\`` : "a map"}`}: it collects read-only (inventory commands, catalog queries, file reads) and draws the result on a page of its own, as a change you keep or revert.${
+			fields.length ? `\n\nWith: ${fields.map((k) => `\`${k}\``).join(", ")}` : ""
+		}`,
+	};
+}

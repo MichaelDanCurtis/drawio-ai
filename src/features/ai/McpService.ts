@@ -4,8 +4,8 @@ import type { Server } from "http";
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { AgentInstance, drawioAiHome, readInstances, removeInstance, writeInstance, writeLauncher } from "../../agent-bridge/discovery";
 import type { DiagramToolbox } from "./DiagramToolbox";
-import { MAPPER_TOOL_NAMES, allMcpTools } from "./allTools";
-import { createMcpListener, McpToolResult } from "./mcp";
+import { allMcpTools } from "./allTools";
+import { createMcpListener } from "./mcp";
 import { mcpInstructions } from "./systemPrompt";
 
 const TOKEN_KEY = "drawio-ai.mcp.token";
@@ -38,9 +38,7 @@ export class McpService {
 		private readonly context: vscode.ExtensionContext,
 		private readonly toolbox: DiagramToolbox,
 		private readonly targetEditor: () => DrawioEditor | undefined,
-		private readonly templatePrompt: () => Promise<string | undefined>,
-		/** The Mapper's tools (src/features/mapper), once that feature is up. */
-		private readonly mapper: () => { callTool(name: string, args: unknown): Promise<McpToolResult> } | undefined = () => undefined
+		private readonly templatePrompt: () => Promise<string | undefined>
 	) {
 		this.status.command = "drawio-ai.mcpSetup";
 		this.disposables.push(
@@ -100,10 +98,8 @@ export class McpService {
 			deps: {
 				serverVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
 				tools: allMcpTools,
-				callTool: async (name, args, meta) =>
-					MAPPER_TOOL_NAMES.has(name)
-						? (await this.mapper()?.callTool(name, args)) ?? { text: "The Mapper is not available yet. Try again in a moment.", isError: true }
-						: this.toolbox.invoke(name, args, { onTarget: (editor) => this.markBusy(editor, name, meta.client) }),
+				// (the toolbox hands the Mapper's tools to the Mapper)
+				callTool: (name, args, meta) => this.toolbox.invoke(name, args, { onTarget: (editor) => this.markBusy(editor, name, meta.client) }),
 				instructions: async () => mcpInstructions(await this.templatePrompt().catch(() => undefined)),
 			},
 		});

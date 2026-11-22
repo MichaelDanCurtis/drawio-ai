@@ -107,8 +107,8 @@ test("MCP lists the diagram tools and the Mapper's, each once, and says which on
 	assert.equal(listed.result.tools.find((t) => t.name === "mapper_find").annotations.readOnlyHint, true);
 	await handleMcpMessage({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "mapper_maps", arguments: {} } }, deps);
 	assert.deepEqual(calls, [["mapper_maps", {}]]);
-	// the extension's server sends the Mapper's tools to the Mapper, and the bridge lists the same tools
-	assert.match(read("src/features/ai/McpService.ts"), /MAPPER_TOOL_NAMES\.has\(name\)/);
+	// the extension's server and the bridge list the same tools (the real VS Code suite calls one over MCP)
+	assert.match(read("src/features/ai/McpService.ts"), /tools: allMcpTools,/);
 	assert.match(read("src/agent-bridge/bridge.ts"), /tools: allMcpTools,/);
 });
 
@@ -272,7 +272,7 @@ test("requests to the agent name the host's diagram tools and its way to play a 
 	assert.doesNotMatch(feature.match(/const PLAY_TOUR = .*/)[0], /F5/);
 });
 
-test("the Mapper stays read-only and trusted-workspace-only in the extension", () => {
+test("the Mapper stays read-only in the extension, and git never runs a repository's own programs", async () => {
 	const feature = read("src/features/mapper/MapperFeature.ts");
 	// commands run through the desktop app's guarded runner, nothing else
 	assert.doesNotMatch(feature, /child_process|execFile|spawn\(/);
@@ -283,7 +283,95 @@ test("the Mapper stays read-only and trusted-workspace-only in the extension", (
 	assert.match(checkReadOnly("git", ["push"]), /not a read-only command/);
 	assert.match(checkReadOnly("az", ["vm", "delete", "--name", "x"]), /not a read-only command/);
 	assert.match(checkReadOnly("rm", ["-rf", "/"]), /not one of the Mapper's read-only tools/);
-	// running a map from the chat asks the user first
-	assert.match(feature, /const collects = schema\.name === "mapper_run" \|\| schema\.name === "mapper_refresh";/);
-	assert.match(feature, /confirmationMessages: collects/);
+
+	// A repository can name a program for git to start on `git status` (core.fsmonitor): the Mapper's git does not start it.
+	const os = require("os");
+	const { execFileSync } = require("child_process");
+	const repo = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-mapper-git-"));
+	const marker = path.join(repo, "RAN");
+	const hook = path.join(repo, "hook.sh");
+	fs.writeFileSync(hook, `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+	fs.writeFileSync(path.join(repo, "a.txt"), "a");
+	const git = (...args) => execFileSync("git", ["-c", "user.email=t@example.com", "-c", "user.name=t", ...args], { cwd: repo, stdio: "pipe" });
+	git("init", "-q");
+	git("add", "a.txt");
+	git("commit", "-qm", "initial");
+	git("config", "core.fsmonitor", hook);
+	const { createContext } = mapper("context.ts");
+	const ctx = createContext({ cwd: repo, env: process.env });
+	const status = await ctx.exec("git", ["status", "--short"]);
+	assert.equal(status.code, 0, status.stderr);
+	assert.match(status.stdout, /hook\.sh/);
+	assert.equal(fs.existsSync(marker), false, "git started the repository's own program");
+	await assert.rejects(ctx.exec("git", ["commit", "-m", "x"]), /Refused: .*not a read-only command/);
+});
+
+test("only a commit hash from a map's record reaches git's arguments", async () => {
+	const { MapperService } = mapper("service.ts");
+	const calls = [];
+	const service = new MapperService({
+		client: {},
+		cwd: () => root,
+		diagram: () => path.join(root, "x.drawio"),
+		context: () => ({ cwd: root, signal: new AbortController().signal, progress: () => undefined, exec: async (command, args) => (calls.push([command, ...args]), { stdout: "", stderr: "", code: 0 }) }),
+	});
+	const record = (head) => ({ id: "m1", title: "T", root, git: { head }, graph: { title: "T", nodes: [], edges: [] }, findings: [], dismissed: {}, descriptions: {}, tours: [], checked: [], fingerprints: {} });
+	// a record is a file next to the diagram: anyone can have written it
+	const crafted = await service.recentChanges(record("--output=/tmp/pwned"));
+	assert.equal(crafted.since, undefined);
+	assert.ok(calls.length > 0);
+	assert.doesNotMatch(JSON.stringify(calls), /--output|pwned/);
+	calls.length = 0;
+	const real = await service.recentChanges(record("0123456789abcdef0123456789abcdef01234567"));
+	assert.equal(real.since, "0123456");
+	assert.ok(calls.some((c) => c.includes("0123456789abcdef0123456789abcdef01234567..HEAD")));
+});
+
+test("tours keep unique ids, and a renamed diagram keeps its maps", () => {
+	const os = require("os");
+	const { MapperService } = mapper("service.ts");
+	const store = mapper("store.ts");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-mapper-rec-"));
+	let diagram = path.join(dir, "shop.drawio");
+	const service = new MapperService({ client: {}, cwd: () => dir, diagram: () => diagram, context: () => { throw new Error("not used"); } });
+	const record = { version: 1, id: "m1", recipe: "software.connectivity", title: "Shop", input: {}, createdAt: "", updatedAt: "", summary: "", graph: { title: "Shop", nodes: [{ id: "a", label: "A", kind: "k" }, { id: "b", label: "B", kind: "k" }], edges: [{ from: "a", to: "b" }] }, fingerprints: {}, findings: [], checked: [], dismissed: {}, descriptions: {}, tours: [] };
+	const steps = [{ title: "One", caption: "This is where it starts.", nodeIds: ["a"] }, { title: "Two", caption: "And this is where it ends.", nodeIds: ["b"] }];
+	for (const title of ["A", "B", "A", "C"]) assert.equal(service.setTour(record, title, steps).saved, true, title);
+	// (saving "A" again replaced it; its id must not be handed to "C" as well)
+	assert.deepEqual(record.tours.map((t) => t.title), ["B", "A", "C"]);
+	assert.equal(new Set(record.tours.map((t) => t.id)).size, 3, JSON.stringify(record.tours.map((t) => t.id)));
+	assert.equal(service.records().length, 1);
+
+	// renamed in the same folder, then moved to another one
+	const renamed = path.join(dir, "shop-v2.drawio");
+	assert.equal(store.adoptRecords({ cwd: dir, diagram }, { cwd: dir, diagram: renamed }), 1);
+	assert.equal(service.records().length, 0, "the old name still has the map");
+	diagram = renamed;
+	assert.deepEqual(service.records().map((r) => [r.id, r.diagram, r.tours.length]), [["m1", "shop-v2.drawio", 3]]);
+	const other = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-mapper-rec-"));
+	assert.equal(store.adoptRecords({ cwd: dir, diagram: renamed }, { cwd: other, diagram: path.join(other, "shop-v2.drawio") }), 1);
+	assert.equal(store.loadRecord(other, "m1").diagram, "shop-v2.drawio");
+	// the extension does this when VS Code renames a file
+	assert.match(read("src/features/mapper/MapperFeature.ts"), /onDidRenameFiles\(\(e\) => void this\.adopt\(e\.files\)\)/);
+});
+
+test("before the agent starts a map the user is asked, with the fields' names and never their values", () => {
+	const { collects, runConfirmation } = require(path.join(root, "src/features/mapper/requests.ts"));
+	assert.deepEqual(MAPPER_TOOL_SCHEMAS.map((t) => t.name).filter(collects), ["mapper_run", "mapper_refresh"]);
+	const ask = runConfirmation("mapper_run", { recipe: "database.schema", input: { engine: "postgres", connectionString: "postgres://admin:hunter2@db.example.com/shop", password: "hunter2" } });
+	assert.equal(ask.title, "Map something into the diagram?");
+	assert.match(ask.message, /The Mapper will run `database\.schema`: it collects read-only/);
+	assert.match(ask.message, /With: `engine`, `connectionString`, `password`$/);
+	assert.doesNotMatch(ask.message, /hunter2|postgres:\/\/|db\.example\.com/);
+	// names from the agent cannot bring Markdown or a link into the question
+	const odd = runConfirmation("mapper_run", { recipe: "x`](http://evil.example) [", input: { "a`b [c](d)": "v" } });
+	assert.doesNotMatch(odd.message, /\]\(|evil\.example\)|\[c\]/);
+	assert.match(runConfirmation("mapper_refresh", { mapId: "m1" }).message, /^The Mapper will run the same map again: /);
+	assert.equal(runConfirmation("mapper_run", undefined).message.startsWith("The Mapper will run a map: "), true);
+	// VS Code's chat asks through the tool's confirmation; `@drawio`, which has none, through a dialog; MCP agents ask their own user
+	const feature = read("src/features/mapper/MapperFeature.ts");
+	assert.match(feature, /confirmationMessages: ask \? \{/);
+	assert.match(feature, /invoke: \(name, input, options\) => this\.callTool\(name, input, \{ confirm: !!options\.scoped \}\)/);
+	assert.match(read("src/features/ai/DiagramToolbox.ts"), /if \(this\.extra\?\.has\(name\)\) \{\s*return this\.extra\.invoke\(name, rawInput, options\);/);
+	assert.match(read("src/Extension.ts"), /this\.aiFeature\.extraTools = this\.mapperFeature\.tools;/);
 });

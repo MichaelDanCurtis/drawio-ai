@@ -14,6 +14,18 @@ export interface ContextOptions {
 /** A CollectContext that runs commands for real, refusing anything that is not read-only. */
 export function createContext(options: ContextOptions): CollectContext {
 	const signal = options.signal ?? new AbortController().signal;
+	// git in a folder the Mapper is pointed at: a repository's config must not make `git status`
+	// start a program (core.fsmonitor), and status must not write the index.
+	const gitConfigs = Number(options.env.GIT_CONFIG_COUNT) || 0;
+	const env = {
+		...options.env,
+		// az installs a missing extension silently when a command needs one: never from the Mapper.
+		AZURE_EXTENSION_USE_DYNAMIC_INSTALL: "no",
+		GIT_OPTIONAL_LOCKS: "0",
+		GIT_CONFIG_COUNT: String(gitConfigs + 1),
+		[`GIT_CONFIG_KEY_${gitConfigs}`]: "core.fsmonitor",
+		[`GIT_CONFIG_VALUE_${gitConfigs}`]: "false",
+	};
 	return {
 		cwd: options.cwd,
 		signal,
@@ -28,8 +40,7 @@ export function createContext(options: ContextOptions): CollectContext {
 					args,
 					{
 						cwd: opts.cwd ?? options.cwd,
-						// az installs a missing extension silently when a command needs one: never from the Mapper.
-						env: { ...options.env, AZURE_EXTENSION_USE_DYNAMIC_INSTALL: "no" },
+						env,
 						timeout: opts.timeoutMs ?? 180_000,
 						maxBuffer: 512 * 1024 * 1024,
 						signal,

@@ -50,8 +50,18 @@ const REVIEW_NOTE = "Applied and shown to the user as pending changes they can k
  * Implements the diagram tools against whichever draw.io editor is active
  * (or was last active), so tools keep working while the chat has focus.
  */
+/** Tools of another feature, served wherever the diagram tools are (the Mapper's: src/features/mapper). */
+export interface ExtraTools {
+	specs(): ToolSpec[];
+	has(name: string): boolean;
+	invoke(name: string, input: unknown, options: InvokeOptions): Promise<ToolResult>;
+}
+
 export class DiagramToolbox {
 	private readonly applyListeners = new Set<(editor: DrawioEditor) => void>();
+
+	/** Set once the feature that has them is up. */
+	public extra: ExtraTools | undefined;
 
 	/** Called after every drawio_apply_operations batch that changed the diagram. */
 	public onDidApplyOperations(listener: (editor: DrawioEditor) => void): { dispose(): void } {
@@ -80,13 +90,17 @@ export class DiagramToolbox {
 	 */
 	public specs(options: { vision: boolean }): ToolSpec[] {
 		const forPanel = new Set(["drawio_style_reference", "drawio_import", "drawio_get_attachment"]);
-		return TOOL_SCHEMAS.filter((t) => (options.vision || !t.requiresVision) && (!t.workspace || forPanel.has(t.name))).map((t) => {
+		const own = TOOL_SCHEMAS.filter((t) => (options.vision || !t.requiresVision) && (!t.workspace || forPanel.has(t.name))).map((t) => {
 			const { file, ...properties } = (t.inputSchema.properties ?? {}) as Record<string, unknown>;
 			return { name: t.name, description: t.description, inputSchema: { ...t.inputSchema, properties } };
 		});
+		return [...own, ...(this.extra?.specs() ?? [])];
 	}
 
 	public async invoke(name: string, rawInput: unknown, options: InvokeOptions = {}): Promise<ToolResult> {
+		if (this.extra?.has(name)) {
+			return this.extra.invoke(name, rawInput, options);
+		}
 		if (name === "drawio_import") {
 			// Needs no open diagram: it creates one.
 			return this.importFile(rawInput);

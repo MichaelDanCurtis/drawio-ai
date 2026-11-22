@@ -6,7 +6,7 @@ import { getAiSettings } from "./aiSettings";
 import { analyze, codeRefs, DiagramKind, detectKind, Entity, formatAnalysis, SourceFile } from "./codeAnalysis";
 import { registerChatParticipant, registerLanguageModelTools } from "./copilotIntegration";
 import { DiagramAgent } from "./DiagramAgent";
-import { DiagramToolbox } from "./DiagramToolbox";
+import { DiagramToolbox, ExtraTools } from "./DiagramToolbox";
 import { DiagramWorkspace } from "./DiagramWorkspace";
 import { VsCodeLmClient } from "./providers/VsCodeLmProvider";
 import { readImage } from "./images";
@@ -17,7 +17,6 @@ import { path } from "../../utils/path";
 import { linkData, splitLines } from "./codeLinks";
 import { CodeLinkService } from "./CodeLinkService";
 import { McpService } from "./McpService";
-import type { McpToolResult } from "./mcp";
 import { AgentConnector, ConnectArgs } from "./agentConnect";
 import { exportDiagramToWorkspace } from "./exportDiagram";
 import { importForAgent } from "../importDiagram";
@@ -73,8 +72,13 @@ export class AiFeature {
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
 
-	/** The Mapper's tools, served over MCP next to the diagram tools (set by the extension once the Mapper is up). */
-	public mapperTools: { callTool(name: string, args: unknown): Promise<McpToolResult> } | undefined;
+	/**
+	 * The Mapper's tools, served wherever the diagram tools are: the MCP server, `@drawio` and
+	 * the old chat panel (VS Code's chat gets them as language-model tools from the Mapper itself).
+	 */
+	public set extraTools(tools: ExtraTools) {
+		this.toolbox.extra = tools;
+	}
 
 	/** Sends a request about `editor`'s diagram to VS Code's chat, as the diagram's own requests are sent. */
 	public askAgent(text: string, editor: DrawioEditor, extras: { attachments?: { name: string; text: string }[]; selection?: SelectionContext } = {}): Promise<boolean> {
@@ -112,8 +116,7 @@ export class AiFeature {
 			this.context,
 			this.toolbox,
 			() => this.targetEditor(),
-			() => this.templates.promptSection(this.targetEditor()?.uri),
-			() => this.mapperTools
+			() => this.templates.promptSection(this.targetEditor()?.uri)
 		);
 		track(mcp);
 		void pruneAttachments(this.context.globalStorageUri);

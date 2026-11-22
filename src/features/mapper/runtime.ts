@@ -14,5 +14,5 @@ export { askPrompt, describePrompt, fixFindingPrompt, tourPrompt } from "../../.
 export { digDeeperRequest, setToolSource } from "../../../standalone/src/main/mapper/recipes/common";
 export { catalog, recipeById } from "../../../standalone/src/main/mapper/registry";
 export { MapperService, SEVERITY } from "../../../standalone/src/main/mapper/service";
-export { activeFindings } from "../../../standalone/src/main/mapper/store";
+export { activeFindings, adoptRecords } from "../../../standalone/src/main/mapper/store";
 export { MapperError } from "../../../standalone/src/main/mapper/types";

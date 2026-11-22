@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import * as nodePath from "path";
 import { randomBytes } from "crypto";
 import { Disposable } from "@hediet/std/disposable";
@@ -8,13 +9,13 @@ import type { MapperService } from "../../../standalone/src/main/mapper/service"
 import type { MapRecord } from "../../../standalone/src/main/mapper/store";
 import type { MapFinding, MapInput } from "../../../standalone/src/main/mapper/types";
 import { MAPPER_TOOL_NAMES, MAPPER_TOOL_SCHEMAS } from "../ai/allTools";
-import type { McpToolResult } from "../ai/mcp";
+import type { ExtraTools, ToolResult } from "../ai/DiagramToolbox";
 import type { SelectionContext } from "../ai/systemPrompt";
 import { OMNI_DIR } from "../editorLook";
 import type { EditorLookFeature, PresentationTour } from "../EditorLookFeature";
 import { mapperPageHtml, MAPPER_PAGE, pageNonce } from "./mapperPage";
 import { ChangedShapes, MapsViewProvider } from "./MapsView";
-import { splitFacts } from "./requests";
+import { collects, runConfirmation, splitFacts } from "./requests";
 
 type Runtime = typeof import("./runtime");
 
@@ -48,8 +49,10 @@ export class MapperFeature {
 	private runtimePromise: Promise<Runtime> | undefined;
 	private readonly services = new WeakMap<DrawioEditor, MapperService>();
 	private readonly panels = new Map<DrawioEditor, vscode.WebviewPanel>();
-	/** Panels whose page has started and asked for the catalog (tests). */
-	private readonly panelsReady = new WeakSet<vscode.WebviewPanel>();
+	/** Diagrams whose panel is being opened (the Mapper loads on first use). */
+	private readonly opening = new Set<DrawioEditor>();
+	/** What each panel's page reported when it had loaded (tests): the files a webview could read from the extension's folder. */
+	private readonly panelPages = new WeakMap<vscode.WebviewPanel, { ready: boolean; loaded?: unknown }>();
 	/** What "Recent changes" found last, per map id (shown in the Maps view until VS Code closes). */
 	private readonly changes = new Map<string, ChangedShapes>();
 	private readonly view: MapsViewProvider;
@@ -70,6 +73,9 @@ export class MapperFeature {
 			}),
 		});
 		this.dispose.track({ dispose: () => [...this.panels.values()].forEach((p) => p.dispose()) });
+
+		// A renamed or moved diagram keeps its maps.
+		track(vscode.workspace.onDidRenameFiles((e) => void this.adopt(e.files)));
 
 		// Presentation mode offers the diagram's tours.
 		this.deps.look.toursOf = (editor) => this.tours(editor);
@@ -125,23 +131,46 @@ export class MapperFeature {
 		return editor;
 	}
 
+	/**
+	 * Whether the extension can read and write next to this file: a local file, or one on a
+	 * remote machine (WSL, SSH, a container) when the extension runs there.
+	 */
+	private onDisk(uri: vscode.Uri): boolean {
+		return uri.scheme === "file" || (uri.scheme === "vscode-remote" && this.deps.context.extension.extensionKind === vscode.ExtensionKind.Workspace);
+	}
+
 	/** Maps are kept next to the diagram (`.drawai/maps`), so the diagram must be a file on disk. */
-	private static fileOf(editor: DrawioEditor): string {
-		if (editor.uri.scheme !== "file") {
-			throw new Error("The Mapper keeps its maps next to the diagram: save the diagram to a folder on this computer first.");
+	private fileOf(editor: DrawioEditor): string {
+		if (!this.onDisk(editor.uri)) {
+			throw new Error("The Mapper keeps its maps next to the diagram: save the diagram as a file in a folder first.");
 		}
 		return editor.uri.fsPath;
 	}
 
+	/** After a rename or move: the records of the diagram's maps go with it. */
+	private async adopt(files: readonly { oldUri: vscode.Uri; newUri: vscode.Uri }[]): Promise<void> {
+		try {
+			for (const { oldUri, newUri } of files) {
+				if (!this.onDisk(oldUri) || !this.onDisk(newUri)) continue;
+				const from = nodePath.dirname(oldUri.fsPath);
+				if (!fs.existsSync(nodePath.join(from, ".drawai", "maps"))) continue;
+				const rt = await this.runtime();
+				if (rt.adoptRecords({ cwd: from, diagram: oldUri.fsPath }, { cwd: nodePath.dirname(newUri.fsPath), diagram: newUri.fsPath })) this.view.refresh();
+			}
+		} catch {
+			// the maps stay with the old name: nothing is lost
+		}
+	}
+
 	private async service(editor: DrawioEditor): Promise<MapperService> {
 		const rt = await this.runtime();
-		MapperFeature.fileOf(editor);
+		this.fileOf(editor);
 		let service = this.services.get(editor);
 		if (!service) {
 			service = new rt.MapperService({
 				client: editor.drawioClient,
-				cwd: () => nodePath.dirname(MapperFeature.fileOf(editor)),
-				diagram: () => MapperFeature.fileOf(editor),
+				cwd: () => nodePath.dirname(this.fileOf(editor)),
+				diagram: () => this.fileOf(editor),
 				context: (signal, progress) => this.collectContext(rt, editor, signal, progress),
 			});
 			this.services.set(editor, service);
@@ -157,7 +186,7 @@ export class MapperFeature {
 		if (!vscode.workspace.isTrusted) {
 			throw new rt.MapperError("The Mapper runs read-only tools (git, cloud CLIs) in this folder, so the workspace must be trusted first (Workspaces: Manage Workspace Trust).");
 		}
-		return rt.createContext({ cwd: nodePath.dirname(MapperFeature.fileOf(editor)), env: process.env, signal, progress });
+		return rt.createContext({ cwd: nodePath.dirname(this.fileOf(editor)), env: process.env, signal, progress });
 	}
 
 	/** Sends a request to the agent; the facts a map collected go along as an attachment, not as chat text. */
@@ -179,10 +208,22 @@ export class MapperFeature {
 			if (category) void open.webview.postMessage({ type: "selectCategory", category });
 			return;
 		}
+		// (the Mapper loads on first use: a second click meanwhile must not open a second panel)
+		if (this.opening.has(editor)) return;
+		this.opening.add(editor);
+		try {
+			await this.openPanel(editor, category);
+		} finally {
+			this.opening.delete(editor);
+		}
+	}
+
+	private async openPanel(editor: DrawioEditor, category?: string): Promise<void> {
 		const rt = await this.runtime();
 		const service = await this.service(editor);
 		const omni = vscode.Uri.joinPath(this.deps.context.extensionUri, OMNI_DIR);
 		const template = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(omni, MAPPER_PAGE))).toString("utf8");
+		if (!this.deps.editorService.openedEditors.has(editor)) return; // closed meanwhile
 		const panel = vscode.window.createWebviewPanel(
 			"drawio-ai.mapper",
 			`Map Something: ${fileName(editor)}`,
@@ -190,10 +231,17 @@ export class MapperFeature {
 			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [omni] }
 		);
 		this.panels.set(editor, panel);
+		const page: { ready: boolean; loaded?: unknown } = { ready: false };
+		this.panelPages.set(panel, page);
+		// (a map can still be running when the panel or the diagram is closed: a closed panel has no webview to post to)
+		let closed = false;
+		const post = (msg: unknown) => {
+			if (!closed) void panel.webview.postMessage(msg);
+		};
 		const state = this.deps.context.globalState;
 		const core = new rt.MapperDialogCore({
-			post: (msg) => void panel.webview.postMessage(msg),
-			cwd: () => nodePath.dirname(MapperFeature.fileOf(editor)),
+			post,
+			cwd: () => nodePath.dirname(this.fileOf(editor)),
 			ready: () => this.deps.editorService.openedEditors.has(editor),
 			service: () => service,
 			context: (signal, progress) => this.collectContext(rt, editor, signal, progress),
@@ -203,7 +251,7 @@ export class MapperFeature {
 			saveInputs: (all) => void state.update(INPUTS_KEY, all),
 			pick: async (kind, current) => {
 				const picked = await vscode.window.showOpenDialog({
-					defaultUri: vscode.Uri.file(current || nodePath.dirname(MapperFeature.fileOf(editor))),
+					defaultUri: vscode.Uri.file(current || nodePath.dirname(this.fileOf(editor))),
 					canSelectFolders: kind === "folder",
 					canSelectFiles: kind === "file",
 					canSelectMany: false,
@@ -215,21 +263,30 @@ export class MapperFeature {
 			close: () => panel.dispose(),
 		});
 		const received = panel.webview.onDidReceiveMessage((msg) => {
-			if (msg?.type === "ready") this.panelsReady.add(panel);
-			void core.onMessage(msg).then(
-				() => {
-					if (msg?.type === "ready" && category) void panel.webview.postMessage({ type: "selectCategory", category });
+			if (msg?.type === "ready") page.ready = true;
+			if (msg?.type === "pageLoaded") {
+				page.loaded = msg;
+				return;
+			}
+			void core
+				.onMessage(msg)
+				.then(
+					() => {
+						if (msg?.type === "ready" && category) post({ type: "selectCategory", category });
+					},
+					(e) => post({ type: "failed", message: String(e?.message ?? e) })
+				)
+				.then(() => {
 					if (msg?.type === "run") this.view.refresh();
-				},
-				(e) => void panel.webview.postMessage({ type: "failed", message: String(e?.message ?? e) })
-			);
+				});
 		});
 		const editorClosed = editor.webviewPanel.onDidDispose(() => panel.dispose());
 		panel.onDidDispose(() => {
+			closed = true;
 			core.abort();
 			received.dispose();
 			editorClosed.dispose();
-			this.panels.delete(editor);
+			if (this.panels.get(editor) === panel) this.panels.delete(editor);
 		});
 		panel.webview.html = mapperPageHtml(template, {
 			nonce: pageNonce((n) => randomBytes(n)),
@@ -242,7 +299,7 @@ export class MapperFeature {
 
 	private async viewData(): Promise<{ records: MapRecord[]; changes: Map<string, ChangedShapes>; active: (r: MapRecord) => MapFinding[] } | undefined> {
 		const editor = this.deps.editorService.targetDrawioEditor;
-		if (!editor || editor.uri.scheme !== "file") return undefined;
+		if (!editor || !this.onDisk(editor.uri)) return undefined;
 		const rt = await this.runtime();
 		const service = await this.service(editor);
 		return { records: service.records(), changes: this.changes, active: rt.activeFindings };
@@ -437,17 +494,17 @@ export class MapperFeature {
 
 	/** The diagram's map tours, for presentation mode to offer and play. */
 	private async tours(editor: DrawioEditor): Promise<PresentationTour[]> {
-		if (editor.uri.scheme !== "file") return [];
+		if (!this.onDisk(editor.uri)) return [];
 		const service = await this.service(editor);
 		return service.records().flatMap((r) => r.tours.map((t) => ({ mapId: r.id, title: t.title, steps: t.steps })));
 	}
 
 	private async playTour(arg: unknown) {
-		const a = arg as { mapId?: string; tourId?: string } | undefined;
+		const a = arg as { mapId?: string; tourId?: string; title?: string } | undefined;
 		if (!a?.mapId) throw new Error("Pick a tour in the Maps view.");
 		const editor = this.target();
 		const r = (await this.service(editor)).record(a.mapId);
-		const tour = r.tours.find((t) => t.id === a.tourId) ?? r.tours[0];
+		const tour = r.tours.find((t) => t.id === a.tourId && (a.title === undefined || t.title === a.title)) ?? r.tours.find((t) => t.title === a.title) ?? r.tours[0];
 		if (!tour) throw new Error(`"${r.title}" has no tour yet. Build one: right-click the map in the Maps view.`);
 		// Presentation mode plays the tours of the page shown.
 		await this.select(editor, r, []);
@@ -456,46 +513,63 @@ export class MapperFeature {
 
 	// ----- the tools -----
 
-	/** Runs one of the Mapper's tools on the diagram used last (VS Code's chat, the MCP server, tests). */
-	public async callTool(name: string, args: unknown): Promise<McpToolResult> {
-		if (!MAPPER_TOOL_NAMES.has(name)) return { text: `Unknown tool ${name}`, isError: true };
+	/**
+	 * Runs one of the Mapper's tools on the diagram used last (VS Code's chat, the MCP server,
+	 * `@drawio`, tests). `signal` stops a map being collected; with `confirm`, a tool that
+	 * collects asks the user first (callers that have no confirmation of their own).
+	 */
+	public async callTool(name: string, args: unknown, opts: { signal?: AbortSignal; confirm?: boolean } = {}): Promise<ToolResult> {
+		if (!MAPPER_TOOL_NAMES.has(name)) return { text: `Unknown tool ${name}`, summary: "Unknown tool", isError: true };
 		try {
 			const editor = this.deps.editorService.targetDrawioEditor;
-			if (!editor) return { text: "No draw.io diagram is open in VS Code. Ask the user to open or create a .drawio file: the Mapper draws into the diagram used last.", isError: true };
+			if (!editor) {
+				return { text: "No draw.io diagram is open in VS Code. Ask the user to open or create a .drawio file: the Mapper draws into the diagram used last.", summary: "No diagram open", isError: true };
+			}
+			if (opts.confirm && collects(name)) {
+				const ask = runConfirmation(name, args);
+				const yes = name === "mapper_run" ? "Map It" : "Map It Again";
+				if ((await vscode.window.showWarningMessage(ask.title, { modal: true, detail: ask.message.replace(/`/g, "") }, yes)) !== yes) {
+					return { text: "The user did not allow this map. Do not try again unless they ask.", summary: "Not allowed", isError: true };
+				}
+			}
 			const rt = await this.runtime();
 			const service = await this.service(editor);
-			const out = await rt.callMapperTool(service, name, args);
+			const out = await rt.callMapperTool(service, name, args, { signal: opts.signal });
 			if (!MAPPER_TOOL_SCHEMAS.find((t) => t.name === name)?.readOnly) this.view.refresh();
-			return { text: out.text, isError: out.isError };
+			return { text: out.text, summary: out.summary, isError: out.isError };
 		} catch (e: any) {
-			return { text: `Error: ${String(e?.message ?? e)}`, isError: true };
+			return { text: `Error: ${String(e?.message ?? e)}`, summary: `${name} failed`, isError: true };
 		}
 	}
+
+	/** The Mapper's tools for the diagram toolbox: the MCP server (the agent there asks its own user), and `@drawio`, which does not. */
+	public readonly tools: ExtraTools = {
+		specs: () => MAPPER_TOOL_SCHEMAS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+		has: (name) => MAPPER_TOOL_NAMES.has(name),
+		invoke: (name, input, options) => this.callTool(name, input, { confirm: !!options.scoped }),
+	};
 
 	private registerLanguageModelTools(): vscode.Disposable[] {
 		return MAPPER_TOOL_SCHEMAS.map((schema) =>
 			vscode.lm.registerTool<Record<string, unknown>>(schema.name, {
 				prepareInvocation: (options) => {
-					const input = (options.input ?? {}) as { recipe?: unknown; input?: unknown };
 					// Mapping runs read-only commands and may connect to a database: the user says yes first.
-					const collects = schema.name === "mapper_run" || schema.name === "mapper_refresh";
+					const ask = collects(schema.name) ? runConfirmation(schema.name, options.input) : undefined;
 					return {
 						invocationMessage: `${schema.title}…`,
-						confirmationMessages: collects
-							? {
-									title: schema.name === "mapper_run" ? "Map something into the diagram?" : "Map it again?",
-									message: new vscode.MarkdownString(
-										`${schema.name === "mapper_run" ? `The Mapper will run \`${String(input.recipe ?? "a map")}\`` : "The Mapper will run the same map again"}: it collects read-only (inventory commands, catalog queries, file reads) and draws the result on a page of its own, as a change you keep or revert.${
-											schema.name === "mapper_run" && input.input && typeof input.input === "object" ? `\n\nWith: ${Object.keys(input.input as object).map((k) => `\`${k}\``).join(", ")}` : ""
-										}`
-									),
-							  }
-							: undefined,
+						confirmationMessages: ask ? { title: ask.title, message: new vscode.MarkdownString(ask.message) } : undefined,
 					};
 				},
-				invoke: async (options) => {
-					const result = await this.callTool(schema.name, options.input);
-					return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result.text)]);
+				invoke: async (options, token) => {
+					// Stopping the chat request stops the map.
+					const ac = new AbortController();
+					const stop = token.onCancellationRequested(() => ac.abort());
+					try {
+						const result = await this.callTool(schema.name, options.input, { signal: ac.signal });
+						return new vscode.LanguageModelToolResult([new vscode.LanguageModelTextPart(result.text)]);
+					} finally {
+						stop.dispose();
+					}
 				},
 			})
 		);
@@ -517,12 +591,12 @@ export class MapperFeature {
 
 	private async state() {
 		const editor = this.deps.editorService.targetDrawioEditor;
-		if (!editor || editor.uri.scheme !== "file") return { maps: [], panelOpen: false };
+		if (!editor || !this.onDisk(editor.uri)) return { maps: [], panelOpen: false };
 		const service = await this.service(editor);
 		return {
 			maps: service.records().map((r) => service.summary(r)),
 			panelOpen: this.panels.has(editor),
-			panelReady: this.panelsReady.has(this.panels.get(editor)!),
+			panelPage: this.panels.has(editor) ? this.panelPages.get(this.panels.get(editor)!) : undefined,
 			view: await this.view.snapshot(),
 		};
 	}

@@ -188,7 +188,7 @@ the diagram will stay visible.
 -   **Read-only.** A map is collected with listing, describing and querying commands only (a guard refuses anything else), fixed catalog queries in read-only database sessions, and file reads. Nothing in your systems is changed.
 -   **Secrets.** Passwords, connection strings and tokens are used for that run only. They are never stored, drawn on the map or sent to the agent.
 -   **Keep or revert.** A map is drawn on a page of its own as a pending change, like any AI edit.
--   **Next to the diagram.** What the Mapper knows about each map (its shapes, findings, descriptions, tours) is kept in `.drawai/maps/` beside the diagram, so it travels with the repository. The diagram has to be a file on disk, and the workspace has to be trusted: the Mapper runs `git` and your cloud CLIs in it.
+-   **Next to the diagram.** What the Mapper knows about each map (its shapes, findings, descriptions, tours) is kept in `.drawai/maps/` beside the diagram, so it travels with the repository. The diagram has to be a file on disk, and the workspace has to be trusted: the Mapper runs `git` and your cloud CLIs in it. A diagram you rename or move in VS Code keeps its maps.
 
 The **Maps** view (Draw.AI in the activity bar) lists the maps of the diagram you used last:
 
@@ -197,7 +197,7 @@ The **Maps** view (Draw.AI in the activity bar) lists the maps of the diagram yo
 -   Right-click a map to have the agent describe every shape in plain English (shown as tooltips), build a tour, see what changed in git since the map was made, or map it again and mark what is new.
 -   **Ask the Map…** (the view's title bar) has the agent answer a question from the maps and draw the answer as a page. **Draw.AI: Dig Deeper into Selected Map Shapes…** has it investigate the shapes you selected.
 
-The agent works through 13 `mapper_*` tools (`mapper_maps`, `mapper_find`, `mapper_show`, `mapper_path`, `mapper_findings`, `mapper_run` and others), in VS Code's chat with the **Draw.AI** agent and, once connected, in Claude Code and Codex. When the agent starts a map itself, VS Code asks you first.
+The agent works through 13 `mapper_*` tools (`mapper_maps`, `mapper_find`, `mapper_show`, `mapper_path`, `mapper_findings`, `mapper_run` and others), in VS Code's chat with the **Draw.AI** agent (and `@drawio`) and, once connected, in Claude Code and Codex. When the agent starts a map itself, you are asked first, and stopping the chat request stops the map.
 
 ## Editor Tools and Look
 

@@ -15,7 +15,7 @@ export type MapNode =
 	| { kind: "findings"; mapId: string; record: MapRecord; findings: MapFinding[] }
 	| { kind: "finding"; mapId: string; findingId: string; record: MapRecord; finding: MapFinding }
 	| { kind: "tours"; mapId: string; record: MapRecord }
-	| { kind: "tour"; mapId: string; tourId: string; record: MapRecord; tour: MapTour }
+	| { kind: "tour"; mapId: string; tourId: string; title: string; index: number; record: MapRecord; tour: MapTour }
 	| { kind: "changes"; mapId: string; record: MapRecord; changes: ChangedShapes }
 	| { kind: "change"; mapId: string; nodeIds: string[]; label: string; detail: string };
 
@@ -68,7 +68,7 @@ export class MapsViewProvider implements vscode.TreeDataProvider<MapNode> {
 					.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity))
 					.map((finding) => ({ kind: "finding", mapId: node.mapId, findingId: finding.id, record: node.record, finding }));
 			case "tours":
-				return node.record.tours.map((tour) => ({ kind: "tour", mapId: node.mapId, tourId: tour.id, record: node.record, tour }));
+				return node.record.tours.map((tour, index) => ({ kind: "tour", mapId: node.mapId, tourId: tour.id, title: tour.title, index, record: node.record, tour }));
 			case "changes":
 				return node.changes.shapes.map((s) => ({
 					kind: "change",
@@ -133,12 +133,13 @@ export class MapsViewProvider implements vscode.TreeDataProvider<MapNode> {
 			}
 			case "tour": {
 				const t = new vscode.TreeItem(node.tour.title, vscode.TreeItemCollapsibleState.None);
-				t.id = `tour:${node.mapId}:${node.tour.id}`;
+				// (records made before tour ids were unique can hold two tours with one id)
+				t.id = `tour:${node.mapId}:${node.index}:${node.tour.id}`;
 				t.description = `${node.tour.steps.length} step${node.tour.steps.length === 1 ? "" : "s"}`;
 				t.tooltip = node.tour.steps.map((s, i) => `${i + 1}. ${s.title || s.caption}`).join("\n");
 				t.iconPath = new vscode.ThemeIcon("play");
 				t.contextValue = "drawioMapTour";
-				t.command = { command: "drawio-ai.maps.playTour", title: "Play the Tour", arguments: [{ mapId: node.mapId, tourId: node.tour.id }] };
+				t.command = { command: "drawio-ai.maps.playTour", title: "Play the Tour", arguments: [{ mapId: node.mapId, tourId: node.tour.id, title: node.tour.title }] };
 				return t;
 			}
 			case "changes": {

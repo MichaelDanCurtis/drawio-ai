@@ -8,15 +8,20 @@ import { MapperError } from "./types";
  * and for Claude Code / Codex connected to the desktop app. Lookups first, so an
  * agent can ask the map before grepping (floorplan's query CLI, as tools).
  */
-interface MapperTool extends MapperToolSchema {
-	run(service: MapperService, args: any): Promise<unknown>;
+/** For a call that collects (mapper_run, mapper_refresh): stops it when the caller gives up. */
+export interface MapperCallOptions {
+	signal?: AbortSignal;
 }
 
-const RUN: Record<string, (service: MapperService, args: any) => Promise<unknown>> = {
+interface MapperTool extends MapperToolSchema {
+	run(service: MapperService, args: any, opts?: MapperCallOptions): Promise<unknown>;
+}
+
+const RUN: Record<string, (service: MapperService, args: any, opts?: MapperCallOptions) => Promise<unknown>> = {
 	mapper_maps: async (s) => ({ onPage: (await s.pageRecords()).map((r) => r.id), maps: s.records().map((r) => s.summary(r)) }),
 	mapper_list_recipes: async (_s, a) => catalog().recipes.filter((r) => !a.category || r.category === a.category).map((r) => ({ id: r.id, title: r.title, description: r.description, fields: r.fields.map((f) => ({ id: f.id, label: f.label, type: f.type, required: !!f.required, options: f.options?.map((o) => o.value), secret: !!(f.secret || f.type === "password") })) })),
-	mapper_run: async (s, a) => {
-		const out = await s.run(String(a.recipe), a.input ?? {});
+	mapper_run: async (s, a, opts) => {
+		const out = await s.run(String(a.recipe), a.input ?? {}, { signal: opts?.signal });
 		return { map: s.summary(out.record), drawnOn: out.drawn?.page, healthBadges: out.badges, warnings: out.result.warnings ?? [] };
 	},
 	mapper_find: async (s, a) => s.find(String(a.query), a.mapId),
@@ -29,8 +34,8 @@ const RUN: Record<string, (service: MapperService, args: any) => Promise<unknown
 	mapper_worksheet: async (s, a) => s.worksheet(s.record(a.mapId), { only: a.only ?? "missing", offset: a.offset, limit: Math.min(100, a.limit ?? 40) }),
 	mapper_set_descriptions: async (s, a) => s.setDescriptions(s.record(a.mapId), a.items ?? [], a.audience === "developer" ? "developer" : "everyone"),
 	mapper_recent_changes: async (s, a) => s.recentChanges(s.record(a.mapId), { draw: !!a.draw }),
-	mapper_refresh: async (s, a) => {
-		const out = await s.refresh(s.record(a.mapId));
+	mapper_refresh: async (s, a, opts) => {
+		const out = await s.refresh(s.record(a.mapId), {}, { signal: opts?.signal });
 		return { map: s.summary(out.record), drawnOn: out.drawn?.page, diff: out.diff };
 	},
 	mapper_set_tour: async (s, a) => s.setTour(s.record(a.mapId), String(a.title ?? "Tour"), (a.steps ?? []).map((x: any) => ({ title: String(x.title ?? ""), caption: String(x.caption ?? ""), nodeIds: x.nodeIds ?? [] }))),
@@ -42,11 +47,11 @@ export const MAPPER_TOOLS: MapperTool[] = MAPPER_TOOL_SCHEMAS.map((t) => ({ ...t
 export { MAPPER_TOOL_NAMES };
 
 /** Runs a mapper tool; errors become tool errors the agent can act on. */
-export async function callMapperTool(service: MapperService, name: string, args: unknown): Promise<{ text: string; summary: string; isError?: boolean }> {
+export async function callMapperTool(service: MapperService, name: string, args: unknown, opts?: MapperCallOptions): Promise<{ text: string; summary: string; isError?: boolean }> {
 	const tool = MAPPER_TOOLS.find((t) => t.name === name);
 	if (!tool) return { text: `Unknown tool ${name}`, summary: "Unknown tool", isError: true };
 	try {
-		const out = await tool.run(service, args ?? {});
+		const out = await tool.run(service, args ?? {}, opts);
 		const text = JSON.stringify(out, null, 1);
 		return { text: text.length > 120_000 ? text.slice(0, 120_000) + "\n… (truncated; page or filter)" : text, summary: summaryFor(name, out) };
 	} catch (e: any) {

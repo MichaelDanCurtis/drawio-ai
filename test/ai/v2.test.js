@@ -318,6 +318,27 @@ test("code analysis never executes code embedded in YAML (js-yaml !!js/function)
 	assert.match(a.notes[0], /YAML parse error \(unknown (scalar )?tag/);
 });
 
+test("code analysis reads YAML merge keys: a compose service built on an anchor keeps its image and dependencies", () => {
+	const a = code.analyze(
+		[
+			{
+				path: "docker-compose.yml",
+				text: 'x-app: &app\n  image: shop/app:1\n  depends_on: [db]\nservices:\n  web:\n    <<: *app\n    ports: ["8080:80"]\n  worker:\n    <<: *app\n  db:\n    image: postgres:16\n',
+			},
+		],
+		"infrastructure"
+	);
+	assert.deepEqual(a.notes, []);
+	assert.deepEqual(a.entities.find((e) => e.id === "svc:web").details, ["image: shop/app:1", "port 8080:80"]);
+	assert.deepEqual(
+		a.relations.filter((r) => r.kind === "depends on").map((r) => `${r.from}>${r.to}`),
+		["svc:web>svc:db", "svc:worker>svc:db"]
+	);
+	// plain words stay words: only the core schema's true/false are booleans (YAML 1.1's on / y / no are not)
+	const b = code.analyze([{ path: "docker-compose.yml", text: "services:\n  on:\n    image: y\n" }], "infrastructure");
+	assert.deepEqual([b.entities[0].name, b.entities[0].details], ["on", ["image: y"]]);
+});
+
 test("code analysis: kind detection, aggregation of large trees, and the prompt payload", () => {
 	assert.equal(code.detectKind([{ path: "a.sql", text: "" }]), "erd");
 	assert.equal(code.detectKind([{ path: "x.yaml", text: "kind: Service\n" }]), "infrastructure");

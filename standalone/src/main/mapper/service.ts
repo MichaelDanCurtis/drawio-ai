@@ -4,7 +4,7 @@ import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/Custom
 import { applyDescriptions, Badge, drawBadges, drawMap, mapsOnPage } from "./draw";
 import { answerGraph, checkDescriptions, checkTour, findNodes, findPath, showNode, worksheet } from "./query";
 import { recipeById } from "./registry";
-import { activeFindings, createRecord, diffRecords, findingFingerprint, loadRecord, MapRecord, mapsDir, newMapId, saveRecord } from "./store";
+import { activeFindings, adoptRecords, createRecord, diffRecords, findingFingerprint, loadRecord, MapRecord, mapsDir, newMapId, saveRecord } from "./store";
 import type { CollectContext, CollectResult, MapFinding, MapInput } from "./types";
 import { MapperError } from "./types";
 
@@ -62,24 +62,7 @@ export class MapperService {
 	 * folder they are re-associated with the new name.
 	 */
 	public adoptRecords(from: { cwd: string; diagram?: string }, to: { cwd: string; diagram: string }): number {
-		const oldName = from.diagram ? path.basename(from.diagram) : undefined;
-		const newName = path.basename(to.diagram);
-		let names: string[] = [];
-		try {
-			names = fs.readdirSync(mapsDir(from.cwd)).filter((n) => n.endsWith(".json"));
-		} catch {
-			return 0;
-		}
-		let n = 0;
-		for (const name of names) {
-			const r = loadRecord(from.cwd, name.replace(/\.json$/, ""));
-			if (!r || (r.diagram ?? undefined) !== oldName) continue;
-			if (path.resolve(from.cwd) !== path.resolve(to.cwd) && loadRecord(to.cwd, r.id)) continue; // already there
-			r.diagram = newName;
-			saveRecord(to.cwd, r);
-			n++;
-		}
-		return n;
+		return adoptRecords(from, to);
 	}
 
 	public record(id: string | undefined): MapRecord {
@@ -219,7 +202,8 @@ export class MapperService {
 			return r.stdout;
 		};
 		const changed = new Map<string, string>();
-		const since = record.git?.head;
+		// (the record is a file next to the diagram: only a commit hash goes into git's arguments)
+		const since = /^[0-9a-f]{7,64}$/i.test(record.git?.head ?? "") ? record.git!.head : undefined;
 		if (since) for (const f of (await git(["diff", "--name-only", "--relative", `${since}..HEAD`])).split("\n").filter(Boolean)) changed.set(f, "committed");
 		for (const line of (await git(["status", "--short", "--untracked-files=all", "."])).split("\n").filter(Boolean)) {
 			const p = line.slice(3).split(" -> ").pop()!.replace(/^"|"$/g, "");
@@ -286,8 +270,13 @@ export class MapperService {
 	public setTour(record: MapRecord, title: string, steps: { title: string; caption: string; nodeIds: string[] }[]) {
 		const check = checkTour(record, steps);
 		if (check.problems.length) return { saved: false, ...check };
-		const id = `t${record.tours.length + 1}`;
-		record.tours = [...record.tours.filter((t) => t.title !== title), { id, title: title || "Tour", steps }];
+		// A tour saved again under its title replaces the old one; ids stay unique among the tours kept.
+		const kept = record.tours.filter((t) => t.title !== title);
+		const taken = new Set(kept.map((t) => t.id));
+		let n = kept.length + 1;
+		while (taken.has(`t${n}`)) n++;
+		const id = `t${n}`;
+		record.tours = [...kept, { id, title: title || "Tour", steps }];
 		this.save(record);
 		return { saved: true, tourId: id, ...check };
 	}

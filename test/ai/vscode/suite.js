@@ -649,19 +649,22 @@ async function runSteps() {
 		// databases: every driver is part of the extension (it gets as far as the network), and a SQLite file maps
 		const raw = (name, args) => vscode.commands.executeCommand("drawio-ai.maps.tool", { name, args });
 		for (const [engine, connectionString] of [
-			["postgres", "postgres://u:p@127.0.0.1:1/db"],
-			["mysql", "mysql://u:p@127.0.0.1:1/db"],
-			["mssql", "Server=127.0.0.1,1;Database=db;User Id=u;Password=p;Encrypt=false"],
-			["oracle", "oracle://u:p@127.0.0.1:1/svc"],
-			["mongodb", "mongodb://u:p@127.0.0.1:1/db?serverSelectionTimeoutMS=1500"],
+			["postgres", "postgres://u:s3cr3tPw@127.0.0.1:1/db"],
+			["mysql", "mysql://u:s3cr3tPw@127.0.0.1:1/db"],
+			["mssql", "Server=127.0.0.1,1;Database=db;User Id=u;Password=s3cr3tPw;Encrypt=false"],
+			["oracle", "oracle://u:s3cr3tPw@127.0.0.1:1/svc"],
+			["mongodb", "mongodb://u:s3cr3tPw@127.0.0.1:1/db?serverSelectionTimeoutMS=1500"],
 		]) {
 			const r = await raw("mapper_run", { recipe: "database.schema", input: { engine, connectWith: "url", connectionString } });
 			assert.equal(r.isError, true, `${engine}: ${r.text}`);
 			assert.doesNotMatch(r.text, /Cannot find module|is not a function|is not defined|not a constructor/, `${engine}: ${r.text}`);
 			assert.match(r.text, /ECONNREFUSED|connect|reach|refused|NJS-|timed out|Server selection/i, `${engine}: ${r.text}`);
 			// the secret never comes back
-			assert.doesNotMatch(r.text, /u:p@/, `${engine}: ${r.text}`);
+			assert.ok(!r.text.includes("s3cr3tPw"), `${engine}: ${r.text}`);
 		}
+		// ... and is not written next to the diagram
+		const mapsDir = path.join(path.dirname(diagram.uri.fsPath), ".drawai", "maps");
+		for (const f of fs.readdirSync(mapsDir)) assert.ok(!fs.readFileSync(path.join(mapsDir, f), "utf8").includes("s3cr3tPw"), f);
 		let sqlite;
 		try {
 			sqlite = require("node:sqlite");
@@ -682,8 +685,30 @@ async function runSteps() {
 		}
 
 		// the Map Something panel: the desktop app's page, loaded in a webview
-		await vscode.commands.executeCommand("drawio-ai.mapSomething");
-		await waitFor(async () => ((await mapsState()).panelReady ? true : undefined), "the Map Something page to start");
+		// (asked for twice at once: still one panel)
+		await Promise.all([vscode.commands.executeCommand("drawio-ai.mapSomething"), vscode.commands.executeCommand("drawio-ai.mapSomething")]);
+		const loaded = await waitFor(async () => {
+			const p = (await mapsState()).panelPage;
+			return p?.ready && p.loaded ? p.loaded : undefined;
+		}, "the Map Something page to load");
+		// its five style sheets, its scripts, its modules and its font came from the extension's folder
+		assert.deepEqual([loaded.sheets, loaded.scripts, loaded.modules, loaded.font], [5, true, true, true], JSON.stringify(loaded));
+		assert.equal(vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => /^Map Something: /.test(t.label)).length, 1);
+
+		// the same tools over the MCP server, as Claude Code and Codex reach them
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("port", 0, vscode.ConfigurationTarget.Global);
+		const info = await vscode.commands.executeCommand("drawio-ai.mcpSetup", { enable: true, show: false });
+		const rpc = async (id, method, params) => {
+			const r = await fetch(info.url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${info.token}` }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
+			assert.equal(r.status, 200);
+			return (await r.json()).result;
+		};
+		const listed = (await rpc(1, "tools/list")).tools;
+		assert.equal(listed.filter((t) => t.name.startsWith("mapper_")).length, 13);
+		const viaMcp = await rpc(2, "tools/call", { name: "mapper_maps", arguments: {} });
+		assert.equal(viaMcp.isError, false, JSON.stringify(viaMcp));
+		assert.ok(JSON.parse(viaMcp.content[0].text).maps.some((m) => m.id === mapId));
+		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global);
 	});
 }
 

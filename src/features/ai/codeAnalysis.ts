@@ -1,5 +1,11 @@
 import * as yaml from "js-yaml";
 
+/**
+ * YAML as compose files and Kubernetes manifests use it: js-yaml's core schema (which never
+ * builds anything but plain data) plus merge keys (`<<: *common`), which compose files lean on.
+ */
+const YAML_SCHEMA = yaml.CORE_SCHEMA.withTags(yaml.mergeTag);
+
 // Pure, best-effort static analysis that turns source files into entities and
 // relations for the AI to draw. No vscode import (unit-testable).
 
@@ -650,7 +656,7 @@ function infrastructure(files: SourceFile[]): Omit<Analysis, "kind" | "fileCount
 	for (const f of files.filter((x) => /\.ya?ml$/i.test(x.path))) {
 		let docs: any[];
 		try {
-			docs = (yaml.loadAll(f.text) as any[]).filter((d) => d && typeof d === "object");
+			docs = (yaml.loadAll(f.text, { schema: YAML_SCHEMA }) as any[]).filter((d) => d && typeof d === "object");
 		} catch (e: any) {
 			notes.push(`${f.path}: YAML parse error (${String(e?.message ?? e).split("\n")[0]})`);
 			continue;

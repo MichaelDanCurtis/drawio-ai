@@ -58,7 +58,7 @@ export class Extension {
 	);
 
 	constructor(private readonly context: vscode.ExtensionContext) {
-		this.aiFeature.mapperTools = this.mapperFeature;
+		this.aiFeature.extraTools = this.mapperFeature.tools;
 		for (const d of registerImportCommands(
 			(uri, task) => this.editorService.withDrawioWebview(uri, task),
 			() => {

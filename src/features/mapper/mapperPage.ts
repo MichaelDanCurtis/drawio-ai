@@ -32,6 +32,18 @@ function bridgeScript(): string {
 		'		if (c.contains("vscode-dark") || (c.contains("vscode-high-contrast") && !c.contains("vscode-high-contrast-light"))) document.documentElement.dataset.theme = "dark";',
 		'		else if (c.contains("vscode-light") || c.contains("vscode-high-contrast-light")) document.documentElement.dataset.theme = "light";',
 		"	}",
+		// What the webview could load from the extension's folder (the extension's tests read it).
+		'	window.addEventListener("load", function () {',
+		"		var report = function (faces) {",
+		"			var sheets = 0;",
+		"			for (var i = 0; i < document.styleSheets.length; i++) {",
+		"				try { if (document.styleSheets[i].href && document.styleSheets[i].cssRules.length) sheets++; } catch (e) { /* not readable: not loaded */ }",
+		"			}",
+		'			vs.postMessage({ type: "pageLoaded", sheets: sheets, scripts: !!(window.DrawAIIcons && window.DrawAIBrands && window.DrawAITips && window.DrawAIBrandmark), modules: !!window.omnidrawMatrix && typeof window.drawaiPulse === "function", font: !!(faces && faces.length) });',
+		"		};",
+		// (asked for by name: a font is otherwise only fetched once text in it is painted)
+		'		document.fonts.load(\'14px "Space Grotesk"\').then(report, function () { report([]); });',
+		"	});",
 		'	document.addEventListener("DOMContentLoaded", function () {',
 		"		theme();",
 		'		new MutationObserver(theme).observe(document.body, { attributes: true, attributeFilter: ["class"] });',
