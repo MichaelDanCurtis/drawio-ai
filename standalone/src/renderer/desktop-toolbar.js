@@ -25,6 +25,51 @@
 	// Our own buttons' classic look: the flat glyphs.
 	var EXTRA = { present: null, chatPanel: null };
 	var style = (/[?&]icons=([a-z]+)/.exec(location.search) || [])[1] || "isometric";
+	var side = (/[?&]toolbar=([a-z]+)/.exec(location.search) || [])[1] || "top";
+
+	/**
+	 * Toolbar on the top, left, right or bottom: draw.io lays the editor out with a CSS grid
+	 * (menu bar / toolbar / sidebar · split · diagram · format / page tabs), so a class on the
+	 * editor moves the toolbar and shifts the other areas.
+	 */
+	var SIDE_CSS = [
+		// left / right: one more column for a vertical toolbar
+		".drawai-tb-left.geEditor, .drawai-tb-right.geEditor { grid-template-rows: min-content 1fr min-content !important; }",
+		".drawai-tb-left.geEditor { grid-template-columns: min-content min-content min-content 1fr min-content !important; }",
+		".drawai-tb-right.geEditor { grid-template-columns: min-content min-content 1fr min-content min-content !important; }",
+		".drawai-tb-left.geEditor > .geToolbarContainer, .drawai-tb-right.geEditor > .geToolbarContainer { grid-row: 2 / 4 !important; width: 46px !important; height: auto !important; padding: 6px 0 !important; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; display: flex !important; flex-direction: column; align-items: center; }",
+		".drawai-tb-left.geEditor > .geToolbarContainer { grid-column: 1 !important; border-right: 1px solid light-dark(#e6e4df, #222222); }",
+		".drawai-tb-right.geEditor > .geToolbarContainer { grid-column: 5 !important; border-left: 1px solid light-dark(#e6e4df, #222222); }",
+		".drawai-tb-left.geEditor > .geToolbarContainer .geToolbar, .drawai-tb-right.geEditor > .geToolbarContainer .geToolbar { flex-direction: column; height: auto !important; flex-grow: 0; gap: 2px; }",
+		".drawai-tb-left.geEditor > .geToolbarContainer .geToolbarEnd, .drawai-tb-right.geEditor > .geToolbarContainer .geToolbarEnd { flex-direction: column; margin-top: auto; height: auto !important; flex-grow: 0; }",
+		".drawai-tb-left.geEditor > .geToolbarContainer .geSeparator, .drawai-tb-right.geEditor > .geToolbarContainer .geSeparator { width: 22px !important; height: 1px !important; margin: 5px 0 !important; }",
+		".drawai-tb-left.geEditor > .geToolbarContainer .geZoomInput, .drawai-tb-right.geEditor > .geToolbarContainer .geZoomInput { width: 40px !important; padding: 0 !important; font-size: 11px !important; background-image: none !important; text-align: center; }",
+		".drawai-tb-left.geEditor > .geSidebarContainer:not(.geFormatContainer) { grid-column: 2 !important; grid-row: 2 !important; }",
+		".drawai-tb-left.geEditor > .geHsplit { grid-column: 3 !important; grid-row: 2 !important; }",
+		".drawai-tb-left.geEditor > .geDiagramContainer { grid-column: 4 !important; grid-row: 2 !important; }",
+		".drawai-tb-left.geEditor > .geFormatContainer { grid-column: 5 !important; grid-row: 2 !important; }",
+		".drawai-tb-left.geEditor > .geTabContainer { grid-column: 2 / -1 !important; grid-row: 3 !important; }",
+		".drawai-tb-right.geEditor > .geSidebarContainer:not(.geFormatContainer) { grid-column: 1 !important; grid-row: 2 !important; }",
+		".drawai-tb-right.geEditor > .geHsplit { grid-column: 2 !important; grid-row: 2 !important; }",
+		".drawai-tb-right.geEditor > .geDiagramContainer { grid-column: 3 !important; grid-row: 2 !important; }",
+		".drawai-tb-right.geEditor > .geFormatContainer { grid-column: 4 !important; grid-row: 2 !important; }",
+		".drawai-tb-right.geEditor > .geTabContainer { grid-column: 1 / 5 !important; grid-row: 3 !important; }",
+		// bottom: the toolbar row moves under the diagram, above the page tabs
+		".drawai-tb-bottom.geEditor { grid-template-rows: min-content 1fr min-content min-content !important; }",
+		".drawai-tb-bottom.geEditor > .geSidebarContainer, .drawai-tb-bottom.geEditor > .geHsplit, .drawai-tb-bottom.geEditor > .geDiagramContainer { grid-row: 2 !important; }",
+		".drawai-tb-bottom.geEditor > .geToolbarContainer { grid-row: 3 !important; border-top: 1px solid light-dark(#e6e4df, #222222); }",
+		".drawai-tb-bottom.geEditor > .geTabContainer { grid-row: 4 !important; }",
+	].join("\n");
+	function setSide(next, ui) {
+		side = next;
+		var editor = (ui && ui.container) || document.querySelector(".geEditor");
+		if (!editor) return;
+		["top", "left", "right", "bottom"].forEach(function (s) { editor.classList.toggle("drawai-tb-" + s, s === side); });
+		if (ui) {
+			try { ui.refresh(); } catch (e) { /* layout catches up on the next resize */ }
+			try { window.dispatchEvent(new Event("resize")); } catch (e) { /* old engines */ }
+		}
+	}
 
 	function glyphUri(name, s) {
 		// draw.io inverts toolbar images in dark mode, so the icons are drawn in ink.
@@ -129,6 +174,11 @@
 			bar.insertBefore(mark, bar.firstChild);
 		}
 
+		var sideCss = document.createElement("style");
+		sideCss.textContent = SIDE_CSS;
+		document.head.appendChild(sideCss);
+		setSide(side, ui);
+
 		var css = document.createElement("style");
 		css.textContent = [
 			".drawai-mark { display: inline-flex !important; align-items: center; padding: 0 8px 0 4px !important; cursor: pointer; }",
@@ -192,6 +242,7 @@
 			if (!data) return;
 			if (data.action === "desktopPrefs") {
 				if (data.iconStyle && data.iconStyle !== style) setStyle(data.iconStyle, ui);
+				if (data.toolbar && data.toolbar !== side) setSide(data.toolbar, ui);
 				if (EXTRA.chatPanel) EXTRA.chatPanel.classList.toggle("drawai-off", !data.chatVisible);
 			} else if (data.action === "desktopShapes") {
 				try { showShapes(data.libraries); } catch (e) { console.warn("Draw.AI: could not show the shape libraries", e); }

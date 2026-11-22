@@ -252,7 +252,8 @@ export class DiagramWindow {
 	 * partly off screen), a little down and right of the windows already open there.
 	 */
 	private static placement(): { x: number; y: number; width: number; height: number } {
-		const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+		// (test runs use the primary display: another one may be asleep and not capturable)
+		const area = (process.env.DRAWAI_E2E ? screen.getPrimaryDisplay() : screen.getDisplayNearestPoint(screen.getCursorScreenPoint())).workArea;
 		const width = Math.min(1500, Math.max(800, area.width - 48));
 		const height = Math.min(950, Math.max(500, area.height - 48));
 		const cascade = (DiagramWindow.all.size % 6) * 28;
@@ -278,7 +279,7 @@ export class DiagramWindow {
 	/** Icon style and the chat's state, for the editor's plugins. */
 	private sendEditorPrefs(): void {
 		const s = settings();
-		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, chatVisible: this.chatVisible, chatSide: s.chat.side });
+		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, toolbar: s.appearance.toolbar, chatVisible: this.chatVisible, chatSide: s.chat.side });
 	}
 
 	private shapesSeq = 0;
@@ -295,7 +296,7 @@ export class DiagramWindow {
 		const dark = nativeTheme.shouldUseDarkColors;
 		this.win.show();
 		this.editorView.webContents.focus();
-		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() })}?icons=${settings().appearance.iconStyle}`);
+		void this.editorView.webContents.loadURL(`${server.editorUrl(this.id, { dark: "auto", localStorage: drawioLocalStorage() })}?icons=${settings().appearance.iconStyle}&toolbar=${settings().appearance.toolbar}`);
 		void this.chatView.webContents.loadURL(`${server.base}/chat.html`);
 		void dark;
 	}

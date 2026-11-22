@@ -509,7 +509,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
 		for (const style of ["isometric", "dots", "extruded", "classic"] as const) {
-			updateSettings({ appearance: { theme, iconStyle: style } });
+			updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: style } });
 			await pause(700);
 			await save(`toolbar-${theme}-${style}.png`, ed, await top());
 			await save(`chat-${theme}-${style}.png`, chat);
@@ -518,8 +518,18 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
 	}
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "isometric" } });
+	updateSettings({ appearance: { theme: "light", iconStyle: "isometric", toolbar: "top" } });
 	await pause(600);
+	// the toolbar on each side
+	for (const side of ["left", "right", "bottom", "top"] as const) {
+		updateSettings({ appearance: { ...settings().appearance, toolbar: side } });
+		await pause(700);
+		log(
+			`toolbar-${side}`,
+			await ed.executeJavaScript(`(() => { const t = document.querySelector(".geToolbarContainer").getBoundingClientRect(), d = document.querySelector(".geDiagramContainer").getBoundingClientRect(); const visible = Array.from(document.querySelectorAll(".geToolbarContainer a.geButton")).filter((b) => b.offsetParent && b.getBoundingClientRect().width > 0).length; return { toolbar: [Math.round(t.left), Math.round(t.top), Math.round(t.width), Math.round(t.height)], diagram: [Math.round(d.left), Math.round(d.top), Math.round(d.width), Math.round(d.height)], buttons: visible }; })()`)
+		);
+		await save(`layout-toolbar-${side}.png`, ed);
+	}
 	log("chatIconsDrawn", await chat.executeJavaScript(`document.querySelectorAll("[data-icon] svg.icon").length`));
 	log("chatToolbarOneRow", await chat.executeJavaScript(`(() => { const tops = new Set(Array.from(document.querySelectorAll("#context > .tb:not(.hidden)")).map((b) => Math.round(b.getBoundingClientRect().top))); return tops.size === 1; })()`));
 
@@ -571,7 +581,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(800);
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
-		updateSettings({ appearance: { theme, iconStyle: "isometric" } });
+		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "isometric" } });
 		await pause(500);
 		for (const section of ["appearance", "agents", "chat", "editor", "shapes"]) {
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
@@ -582,5 +592,5 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
 	sw.close();
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "isometric" } });
+	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "isometric" } });
 }

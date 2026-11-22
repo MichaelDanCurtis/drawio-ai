@@ -106,6 +106,15 @@
 					</div>
 				</div>
 				<div class="group">
+					<span class="label">Toolbar</span>
+					<div class="seg" role="group" aria-label="Toolbar position" id="toolbarSide">
+						<button data-value="top" aria-pressed="false">Top</button>
+						<button data-value="left" aria-pressed="false">Left</button>
+						<button data-value="right" aria-pressed="false">Right</button>
+						<button data-value="bottom" aria-pressed="false">Bottom</button>
+					</div>
+				</div>
+				<div class="group">
 					<span class="label">Icons</span>
 					<div class="styles" id="iconStyles"></div>
 				</div>
@@ -199,6 +208,7 @@
 	const PREVIEW = ["zoomIn", "undo", "layers", "map", "sparkle", "gear"];
 	function renderAppearance(s) {
 		seg($("theme"), s.appearance.theme, (v) => set({ appearance: { ...state.settings.appearance, theme: v } }));
+		seg($("toolbarSide"), s.appearance.toolbar, (v) => set({ appearance: { ...state.settings.appearance, toolbar: v } }));
 		const box = $("iconStyles");
 		box.textContent = "";
 		for (const style of I.styles) {
