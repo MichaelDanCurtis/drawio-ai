@@ -109,3 +109,22 @@ test("the vendors' logos for the Mapper are plain embedded SVGs", () => {
 		assert.doesNotMatch(svg, /<script|\son\w+=|href=|url\(\s*["']?https?:/i);
 	}
 });
+
+test("the chat's dot object: every shape it turns into has the same dots, all inside the stage", async () => {
+	const m = await import("../src/renderer/ui/dot-object.js");
+	assert.deepEqual(m.MORPH_SHAPES.slice(0, 5), ["planes", "face", "tetrahedron", "spiral", "galaxy"], "it starts as the square of layers");
+	const n = m.planes().length / 3;
+	for (const make of [m.face, m.tetrahedron, m.spiral, m.galaxy, m.saturn, m.helix, m.heart, m.wave]) {
+		const pts = make();
+		assert.ok(pts.length > 300, `${make.name} has enough dots to read`);
+		const fit = m.fitShape(pts, n);
+		assert.equal(fit.length, n * 3);
+		for (let i = 0; i < n; i++) {
+			const r = Math.hypot(fit[i * 3], fit[i * 3 + 1], fit[i * 3 + 2]);
+			assert.ok(Number.isFinite(r) && r <= 1.2, `${make.name} dot ${i} is at ${r}`);
+		}
+	}
+	// top to bottom, so a dot's place in one shape is near its place in the next
+	const f = m.fitShape(m.galaxy(), n);
+	assert.ok(f[1] >= f[(n - 1) * 3 + 1]);
+});

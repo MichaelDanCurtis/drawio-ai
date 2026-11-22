@@ -215,8 +215,13 @@ Space Grotesk with Space Mono caps labels, flat hairline cards, an ink primary b
 and one signal red for the single thing that needs you (a permission request, the
 findings count, the current tour step). Depth comes from dots: a live dot field behind
 the chat and Mapper heads that leans away from the pointer and ripples when you switch
-agents or start a new chat, and a 3D dot object (stacked diagram layers) while the chat
-is empty. Motion is short and ease-out only: messages, menus, cards and tour captions
+agents or start a new chat, and a 3D dot object in the empty chat that keeps changing
+shape: it starts as a square of stacked layers, then every dot travels to its place in a
+face, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
+more (`ui/dot-object.js`). When you start to type it shoots to the top right corner of
+the chat and stays there, small, during the conversation; in a new, empty chat it comes
+back. The dots near the pointer brighten and lean, in the object, in every head's dot
+field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel. Motion is short and ease-out only: messages, menus, cards and tour captions
 rise in. Under *reduce motion* nothing moves.
 
 - Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`

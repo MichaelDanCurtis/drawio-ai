@@ -133,10 +133,17 @@
 	.report .ractions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 	.report .rfooter { color: var(--muted); font-size: 11.5px; white-space: pre-wrap; border-top: 1px solid var(--border); background: var(--surface-2); padding: 10px 14px; }
 
-	/* ---------- empty: a 3D dot object (stacked diagram layers) ---------- */
+	/* ---------- empty: a 3D dot object that changes shape (a square of layers, a face, a galaxy…) ---------- */
 	#empty { padding: 4px 4px 8px; display: flex; flex-direction: column; gap: 12px; }
-	#empty .dotobject-stage { aspect-ratio: 16 / 10; margin: 0 -6px; }
-	#empty .dotobject { border-radius: var(--radius-lg); }
+	#empty .dotobject-stage { aspect-ratio: 16 / 10; margin: 0 -6px; max-height: 460px; overflow: hidden; transition: max-height var(--dur-slow, 380ms) var(--ease-out), margin-bottom var(--dur-slow, 380ms) var(--ease-out); }
+	/* once the object has left for the corner, its place closes up */
+	body.orb-docked #empty .dotobject-stage { max-height: 0; margin-bottom: -12px; }
+	/* The object itself floats over its place in the empty chat, so it can fly to the top right
+	   corner when you start to type (and live there while there is a conversation). */
+	#orb { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 5; will-change: transform; }
+	#orb .dotobject { border-radius: var(--radius-lg); }
+	#orb.docked { pointer-events: none; }
+	body.orb-docked #context { padding-right: 56px; }
 	#empty h2 { margin: 0; font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; }
 	#empty p { margin: 0; color: var(--muted); font-size: 12.5px; }
 	.suggestions { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
@@ -209,7 +216,7 @@
 	</div>
 	<div id="messages">
 		<div id="empty">
-			<figure class="dotobject-stage" id="emptyStage"><canvas class="dotobject" id="emptyObject" aria-label="Three stacked diagram layers drawn in dots"></canvas></figure>
+			<figure class="dotobject-stage" id="emptyStage"></figure>
 			<h2>What should we draw?</h2>
 			<p>Pick one of your coding agents above and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
 			<div class="suggestions">
@@ -220,6 +227,7 @@
 			</div>
 		</div>
 	</div>
+	<div id="orb"><canvas class="dotobject" id="emptyObject" aria-label="A shape drawn in dots that keeps changing: stacked layers, a face, a galaxy and more"></canvas></div>
 	<footer>
 		<div id="review" class="hidden" role="status">
 			<span class="counts"><span class="label">Pending changes</span><span id="reviewCounts" class="counts"></span></span>
@@ -241,18 +249,66 @@
 		</div>
 	</footer>
 <script type="module" nonce="$$nonce$$">
-	// The dot layers: one live field behind the head, and a 3D dot object while the chat is empty.
+	// The dot layers: one live field behind the head, and a 3D dot object that changes shape.
 	import { mountDotField } from "/ui/dots.js";
 	import { mountDotObject } from "/ui/dot-object.js";
 	const field = mountDotField(document.getElementById("field"), { density: 0.42, grid: 7 });
-	let object = null;
-	function syncEmpty() {
-		const empty = document.getElementById("empty");
-		const shown = !empty.classList.contains("hidden");
-		if (shown && !object) object = mountDotObject(document.getElementById("emptyObject"), { shape: "planes", signalAt: [0.72, 0.55, 0.72], dot: 2.1, scale: 0.4 });
-		else if (!shown && object) { object.destroy(); object = null; }
+
+	// The object sits in the empty chat. When you start to type (or a conversation starts) it
+	// shoots to the top right corner and lives there, small; in a new, empty chat it comes back.
+	const orb = document.getElementById("orb"), stage = document.getElementById("emptyStage"), empty = document.getElementById("empty");
+	const input = document.getElementById("input"), row = document.getElementById("context");
+	const SHAPES = ["planes", "face", "tetrahedron", "spiral", "galaxy", "saturn", "helix", "heart", "cube", "torus", "wave", "sphere"];
+	const DOCK = 42, FLY_MS = 560;
+	const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	let object = null, docked = false, flight = null, at = null;
+	const home = () => { const r = stage.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; };
+	const dock = () => { const r = row.getBoundingClientRect(); return { x: r.right - DOCK - 8, y: r.top + (r.height - DOCK) / 2, w: DOCK, h: DOCK }; };
+	function put(r) {
+		at = r;
+		orb.style.transform = "translate(" + r.x.toFixed(1) + "px, " + r.y.toFixed(1) + "px)";
+		orb.style.width = Math.max(1, Math.round(r.w)) + "px";
+		orb.style.height = Math.max(1, Math.round(r.h)) + "px";
 	}
-	window.drawaiUI = { pulse: (x = 0.85, y = 0.35) => field?.pulse(x, y), syncEmpty };
+	function place() {
+		if (!flight) put(docked ? dock() : home());
+	}
+	function fly() {
+		const from = at || home(), t0 = performance.now();
+		const step = (now) => {
+			const u = Math.min(1, (now - t0) / FLY_MS);
+			// leaves fast, lands softly; it shrinks (or grows) on the way
+			const e = 1 - (1 - u) ** 3, to = docked ? dock() : home();
+			put({ x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, w: from.w + (to.w - from.w) * e, h: from.h + (to.h - from.h) * e });
+			flight = u < 1 ? requestAnimationFrame(step) : null;
+			if (!flight) field?.pulse(docked ? 0.94 : 0.5, docked ? 0.75 : 0.9);
+		};
+		cancelAnimationFrame(flight);
+		flight = requestAnimationFrame(step);
+	}
+	function syncEmpty() {
+		const shown = !empty.classList.contains("hidden");
+		const want = !shown || input.value.trim() !== "";
+		if (!object) {
+			docked = want;
+			orb.classList.toggle("docked", docked);
+			document.body.classList.toggle("orb-docked", docked);
+			place();
+			object = mountDotObject(document.getElementById("emptyObject"), { morph: SHAPES, signalAt: [0.72, 0.55, 0.72], dot: 2.1, scale: 0.4 });
+			return;
+		}
+		if (want === docked) return place();
+		docked = want;
+		orb.classList.toggle("docked", docked);
+		document.body.classList.toggle("orb-docked", docked);
+		if (still()) place();
+		else fly();
+	}
+	input.addEventListener("input", syncEmpty);
+	document.getElementById("messages").addEventListener("scroll", place, { passive: true });
+	new ResizeObserver(place).observe(document.body);
+	new ResizeObserver(place).observe(stage);
+	window.drawaiUI = { pulse: (x = 0.85, y = 0.35) => field?.pulse(x, y), syncEmpty, orb: () => ({ docked, shape: object?.object.canvas.dataset.shape || "planes", rect: at }) };
 	syncEmpty();
 </script>
 <script nonce="$$nonce$$">
@@ -655,7 +711,7 @@
 		vscode.postMessage(msg);
 		images = [];
 		renderAttachments();
-		input.value = "";
+		input.value = ""; window.drawaiUI?.syncEmpty();
 		autosize();
 	}
 
@@ -700,13 +756,13 @@
 			closeMapMenu(false);
 			const text = $("input").value.trim();
 			const action = b.dataset.action;
-			if ((action === "ask" || action === "tour") && text) $("input").value = "";
+			if ((action === "ask" || action === "tour") && text) $("input").value = ""; window.drawaiUI?.syncEmpty();
 			vscode.postMessage({ type: "mapAction", action, text });
 		});
 	}
 	$("digDeeper").addEventListener("click", () => {
 		const question = $("input").value.trim();
-		$("input").value = "";
+		$("input").value = ""; window.drawaiUI?.syncEmpty();
 		vscode.postMessage({ type: "digDeeper", text: question });
 	});
 	input.addEventListener("paste", (e) => {

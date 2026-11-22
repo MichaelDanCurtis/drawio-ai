@@ -576,6 +576,28 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	})()`));
 	await save("toolbar-buttons.png", ed, await top());
 
+	// the Format panel has the chat's live dot field in its top right corner
+	await pause(600);
+	log("formatDots", await ed.executeJavaScript(`(() => {
+		const c = document.querySelector(".geFormatContainer .drawai-backdrop canvas, .drawai-dots-host .drawai-backdrop canvas");
+		const f = window.omnidrawFormatDots;
+		return { canvas: !!c, width: c ? c.width : 0, dots: f ? f.engine.stats().dots : 0 };
+	})()`));
+	// the chat's dot object: a square of layers that changes shape, and flies to the top right corner on typing
+	const orb = () => chat.executeJavaScript("(() => { const o = window.drawaiUI.orb(); return { docked: o.docked, shape: o.shape, x: Math.round(o.rect.x), y: Math.round(o.rect.y), w: Math.round(o.rect.w) }; })()");
+	const orb0 = await orb();
+	await chat.executeJavaScript(`(() => { const o = document.getElementById("emptyObject"); return new Promise((r) => { const t0 = Date.now(); (function wait() { if ((o.dataset.shape && o.dataset.shape !== "planes") || Date.now() - t0 > 9000) r(); else setTimeout(wait, 150); })(); }); })()`);
+	const orbMorphed = await orb();
+	await pause(1900);
+	await save("chat-orb-morphed.png", chat);
+	await chat.executeJavaScript(`(() => { const i = document.getElementById("input"); i.value = "hello"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+	await pause(900);
+	const orbTyping = await orb();
+	await save("chat-orb-docked.png", chat);
+	await chat.executeJavaScript(`(() => { const i = document.getElementById("input"); i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+	await pause(900);
+	log("chatOrb", { start: orb0, morphed: orbMorphed.shape, typing: orbTyping, cleared: await orb(), viewport: await chat.executeJavaScript("window.innerWidth") });
+
 	// icon styles, in both themes
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;

@@ -244,9 +244,45 @@
 			// while the chat is open its own arrow (next to this one, across the edge) closes it: one arrow at a time
 			".drawai-chat-toggle[data-chat='open'] { display: none !important; }",
 			".drawai-coloured { filter: none !important; }",
+			".drawai-dots-host { position: relative; isolation: isolate; }",
+			".drawai-backdrop { position: absolute; top: 0; left: 0; right: 0; height: 150px; z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); -webkit-mask-composite: source-in; mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); mask-composite: intersect; }",
+			".drawai-backdrop canvas { display: block; width: 100%; height: 100%; }",
 			".geEditor .geToolbarContainer .drawai-own:not(.mxDisabled, [disabled]) { opacity: 0.95 !important; }",
 		].join("\n");
 		document.head.appendChild(css);
+
+		// ----- the live dot field in the top right of the Format panel, like the chat's head -----
+		// (dots near the pointer brighten and lean; it drifts slowly; still under reduced motion)
+		(function formatDots() {
+			var box = ui.format && ui.format.container;
+			if (!box) return;
+			box.setAttribute("data-dot-host", "");
+			box.classList.add("drawai-dots-host");
+			var back = document.createElement("div");
+			back.className = "drawai-backdrop";
+			var canvas = document.createElement("canvas");
+			back.appendChild(canvas);
+			var colours = function () {
+				var dark = typeof Editor.isDarkMode === "function" && Editor.isDarkMode();
+				back.style.setProperty("--dot", dark ? "#7d7d7d" : "#8b8984");
+				back.style.setProperty("--ink", dark ? "#ededed" : "#141414");
+				back.style.setProperty("--signal", dark ? "#e5262f" : "#d71921");
+			};
+			colours();
+			// draw.io empties the panel whenever the selection changes: put the layer back each time
+			var clear = ui.format.clear;
+			ui.format.clear = function () {
+				clear.apply(this, arguments);
+				box.insertBefore(back, box.firstChild);
+			};
+			box.insertBefore(back, box.firstChild);
+			import("/ui/dots.js").then(function (m) {
+				var fieldLayer = m.mountDotField(canvas, { density: 0.42, grid: 7 });
+				if (!fieldLayer) return;
+				window.omnidrawFormatDots = fieldLayer;
+				try { ui.addListener("darkModeChanged", function () { colours(); fieldLayer.engine.readColours(); }); } catch (e) { /* older draw.io */ }
+			}).catch(function () { /* the panel is complete without it */ });
+		})();
 
 		// ----- a shape from the Workshop: in the middle of the view, selected -----
 		function insertShape(shape) {
