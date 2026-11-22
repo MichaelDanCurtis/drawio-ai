@@ -23,6 +23,7 @@ const START: StartItem[] = [
 	{ label: "New Diagram", command: "drawio-ai.newDiagram", icon: "new-file", tooltip: "Create a .drawio file and open it in Draw.AI" },
 	{ label: "Open Draw.AI in Chat", command: "drawio-ai.openChat", icon: "sparkle", tooltip: "Ask the Draw.AI agent in VS Code's chat to draw or change a diagram" },
 	{ label: "Diagram from Code…", command: "drawio-ai.diagramFromCode", icon: "code", tooltip: "Draw a diagram of a folder or file: architecture, data model, flow" },
+	{ label: "Map Something…", command: "drawio-ai.mapSomething", icon: "type-hierarchy", tooltip: "Map software, databases, Azure, AWS, Google Cloud or ML systems into the open diagram (read-only)" },
 	{ label: "Diagram from Sketch…", command: "drawio-ai.diagramFromImage", icon: "device-camera", tooltip: "Turn a sketch, whiteboard photo or screenshot into an editable diagram" },
 	{ label: "Import from Another Tool…", command: "drawio-ai.importDiagram", icon: "cloud-download", tooltip: "Visio, Gliffy, yEd (GraphML), Lucidchart, Miro or draw.io CSV" },
 	{ label: "Export to PDF…", command: "drawio-ai.exportPdf", icon: "file-pdf", tooltip: "Export the diagram you used last to PDF" },

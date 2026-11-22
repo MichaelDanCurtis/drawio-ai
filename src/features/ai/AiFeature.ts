@@ -17,6 +17,7 @@ import { path } from "../../utils/path";
 import { linkData, splitLines } from "./codeLinks";
 import { CodeLinkService } from "./CodeLinkService";
 import { McpService } from "./McpService";
+import type { McpToolResult } from "./mcp";
 import { AgentConnector, ConnectArgs } from "./agentConnect";
 import { exportDiagramToWorkspace } from "./exportDiagram";
 import { importForAgent } from "../importDiagram";
@@ -72,6 +73,14 @@ export class AiFeature {
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
 
+	/** The Mapper's tools, served over MCP next to the diagram tools (set by the extension once the Mapper is up). */
+	public mapperTools: { callTool(name: string, args: unknown): Promise<McpToolResult> } | undefined;
+
+	/** Sends a request about `editor`'s diagram to VS Code's chat, as the diagram's own requests are sent. */
+	public askAgent(text: string, editor: DrawioEditor, extras: { attachments?: { name: string; text: string }[]; selection?: SelectionContext } = {}): Promise<boolean> {
+		return this.ask(text, extras.selection ?? { cellIds: [] }, { editor, attachments: extras.attachments });
+	}
+
 	constructor(
 		private readonly context: vscode.ExtensionContext,
 		private readonly editorService: DrawioEditorService
@@ -103,7 +112,8 @@ export class AiFeature {
 			this.context,
 			this.toolbox,
 			() => this.targetEditor(),
-			() => this.templates.promptSection(this.targetEditor()?.uri)
+			() => this.templates.promptSection(this.targetEditor()?.uri),
+			() => this.mapperTools
 		);
 		track(mcp);
 		void pruneAttachments(this.context.globalStorageUri);

@@ -531,7 +531,7 @@
 					if (data.start) {
 						var here = toursHere();
 						if (here.length) startTour(here[0]);
-						else showHint("No tour on this page. Build one from the chat: Map ▾ → Build a tour.");
+						else showHint(window.omnidrawConfig && window.omnidrawConfig.host === "vscode" ? "No tour on this page. Build one from the Maps view: right-click a map → Build a Tour." : "No tour on this page. Build one from the chat: Map ▾ → Build a tour.");
 					}
 				}
 			} else if (data && data.action === "desktopPresentationStep" && active) {

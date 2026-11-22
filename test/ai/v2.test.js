@@ -314,7 +314,8 @@ test("code analysis never executes code embedded in YAML (js-yaml !!js/function)
 	JSON.stringify(a);
 	code.formatAnalysis(a);
 	assert.equal(globalThis.__yamlPwned, false);
-	assert.match(a.notes[0], /YAML parse error \(unknown tag/);
+	// (js-yaml 5 says "unknown scalar tag"; its loadAll only knows the safe schema)
+	assert.match(a.notes[0], /YAML parse error \(unknown (scalar )?tag/);
 });
 
 test("code analysis: kind detection, aggregation of large trees, and the prompt payload", () => {

@@ -12,7 +12,9 @@ const OMNI_FONTS = [
 	"space-grotesk-latin-400-normal",
 	"space-grotesk-latin-ext-400-normal",
 	"space-grotesk-latin-500-normal",
+	"space-grotesk-latin-ext-500-normal",
 	"space-mono-latin-400-normal",
+	"space-mono-latin-ext-400-normal",
 ];
 
 module.exports = {
@@ -62,7 +64,8 @@ module.exports = {
 		// its pages use (/ui and /plugin), with the fonts the look is set in.
 		new CopyPlugin({
 			patterns: [
-				...["icons.js", "brandmark.js", "tips.js", "dots.js", "matrix.js"].map((f) => ({
+				// (brands.js and the style sheets are for the Map Something page: src/features/mapper)
+				...["icons.js", "brandmark.js", "tips.js", "dots.js", "matrix.js", "brands.js", "fonts.css", "tokens.css", "motion.css", "depth.css", "app.css"].map((f) => ({
 					from: r(`../standalone/src/renderer/ui/${f}`),
 					to: `omni/ui/${f}`,
 				})),
@@ -70,6 +73,7 @@ module.exports = {
 					from: r(`../standalone/src/renderer/${f}`),
 					to: `omni/plugin/${f}`,
 				})),
+				{ from: r("../standalone/src/renderer/mapper.html"), to: "omni/mapper.html" },
 				...OMNI_FONTS.map((f) => ({
 					from: r(`../node_modules/@fontsource/${f.replace(/-(latin).*$/, "")}/files/${f}.woff2`),
 					to: `omni/ui/fonts/${f}.woff2`,

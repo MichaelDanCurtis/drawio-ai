@@ -168,6 +168,10 @@
 				{
 					"id": "drawio-ai.diagrams",
 					"name": "Diagrams"
+				},
+				{
+					"id": "drawio-ai.maps",
+					"name": "Maps"
 				}
 			]
 		},
@@ -181,6 +185,10 @@
 				"view": "drawio-ai.diagrams",
 				"contents": "No diagrams in this workspace yet.\n[New Diagram](command:drawio-ai.newDiagram)\n[Import from Another Tool](command:drawio-ai.importDiagram)",
 				"when": "workbenchState != empty"
+			},
+			{
+				"view": "drawio-ai.maps",
+				"contents": "Maps of the diagram you used last show here, with their findings and tours.\nThe Mapper draws software, databases, Azure, AWS, Google Cloud and ML systems into the diagram. It only reads.\n[Map Something…](command:drawio-ai.mapSomething)"
 			}
 		],
 		"chatParticipants": [
@@ -1048,6 +1056,445 @@
 						"path"
 					]
 				}
+			},
+			{
+				"name": "mapper_maps",
+				"displayName": "List Maps",
+				"toolReferenceName": "mapper-maps",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "List Maps",
+				"modelDescription": "List the maps of the open diagram (made with the Mapper): id, what was mapped, page, counts of shapes, descriptions, findings by severity, tours. Start here.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {}
+				}
+			},
+			{
+				"name": "mapper_list_recipes",
+				"displayName": "List What Can Be Mapped",
+				"toolReferenceName": "mapper-list-recipes",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "List What Can Be Mapped",
+				"modelDescription": "What the Mapper can map (software, databases, Azure/AWS/GCP, ML): recipe ids, descriptions and their input fields.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"category": {
+							"type": "string",
+							"enum": [
+								"software",
+								"database",
+								"azure",
+								"aws",
+								"gcp",
+								"ml"
+							]
+						}
+					}
+				}
+			},
+			{
+				"name": "mapper_run",
+				"displayName": "Map Something",
+				"toolReferenceName": "mapper-run",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Map Something",
+				"modelDescription": "Map something into the open diagram (read-only collection; drawn on its own page as a pending change the user keeps or reverts, with health badges). Get recipe ids and fields from mapper_list_recipes. Secret fields (passwords, connection strings, tokens) are used for this run only and never stored or returned.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"recipe": {
+							"type": "string"
+						},
+						"input": {
+							"type": "object",
+							"additionalProperties": {
+								"type": "string"
+							}
+						}
+					},
+					"required": [
+						"recipe"
+					]
+				}
+			},
+			{
+				"name": "mapper_find",
+				"displayName": "Find on Maps",
+				"toolReferenceName": "mapper-find",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Find on Maps",
+				"modelDescription": "Find nodes on the maps by words in their name, kind, ids, data, files or description. Returns node ids to use with mapper_show and mapper_path.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"query": {
+							"type": "string"
+						},
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						}
+					},
+					"required": [
+						"query"
+					]
+				}
+			},
+			{
+				"name": "mapper_show",
+				"displayName": "Show Map Node",
+				"toolReferenceName": "mapper-show",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Show Map Node",
+				"modelDescription": "Everything a map knows about one node: where it sits, what it contains, what it uses and what uses it (with edge labels), its data, files, description and findings.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"nodeId": {
+							"type": "string"
+						},
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						}
+					},
+					"required": [
+						"nodeId"
+					]
+				}
+			},
+			{
+				"name": "mapper_path",
+				"displayName": "Path Between Map Nodes",
+				"toolReferenceName": "mapper-path",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Path Between Map Nodes",
+				"modelDescription": "The shortest chain of connections between two nodes of a map, hop by hop with each connection's label and direction.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"from": {
+							"type": "string"
+						},
+						"to": {
+							"type": "string"
+						},
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						}
+					},
+					"required": [
+						"from",
+						"to"
+					]
+				}
+			},
+			{
+				"name": "mapper_findings",
+				"displayName": "Map Findings",
+				"toolReferenceName": "mapper-findings",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Map Findings",
+				"modelDescription": "Health findings of a map (severity, the shapes concerned, evidence, suggested fix) and what was checked. Dismissed findings are left out.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						},
+						"severity": {
+							"type": "string",
+							"enum": [
+								"high",
+								"medium",
+								"low",
+								"info"
+							]
+						}
+					}
+				}
+			},
+			{
+				"name": "mapper_worksheet",
+				"displayName": "Map Description Worksheet",
+				"toolReferenceName": "mapper-worksheet",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Map Description Worksheet",
+				"modelDescription": "The facts to write plain-English descriptions from, per node: kind, where it sits, what uses it and what it uses, files and key data. Read the files when you need to. Paged: pass offset from `next`. only: 'missing' (default) or a list of node ids.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						},
+						"only": {
+							"description": "'missing' or node ids"
+						},
+						"offset": {
+							"type": "number"
+						},
+						"limit": {
+							"type": "number"
+						}
+					}
+				}
+			},
+			{
+				"name": "mapper_set_descriptions",
+				"displayName": "Describe Map Shapes",
+				"toolReferenceName": "mapper-set-descriptions",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Describe Map Shapes",
+				"modelDescription": "Save plain-English descriptions for existing nodes of a map; they show as the shapes' tooltips. One or two sentences each, verb first, saying what it does today from evidence (who uses it, what it uses, its code), not from its name; call out stubs and placeholders. audience 'everyone' (no jargon, default) or 'developer'. Unknown node ids are refused: this never adds or removes shapes. Returns problems to fix and how many nodes still lack a description.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						},
+						"audience": {
+							"type": "string",
+							"enum": [
+								"everyone",
+								"developer"
+							]
+						},
+						"items": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"nodeId": {
+										"type": "string"
+									},
+									"description": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"nodeId",
+									"description"
+								]
+							}
+						}
+					},
+					"required": [
+						"items"
+					]
+				}
+			},
+			{
+				"name": "mapper_recent_changes",
+				"displayName": "Recent Changes on Map",
+				"toolReferenceName": "mapper-recent-changes",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Recent Changes on Map",
+				"modelDescription": "Files changed in git since a map was made (committed and uncommitted), mapped to its shapes, with the commits. draw: true also tags those shapes with green 'changed' badges on the Changes layer.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						},
+						"draw": {
+							"type": "boolean"
+						}
+					}
+				}
+			},
+			{
+				"name": "mapper_refresh",
+				"displayName": "Refresh Map",
+				"toolReferenceName": "mapper-refresh",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Refresh Map",
+				"modelDescription": "Map the same thing again onto a new page, keeping descriptions and tours of nodes that still exist, and tag what is new or changed. Maps that need a secret (a database password) must be refreshed by the user from the app.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						}
+					}
+				}
+			},
+			{
+				"name": "mapper_set_tour",
+				"displayName": "Save Map Tour",
+				"toolReferenceName": "mapper-set-tour",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Save Map Tour",
+				"modelDescription": "Save a guided tour through a map: ordered steps, each with a short title, a one-or-two sentence caption and the node ids to show. Consecutive steps should be connected on the map. The user plays it in presentation mode.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"mapId": {
+							"type": "string",
+							"description": "Map id from mapper_maps. Default: the newest map of this diagram."
+						},
+						"title": {
+							"type": "string"
+						},
+						"steps": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"title": {
+										"type": "string"
+									},
+									"caption": {
+										"type": "string"
+									},
+									"nodeIds": {
+										"type": "array",
+										"items": {
+											"type": "string"
+										},
+										"description": "Node ids (mapperId) from the map."
+									}
+								},
+								"required": [
+									"caption",
+									"nodeIds"
+								]
+							}
+						}
+					},
+					"required": [
+						"title",
+						"steps"
+					]
+				}
+			},
+			{
+				"name": "mapper_answer",
+				"displayName": "Answer from Maps",
+				"toolReferenceName": "mapper-answer",
+				"canBeReferencedInPrompt": true,
+				"icon": "$(sparkle)",
+				"tags": [
+					"drawio",
+					"diagram",
+					"map"
+				],
+				"userDescription": "Answer from Maps",
+				"modelDescription": "Answer the user's question about the maps as a picture: draws a new page with only the nodes your answer refers to, numbered in reading order, each with an optional short note, plus your answer as a note. Look things up with mapper_find / mapper_show / mapper_path first.",
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"question": {
+							"type": "string"
+						},
+						"answer": {
+							"type": "string"
+						},
+						"steps": {
+							"type": "array",
+							"items": {
+								"type": "object",
+								"properties": {
+									"nodeId": {
+										"type": "string"
+									},
+									"note": {
+										"type": "string"
+									},
+									"mapId": {
+										"type": "string"
+									}
+								},
+								"required": [
+									"nodeId"
+								]
+							}
+						}
+					},
+					"required": [
+						"question",
+						"answer",
+						"steps"
+					]
+				}
 			}
 		],
 		"commands": [
@@ -1062,6 +1509,89 @@
 				"title": "Presentation Mode",
 				"category": "Draw.AI",
 				"icon": "$(play)"
+			},
+			{
+				"command": "drawio-ai.mapSomething",
+				"title": "Map Something…",
+				"category": "Draw.AI",
+				"icon": "$(type-hierarchy)"
+			},
+			{
+				"command": "drawio-ai.maps.ask",
+				"title": "Ask the Map…",
+				"category": "Draw.AI",
+				"icon": "$(comment-discussion)"
+			},
+			{
+				"command": "drawio-ai.maps.digDeeper",
+				"title": "Dig Deeper into Selected Map Shapes…",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.maps.describe",
+				"title": "Describe Map in Plain English",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.maps.describeForDevelopers",
+				"title": "Describe Map for Developers",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.maps.buildTour",
+				"title": "Build a Tour of the Map…",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.maps.recentChanges",
+				"title": "Show Recent Changes on Map",
+				"category": "Draw.AI",
+				"icon": "$(git-compare)"
+			},
+			{
+				"command": "drawio-ai.maps.refresh",
+				"title": "Map It Again (Refresh)",
+				"category": "Draw.AI",
+				"icon": "$(sync)"
+			},
+			{
+				"command": "drawio-ai.maps.show",
+				"title": "Show the Map",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.maps.refreshView",
+				"title": "Refresh Maps",
+				"category": "Draw.AI",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "drawio-ai.maps.playTour",
+				"title": "Play Tour",
+				"category": "Draw.AI",
+				"icon": "$(play)"
+			},
+			{
+				"command": "drawio-ai.maps.showFinding",
+				"title": "Show Finding on the Map",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.maps.fixFinding",
+				"title": "Fix Finding with the Agent",
+				"category": "Draw.AI",
+				"icon": "$(wrench)"
+			},
+			{
+				"command": "drawio-ai.maps.dismissFinding",
+				"title": "Dismiss Finding",
+				"category": "Draw.AI",
+				"icon": "$(close)"
+			},
+			{
+				"command": "drawio-ai.maps.showShapes",
+				"title": "Show Shapes on the Map",
+				"category": "Draw.AI"
 			},
 			{
 				"command": "drawio-ai.useForDiagrams",
@@ -1876,6 +2406,11 @@
 					"command": "drawio-ai.selectTemplate",
 					"when": "drawio-ai.active",
 					"group": "drawio-ai@1"
+				},
+				{
+					"command": "drawio-ai.mapSomething",
+					"when": "drawio-ai.active",
+					"group": "drawio-ai@2"
 				}
 			],
 			"explorer/context": [
@@ -1929,6 +2464,26 @@
 				{
 					"command": "drawio-ai.sidebar.reveal",
 					"when": "false"
+				},
+				{
+					"command": "drawio-ai.maps.playTour",
+					"when": "false"
+				},
+				{
+					"command": "drawio-ai.maps.showFinding",
+					"when": "false"
+				},
+				{
+					"command": "drawio-ai.maps.fixFinding",
+					"when": "false"
+				},
+				{
+					"command": "drawio-ai.maps.dismissFinding",
+					"when": "false"
+				},
+				{
+					"command": "drawio-ai.maps.showShapes",
+					"when": "false"
 				}
 			],
 			"view/title": [
@@ -1941,6 +2496,26 @@
 					"command": "drawio-ai.sidebar.refresh",
 					"when": "view == drawio-ai.diagrams",
 					"group": "navigation@2"
+				},
+				{
+					"command": "drawio-ai.mapSomething",
+					"when": "view == drawio-ai.maps",
+					"group": "navigation@1"
+				},
+				{
+					"command": "drawio-ai.maps.ask",
+					"when": "view == drawio-ai.maps",
+					"group": "navigation@2"
+				},
+				{
+					"command": "drawio-ai.maps.refreshView",
+					"when": "view == drawio-ai.maps",
+					"group": "navigation@3"
+				},
+				{
+					"command": "drawio-ai.maps.digDeeper",
+					"when": "view == drawio-ai.maps",
+					"group": "1_agent@1"
 				}
 			],
 			"view/item/context": [
@@ -1963,6 +2538,76 @@
 					"command": "drawio-ai.sidebar.reveal",
 					"when": "view == drawio-ai.diagrams && viewItem == drawioDiagram",
 					"group": "2_reveal"
+				},
+				{
+					"command": "drawio-ai.maps.recentChanges",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "inline@1"
+				},
+				{
+					"command": "drawio-ai.maps.refresh",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "inline@2"
+				},
+				{
+					"command": "drawio-ai.maps.show",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "1_show@1"
+				},
+				{
+					"command": "drawio-ai.maps.describe",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "2_agent@1"
+				},
+				{
+					"command": "drawio-ai.maps.describeForDevelopers",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "2_agent@2"
+				},
+				{
+					"command": "drawio-ai.maps.buildTour",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "2_agent@3"
+				},
+				{
+					"command": "drawio-ai.maps.recentChanges",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "3_changes@1"
+				},
+				{
+					"command": "drawio-ai.maps.refresh",
+					"when": "view == drawio-ai.maps && viewItem == drawioMap",
+					"group": "3_changes@2"
+				},
+				{
+					"command": "drawio-ai.maps.fixFinding",
+					"when": "view == drawio-ai.maps && viewItem == drawioMapFinding",
+					"group": "inline@1"
+				},
+				{
+					"command": "drawio-ai.maps.dismissFinding",
+					"when": "view == drawio-ai.maps && viewItem == drawioMapFinding",
+					"group": "inline@2"
+				},
+				{
+					"command": "drawio-ai.maps.showFinding",
+					"when": "view == drawio-ai.maps && viewItem == drawioMapFinding",
+					"group": "1_show@1"
+				},
+				{
+					"command": "drawio-ai.maps.fixFinding",
+					"when": "view == drawio-ai.maps && viewItem == drawioMapFinding",
+					"group": "2_act@1"
+				},
+				{
+					"command": "drawio-ai.maps.dismissFinding",
+					"when": "view == drawio-ai.maps && viewItem == drawioMapFinding",
+					"group": "2_act@2"
+				},
+				{
+					"command": "drawio-ai.maps.playTour",
+					"when": "view == drawio-ai.maps && viewItem == drawioMapTour",
+					"group": "inline@1"
 				}
 			]
 		},
@@ -1996,8 +2641,8 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js test/ai/look.test.js",
-		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js test/ai/look.e2e.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js test/ai/look.test.js test/ai/mapper.test.js",
+		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js test/ai/look.e2e.test.js test/ai/mapper.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"
 	},
@@ -2042,7 +2687,12 @@
 		"clean-webpack-plugin": "^4.0.0-alpha.0",
 		"copy-webpack-plugin": "^9.0.1",
 		"css-loader": "^3.4.2",
+		"mongodb": "^7.9.1",
+		"mssql": "^12.8.0",
+		"mysql2": "^3.24.6",
+		"oracledb": "^26.0.0",
 		"ovsx": "^0.1.0-next.e000fdb",
+		"pg": "^8.23.1",
 		"playwright-core": "^1.50.0",
 		"prettier": "^2.3.2",
 		"raw-loader": "^4.0.1",
@@ -2065,7 +2715,7 @@
 		"@knuddels/mobx-logger": "^1.1.1",
 		"buffer": "^6.0.3",
 		"js-sha256": "^0.9.0",
-		"js-yaml": "^3.13.1",
+		"js-yaml": "^5.5.0",
 		"mithril": "^2.0.4",
 		"mobx": "5.15.4",
 		"mobx-utils": "5.5.7",

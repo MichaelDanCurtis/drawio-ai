@@ -11,8 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Requests from a diagram (`Alt+K`, lasso, markup, review, sketch, from code) and **Open Draw.AI in Chat** now go to the **Draw.AI agent** in VS Code's chat, not to `@drawio`. VS Code's Copilot chat runtime (the default since November 2026) does not run extension chat participants, and the Local runtime that does is removed in February 2027. Pending changes are kept or reverted with the buttons in the diagram's title bar. Set `drawio-ai.chat.target` to `participant` to keep using `@drawio` while the Local runtime exists. VS Code older than 1.142, which does not know the agent, keeps using `@drawio` by itself
 
+- YAML files (**Diagram from Code…**, the Mapper) are read with js-yaml 5 (was 3), whose loader only knows the safe schema.
+
 ### Added
 
+- **The Mapper** of the OmniDraw desktop app, in VS Code. **Draw.AI: Map Something…** (also in the Start view and the diagram's `…` menu) draws software, databases, Azure, AWS, Google Cloud and machine-learning systems into the open diagram:
+  - The same maps as the desktop app, collected **read-only**: listing, describing and querying commands of your signed-in `az`, `aws`, `gcloud`, `kubectl` and `git` (a guard refuses anything else), fixed catalog queries in read-only database sessions (PostgreSQL, MySQL / MariaDB, SQL Server, Oracle, SQLite, MongoDB), and file reads. Passwords, connection strings and tokens are used for that run only: never stored, drawn or sent to the agent.
+  - A map is drawn on a page of its own as a pending change you keep or revert. What the Mapper knows about it is kept in `.drawai/maps/` next to the diagram.
+  - A **Maps** view in the Draw.AI side bar lists the maps of the diagram used last, with their **findings** (worst first; show on the map, fix with the agent, dismiss), their **tours** (click to play in presentation mode) and what changed in git since a map was made. Right-click a map to describe every shape in plain English, build a tour, or map it again.
+  - **Ask the Map…** and **Dig Deeper into Selected Map Shapes…** hand a question to the Draw.AI agent in VS Code's chat.
+  - 13 `mapper_*` tools for the agent, in VS Code's chat and (through the MCP server and the agent plugin) in Claude Code and Codex. VS Code asks before the agent starts a map itself.
+  - Needs a trusted workspace and a diagram saved as a file on disk.
 - The diagram editor gets the editor tools and the look of the OmniDraw desktop app:
   - **Toolbar buttons** for Layers, Tags, Outline, the ruler and presentation mode. The first toolbar button now opens and closes the Shapes panel with one click, and the dot mark at the start of the toolbar opens these settings.
   - **Presentation mode** (the toolbar button, or **Draw.AI: Presentation Mode**): only the diagram, read-only, filling the editor. **Exit** is at the bottom left, **Previous** / **Next** and the page count at the bottom right, pages are dots; the arrow keys, Tab and Space step through pages and Esc leaves. Nothing in the file changes.

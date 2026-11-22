@@ -10,8 +10,14 @@ import { registerFailableCommand } from "../utils/registerFailableCommand";
  * the editor's page; this answers their buttons and keeps the open editors in step with the
  * settings.
  */
+/** A map tour presentation mode can play (see standalone/src/renderer/presentation.js). */
+export type PresentationTour = DesktopPresentationToursAction["tours"][number];
+
 export class EditorLookFeature {
 	public readonly dispose = Disposable.fn();
+
+	/** The diagram's map tours, for presentation mode to offer (set by the Mapper). */
+	public toursOf: ((editor: DrawioEditor) => Promise<PresentationTour[]>) | undefined;
 
 	constructor(
 		private readonly editorService: DrawioEditorService,
@@ -66,6 +72,7 @@ export class EditorLookFeature {
 		switch (command) {
 			case "present":
 				editor.drawioClient.setPresenting(true);
+				await this.sendTours(editor);
 				break;
 			case "exitPresentation":
 				editor.drawioClient.setPresenting(false);
@@ -82,6 +89,45 @@ export class EditorLookFeature {
 		}
 	}
 
+	/** Gives presentation mode the diagram's tours; with `play`, that tour goes first and starts. */
+	private async sendTours(editor: DrawioEditor, play?: { mapId: string; title: string }): Promise<void> {
+		let tours: PresentationTour[] = [];
+		try {
+			tours = (await this.toursOf?.(editor)) ?? [];
+		} catch {
+			// no maps to read: presentation mode works without tours
+		}
+		if (play) {
+			const chosen = (t: PresentationTour) => (t.mapId === play.mapId && t.title === play.title ? 0 : 1);
+			tours = [...tours].sort((a, b) => chosen(a) - chosen(b));
+		}
+		editor.drawioClient.setPresentationTours(tours, !!play);
+	}
+
+	/** Why presentation mode cannot start in this editor, or undefined when it can. */
+	private async presentable(editor: DrawioEditor): Promise<{ presenting: boolean } | string> {
+		if (!editor.config.look.editorTools) {
+			return "Presentation mode is one of the editor tools. Turn on the setting Draw.AI › Look: Editor Tools.";
+		}
+		const state = await editor.drawioClient.editorLookState();
+		return state ?? "Presentation mode is not available in this editor: it is still loading, it only shows the diagram (a read-only view), or it uses an online draw.io.";
+	}
+
+	/** Starts presentation mode in `editor` (when it is not on) and, with `tour`, plays that map tour. */
+	public async present(editor: DrawioEditor, tour?: { mapId: string; title: string }): Promise<boolean> {
+		const state = await this.presentable(editor);
+		if (typeof state === "string") {
+			void vscode.window.showInformationMessage(state);
+			return false;
+		}
+		editor.webviewPanel.reveal();
+		if (!state.presenting) {
+			editor.drawioClient.setPresenting(true);
+		}
+		await this.sendTours(editor, tour);
+		return true;
+	}
+
 	/** Draw.AI: Presentation Mode. Starts it in the diagram used last, or leaves it. */
 	private async togglePresentation(): Promise<void> {
 		const editor = this.editorService.targetDrawioEditor;
@@ -89,16 +135,15 @@ export class EditorLookFeature {
 			void vscode.window.showInformationMessage("Open a diagram first: presentation mode shows the diagram used last.");
 			return;
 		}
-		if (!editor.config.look.editorTools) {
-			void vscode.window.showInformationMessage("Presentation mode is one of the editor tools. Turn on the setting Draw.AI › Look: Editor Tools.");
-			return;
-		}
-		const state = await editor.drawioClient.editorLookState();
-		if (!state) {
-			void vscode.window.showInformationMessage("Presentation mode is not available in this editor: it is still loading, it only shows the diagram (a read-only view), or it uses an online draw.io.");
+		const state = await this.presentable(editor);
+		if (typeof state === "string") {
+			void vscode.window.showInformationMessage(state);
 			return;
 		}
 		editor.webviewPanel.reveal();
 		editor.drawioClient.setPresenting(!state.presenting);
+		if (!state.presenting) {
+			await this.sendTours(editor);
+		}
 	}
 }

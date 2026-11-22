@@ -38,6 +38,7 @@ The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the r
 -   **Export to PDF**: **Draw.io: Export to PDF…**, **File → Export as PDF…** in the diagram, `.pdf` in **Draw.io: Export To...**, or **Export PDF** under a `@drawio` answer. Every page becomes one PDF page the size of its content, rendered at print resolution (about 300 dpi) inside VS Code; nothing is uploaded.
 -   **Export from chat**: ask for a PDF, Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace (never through symbolic links), asks you before replacing an earlier export, and never replaces a diagram.
 -   **Import from chat**: ask the AI to open a Visio, Gliffy, yEd, Lucidchart, Miro or draw.io CSV file ("open docs/network.vsdx") and it converts it into a new `.drawio` file with the `drawio_import` tool, then tells you what did not carry over. It only reads files inside the workspace and never replaces a file.
+-   **Mapper**: **Draw.AI: Map Something…** draws software, databases, cloud environments and ML systems into the diagram from facts it collects read-only, with health findings and guided tours. See [Mapper](#mapper).
 -   **External agents (MCP)**: turn on the local MCP server and Claude Code, Codex, Cursor and other MCP clients can read and edit your diagrams with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
 
 ## Privacy
@@ -47,6 +48,7 @@ The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the r
 -   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, a session token that only works while that window runs, its folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`). The long-lived token you copy for hand-configured clients never goes there.
 -   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
 -   Exports and imports, including PDF and Visio files, are made inside VS Code. Nothing is uploaded.
+-   The [Mapper](#mapper) only reads the systems it maps. Passwords, connection strings and tokens are used for one run and are never stored, drawn or sent to the agent; the facts it collects go to the agent only when you ask it to review, describe or dig into a map.
 
 ## Main Settings
 
@@ -90,7 +92,7 @@ Draw.AI's diagram tools also work from Claude Code and Codex, whether you run th
 The plugin adds:
 
 -   **Skills** that teach the agent how to build, review and code-link diagrams well. The same skills are offered to Copilot in VS Code.
--   **The `drawio_*` tools**, through a small bridge that runs on VS Code's own runtime (no Node.js needed). It finds the VS Code window that has the diagram, so several windows work at once and no token has to be copied.
+-   **The `drawio_*` and `mapper_*` tools**, through a small bridge that runs on VS Code's own runtime (no Node.js needed). It finds the VS Code window that has the diagram, so several windows work at once and no token has to be copied.
 
 Agents name a diagram with `file` (for example `docs/architecture.drawio`): it opens beside your work without taking keyboard focus, so you can watch. `drawio_list_diagrams`, `drawio_search_diagrams` and `drawio_create` find and make diagrams. Without `file`, the tools act on the diagram you have open. In a diagram with several pages, agents read any page with `page` and switch pages with `drawio_pages`; edits go to the page shown, so you see them.
 
@@ -171,6 +173,31 @@ _TIP_: If you open the draw.io editor to the right side (i.e. the second editor 
 the diagram will stay visible.
 
 ![](./docs/demo-code-link.gif)
+
+## Mapper
+
+**Draw.AI: Map Something…** (also in the Start view and the diagram's `…` menu) draws a system into the open diagram: software, databases, Azure, AWS, Google Cloud and machine-learning systems. It is the Mapper of the OmniDraw desktop app, with the same maps.
+
+| Category | Maps |
+| --- | --- |
+| Software | Connectivity, data flow, module dependencies, class diagram, API surface, GitHub Actions workflows, Kubernetes |
+| Databases | Schema (ERD) of PostgreSQL, MySQL / MariaDB, SQL Server / Azure SQL, Oracle, SQLite and MongoDB; dbt lineage |
+| Azure, AWS, Google Cloud | The live environment through your signed-in `az`, `aws` or `gcloud`; infrastructure as code (Terraform, Bicep, ARM, CloudFormation, CDK, Deployment Manager) |
+| Machine learning | Pipelines, MLflow tracking and registry, the end-to-end lifecycle, model architecture |
+
+-   **Read-only.** A map is collected with listing, describing and querying commands only (a guard refuses anything else), fixed catalog queries in read-only database sessions, and file reads. Nothing in your systems is changed.
+-   **Secrets.** Passwords, connection strings and tokens are used for that run only. They are never stored, drawn on the map or sent to the agent.
+-   **Keep or revert.** A map is drawn on a page of its own as a pending change, like any AI edit.
+-   **Next to the diagram.** What the Mapper knows about each map (its shapes, findings, descriptions, tours) is kept in `.drawai/maps/` beside the diagram, so it travels with the repository. The diagram has to be a file on disk, and the workspace has to be trusted: the Mapper runs `git` and your cloud CLIs in it.
+
+The **Maps** view (Draw.AI in the activity bar) lists the maps of the diagram you used last:
+
+-   **Findings**: health problems the map shows (a port open to the internet, a table without a primary key, a gap in an ML lifecycle), worst first, with a badge on the shapes concerned. Click one to select its shapes; the buttons beside it hand it to the agent to fix, or dismiss it until it changes. The tooltip of **Findings** says what was checked.
+-   **Tours**: click one to play it in presentation mode, step by step with captions.
+-   Right-click a map to have the agent describe every shape in plain English (shown as tooltips), build a tour, see what changed in git since the map was made, or map it again and mark what is new.
+-   **Ask the Map…** (the view's title bar) has the agent answer a question from the maps and draw the answer as a page. **Draw.AI: Dig Deeper into Selected Map Shapes…** has it investigate the shapes you selected.
+
+The agent works through 13 `mapper_*` tools (`mapper_maps`, `mapper_find`, `mapper_show`, `mapper_path`, `mapper_findings`, `mapper_run` and others), in VS Code's chat with the **Draw.AI** agent and, once connected, in Claude Code and Codex. When the agent starts a map itself, VS Code asks you first.
 
 ## Editor Tools and Look
 

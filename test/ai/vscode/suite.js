@@ -546,6 +546,145 @@ async function runSteps() {
 		assert.match(xml, /Order Service/);
 		assert.doesNotMatch(xml, /Orders DB/);
 	});
+
+	await step("the Mapper: maps a folder into the diagram, its tools answer, the Maps view lists findings and tours, and a tour plays", async () => {
+		const names = vscode.lm.tools.map((t) => t.name);
+		for (const n of ["mapper_maps", "mapper_list_recipes", "mapper_run", "mapper_find", "mapper_show", "mapper_path", "mapper_findings", "mapper_worksheet", "mapper_set_descriptions", "mapper_recent_changes", "mapper_refresh", "mapper_set_tour", "mapper_answer"]) {
+			assert.ok(names.includes(n), `tool ${n} not registered`);
+		}
+		// (as VS Code's chat and the MCP server call them; running a map through the chat asks the user first)
+		const tool = async (name, args = {}) => {
+			const r = await vscode.commands.executeCommand("drawio-ai.maps.tool", { name, args });
+			assert.ok(!r.isError, `${name}: ${r.text}`);
+			return JSON.parse(r.text);
+		};
+		const mapsState = () => vscode.commands.executeCommand("drawio-ai.maps.state");
+		const look = () => vscode.commands.executeCommand("drawio-ai.editorLookState");
+
+		// A small repository under git, from the desktop app's software fixture.
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-map-"));
+		fs.cpSync(path.join(__dirname, "../../../standalone/test/fixtures/software/shop"), repo, { recursive: true });
+		const git = (...args) => require("child_process").execFileSync("git", ["-c", "user.email=it@example.com", "-c", "user.name=it", ...args], { cwd: repo, stdio: "pipe" });
+		git("init", "-q");
+		git("add", "-A");
+		git("commit", "-qm", "initial");
+
+		assert.deepEqual(JSON.parse(await invoke("mapper_maps", {})).maps, []);
+		assert.ok(JSON.parse(await invoke("mapper_list_recipes", { category: "software" })).some((r) => r.id === "software.connectivity"));
+		assert.match((await vscode.commands.executeCommand("drawio-ai.maps.tool", { name: "mapper_run", args: { recipe: "nope" } })).text, /Unknown map nope/);
+
+		const run = await tool("mapper_run", { recipe: "software.connectivity", input: { folder: repo } });
+		const mapId = run.map.id;
+		assert.ok(run.map.shapes > 3, JSON.stringify(run.map));
+		assert.ok(run.drawnOn, "the map was not drawn");
+		// the record is next to the diagram, and the map is a pending change on a page of its own
+		const diagram = vscode.workspace.textDocuments.find((d) => /services-2\.drawio$/.test(d.uri.fsPath));
+		assert.ok(fs.existsSync(path.join(path.dirname(diagram.uri.fsPath), ".drawai", "maps", `${mapId}.json`)), "no map record next to the diagram");
+		const maps = await tool("mapper_maps");
+		assert.deepEqual([maps.maps.length, maps.onPage], [1, [mapId]]);
+		const model = JSON.parse(await invoke("drawio_get_diagram", {}));
+		assert.equal(model.page.name, run.drawnOn);
+		assert.ok(model.totalCells > 3);
+
+		// lookups, and a description that shows as the shape's tooltip
+		const found = await tool("mapper_find", { query: "" });
+		const first = found[0];
+		const shown = await tool("mapper_show", { nodeId: first.id });
+		assert.equal(shown.id, first.id);
+		const ws = await tool("mapper_worksheet", { mapId, limit: 5 });
+		const described = await tool("mapper_set_descriptions", { mapId, items: [{ nodeId: ws.entries[0].id, description: "Keeps the shop running and answers the pages people open." }, { nodeId: "nope", description: "Nothing here at all, really." }] });
+		assert.deepEqual([described.accepted, described.applied, described.problems.length], [1, 1, 1], JSON.stringify(described));
+
+		// findings: in the Maps view, shown on the map, dismissed
+		const findings = await tool("mapper_findings", { mapId });
+		assert.ok(findings.checked.length > 0, "no checks ran");
+		let view = (await mapsState()).view;
+		assert.equal(view.length, 1);
+		const group = view[0].children[0];
+		assert.equal(group.label, findings.findings.length ? `Findings (${findings.findings.length})` : "No findings");
+		assert.equal(group.children.length, findings.findings.length);
+		if (findings.findings.length) {
+			const f = findings.findings[0];
+			assert.ok((await vscode.commands.executeCommand("drawio-ai.maps.showFinding", { mapId, findingId: f.id })) > 0, "the finding's shapes were not selected");
+			await vscode.commands.executeCommand("drawio-ai.maps.dismissFinding", { mapId, findingId: f.id });
+			assert.equal((await tool("mapper_findings", { mapId })).findings.length, findings.findings.length - 1);
+		}
+
+		// recent changes: a changed file marks its shapes
+		const known = found.map((n) => n.id).slice(0, 12);
+		let changedFile;
+		for (const id of known) {
+			const files = (await tool("mapper_show", { nodeId: id })).files ?? [];
+			changedFile = files.map((f) => path.join(repo, f)).find((f) => fs.existsSync(f) && fs.statSync(f).isFile());
+			if (changedFile) break;
+		}
+		assert.ok(changedFile, "no shape of the map lists a file");
+		fs.appendFileSync(changedFile, "\n# changed by the test\n");
+		const recent = await vscode.commands.executeCommand("drawio-ai.maps.recentChanges", mapId);
+		assert.ok(recent.shapes > 0 && recent.badges > 0, JSON.stringify(recent));
+		view = (await mapsState()).view;
+		assert.ok(view[0].children.some((c) => /^Changed since [0-9a-f]{7} \(\d+\)$/.test(c.label)), JSON.stringify(view[0].children.map((c) => c.label)));
+
+		// a tour: saved by the agent's tool, listed in the view, played in presentation mode
+		const steps = [first.id, ...(shown.uses[0] ? [shown.uses[0].id] : [])].map((id, i) => ({ title: `Step ${i + 1}`, caption: `This is ${id}.`, nodeIds: [id] }));
+		assert.equal((await tool("mapper_set_tour", { mapId, title: "Quick tour", steps })).saved, true);
+		view = (await mapsState()).view;
+		assert.deepEqual(view[0].children.find((c) => c.label === "Tours (1)")?.children, ["Quick tour"]);
+		assert.equal(await vscode.commands.executeCommand("drawio-ai.maps.playTour", { mapId }), true);
+		// (the first step is shown a moment after the tour starts, once presentation mode has fitted the page)
+		const playing = await waitFor(async () => {
+			const s = await look();
+			return s?.presenting && s.tour?.highlighted > 0 ? s : undefined;
+		}, "the tour to play in presentation mode and highlight its first step");
+		assert.deepEqual([playing.tour.title, playing.tour.step, playing.tour.steps], ["Quick tour", 0, steps.length]);
+		assert.deepEqual(playing.tours, ["Quick tour"]);
+		assert.match(playing.tour.caption, /This is /);
+		await vscode.commands.executeCommand("drawio-ai.present");
+		await waitFor(async () => ((await look())?.presenting === false ? true : undefined), "presentation mode to end");
+
+		// an answer drawn as a page of its own
+		const answer = await tool("mapper_answer", { question: "What does it talk to?", answer: "Its database.", steps: steps.map((s) => ({ nodeId: s.nodeIds[0], note: s.caption, mapId })) });
+		assert.equal(answer.drawn, true, JSON.stringify(answer));
+
+		// databases: every driver is part of the extension (it gets as far as the network), and a SQLite file maps
+		const raw = (name, args) => vscode.commands.executeCommand("drawio-ai.maps.tool", { name, args });
+		for (const [engine, connectionString] of [
+			["postgres", "postgres://u:p@127.0.0.1:1/db"],
+			["mysql", "mysql://u:p@127.0.0.1:1/db"],
+			["mssql", "Server=127.0.0.1,1;Database=db;User Id=u;Password=p;Encrypt=false"],
+			["oracle", "oracle://u:p@127.0.0.1:1/svc"],
+			["mongodb", "mongodb://u:p@127.0.0.1:1/db?serverSelectionTimeoutMS=1500"],
+		]) {
+			const r = await raw("mapper_run", { recipe: "database.schema", input: { engine, connectWith: "url", connectionString } });
+			assert.equal(r.isError, true, `${engine}: ${r.text}`);
+			assert.doesNotMatch(r.text, /Cannot find module|is not a function|is not defined|not a constructor/, `${engine}: ${r.text}`);
+			assert.match(r.text, /ECONNREFUSED|connect|reach|refused|NJS-|timed out|Server selection/i, `${engine}: ${r.text}`);
+			// the secret never comes back
+			assert.doesNotMatch(r.text, /u:p@/, `${engine}: ${r.text}`);
+		}
+		let sqlite;
+		try {
+			sqlite = require("node:sqlite");
+		} catch {
+			sqlite = undefined; // an older VS Code: the Mapper says so
+		}
+		const dbFile = path.join(repo, "shop.sqlite");
+		if (sqlite) {
+			const db = new sqlite.DatabaseSync(dbFile);
+			db.exec("CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL); CREATE TABLE orders (id INTEGER PRIMARY KEY, customer_id INTEGER NOT NULL REFERENCES customers(id), total REAL);");
+			db.close();
+			const dbMap = await tool("mapper_run", { recipe: "database.schema", input: { engine: "sqlite", file: dbFile } });
+			assert.ok(dbMap.map.shapes >= 2, JSON.stringify(dbMap.map));
+			assert.ok((await tool("mapper_find", { query: "orders", mapId: dbMap.map.id })).length > 0);
+		} else {
+			fs.writeFileSync(dbFile, "");
+			assert.match((await raw("mapper_run", { recipe: "database.schema", input: { engine: "sqlite", file: dbFile } })).text, /newer runtime/);
+		}
+
+		// the Map Something panel: the desktop app's page, loaded in a webview
+		await vscode.commands.executeCommand("drawio-ai.mapSomething");
+		await waitFor(async () => ((await mapsState()).panelReady ? true : undefined), "the Map Something page to start");
+	});
 }
 
 const tabPaths = () =>

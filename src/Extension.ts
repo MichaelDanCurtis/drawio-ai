@@ -13,6 +13,7 @@ import { registerFailableCommand } from "./utils/registerFailableCommand";
 import { registerImportCommands } from "./features/importDiagram";
 import { SidebarFeature } from "./features/SidebarFeature";
 import { EditorLookFeature } from "./features/EditorLookFeature";
+import { MapperFeature } from "./features/mapper/MapperFeature";
 
 export class Extension {
 	public readonly dispose = Disposable.fn();
@@ -47,7 +48,17 @@ export class Extension {
 		new EditorLookFeature(this.editorService, this.context.extension.id)
 	);
 
+	private readonly mapperFeature = this.dispose.track(
+		new MapperFeature({
+			context: this.context,
+			editorService: this.editorService,
+			look: this.editorLookFeature,
+			ask: (text, editor, extras) => this.aiFeature.askAgent(text, editor, extras),
+		})
+	);
+
 	constructor(private readonly context: vscode.ExtensionContext) {
+		this.aiFeature.mapperTools = this.mapperFeature;
 		for (const d of registerImportCommands(
 			(uri, task) => this.editorService.withDrawioWebview(uri, task),
 			() => {

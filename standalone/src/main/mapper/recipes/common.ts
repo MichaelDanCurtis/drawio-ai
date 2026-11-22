@@ -97,18 +97,27 @@ export const FOLDER_FIELD: FieldDef = {
 	help: "Read locally; nothing is uploaded except what you then send to the agent.",
 };
 
+/** Where the agent finds the diagram tools. The desktop app serves them as an MCP server; the VS Code extension names its own. */
+let toolSource = 'of the "omnidraw" MCP server';
+
+export function setToolSource(text: string): void {
+	toolSource = text;
+}
+
 /** Shared rules for every request the Mapper sends to the agent. */
-export const AGENT_RULES = [
-	"Work ONLY through the drawio_* tools of the \"omnidraw\" MCP server to read and change the diagram; never edit diagram files on disk.",
-	"You may read files and run read-only inspection commands (list / describe / show / get / query) to investigate. NEVER run anything that creates, changes, deletes, deploys, restarts or costs money, and never print secrets.",
-	"Shapes the Mapper drew carry data attributes (mapper, mapperKind, mapperId and source ids such as ARNs or resource ids): keep them, and give new shapes the same attributes where you can.",
-	"Use proper icons (search the shape libraries with drawio_search_shapes) and keep the existing layout readable; add new shapes next to what they relate to.",
-	"End with a short summary of what you found and what you changed on the map.",
-].join("\n- ");
+export function agentRules(): string {
+	return [
+		`Work ONLY through the drawio_* tools ${toolSource} to read and change the diagram; never edit diagram files on disk.`,
+		"You may read files and run read-only inspection commands (list / describe / show / get / query) to investigate. NEVER run anything that creates, changes, deletes, deploys, restarts or costs money, and never print secrets.",
+		"Shapes the Mapper drew carry data attributes (mapper, mapperKind, mapperId and source ids such as ARNs or resource ids): keep them, and give new shapes the same attributes where you can.",
+		"Use proper icons (search the shape libraries with drawio_search_shapes) and keep the existing layout readable; add new shapes next to what they relate to.",
+		"End with a short summary of what you found and what you changed on the map.",
+	].join("\n- ");
+}
 
 /** A request for the agent with the facts attached, size-limited. */
 export function agentRequest(task: string, facts?: string, maxFacts = 60_000): string {
-	const parts = [task, "", `Rules:\n- ${AGENT_RULES}`];
+	const parts = [task, "", `Rules:\n- ${agentRules()}`];
 	if (facts?.trim()) {
 		const trimmed = facts.length > maxFacts ? facts.slice(0, maxFacts) + "\n… (truncated)" : facts;
 		parts.push("", "<facts collected read-only by the Mapper>", trimmed, "</facts>");
