@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { CheckCoverage, CollectResult, MapFinding, MapGraph, MapInput, MapNode, Recipe } from "./types";
+import { safeInputs } from "./redact";
 
 /**
  * What the Mapper knows about a map it drew, kept next to the diagram in
@@ -70,7 +71,7 @@ export function newMapId(): string {
 	return `m${Date.now().toString(36)}${randomBytes(3).toString("hex")}`;
 }
 
-/** The record for a fresh map run (secret fields removed from the inputs). */
+/** The record for a fresh map run (secret fields removed from the inputs, credentials stripped from the rest). */
 export function createRecord(opts: {
 	id?: string;
 	recipe: Recipe;
@@ -95,7 +96,7 @@ export function createRecord(opts: {
 		recipe: opts.recipe.id,
 		title: graph.title,
 		page: opts.page,
-		input: Object.fromEntries(Object.entries(opts.input).filter(([k]) => !secret.has(k))),
+		input: safeInputs(opts.input, secret),
 		root: opts.root,
 		createdAt: now,
 		updatedAt: now,

@@ -9,6 +9,7 @@ import { catalog, recipeById } from "./mapper/registry";
 import { agentRequest } from "./mapper/recipes/common";
 import { CollectResult, MapInput, MapperError, Recipe } from "./mapper/types";
 import { paths } from "./paths";
+import { safeInputs } from "./mapper/redact";
 import type { StaticServer } from "./staticServer";
 
 /** What the Mapper needs from the diagram window it maps into. */
@@ -38,7 +39,7 @@ function loadSavedInputs(): Record<string, MapInput> {
 function saveInputs(recipe: Recipe, input: MapInput): void {
 	const all = loadSavedInputs();
 	const secret = new Set(recipe.fields.filter((f) => f.secret || f.type === "password").map((f) => f.id));
-	all[recipe.id] = Object.fromEntries(Object.entries(input).filter(([k]) => !secret.has(k)));
+	all[recipe.id] = safeInputs(input, secret);
 	try {
 		fs.writeFileSync(inputsFile(), JSON.stringify(all, null, 1), { mode: 0o600 });
 	} catch {
