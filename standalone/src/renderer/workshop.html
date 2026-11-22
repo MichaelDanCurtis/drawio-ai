@@ -17,6 +17,7 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
 <script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
 <script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<script nonce="$$nonce$$" src="/ui/tips.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; }
 	.head { position: relative; isolation: isolate; flex: none; padding: 18px 24px 14px; border-bottom: 1px solid var(--border); }
@@ -331,7 +332,7 @@
 			const now = state.galleries.find((g) => g.id === selected);
 			// a collection being browsed changed (a shape added or removed): show it again
 			if (now && was && now.count !== was.count) setTimeout(runSearch);
-			applyIcons(m.iconStyle || "isometric");
+			applyIcons(m.iconStyle || "dots2d");
 			renderGalleries();
 			renderScope();
 		} else if (m.type === "results" && m.reqId === reqId) {

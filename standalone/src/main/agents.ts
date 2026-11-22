@@ -2,6 +2,7 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { chooseAdapter, installedAdapterVersion, latestAdapterVersion } from "./adapterVersions";
 import { settings } from "./settings";
 
 export type AgentId = "gemini" | "claude" | "codex" | "copilot" | "kimi";
@@ -214,6 +215,8 @@ export interface LaunchSpec {
 	label?: string;
 	/** The agent needs short MCP tool descriptions (see compactTools in mcpServer.ts). */
 	compactTools?: boolean;
+	/** Set when a newer adapter is started through npx although one is installed: the npm package to fall back from. */
+	adapterFallback?: string;
 }
 
 export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
@@ -235,11 +238,14 @@ export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
 		const command = which(def.acp.command, env);
 		return command ? { command, args: def.acp.args, env } : { error: `${def.label} is not installed. Install it with: ${def.install}` };
 	}
+	// An adapter installed long ago offers the models of its day: when npm has a newer one, that
+	// exact version is started with npx instead (adapterVersions.ts looks it up).
 	const adapter = which(def.acp.bin, env);
-	if (adapter) return { command: adapter, args: [], env };
 	const npx = which("npx", env);
+	const choice = chooseAdapter(adapter ? { bin: adapter, version: installedAdapterVersion(adapter, def.acp.npxPackage) } : undefined, latestAdapterVersion(def.acp.npxPackage));
+	if (adapter && (choice.use === "installed" || !npx)) return { command: adapter, args: [], env };
 	if (!npx) return { error: `${def.acp.bin} is not installed and npx was not found. Install it with: ${def.install}` };
-	return { command: npx, args: ["-y", def.acp.npxPackage], env };
+	return { command: npx, args: ["-y", `${def.acp.npxPackage}${choice.use === "npx" && choice.version ? `@${choice.version}` : ""}`], env, ...(adapter ? { adapterFallback: def.acp.npxPackage } : {}) };
 }
 
 export function agentStatuses(): AgentStatus[] {
@@ -270,4 +276,9 @@ export function agentStatuses(): AgentStatus[] {
 
 export function agentDef(id: AgentId): AgentDef {
 	return AGENTS.find((a) => a.id === id) ?? AGENTS[0];
+}
+
+/** The npm packages of the adapters the app starts (their newest versions are looked up). */
+export function adapterPackages(): string[] {
+	return AGENTS.flatMap((a) => ("npxPackage" in a.acp ? [a.acp.npxPackage] : []));
 }

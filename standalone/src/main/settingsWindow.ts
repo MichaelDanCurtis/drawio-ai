@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import { AgentId, agentStatuses } from "./agents";
+import { adapterPackages, AgentId, agentStatuses } from "./agents";
+import { refreshAdapterVersions } from "./adapterVersions";
+import { probeModels, probing } from "./modelProbe";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, settingsPath, ShapeLocation, updateSettings, type Settings } from "./settings";
 import type { StaticServer } from "./staticServer";
@@ -15,6 +17,9 @@ export class SettingsWindow {
 	private static installed = false;
 	/** Opens the Shape Workshop's gallery (main.ts sets it). */
 	public static openWorkshop: (() => void) | undefined;
+	/** Agents asked for their models since the app started, and what went wrong for each. */
+	private static asked = new Set<AgentId>();
+	private static modelErrors = new Map<AgentId, string>();
 
 	public static open(server: StaticServer, section?: string): void {
 		SettingsWindow.install();
@@ -70,16 +75,41 @@ export class SettingsWindow {
 		SettingsWindow.post({
 			type: "state",
 			settings: s,
-			agents: agentStatuses().map((a) => ({ id: a.id, label: a.label, installed: a.installed, signedIn: a.signedIn, launch: a.launch, problem: a.problem })),
+			agents: agentStatuses().map((a) => ({ id: a.id, label: a.label, installed: a.installed, signedIn: a.signedIn, launch: a.launch, problem: a.problem, loadingModels: probing().includes(a.id), modelError: SettingsWindow.modelErrors.get(a.id) })),
 			file: settingsPath(),
 			version: app.getVersion(),
 		});
+	}
+
+	/**
+	 * Asks the agents which models they offer (each agent itself, never a list kept in the app):
+	 * every usable agent once per run when Settings opens, or one again on request.
+	 */
+	private static async loadModels(only?: AgentId): Promise<void> {
+		if (process.env.DRAWAI_E2E) return;
+		if (only) await refreshAdapterVersions(adapterPackages(), { force: true });
+		const todo = agentStatuses().filter((a) => a.installed && a.signedIn && (only ? a.id === only : !SettingsWindow.asked.has(a.id)));
+		for (const a of todo) SettingsWindow.asked.add(a.id);
+		await Promise.all(
+			todo.map(async (a) => {
+				SettingsWindow.modelErrors.delete(a.id);
+				const run = probeModels(a.id);
+				SettingsWindow.postState();
+				const problem = await run;
+				if (problem) SettingsWindow.modelErrors.set(a.id, problem);
+				SettingsWindow.postState();
+			})
+		);
 	}
 
 	private static async onMessage(msg: any): Promise<void> {
 		switch (msg?.type) {
 			case "ready":
 				SettingsWindow.postState();
+				void SettingsWindow.loadModels();
+				break;
+			case "refreshModels":
+				void SettingsWindow.loadModels(String(msg.agent) as AgentId);
 				break;
 			case "set": {
 				const patch: Partial<Settings> = {};
@@ -96,15 +126,6 @@ export class SettingsWindow {
 				else hidden.add(value);
 				const next = { ...cur, hidden: [...hidden] };
 				if (next.preferred === value && !msg.visible) delete next.preferred;
-				updateSettings({ models: { ...settings().models, [agent]: next } });
-				break;
-			}
-			case "setPreferredModel": {
-				const agent = String(msg.agent) as AgentId;
-				const cur = settings().models[agent] ?? {};
-				const next = { ...cur, preferred: msg.value ? String(msg.value) : undefined };
-				if (!next.preferred) delete next.preferred;
-				else next.hidden = (next.hidden ?? []).filter((v) => v !== next.preferred);
 				updateSettings({ models: { ...settings().models, [agent]: next } });
 				break;
 			}

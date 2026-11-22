@@ -557,16 +557,51 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(800);
 	log("menuKeyFromChatIgnored", { found: !!dup, before: d0, after: await cells() });
 
-	await ed.executeJavaScript(`(() => { const b = document.querySelector(".geToolbarContainer a.geButton:not(.drawai-mark)"); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); })()`);
-	await pause(400);
-	log("panelMenu", await ed.executeJavaScript(`Array.from(document.querySelectorAll(".mxPopupMenu .mxPopupMenuItem")).map((e) => e.textContent.trim()).filter(Boolean)`));
-	await save("panel-menu.png", ed, { x: 0, y: 0, width: 360, height: 260 });
-	await ed.executeJavaScript(`document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));`);
+	// the first toolbar button shows and hides the Shapes panel directly (no menu)
+	const shapesShown = `(() => { const sb = document.querySelector(".geSidebarContainer:not(.geFormatContainer)"); return !!sb && sb.offsetWidth > 20 && getComputedStyle(sb).display !== "none"; })()`;
+	const clickShapes = `(() => { const b = document.querySelector('.geToolbarContainer [data-drawai="shapes-toggle"]'); b && b.dispatchEvent(new MouseEvent("click", { bubbles: true })); return !!b; })()`;
+	const shapes0 = await ed.executeJavaScript(shapesShown);
+	const hasShapesBtn = await ed.executeJavaScript(clickShapes);
+	await pause(500);
+	const shapes1 = await ed.executeJavaScript(shapesShown);
+	const menuOpened = await ed.executeJavaScript(`document.querySelectorAll(".mxPopupMenu .mxPopupMenuItem").length`);
+	await ed.executeJavaScript(clickShapes);
+	await pause(500);
+	log("shapesToggle", { button: hasShapesBtn, before: shapes0, afterOneClick: shapes1, afterTwo: await ed.executeJavaScript(shapesShown), menuOpened });
+	// Ruler is a toolbar button; the chat's arrow says which way the chat goes; tooltips are quick
+	log("toolbarExtras", await ed.executeJavaScript(`(() => {
+		const ruler = document.querySelector('.geToolbarContainer [data-drawai="ruler"]');
+		const arrow = document.querySelector(".drawai-chat-toggle");
+		return { ruler: !!ruler, chatArrow: arrow ? arrow.getAttribute("data-chat") : null, tips: !!window.DrawAITips && window.DrawAITips.delay };
+	})()`));
+	await save("toolbar-buttons.png", ed, await top());
+
+	// the Format panel has the chat's live dot field in its top right corner
+	await pause(600);
+	log("formatDots", await ed.executeJavaScript(`(() => {
+		const c = document.querySelector(".geFormatContainer .drawai-backdrop canvas, .drawai-dots-host .drawai-backdrop canvas");
+		const f = window.omnidrawFormatDots;
+		return { canvas: !!c, width: c ? c.width : 0, dots: f ? f.engine.stats().dots : 0 };
+	})()`));
+	// the chat's dot object: a square of layers that changes shape, and flies to the top right corner on typing
+	const orb = () => chat.executeJavaScript("(() => { const o = window.drawaiUI.orb(); return { docked: o.docked, shape: o.shape, x: Math.round(o.rect.x), y: Math.round(o.rect.y), w: Math.round(o.rect.w) }; })()");
+	const orb0 = await orb();
+	await chat.executeJavaScript(`(() => { const o = document.getElementById("emptyObject"); return new Promise((r) => { const t0 = Date.now(); (function wait() { if ((o.dataset.shape && o.dataset.shape !== "planes") || Date.now() - t0 > 9000) r(); else setTimeout(wait, 150); })(); }); })()`);
+	const orbMorphed = await orb();
+	await pause(1900);
+	await save("chat-orb-morphed.png", chat);
+	await chat.executeJavaScript(`(() => { const i = document.getElementById("input"); i.value = "hello"; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+	await pause(900);
+	const orbTyping = await orb();
+	await save("chat-orb-docked.png", chat);
+	await chat.executeJavaScript(`(() => { const i = document.getElementById("input"); i.value = ""; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+	await pause(900);
+	log("chatOrb", { start: orb0, morphed: orbMorphed.shape, typing: orbTyping, cleared: await orb(), viewport: await chat.executeJavaScript("window.innerWidth") });
 
 	// icon styles, in both themes
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
-		for (const style of ["isometric", "dots", "extruded", "classic"] as const) {
+		for (const style of ["dots2d", "dots", "real", "classic"] as const) {
 			updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: style } });
 			await pause(700);
 			await save(`toolbar-${theme}-${style}.png`, ed, await top());
@@ -576,7 +611,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
 	}
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "isometric", toolbar: "top" } });
+	updateSettings({ appearance: { theme: "light", iconStyle: "dots2d", toolbar: "top" } });
 	await pause(600);
 	// the toolbar on each side
 	for (const side of ["left", "right", "bottom", "top"] as const) {
@@ -639,7 +674,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(800);
 	for (const theme of ["light", "dark"] as const) {
 		process.env.DRAWAI_THEME = theme;
-		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "isometric" } });
+		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "dots2d" } });
 		await pause(500);
 		for (const section of ["appearance", "agents", "chat", "editor", "shapes"]) {
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
@@ -650,7 +685,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
 	sw.close();
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "isometric" } });
+	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "dots2d" } });
 }
 
 /** Calls a diagram tool on the window's MCP server, as an agent would. */

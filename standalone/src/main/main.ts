@@ -1,7 +1,8 @@
 import { app, dialog, Menu, MenuItemConstructorOptions, nativeTheme, session, shell, webContents, type WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
-import { AGENTS } from "./agents";
+import { adapterPackages, AGENTS } from "./agents";
+import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
 import { DiagramWindow, type DrawioMenuItem } from "./diagramWindow";
 import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
@@ -338,6 +339,9 @@ app.whenReady().then(async () => {
 	}
 	await server.start();
 	blockRemoteRequests();
+	// the newest Claude Code and Codex adapters (so their model lists are today's), looked up in the background
+	useAdapterCache(path.join(app.getPath("userData"), "adapters.json"));
+	if (!process.env.DRAWAI_E2E) void refreshAdapterVersions(adapterPackages());
 	DiagramWindow.installIpc();
 	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog(), settings: (section) => openSettings(section), workshop: (mode) => WorkshopWindow.open(server, mode ?? "gallery") };
 	SettingsWindow.openWorkshop = () => WorkshopWindow.open(server, "gallery");

@@ -5,11 +5,13 @@ import * as path from "path";
 import type { ToolResult } from "../../../src/features/ai/DiagramToolbox";
 import { describeContext, SelectionContext } from "../../../src/features/ai/systemPrompt";
 import { AcpAgentSession, AuthRequiredError, SessionInfo } from "./acpSession";
+import { adaptersSettled, noteAdapterFailure } from "./adapterVersions";
 import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./agents";
 import type { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { KnownModel, settings, settingsPath, updateSettings } from "./settings";
-import { versionedName } from "./modelNames";
+import { modelsFromSession } from "./modelNames";
+import { rememberModels } from "./modelProbe";
 import type { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
 
 type TranscriptItem =
@@ -63,7 +65,6 @@ export interface ChatHost {
 const MAX_IMAGES = 4;
 let versionCounter = 0;
 /** Guards against windows re-recording each other's model lists (settings listeners are synchronous). */
-let rememberingModels = false;
 
 /**
  * The chat panel of one window: transcript, agent picker, and one ACP session
@@ -280,9 +281,20 @@ export class ChatController {
 	}
 
 	/** Starts the picked agent and its session if needed; reports problems in the panel. */
-	private ensureSession(): Promise<AcpAgentSession | undefined> {
+	private ensureSession(waited = false): Promise<AcpAgentSession | undefined> {
 		if (this.session?.info) return Promise.resolve(this.session);
 		if (this.starting) return this.starting;
+		// just after launch, the lookup of the newest adapters may still be under way: wait for it once
+		const settling = waited ? undefined : adaptersSettled();
+		if (settling) {
+			const waiting: Promise<AcpAgentSession | undefined> = settling.then(() => {
+				if (this.starting === waiting) this.starting = undefined;
+				this.refreshStatuses();
+				return this.ensureSession(true);
+			});
+			this.starting = waiting;
+			return waiting;
+		}
 		const def = agentDef(this.agentId);
 		const status = this.status();
 		if (status && !status.installed) {
@@ -321,6 +333,16 @@ export class ChatController {
 				return session;
 			} catch (e: any) {
 				if (this.session !== session) return undefined;
+				// the newer adapter could not be started through npx (offline, a registry mirror without
+				// it…): the copy that is installed still works, so use that for the rest of this run
+				if (spec.adapterFallback && !(e instanceof AuthRequiredError)) {
+					noteAdapterFailure(spec.adapterFallback);
+					session.dispose();
+					this.session = undefined;
+					this.starting = undefined;
+					this.refreshStatuses();
+					return this.ensureSession(true);
+				}
 				this.handleStartError(e, session);
 				throw e;
 			} finally {
@@ -372,7 +394,7 @@ export class ChatController {
 	/** Switches a new session to the model chosen in Settings, if the agent offers it. */
 	private async applyPreferredModel(session: AcpAgentSession): Promise<void> {
 		const preferred = settings().models[this.agentId]?.preferred;
-		if (!preferred || !session.info) return;
+		if (!preferred || preferred.startsWith("mode:") || !session.info) return;
 		const { models, current } = this.modelList(session.info);
 		const target = models.find((m) => m.value === preferred);
 		if (!target || current === preferred) return;
@@ -385,43 +407,13 @@ export class ChatController {
 		}
 	}
 
-	/**
-	 * The models (or modes) the agent offers, with versions in their names. `value` is what
-	 * Settings stores (hidden / preferred); `id` is what pickModel takes.
-	 */
-	private modelList(info: SessionInfo | undefined): { models: (KnownModel & { id: string })[]; current?: string; currentId?: string } {
-		const models: (KnownModel & { id: string })[] = [];
-		const modelOption = info?.configOptions?.find((o) => o.type === "select" && (o.category === "model" || /model/i.test(o.id)));
-		if (modelOption && modelOption.type === "select") {
-			for (const entry of modelOption.options as any[]) {
-				const opts = "group" in entry ? entry.options : [entry];
-				for (const o of opts) {
-					const value = String(o.value);
-					models.push({ id: `opt:${modelOption.id}:${value}`, value, name: versionedName(String(o.name ?? value), value, o.description), description: o.description ?? undefined });
-				}
-			}
-			const current = String(modelOption.currentValue);
-			return { models, current, currentId: `opt:${modelOption.id}:${current}` };
-		}
-		if (info?.modes?.availableModes?.length) {
-			for (const m of info.modes.availableModes) models.push({ id: `mode:${m.id}`, value: `mode:${m.id}`, name: `Mode: ${m.name}`, description: m.description ?? undefined });
-			return { models, current: `mode:${info.modes.currentModeId}`, currentId: `mode:${info.modes.currentModeId}` };
-		}
-		return { models };
+	private modelList(info: SessionInfo | undefined) {
+		return modelsFromSession(info);
 	}
 
 	/** Remembers what the agent offers, so Settings can list it while the agent is not running. */
 	private rememberModels(models: KnownModel[]): void {
-		if (!models.length || rememberingModels) return;
-		const known = settings().modelCatalog[this.agentId] ?? [];
-		const slim = models.map((m) => ({ value: m.value, name: m.name, ...(m.description ? { description: m.description } : {}) }));
-		if (JSON.stringify(known) === JSON.stringify(slim)) return;
-		rememberingModels = true;
-		try {
-			updateSettings({ modelCatalog: { ...settings().modelCatalog, [this.agentId]: slim } });
-		} finally {
-			rememberingModels = false;
-		}
+		rememberModels(this.agentId, models);
 	}
 
 	private async pickModel(value: string): Promise<void> {
@@ -431,6 +423,10 @@ export class ChatController {
 			const [kind, id, ...rest] = value.split(":");
 			if (kind === "opt") await session.setConfigOption(id, rest.join(":"));
 			else if (kind === "mode") await session.setMode([id, ...rest].join(":"));
+			// a new chat with this agent starts with the model picked last. Only a model: a mode can be
+			// a permission mode ("accept everything"), which must never come back by itself.
+			const picked = kind === "opt" ? this.modelList(session.info).models.find((m) => m.id === value)?.value : undefined;
+			if (picked && settings().models[this.agentId]?.preferred !== picked) updateSettings({ models: { ...settings().models, [this.agentId]: { ...settings().models[this.agentId], preferred: picked } } });
 		} catch (e: any) {
 			this.push({ kind: "error", text: `Could not change it: ${e?.message ?? e}` });
 		}

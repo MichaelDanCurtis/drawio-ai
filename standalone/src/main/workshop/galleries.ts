@@ -29,7 +29,7 @@ const LOCAL_TTL_MS = 15 * 1000;
 const FETCH_CONCURRENCY = 8;
 const MAX_INDEX_BYTES = 12 * 1024 * 1024;
 /** Bumped when items in a cached index change shape or address (an older cache is read again from its sources). */
-const INDEX_FORMAT = 2;
+const INDEX_FORMAT = 3;
 
 export interface GalleryStatus {
 	id: string;

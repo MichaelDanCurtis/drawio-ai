@@ -215,8 +215,13 @@ Space Grotesk with Space Mono caps labels, flat hairline cards, an ink primary b
 and one signal red for the single thing that needs you (a permission request, the
 findings count, the current tour step). Depth comes from dots: a live dot field behind
 the chat and Mapper heads that leans away from the pointer and ripples when you switch
-agents or start a new chat, and a 3D dot object (stacked diagram layers) while the chat
-is empty. Motion is short and ease-out only: messages, menus, cards and tour captions
+agents or start a new chat, and a 3D dot object in the empty chat that keeps changing
+shape: it starts as a square of stacked layers, then every dot travels to its place in a
+face, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
+more (`ui/dot-object.js`). When you start to type it shoots to the top right corner of
+the chat and stays there, small, during the conversation; in a new, empty chat it comes
+back. The dots near the pointer brighten and lean, in the object, in every head's dot
+field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel. Motion is short and ease-out only: messages, menus, cards and tour captions
 rise in. Under *reduce motion* nothing moves.
 
 - Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
@@ -225,15 +230,24 @@ rise in. Under *reduce motion* nothing moves.
 - draw.io's chrome: `src/renderer/theme.js`, a draw.io plugin that only changes
   draw.io's theme variables, its UI font and its primary buttons, never diagrams.
 - Icons: `src/renderer/ui/icons.js` draws every icon (the chat's, Settings' and draw.io's
-  toolbar) from one flat glyph set in four styles: classic (flat), isometric line,
-  dot-matrix 3D and soft extruded. Each glyph is stood up in 3D, given depth and turned
-  a little; `src/renderer/desktop-toolbar.js` swaps draw.io's own toolbar images.
+  toolbar) from one flat glyph set in four styles that look nothing alike: classic (flat
+  lines), dot-matrix 2D (the glyph on a square grid of dots), dot-matrix 3D (the glyph stood
+  up and turned, in dots) and realistic 3D (a small solid object in the colours of the real
+  thing, with shaded sides and a shadow). `src/renderer/desktop-toolbar.js` swaps draw.io's
+  own toolbar images; realistic icons keep their colours in dark mode (draw.io would show
+  them as negatives). Settings that still name the earlier "isometric" and "extruded" styles
+  get dot-matrix 2D and realistic 3D.
+- Tooltips appear after a tenth of a second (`ui/tips.js`), at once when moving from one
+  control to the next, in the app's pages and on draw.io's toolbar.
 - The toolbar: the OmniDraw dot mark first (opens Settings; every few seconds its dots draw a circle, a face, a diamond, a plus, a wave, a heart or a spiral and come back to the square, `ui/brandmark.js`); Layers, Tags, Outline and
-  Presentation mode as buttons; a chat button at the right end. The panel menu keeps
-  only Shapes, Ruler and Fullscreen (Format and Find/Replace have their own places).
-- The chat slides away and back (the button in its head, the toolbar's chat button, or
-  Cmd/Ctrl+J), docks left or right, and resizes by dragging its inner edge. Its agent
-  and model pickers are in-app menus that show each model's version and description.
+  Presentation mode as buttons, with Ruler next to them. The button after the mark shows
+  and hides the Shapes panel with one click (no menu); Fullscreen and Format are at the
+  right end.
+- The chat closes and opens with an arrow at the edge it shares with the diagram: in the
+  corner of the chat while it is open, at the end of the toolbar while it is closed (or
+  Cmd/Ctrl+J). It docks left or right and resizes by dragging its inner edge. Lasso,
+  Inline, Markup, Review and Map are a row of tabs under its head. Its agent and model
+  pickers are in-app menus that show each model's version and description.
 - **Menus are in the system menu bar**, like any Mac app: File, Edit, View, Arrange and
   Extras come from draw.io (`src/renderer/desktop-menubar.js` records draw.io's menus with a
   popup that is never shown, whenever the editor's state may change, and the app builds the
@@ -303,9 +317,15 @@ the packaged app.
 window. Changes save at once and reach open windows straight away:
 
 - **Appearance:** System, Light or Dark; the toolbar on the top, left, right or bottom; the icon style.
-- **Agents & models:** for each agent, the models its picker shows (an agent lists its
-  models the first time it runs), the model a new chat starts with, and the command that
-  launches it.
+- **Agents & models:** for each agent, the models its picker shows and the command that
+  launches it. Each agent is asked for its models when the page opens (it is started in an
+  empty folder with no tools, and nothing is sent to a model); **Refresh** asks again. A
+  new chat starts with the model picked last.
+  - Claude Code and Codex speak ACP through npm adapters. The app looks their newest
+    versions up on npm (at most twice a day, only the package names are sent) and starts
+    that exact version with `npx` when a globally installed copy is older, so the model
+    list is never the one from the day the adapter was installed
+    (`src/main/adapterVersions.ts`).
 - **Chat:** which side it docks on, its width, starting tucked away, and "Allow all" by
   default.
 - **Editor:** reviewing AI changes, flashing and selecting changed shapes, how many
@@ -319,7 +339,7 @@ the window), for example:
 
 ```json
 {
-	"appearance": { "theme": "dark", "iconStyle": "isometric" },
+	"appearance": { "theme": "dark", "iconStyle": "dots" },
 	"chat": { "side": "right", "startCollapsed": false, "allowAllByDefault": false },
 	"models": { "claude": { "hidden": ["haiku"], "preferred": "opus" } },
 	"agents": { "codex": { "command": "/opt/tools/codex-acp", "args": [], "env": {} } },
