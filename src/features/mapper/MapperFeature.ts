@@ -362,7 +362,9 @@ export class MapperFeature {
 	}
 
 	private recentChanges(arg: unknown) {
-		return this.withRecord(arg, async (r, service) => {
+		return this.withRecord(arg, async (r, service, editor) => {
+			// The badges are drawn on the page shown: that has to be the map's (another page may be showing when a map is picked in the Maps view).
+			await this.select(editor, r, []);
 			const c = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Reading what changed since "${r.title}" was made…` }, () =>
 				service.recentChanges(r, { draw: true })
 			);
@@ -473,10 +475,13 @@ export class MapperFeature {
 		const service = await this.service(editor);
 		const r = service.record(mapId);
 		const title = r.findings.find((f) => f.id === findingId)?.title ?? findingId;
+		// (the finding's badge is taken off the page shown: the map's)
+		await this.select(editor, r, []);
 		await service.dismiss(r, findingId);
 		this.view.refresh();
 		void vscode.window.showInformationMessage(`Dismissed "${title}". It comes back if it changes.`, "Undo").then(async (pick) => {
 			if (!pick) return;
+			await this.select(editor, service.record(mapId), []);
 			await service.dismiss(service.record(mapId), findingId, false);
 			this.view.refresh();
 		});

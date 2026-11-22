@@ -603,11 +603,29 @@ async function runSteps() {
 		const group = view[0].children[0];
 		assert.equal(group.label, findings.findings.length ? `Findings (${findings.findings.length})` : "No findings");
 		assert.equal(group.children.length, findings.findings.length);
+		// (another page is showing when a map is picked in the Maps view: its actions go to the map's page first)
+		const otherPage = JSON.parse(await invoke("drawio_pages", { action: "list" })).pages.find((p) => p.name !== run.drawnOn);
+		assert.ok(otherPage, "the diagram has no other page");
+		const showOther = async () => {
+			await invoke("drawio_pages", { action: "select", page: otherPage.id });
+			assert.notEqual(JSON.parse(await invoke("drawio_get_diagram", {})).page.name, run.drawnOn);
+		};
+		const badgesOnMapPage = async (kind) => {
+			const m = JSON.parse(await invoke("drawio_get_diagram", { maxCells: 5000 }));
+			assert.equal(m.page.name, run.drawnOn, "the map's page is not showing");
+			return m.cells.filter((c) => c.data?.mapperKind === kind).length;
+		};
 		if (findings.findings.length) {
 			const f = findings.findings[0];
+			const before = await badgesOnMapPage("finding-badge");
+			assert.ok(before > 0, "no health badges on the map");
+			await showOther();
 			assert.ok((await vscode.commands.executeCommand("drawio-ai.maps.showFinding", { mapId, findingId: f.id })) > 0, "the finding's shapes were not selected");
+			await showOther();
 			await vscode.commands.executeCommand("drawio-ai.maps.dismissFinding", { mapId, findingId: f.id });
 			assert.equal((await tool("mapper_findings", { mapId })).findings.length, findings.findings.length - 1);
+			// its badge left the map (a shape with another finding keeps a badge)
+			assert.ok((await badgesOnMapPage("finding-badge")) <= before, "the dismissed finding's badge is still drawn");
 		}
 
 		// recent changes: a changed file marks its shapes
@@ -620,8 +638,10 @@ async function runSteps() {
 		}
 		assert.ok(changedFile, "no shape of the map lists a file");
 		fs.appendFileSync(changedFile, "\n# changed by the test\n");
+		await showOther();
 		const recent = await vscode.commands.executeCommand("drawio-ai.maps.recentChanges", mapId);
 		assert.ok(recent.shapes > 0 && recent.badges > 0, JSON.stringify(recent));
+		assert.equal(await badgesOnMapPage("change-badge"), recent.badges);
 		view = (await mapsState()).view;
 		assert.ok(view[0].children.some((c) => /^Changed since [0-9a-f]{7} \(\d+\)$/.test(c.label)), JSON.stringify(view[0].children.map((c) => c.label)));
 
