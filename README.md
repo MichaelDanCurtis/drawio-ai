@@ -16,7 +16,7 @@ In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts t
 
 | Surface | How |
 | --- | --- |
-| VS Code chat, **Draw.AI** agent | The default. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here with the **Draw.AI** agent chosen and the selection described; images and code analyses travel with the request. Or pick **Draw.AI** in the chat's agent picker and type (VS Code 1.142 or later). Keep or revert its pending changes with the buttons in the diagram's title bar |
+| VS Code chat, **Draw.AI** agent | The default. Requests from the diagram (`Alt+K`, lasso, markup, lint fixes, ...) open here with the **Draw.AI** agent chosen and the selection described; images and code analyses travel with the request. Or pick **Draw.AI** in the chat's agent picker and type. Needs VS Code 1.142 or later: older versions keep using `@drawio`. Keep or revert its pending changes with the buttons in the diagram's title bar |
 | VS Code chat, `@drawio` | Only with VS Code's Local chat runtime, which is removed in February 2027 (the Copilot runtime does not run chat participants). Set `drawio-ai.chat.target` to `participant` to send diagram requests to it. `@drawio` has `/selection`, `/layout`, `/style`, `/explain`, `/review`, `/sketch`, and its answers end with action buttons |
 | VS Code chat, Agent mode | The `drawio_*` tools appear under Draw.AI in **Configure Tools** (reference one with `#drawio-…`). Instructions shipped with the extension tell the agent to change `.drawio` files with these tools, not by rewriting their XML |
 | Claude Code and Codex | **Draw.AI: Connect Claude Code / Codex…** installs Draw.AI's plugin (skills and the `drawio_*` tools); see [below](#claude-code-and-codex) |

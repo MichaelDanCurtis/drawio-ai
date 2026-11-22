@@ -27,8 +27,29 @@ export const PARTICIPANT = "drawio";
 /** Where requests go in VS Code's chat: the Draw.AI custom agent, or the old `@drawio` participant. */
 export type ChatTarget = "agent" | "participant";
 
+/** The first VS Code that knows custom agents contributed by an extension (the Draw.AI agent). */
+export const AGENT_MIN_VERSION = [1, 142];
+
+/** Whether this VS Code can open its chat with the Draw.AI agent. */
+export function agentSupported(version: string = vscode.version): boolean {
+	const m = /^(\d+)\.(\d+)/.exec(version);
+	if (!m) {
+		return true;
+	}
+	const major = Number(m[1]), minor = Number(m[2]);
+	return major > AGENT_MIN_VERSION[0] || (major === AGENT_MIN_VERSION[0] && minor >= AGENT_MIN_VERSION[1]);
+}
+
+/**
+ * The agent, unless the user chose the participant or this VS Code is too old to know the
+ * agent: there an unknown chat mode is ignored, and the request would land in ordinary chat
+ * without the diagram tools, where `@drawio` still works.
+ */
 export function chatTarget(): ChatTarget {
-	return vscode.workspace.getConfiguration("drawio-ai").get<string>("chat.target") === "participant" ? "participant" : "agent";
+	if (vscode.workspace.getConfiguration("drawio-ai").get<string>("chat.target") === "participant") {
+		return "participant";
+	}
+	return agentSupported() ? "agent" : "participant";
 }
 
 /** Separates the user's request from the diagram context in a request sent from the diagram. */

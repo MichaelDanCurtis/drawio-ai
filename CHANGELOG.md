@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Requests from a diagram (`Alt+K`, lasso, markup, review, sketch, from code) and **Open Draw.AI in Chat** now go to the **Draw.AI agent** in VS Code's chat, not to `@drawio`. VS Code's Copilot chat runtime (the default since November 2026) does not run extension chat participants, and the Local runtime that does is removed in February 2027. Pending changes are kept or reverted with the buttons in the diagram's title bar. Set `drawio-ai.chat.target` to `participant` to keep using `@drawio` while the Local runtime exists
+- Requests from a diagram (`Alt+K`, lasso, markup, review, sketch, from code) and **Open Draw.AI in Chat** now go to the **Draw.AI agent** in VS Code's chat, not to `@drawio`. VS Code's Copilot chat runtime (the default since November 2026) does not run extension chat participants, and the Local runtime that does is removed in February 2027. Pending changes are kept or reverted with the buttons in the diagram's title bar. Set `drawio-ai.chat.target` to `participant` to keep using `@drawio` while the Local runtime exists. VS Code older than 1.142, which does not know the agent, keeps using `@drawio` by itself
 
 ### Added
 

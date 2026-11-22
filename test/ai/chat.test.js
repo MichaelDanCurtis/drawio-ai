@@ -62,7 +62,7 @@ Module._resolveFilename = function (request, ...rest) {
 require.cache.vscode = { id: "vscode", filename: "vscode", loaded: true, exports: vscodeStub };
 
 const src = (p) => path.resolve(root, "src/features/ai", p);
-const { NATIVE_AGENT, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat, splitDiagramRequest } = require(src("nativeChat.ts"));
+const { NATIVE_AGENT, agentSupported, chatTarget, nativeChatAvailable, openNativeChat, pruneAttachments, readAttachment, sendToNativeChat, splitDiagramRequest } = require(src("nativeChat.ts"));
 const { diagramButtons, startButtons, followups } = require(src("copilotIntegration.ts"));
 const { TOOL_SCHEMAS } = require(src("toolSchemas.ts"));
 const { SYSTEM_PROMPT, NATIVE_AGENT_NOTES } = require(src("systemPrompt.ts"));
@@ -117,6 +117,31 @@ test("Open Draw.AI in Chat opens VS Code's chat with the Draw.AI agent chosen, w
 	await openNativeChat();
 	assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "Draw.AI", query: "", isPartialQuery: true }]]);
 	assert.equal(NATIVE_AGENT, "Draw.AI");
+});
+
+test("a VS Code too old for the Draw.AI agent (before 1.142) keeps using @drawio", async () => {
+	assert.equal(agentSupported("1.105.0"), false);
+	assert.equal(agentSupported("1.141.2"), false);
+	assert.equal(agentSupported("1.142.0"), true);
+	assert.equal(agentSupported("1.147.0-insider"), true);
+	assert.equal(agentSupported("2.0.0"), true);
+	assert.equal(agentSupported("not a version"), true, "an unknown version is taken as new");
+	const now = vscodeStub.version;
+	vscodeStub.version = "1.105.0";
+	try {
+		assert.equal(chatTarget(), "participant");
+		commands.length = 0;
+		await openNativeChat();
+		assert.deepEqual(commands, [["workbench.action.chat.open", { mode: "ask", query: "@drawio ", isPartialQuery: true }]]);
+		commands.length = 0;
+		const editor = { uri: new Uri("/ws/a.drawio"), drawioClient: { currentSelection: [] } };
+		await sendToNativeChat(new Uri("/storage"), "tidy up", undefined, { editor });
+		assert.equal(commands[0][1].mode, "ask");
+		assert.match(commands[0][1].query, /^@drawio tidy up\n---\n/);
+	} finally {
+		vscodeStub.version = now;
+	}
+	assert.equal(chatTarget(), "agent");
 });
 
 test("with drawio-ai.chat.target = participant, requests still go to @drawio (the Local chat runtime)", async () => {
