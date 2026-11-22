@@ -306,7 +306,7 @@ export class DrawioClientFactory {
 		});
 
 		const pageKind = {
-			readOnly: options.isReadOnly,
+			readOnly: options.isReadOnly || options.editorTools === false,
 			drawioTheme: themeVals.theme,
 		};
 
@@ -406,6 +406,8 @@ export class DrawioClientFactory {
 
 export interface DrawioClientOptions {
 	isReadOnly: boolean;
+	/** False for a page nobody looks at: it loads without the editor tools and the look. */
+	editorTools?: boolean;
 }
 
 function getNonce(): string {

@@ -62,7 +62,10 @@ export function fullLook(drawioTheme: string): boolean {
 
 /** What decides the editor page's plugins and their settings. */
 export interface EditorPageKind {
-	/** Only shows the diagram (a diff, an old version): there is no toolbar to add to. */
+	/**
+	 * Only shows the diagram (a diff, an old version), where there is no toolbar to add to,
+	 * or is a page nobody looks at (the hidden one that converts files).
+	 */
 	readOnly: boolean;
 	/** draw.io's theme: the `ui` the page is opened with. */
 	drawioTheme: string;

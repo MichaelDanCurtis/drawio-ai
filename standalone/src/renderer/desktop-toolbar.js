@@ -130,6 +130,8 @@
 	 * their own (the realistic style) must not be: the buttons that show ours are marked.
 	 */
 	function markOwn() {
+		// (a host that keeps draw.io's own toolbar and icons: nothing here is ours)
+		if (!has("toolbar")) return;
 		var coloured = !!(window.DrawAIIcons && window.DrawAIIcons.coloured && window.DrawAIIcons.coloured(style));
 		var els = document.querySelectorAll(".geToolbarContainer [style*='background-image']");
 		for (var i = 0; i < els.length; i++) {
@@ -500,8 +502,12 @@
 			};
 		}
 		window.omnidrawLook = { state: lookState };
-		function postState() {
-			window.VsCodeApi.postMessage(JSON.stringify({ event: "desktopState", state: lookState() }));
+		/** `reqId` is the asking message's (the answer names it); without one the tools have just loaded. */
+		function postState(reqId) {
+			var msg = { event: "desktopState", state: lookState() };
+			if (reqId != null) msg.reqId = reqId;
+			else msg.loaded = true;
+			window.VsCodeApi.postMessage(JSON.stringify(msg));
 		}
 		// once the toolbar is there (the matrix and the dot field arrive a moment later: ask again for them)
 		postState();
@@ -582,7 +588,7 @@
 			} else if (data.action === "desktopReportShapeSets") {
 				postShapeSets();
 			} else if (data.action === "desktopReportState") {
-				postState();
+				postState(data.reqId == null ? 0 : data.reqId);
 			} else if (data.action === "desktopStorage" && data.changes && window.omnidrawStorage) {
 				// another window changed draw.io's storage: this page takes it over, so it does not write its old copy back
 				var store = window.omnidrawStorage, settingsChanged = false, padChanged = false;

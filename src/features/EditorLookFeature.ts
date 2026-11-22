@@ -46,8 +46,18 @@ export class EditorLookFeature {
 			},
 			{ name: "Editor look" }
 		);
+		// A page that has just loaded was built with the look of the moment its HTML was made
+		// (it is not made again when VS Code reloads a webview): bring it up to date.
+		const loaded = client.onEditorToolsLoaded.sub(({ state }) => {
+			const look = editor.config.look;
+			// (with draw.io's themes that keep their own toolbar the page ignores what does not apply)
+			if (state.icons !== look.icons || state.toolbar !== look.toolbar || state.matrix !== look.matrix) {
+				client.setEditorPrefs({ iconStyle: look.icons, toolbar: look.toolbar, matrix: look.matrix });
+			}
+		});
 		editor.webviewPanel.onDidDispose(() => {
 			sub.dispose();
+			loaded.dispose();
 			stopPrefs();
 		});
 	}
@@ -85,7 +95,7 @@ export class EditorLookFeature {
 		}
 		const state = await editor.drawioClient.editorLookState();
 		if (!state) {
-			void vscode.window.showInformationMessage("Presentation mode is not ready in this editor: it is still loading, or it only shows the diagram (a read-only view).");
+			void vscode.window.showInformationMessage("Presentation mode is not available in this editor: it is still loading, it only shows the diagram (a read-only view), or it uses an online draw.io.");
 			return;
 		}
 		editor.webviewPanel.reveal();

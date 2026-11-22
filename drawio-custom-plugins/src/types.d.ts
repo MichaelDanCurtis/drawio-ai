@@ -30,6 +30,8 @@ declare interface DesktopPresentationAction {
 
 declare interface DesktopReportStateAction {
     action: "desktopReportState";
+    /** The answer names it. */
+    reqId: number;
 }
 
 /** A toolbar button or key of the shared editor tools: "present", "exitPresentation", "settings", ... */
@@ -41,6 +43,10 @@ declare interface DesktopCommandEvent {
 declare interface DesktopStateEvent {
     event: "desktopState";
     state: DesktopLookState;
+    /** The request this answers. */
+    reqId?: number;
+    /** Sent unasked, once, when the tools have loaded in a page. */
+    loaded?: boolean;
 }
 
 /** What the editor's toolbar plugin shows now (its answer to "desktopReportState"). */

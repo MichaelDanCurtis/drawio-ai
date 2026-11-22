@@ -120,7 +120,12 @@ export class CustomizedDrawioClient extends DrawioClient<
 	}
 
 	private lookState: DesktopLookState | undefined;
-	private readonly lookStateWaiters: ((state: DesktopLookState) => void)[] = [];
+	private lookStateRequest = 0;
+	private readonly lookStateWaiters = new Map<number, (state: DesktopLookState) => void>();
+
+	private readonly onEditorToolsLoadedEmitter = new EventEmitter<{ state: DesktopLookState }>();
+	/** The editor tools have loaded in the editor's page (again after each time the page loads). */
+	public readonly onEditorToolsLoaded = this.onEditorToolsLoadedEmitter.asEvent();
 
 	/** True once the editor tools have loaded in this editor's page. */
 	public get editorToolsLoaded(): boolean {
@@ -135,18 +140,16 @@ export class CustomizedDrawioClient extends DrawioClient<
 		if (!this.editorToolsLoaded) {
 			return undefined;
 		}
-		let waiter: ((state: DesktopLookState) => void) | undefined;
-		const answer = new Promise<DesktopLookState>((resolve) => {
-			waiter = resolve;
-			this.lookStateWaiters.push(resolve);
-		});
-		this.sendCustomAction({ action: "desktopReportState" });
+		// (the page gets every message twice and answers twice: the answer names its request)
+		const reqId = ++this.lookStateRequest;
+		const answer = new Promise<DesktopLookState>((resolve) => this.lookStateWaiters.set(reqId, resolve));
+		this.sendCustomAction({ action: "desktopReportState", reqId });
 		try {
 			return await withTimeout(answer, timeoutMs, "The editor tools did not answer.");
 		} catch {
-			const i = waiter ? this.lookStateWaiters.indexOf(waiter) : -1;
-			if (i >= 0) this.lookStateWaiters.splice(i, 1);
 			return undefined;
+		} finally {
+			this.lookStateWaiters.delete(reqId);
 		}
 	}
 
@@ -407,7 +410,11 @@ export class CustomizedDrawioClient extends DrawioClient<
 		} else if (evt.event === "desktopState") {
 			if (evt.state && typeof evt.state === "object") {
 				this.lookState = evt.state;
-				this.lookStateWaiters.splice(0).forEach((resolve) => resolve(evt.state));
+				if (evt.loaded) {
+					this.onEditorToolsLoadedEmitter.emit({ state: evt.state });
+				} else if (typeof evt.reqId === "number") {
+					this.lookStateWaiters.get(evt.reqId)?.(evt.state);
+				}
 			}
 		}
 
@@ -418,6 +425,9 @@ export class CustomizedDrawioClient extends DrawioClient<
 			});
 		} else if (evt.event === "pluginLoaded") {
 			if (evt.pluginId === "ai") {
+				// A page has loaded. The editor tools load after this plugin and report
+				// themselves then: until they do, this page has none.
+				this.lookState = undefined;
 				this.aiPluginLoaded = true;
 				this.latestReview = undefined;
 				this.aiPluginWaiters.splice(0).forEach((resolve) => resolve());

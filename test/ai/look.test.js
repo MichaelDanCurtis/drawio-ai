@@ -191,11 +191,27 @@ test("the toolbar's commands reach the extension's event and the desktop app's u
 	deliver(JSON.stringify({ event: "desktopState", state }));
 	await new Promise((r) => setTimeout(r, 0));
 	assert.equal(client.editorToolsLoaded, true);
+	sent.length = 0;
+	const loads = [];
+	client.onEditorToolsLoaded.sub(({ state: s }) => loads.push(s.host));
+	deliver(JSON.stringify({ event: "desktopState", state, loaded: true }));
+	assert.deepEqual(loads, ["vscode"]);
 	const asked = client.editorLookState(500);
-	assert.deepEqual(sent, [{ action: "desktopReportState" }]);
-	deliver(JSON.stringify({ event: "desktopState", state: { ...state, presenting: true } }));
+	assert.deepEqual(sent, [{ action: "desktopReportState", reqId: 1 }]);
+	// the page answers twice (it gets every message twice): the second answer is not the next request's
+	deliver(JSON.stringify({ event: "desktopState", reqId: 1, state: { ...state, presenting: true } }));
 	assert.equal((await asked).presenting, true);
-	assert.equal(await client.editorLookState(30), undefined);
+	const next = client.editorLookState(40);
+	deliver(JSON.stringify({ event: "desktopState", reqId: 1, state: { ...state, presenting: true } }));
+	assert.equal(await next, undefined);
+
+	// a page that loads again starts without tools until they report themselves
+	deliver(JSON.stringify({ event: "pluginLoaded", pluginId: "ai" }));
+	await new Promise((r) => setTimeout(r, 0));
+	assert.equal(client.editorToolsLoaded, false);
+	deliver(JSON.stringify({ event: "desktopState", state, loaded: true }));
+	await new Promise((r) => setTimeout(r, 0));
+	assert.equal(client.editorToolsLoaded, true);
 
 	client.setEditorPrefs({ iconStyle: "real", toolbar: "left", matrix: "off" });
 	client.setPresenting(true);
