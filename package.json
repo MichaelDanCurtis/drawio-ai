@@ -150,6 +150,39 @@
 				"priority": "option"
 			}
 		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "drawio-ai",
+					"title": "Draw.AI",
+					"icon": "media/drawio-ai.svg"
+				}
+			]
+		},
+		"views": {
+			"drawio-ai": [
+				{
+					"id": "drawio-ai.start",
+					"name": "Start"
+				},
+				{
+					"id": "drawio-ai.diagrams",
+					"name": "Diagrams"
+				}
+			]
+		},
+		"viewsWelcome": [
+			{
+				"view": "drawio-ai.diagrams",
+				"contents": "Open a folder to list its diagrams.\n[Open Folder](command:workbench.action.files.openFolder)",
+				"when": "workbenchState == empty"
+			},
+			{
+				"view": "drawio-ai.diagrams",
+				"contents": "No diagrams in this workspace yet.\n[New Diagram](command:drawio-ai.newDiagram)\n[Import from Another Tool](command:drawio-ai.importDiagram)",
+				"when": "workbenchState != empty"
+			}
+		],
 		"chatParticipants": [
 			{
 				"id": "drawio-ai.participant",
@@ -1155,7 +1188,8 @@
 			{
 				"command": "drawio-ai.newDiagram",
 				"title": "New Draw.io Diagram",
-				"category": "Draw.io"
+				"category": "Draw.io",
+				"icon": "$(add)"
 			},
 			{
 				"command": "drawio-ai.linkFileWithSelectedNode",
@@ -1206,6 +1240,28 @@
 				"command": "drawio-ai.inline.convertPlantUml",
 				"title": "Convert PlantUML to Draw.io",
 				"category": "Draw.io"
+			},
+			{
+				"command": "drawio-ai.sidebar.refresh",
+				"title": "Refresh Diagrams",
+				"category": "Draw.AI",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "drawio-ai.sidebar.open",
+				"title": "Open in Draw.AI",
+				"category": "Draw.AI"
+			},
+			{
+				"command": "drawio-ai.sidebar.openToSide",
+				"title": "Open to the Side",
+				"category": "Draw.AI",
+				"icon": "$(split-horizontal)"
+			},
+			{
+				"command": "drawio-ai.sidebar.reveal",
+				"title": "Reveal in Explorer View",
+				"category": "Draw.AI"
 			}
 		],
 		"markdown.markdownItPlugins": true,
@@ -1754,6 +1810,52 @@
 				{
 					"when": "drawio-ai.reviewPending",
 					"command": "drawio-ai.rejectChanges"
+				},
+				{
+					"command": "drawio-ai.sidebar.open",
+					"when": "false"
+				},
+				{
+					"command": "drawio-ai.sidebar.openToSide",
+					"when": "false"
+				},
+				{
+					"command": "drawio-ai.sidebar.reveal",
+					"when": "false"
+				}
+			],
+			"view/title": [
+				{
+					"command": "drawio-ai.newDiagram",
+					"when": "view == drawio-ai.diagrams",
+					"group": "navigation@1"
+				},
+				{
+					"command": "drawio-ai.sidebar.refresh",
+					"when": "view == drawio-ai.diagrams",
+					"group": "navigation@2"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "drawio-ai.sidebar.openToSide",
+					"when": "view == drawio-ai.diagrams && viewItem == drawioDiagram",
+					"group": "inline"
+				},
+				{
+					"command": "drawio-ai.sidebar.open",
+					"when": "view == drawio-ai.diagrams && viewItem == drawioDiagram",
+					"group": "1_open@1"
+				},
+				{
+					"command": "drawio-ai.sidebar.openToSide",
+					"when": "view == drawio-ai.diagrams && viewItem == drawioDiagram",
+					"group": "1_open@2"
+				},
+				{
+					"command": "drawio-ai.sidebar.reveal",
+					"when": "view == drawio-ai.diagrams && viewItem == drawioDiagram",
+					"group": "2_reveal"
 				}
 			]
 		},

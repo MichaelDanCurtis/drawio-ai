@@ -84,6 +84,19 @@ async function runSteps() {
 		await vscode.commands.executeCommand("drawio-ai.openChat");
 	});
 
+	await step("the Draw.AI sidebar: its view opens, and a diagram opens from it in Draw.AI", async () => {
+		const commands = await vscode.commands.getCommands(true);
+		for (const c of ["workbench.view.extension.drawio-ai", "drawio-ai.sidebar.open", "drawio-ai.sidebar.openToSide", "drawio-ai.sidebar.refresh", "drawio-ai.sidebar.reveal"]) {
+			assert.ok(commands.includes(c), `command ${c} missing`);
+		}
+		await vscode.commands.executeCommand("workbench.view.extension.drawio-ai");
+		await vscode.commands.executeCommand("drawio-ai.sidebar.refresh");
+		await vscode.commands.executeCommand("drawio-ai.sidebar.open", file);
+		const tab = await waitFor(() => vscode.window.tabGroups.all.flatMap((g) => g.tabs).find((t) => t.input instanceof vscode.TabInputCustom && t.input.uri.toString() === file.toString()), "the diagram to open from the sidebar");
+		assert.equal(tab.input.viewType, "drawio-ai-text");
+		await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+	});
+
 	await step("tools report a missing diagram instead of failing", async () => {
 		const text = await invoke("drawio_get_diagram", {});
 		assert.match(text, /No draw.io diagram is open/);
