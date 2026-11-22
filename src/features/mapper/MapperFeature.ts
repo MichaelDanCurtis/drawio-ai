@@ -546,7 +546,7 @@ export class MapperFeature {
 	public readonly tools: ExtraTools = {
 		specs: () => MAPPER_TOOL_SCHEMAS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
 		has: (name) => MAPPER_TOOL_NAMES.has(name),
-		invoke: (name, input, options) => this.callTool(name, input, { confirm: !!options.scoped }),
+		invoke: (name, input, options) => this.callTool(name, input, { confirm: !!options.scoped, signal: options.signal }),
 	};
 
 	private registerLanguageModelTools(): vscode.Disposable[] {

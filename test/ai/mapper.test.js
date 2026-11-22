@@ -306,6 +306,22 @@ test("the Mapper stays read-only in the extension, and git never runs a reposito
 	await assert.rejects(ctx.exec("git", ["commit", "-m", "x"]), /Refused: .*not a read-only command/);
 });
 
+test("a signal given to a tool call stops the map it started", async () => {
+	const { callMapperTool } = mapper("mcpTools.ts");
+	const seen = [];
+	// (the service checks the signal after collecting and before drawing: here it only has to arrive)
+	const service = {
+		run: async (recipe, input, opts) => (seen.push(["run", opts.signal]), Promise.reject(new Error("Cancelled"))),
+		record: () => ({ id: "m1" }),
+		refresh: async (record, secrets, opts) => (seen.push(["refresh", opts.signal]), Promise.reject(new Error("Cancelled"))),
+	};
+	const ac = new AbortController();
+	const run = await callMapperTool(service, "mapper_run", { recipe: "software.connectivity", input: { folder: "/x" } }, { signal: ac.signal });
+	const again = await callMapperTool(service, "mapper_refresh", {}, { signal: ac.signal });
+	assert.deepEqual([run.isError, run.text, again.isError], [true, "Cancelled", true]);
+	assert.deepEqual(seen, [["run", ac.signal], ["refresh", ac.signal]]);
+});
+
 test("only a commit hash from a map's record reaches git's arguments", async () => {
 	const { MapperService } = mapper("service.ts");
 	const calls = [];
@@ -371,7 +387,7 @@ test("before the agent starts a map the user is asked, with the fields' names an
 	// VS Code's chat asks through the tool's confirmation; `@drawio`, which has none, through a dialog; MCP agents ask their own user
 	const feature = read("src/features/mapper/MapperFeature.ts");
 	assert.match(feature, /confirmationMessages: ask \? \{/);
-	assert.match(feature, /invoke: \(name, input, options\) => this\.callTool\(name, input, \{ confirm: !!options\.scoped \}\)/);
+	assert.match(feature, /invoke: \(name, input, options\) => this\.callTool\(name, input, \{ confirm: !!options\.scoped, signal: options\.signal \}\)/);
 	assert.match(read("src/features/ai/DiagramToolbox.ts"), /if \(this\.extra\?\.has\(name\)\) \{\s*return this\.extra\.invoke\(name, rawInput, options\);/);
 	assert.match(read("src/Extension.ts"), /this\.aiFeature\.extraTools = this\.mapperFeature\.tools;/);
 });

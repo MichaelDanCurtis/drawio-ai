@@ -34,6 +34,8 @@ export interface InvokeOptions {
 	onTarget?(editor: DrawioEditor): void;
 	/** The caller's conversation belongs to the focused diagram (chat panel, @drawio): ignore `file`, no workspace tools. */
 	scoped?: boolean;
+	/** Aborted when the caller gives up (Stop in the chat): a tool that takes long, like a map being collected, stops. */
+	signal?: AbortSignal;
 }
 
 const MAX_XML_CHARS = 80_000;
