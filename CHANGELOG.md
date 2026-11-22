@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- The Draw.AI icon is back in the activity bar, with two views:
+  - **Start**: New Diagram, Open Draw.AI in Chat, Diagram from Code…, Diagram from Sketch…, Import from Another Tool…, Export to PDF…, Design Templates… and Connect Claude Code / Codex…
+  - **Diagrams**: every diagram in the workspace (`.drawio`, `.dio`, `.drawio.svg`, `.drawio.png`), kept up to date as files are added or removed. A diagram opens in Draw.AI whatever the default editor for its type is; **Open to the Side** and **Reveal in Explorer View** are on each row
+
 ## [0.3.0]
 
 ### Changed

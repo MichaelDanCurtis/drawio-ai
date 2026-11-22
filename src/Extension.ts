@@ -11,6 +11,7 @@ import { AiFeature } from "./features/ai/AiFeature";
 import { DrawioClientFactory } from "./DrawioClient";
 import { registerFailableCommand } from "./utils/registerFailableCommand";
 import { registerImportCommands } from "./features/importDiagram";
+import { SidebarFeature } from "./features/SidebarFeature";
 
 export class Extension {
 	public readonly dispose = Disposable.fn();
@@ -40,6 +41,7 @@ export class Extension {
 	private readonly aiFeature = this.dispose.track(
 		new AiFeature(this.context, this.editorService)
 	);
+	private readonly sidebarFeature = this.dispose.track(new SidebarFeature());
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		for (const d of registerImportCommands(
