@@ -61,7 +61,11 @@ export class StaticServer {
 			.replace("$$simpleLabels$$", "false")
 			.replace("$$chrome$$", JSON.stringify("1"))
 			.replace("$$customPluginPaths$$", JSON.stringify([`${base}/ui/icons.js`, `${base}/ui/brandmark.js`, `${base}/ui/tips.js`, `${base}/plugin/theme.js`, `${base}/plugin/drawio-plugin.js`, `${base}/plugin/desktop-menu.js`, `${base}/plugin/desktop-toolbar.js`, `${base}/plugin/desktop-menubar.js`, `${base}/plugin/presentation.js`]))
-			.replace("$$localStorage$$", JSON.stringify(o.localStorage))
+			// draw.io keeps the Scratchpad (and other libraries) in the page's IndexedDB when there is
+			// one. The app's pages get a new address (port) on every launch, so that database would be
+			// empty each time: without it draw.io falls back to localStorage, which the app keeps in
+			// its data folder. (The expression runs first thing in the page, before draw.io loads.)
+			.replace("$$localStorage$$", `(Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true }), ${JSON.stringify(o.localStorage)})`)
 			.replace("$$additionalCode$$", "[]");
 	}
 

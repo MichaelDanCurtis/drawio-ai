@@ -6,6 +6,7 @@ import { DiagramWindow } from "./diagramWindow";
 import { exportDiagram } from "./exporter";
 import { diagramContent } from "./xmlContent";
 import { settings, updateSettings } from "./settings";
+import { drawioLocalStorage } from "./diagramWindow";
 import { SettingsWindow } from "./settingsWindow";
 import { Menu, screen } from "electron";
 import type { StaticServer } from "./staticServer";
@@ -576,6 +577,21 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	})()`));
 	await save("toolbar-buttons.png", ed, await top());
 
+	// the Scratchpad: a shape put on it is kept by the app, so it is there after a restart
+	const scratch0 = await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`);
+	await ed.executeJavaScript(`window.omnidrawShapes.scratchpad("kept shape")`);
+	await pause(1500);
+	const scratch1 = await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`);
+	const kept = drawioLocalStorage()[".scratchpad"] ?? "";
+	// a window opened afterwards (as after a restart: a fresh page given what the app kept) has it too
+	const second = await DiagramWindow.open(server);
+	await second.whenLoaded();
+	await pause(1200);
+	const scratch2 = await second.editorView.webContents.executeJavaScript(`window.omnidrawShapes.scratchpad()`);
+	(second as any).win?.destroy?.();
+	await pause(300);
+	log("scratchpad", { before: scratch0, after: scratch1, keptByApp: kept.includes("kept shape") || /mxlibrary/.test(kept), keptBytes: kept.length, inNewWindow: scratch2 });
+
 	// the Format panel has the chat's live dot field in its top right corner
 	await pause(600);
 	log("formatDots", await ed.executeJavaScript(`(() => {
@@ -766,6 +782,37 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	log("collection", { title: col.title, count: colCount, file: fs.existsSync(galleries().collectionFile(col.id)) });
 	await pause(600);
 	await shot("workshop-galleries-light.png", wc);
+
+	// draw.io's own shape sets are chosen here too (its "More Shapes" dialog is gone)
+	const sets = await until("draw.io's shape sets in the Workshop", async () => {
+		const r = await wc.executeJavaScript(`({ groups: document.querySelectorAll("#shapeSets details.sets").length, rows: document.querySelectorAll("#shapeSets .set").length, on: document.querySelectorAll("#shapeSets .set input:checked").length })`);
+		return r.rows > 20 ? r : undefined;
+	});
+	const paletteShown = (title: string) => ed.executeJavaScript(`(() => { const t = Array.from(document.querySelectorAll(".geSidebarContainer .geTitle")).find((x) => x.textContent.trim() === ${JSON.stringify(title)}); return !!t && getComputedStyle(t).display !== "none" && t.offsetHeight > 0; })()`);
+	const click = (id: string) => wc.executeJavaScript(`(() => { const i = document.querySelector('#shapeSets .set[data-set="${id}"] input'); if (!i) return false; i.closest("details").open = true; i.click(); return i.checked; })()`);
+	const umlBefore = await paletteShown("UML");
+	const umlSwitch = await click("uml");
+	const umlOn = await until("the UML palette", async () => ((await paletteShown("UML")) ? true : undefined));
+	const remembered = () => String(drawioLocalStorage()[".drawio-config@undefined"] ?? Object.entries(drawioLocalStorage()).find(([k]) => k.startsWith(".drawio-config"))?.[1] ?? "");
+	await pause(700);
+	const keptOn = /"libraries":"[^"]*\buml\b/.test(remembered());
+	await shot("workshop-sets-light.png", wc);
+	await click("uml");
+	await until("the UML palette to go", async () => ((await paletteShown("UML")) ? undefined : true));
+	// the Scratchpad is one of the switches
+	const padBefore = (await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`)).open;
+	await click(".scratchpad");
+	const padOff = await until("the Scratchpad to close", async () => ((await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`)).open ? undefined : true));
+	await click(".scratchpad");
+	const padBack = await until("the Scratchpad to open again", async () => ((await ed.executeJavaScript(`window.omnidrawShapes.scratchpad()`)).open ? true : undefined));
+	// the galleries' palettes are still there after draw.io's sets changed
+	const stillThere: string[] = await ed.executeJavaScript("window.omnidrawShapes.palettes()");
+	// "+ More Shapes" in the editor opens the Workshop at these switches, not draw.io's dialog
+	ww.hide();
+	await ed.executeJavaScript(`(() => { const b = Array.from(document.querySelectorAll(".geSidebarFooter button, .geSidebarFooter a, .geSidebarContainer button")).find((x) => /More Shapes/.test(x.textContent)); if (b) b.click(); return !!b; })()`).then((found) => log("moreShapesButton", found));
+	const reopened = await until("the Workshop from More Shapes", async () => (ww.isVisible() ? true : undefined)).catch(() => false);
+	const drawioDialog = await ed.executeJavaScript(`!!document.querySelector(".geDialog")`);
+	log("shapeSets", { listed: sets, uml: { before: umlBefore, switchedOn: umlSwitch, paletteShown: umlOn, remembered: keptOn }, scratchpad: { before: padBefore, off: padOff, back: padBack }, galleriesKept: ["theSVG", "Tech logos", "UI icons"].every((t) => stillThere.some((x) => x.startsWith(t))), moreShapesOpensWorkshop: reopened, drawioDialog });
 
 	// dark
 	process.env.DRAWAI_THEME = "dark";

@@ -176,6 +176,13 @@ an icon) come next.
   to add it to the diagram you used last (selected, in the middle of the view).
 - **In the editor:** each gallery is a palette in the shapes sidebar (a first page; the rest
   is found by search), and draw.io's own sidebar search finds gallery shapes too.
+- **draw.io's own shape sets** (General, UML, AWS, BPMN… and the Scratchpad) are switches in
+  the same list, under "Built into draw.io". The editor's **+ More Shapes** button opens the
+  Workshop there: draw.io's separate "More Shapes" dialog is not used, so there is one place
+  for every kind of shape. A switch applies to every open diagram and is remembered.
+- **The Scratchpad** (draw.io's shelf for shapes you drag onto it) is kept in the app's data
+  folder, so it is still there after a restart. draw.io would keep it in the page's own
+  database, which is new on every launch because the editor's local address changes.
 - **Downloads** happen in the app's main process, only from jsDelivr (npm and GitHub's CDN)
   and, for theSVG's licence data, raw.githubusercontent.com. Every redirect is checked
   against those hosts and every answer is size-capped (`src/main/workshop/fetch.ts`).

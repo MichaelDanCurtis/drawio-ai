@@ -146,3 +146,17 @@ test("the editor reads style names with digits, and a remembered mode is never a
 	assert.match(chat, /preferred\.startsWith\("mode:"\)/, "a stored mode is skipped when a session starts");
 	assert.match(chat, /kind === "opt" \? this\.modelList/, "only model picks are remembered");
 });
+
+test("draw.io's shape sets from the editor are passed on as plain short values only", () => {
+	const { cleanShapeSets } = require("../src/main/shapeSets");
+	const out = cleanShapeSets([
+		{ title: "Standard", entries: [{ id: "general", title: "General", on: true }, { id: "uml", title: "UML", on: 0 }, { id: "bad id; rm", title: "x", on: true }, null] },
+		{ title: "x".repeat(500), entries: [{ id: ".scratchpad", title: 7, on: "yes" }] },
+		{ title: "Empty", entries: [] },
+		"junk",
+	]);
+	assert.deepEqual(out[0], { title: "Standard", entries: [{ id: "general", title: "General", on: true }, { id: "uml", title: "UML", on: false }] });
+	assert.equal(out[1].title.length, 80);
+	assert.deepEqual(out[1].entries, [{ id: ".scratchpad", title: ".scratchpad", on: true }]);
+	assert.equal(out.length, 2, "groups without usable entries are left out");
+});

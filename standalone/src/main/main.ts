@@ -357,7 +357,10 @@ app.whenReady().then(async () => {
 			const w = DiagramWindow.focused();
 			return w ? w.fileName() ?? "the untitled diagram" : undefined;
 		},
+		shapeSets: () => (DiagramWindow.all.size ? DiagramWindow.shapeSets : undefined),
+		setShapeSet: (id, on) => DiagramWindow.setShapeSet(id, on),
 	};
+	DiagramWindow.onShapeSets = () => WorkshopWindow.refresh();
 	desktopMcp = new DesktopMcp({
 		windows: () => [...DiagramWindow.all],
 		focused: () => DiagramWindow.focused(),

@@ -284,6 +284,50 @@
 			}).catch(function () { /* the panel is complete without it */ });
 		})();
 
+		// ----- draw.io's own shape sets (what its "More Shapes" dialog chooses) live in the Shape Workshop -----
+		function shapeSets() {
+			var groups = [];
+			if (typeof ui.isScratchpadEnabled !== "function" || ui.isScratchpadEnabled()) {
+				groups.push({ title: "Yours", entries: [{ id: ".scratchpad", title: mxResources.get("scratchpad") || "Scratchpad", on: ui.scratchpad != null }] });
+			}
+			(ui.sidebar.entries || []).forEach(function (g) {
+				var entries = (g.entries || []).filter(function (e) { return e.id !== "search" && e.id !== ".scratchpad"; }).map(function (e) {
+					return { id: e.id, title: e.title, on: !!ui.sidebar.isEntryVisible(e.id) };
+				});
+				if (entries.length) groups.push({ title: g.title, entries: entries });
+			});
+			return groups;
+		}
+		var setsTimer = 0;
+		function postShapeSets() {
+			clearTimeout(setsTimer);
+			setsTimer = setTimeout(function () {
+				window.VsCodeApi.postMessage(JSON.stringify({ event: "desktopShapeSets", groups: shapeSets() }));
+			}, 150);
+		}
+		/** Shows or hides one of draw.io's shape sets, and remembers it (as "More Shapes" did with "Remember this setting"). */
+		function setShapeSet(id, on) {
+			if (id === ".scratchpad") {
+				if ((ui.scratchpad != null) !== !!on) ui.toggleScratchpad();
+			} else {
+				var ids = [];
+				(ui.sidebar.entries || []).forEach(function (g) {
+					(g.entries || []).forEach(function (e) {
+						if (e.id === "search" || e.id === ".scratchpad") return;
+						if (e.id === id ? on : ui.sidebar.isEntryVisible(e.id)) ids.push(e.id);
+					});
+				});
+				ui.sidebar.showEntries(ids.join(";"), true, true);
+			}
+			postShapeSets();
+			setTimeout(postShapeSets, 900); // (the Scratchpad opens a moment later)
+		}
+		// "+ More Shapes" under the sidebar opens the Workshop: one place for every kind of shape
+		var moreShapes = ui.actions.get("shapes");
+		if (moreShapes) moreShapes.funct = function () { send("shapeSets"); };
+		postShapeSets();
+		setTimeout(postShapeSets, 1500);
+
 		// ----- a shape from the Workshop: in the middle of the view, selected -----
 		function insertShape(shape) {
 			var graph = ui.editor.graph;
@@ -361,6 +405,23 @@
 			palettes: function () {
 				return Array.from(document.querySelectorAll(".geSidebarContainer .geTitle")).map(function (t) { return t.textContent.trim(); });
 			},
+			sets: shapeSets,
+			/** The Scratchpad: add a new shape to it the way its "+" does, and say what it holds and where it is kept. */
+			scratchpad: function (add) {
+				var elts = ui.sidebar.palettes["L.scratchpad"] || [];
+				if (add && elts[0]) {
+					var graph = ui.editor.graph;
+					graph.setSelectionCell(graph.insertVertex(graph.getDefaultParent(), null, add, 20, 20, 90, 40));
+					var want = mxResources.get("add");
+					var btn = Array.from(elts[0].querySelectorAll("img")).find(function (i) { return i.getAttribute("title") === want || i.getAttribute("data-tip") === want; });
+					if (btn) btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+				}
+				return {
+					open: ui.scratchpad != null,
+					database: ui.database != null,
+					items: elts[1] ? elts[1].querySelectorAll("a.geItem").length : 0,
+				};
+			},
 		};
 
 		// ----- the user's shape folders and libraries -----
@@ -411,7 +472,7 @@
 		window.addEventListener("message", function (evt) {
 			var data = evt.data;
 			if (typeof data === "string") {
-				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0) return;
+				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0) return;
 				try { data = JSON.parse(data); } catch (e) { return; }
 			}
 			if (!data) return;
@@ -435,6 +496,8 @@
 				if (data.seq && data.seq <= lastInsertSeq) return;
 				lastInsertSeq = data.seq || lastInsertSeq;
 				try { insertShape(data.shape); } catch (e) { ui.handleError(e); }
+			} else if (data.action === "desktopSetShapeSet" && typeof data.id === "string") {
+				try { setShapeSet(data.id, !!data.on); } catch (e) { console.warn("OmniDraw: could not switch the shape set", e); }
 			} else if (data.action === "desktopGalleryResults") {
 				var waiting = pendingSearches[data.reqId];
 				if (waiting) { delete pendingSearches[data.reqId]; waiting(data.shapes || []); }

@@ -1,3 +1,4 @@
+import { cleanShapeSets, type ShapeSetGroup } from "./shapeSets";
 import { app, BaseWindow, dialog, ipcMain, nativeTheme, screen, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
@@ -31,7 +32,7 @@ let nextId = 1;
 const localStorageFile = () => path.join(app.getPath("userData"), "drawio-local-storage.json");
 let localStorage: Record<string, string> | undefined;
 let saveTimer: NodeJS.Timeout | undefined;
-function drawioLocalStorage(): Record<string, string> {
+export function drawioLocalStorage(): Record<string, string> {
 	if (!localStorage) {
 		try {
 			localStorage = JSON.parse(fs.readFileSync(localStorageFile(), "utf8"));
@@ -45,6 +46,14 @@ function drawioLocalStorage(): Record<string, string> {
 /** One diagram: a window with the draw.io editor on the left and the agent chat on the right. */
 export class DiagramWindow {
 	public static readonly all = new Set<DiagramWindow>();
+	/** draw.io's own shape sets and which are shown, as the editor used last reported them (for the Shape Workshop). */
+	public static shapeSets: ShapeSetGroup[] | undefined;
+	public static onShapeSets: (() => void) | undefined;
+
+	/** Shows or hides one of draw.io's shape sets in every open diagram (they share draw.io's settings). */
+	public static setShapeSet(id: string, on: boolean): void {
+		for (const w of DiagramWindow.all) w.sendToEditor({ action: "desktopSetShapeSet", id, on });
+	}
 	private static byEditor = new Map<number, DiagramWindow>();
 	/** The diagram window used last, even while another app (a terminal) has focus. */
 	private static lastFocused: DiagramWindow | undefined;
@@ -482,6 +491,9 @@ export class DiagramWindow {
 				localStorage = m.newLocalStorage;
 				clearTimeout(saveTimer);
 				saveTimer = setTimeout(() => fs.writeFile(localStorageFile(), JSON.stringify(localStorage), () => undefined), 500);
+			} else if (m?.event === "desktopShapeSets" && Array.isArray(m.groups)) {
+				DiagramWindow.shapeSets = cleanShapeSets(m.groups);
+				DiagramWindow.onShapeSets?.();
 			} else if (m?.event === "desktopGallerySearch" && typeof m.query === "string") {
 				// draw.io's own search asks for gallery shapes too
 				const query = m.query.slice(0, 200), reqId = m.reqId;
@@ -517,6 +529,7 @@ export class DiagramWindow {
 			case "toggleChat": return this.toggleChat();
 			case "settings": return DiagramWindow.appCommands.settings();
 			case "workshop": return DiagramWindow.appCommands.workshop?.();
+			case "shapeSets": return DiagramWindow.appCommands.workshop?.("sets");
 		}
 	}
 
