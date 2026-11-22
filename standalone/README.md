@@ -228,15 +228,16 @@ findings count, the current tour step). Depth comes from dots: a live dot field 
 the chat and Mapper heads that leans away from the pointer and ripples when you switch
 agents or start a new chat, and a 3D dot object in the empty chat that keeps changing
 shape: it starts as a square of stacked layers, then every dot travels to its place in a
-human bust, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
+human head (a fine mesh of some 3,700 dots, lit like a 3D scan), a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a heart and
 more (`ui/dot-object.js`). When you start to type it shoots to the top right corner of
 the chat and stays there, small, during the conversation; in a new, empty chat it comes
 back. The dots near the pointer brighten and lean, in the object, in every head's dot
 field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel.
 
-- **The matrix:** the head's dot field is also laid over every surface (`ui/matrix.js`): the
-  same dots, 7px grid and grey over the whole of each window (the chat, Settings, the Mapper,
-  the Workshop, and draw.io's toolbar, sidebars and page tabs), never over the diagram. Dots
+- **The matrix:** the head's dot field also lies behind every surface (`ui/matrix.js`): the
+  same dots, 7px grid and grey across the whole of each window (the chat, Settings, the Mapper,
+  the Workshop, and draw.io's toolbar, sidebars and page tabs), never over the diagram. It is
+  a background: text, buttons, tabs, fields and cards are in front of it. Dots
   near the pointer brighten and lean away, as in the field. It is drawn once and only the patch
   around the pointer is drawn again, so it costs nothing while the mouse is still. The heads'
   live fields sit on the same grid, so their dots fall on the matrix's. Settings → Appearance →

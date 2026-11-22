@@ -1,8 +1,11 @@
 /**
- * OmniDraw: the matrix. The dot field behind the chat's head (dots.js), on every surface:
- * one layer of the same dots over the whole window, on the same 7px grid, in the same grey,
+ * OmniDraw: the matrix. The dot field behind the chat's head (dots.js), behind every surface:
+ * one layer of the same dots across the whole window, on the same 7px grid, in the same grey,
  * with the same slow pattern of lighter and darker dots. Dots near the pointer brighten and
  * lean away, exactly like the field's.
+ *
+ * It is a background: it lies under the page's content (z-index -1), so text, buttons, tabs,
+ * fields and cards are in front of it and anything with a background of its own covers it.
  *
  * Unlike the live field it does not drift: it is drawn once, and only the patch around the
  * pointer is drawn again as the pointer moves, so it costs nothing while the mouse is still,
@@ -36,7 +39,7 @@ export function mountMatrix(opts = {}) {
   layer.setAttribute("aria-hidden", "true");
   const canvas = doc.createElement("canvas");
   layer.appendChild(canvas);
-  Object.assign(layer.style, { position: "fixed", left: "0", top: "0", width: "100%", height: "100%", pointerEvents: "none", zIndex: String(opts.zIndex ?? 2147482000) });
+  Object.assign(layer.style, { position: "fixed", left: "0", top: "0", width: "100%", height: "100%", pointerEvents: "none", zIndex: String(opts.zIndex ?? -1) });
   Object.assign(canvas.style, { display: "block", width: "100%", height: "100%" });
   doc.body.appendChild(layer);
   let ctx = null;

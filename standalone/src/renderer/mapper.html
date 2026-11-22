@@ -25,7 +25,7 @@
 	main { flex: 1; display: grid; grid-template-columns: 196px 236px 1fr; min-height: 0; }
 	nav, #recipes { border-right: 1px solid var(--border); overflow: auto; padding: 12px 10px; }
 	nav { display: flex; flex-direction: column; gap: 2px; }
-	#recipes { background: var(--surface-2); }
+	#recipes { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
 	.cat { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 1px solid transparent; background: none; color: var(--ink-2); font: inherit; padding: 8px 10px; border-radius: var(--radius); cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
 	.cat:hover { background: var(--surface-3); color: var(--ink); }
 	.cat.active { background: var(--surface); border-color: var(--border); color: var(--ink); }

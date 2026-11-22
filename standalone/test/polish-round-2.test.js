@@ -231,3 +231,23 @@ test("the matrix and the head's field share one dot grid", async () => {
 	assert.match(matrix, /const GRID = 7;/);
 	assert.match(matrix, /pointerEvents: "none"/, "it never takes a click");
 });
+
+test("the dot object: shapes with fewer dots keep their look, the head brings its own light", async () => {
+	const m = await import("../src/renderer/ui/dot-object.js");
+	const head = m.bust();
+	assert.ok(head.length > 2500, "the head is a fine mesh");
+	assert.ok(head.every((p) => p.length === 7 && Math.abs(Math.hypot(p[3], p[4], p[5]) - 1) < 0.01), "every dot of it knows which way its surface faces");
+	// a sparse shape fitted to the head's number of dots shows only its own dots
+	const planes = [];
+	const flat = m.planes();
+	for (let i = 0; i < flat.length; i += 3) planes.push([flat[i], flat[i + 1], flat[i + 2]]);
+	const fit = m.fitShape(planes, head.length);
+	const shown = fit.weights.reduce((a, w) => a + w, 0);
+	assert.equal(shown, planes.length, "the spare dots are hidden");
+	assert.ok(fit.normals.every((v) => v === 0), "and it is not lit");
+	const fitHead = m.fitShape(head, head.length);
+	assert.ok(fitHead.weights.every((w) => w === 1));
+	assert.ok(fitHead.normals.some((v) => v !== 0));
+	const matrix = fs.readFileSync(path.join(__dirname, "../src/renderer/ui/matrix.js"), "utf8");
+	assert.match(matrix, /zIndex: String\(opts\.zIndex \?\? -1\)/, "the matrix is a background layer");
+});

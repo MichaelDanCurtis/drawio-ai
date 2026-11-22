@@ -243,6 +243,12 @@
 			// while the chat is open the same symbol sits in the chat's own corner (next to this spot) and closes it
 			".drawai-chat-toggle[data-chat='open'] { display: none !important; }",
 			".drawai-coloured { filter: none !important; }",
+			// The matrix is a layer behind the editor's chrome: the bars and panels let it through, and
+			// everything in them (buttons, tabs, fields, shapes) is in front of it. Controls with an
+			// outline get the panel's colour, so no dots show inside them.
+			":root:not([data-drawai-matrix='off']) .geToolbarContainer, :root:not([data-drawai-matrix='off']) .geToolbar, :root:not([data-drawai-matrix='off']) .geSidebarContainer, :root:not([data-drawai-matrix='off']) .geSidebar, :root:not([data-drawai-matrix='off']) .geTabContainer { background-color: transparent !important; }",
+			".geSidebarFooter, .geSidebarFooter .geBtn.gePrimaryBtn { background-color: light-dark(#f3f2ef, #000000) !important; }",
+			".geTabContainer .geTab, .geTabContainer .geControlTab { background-color: light-dark(#f3f2ef, #000000); }",
 			".drawai-dots-host { position: relative; isolation: isolate; }",
 			".drawai-backdrop { position: absolute; top: 0; left: 0; right: 0; height: 150px; z-index: -1; pointer-events: none; -webkit-mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); -webkit-mask-composite: source-in; mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%); mask-composite: intersect; }",
 			".drawai-backdrop canvas { display: block; width: 100%; height: 100%; }",
@@ -290,7 +296,6 @@
 			var diagram = ui.diagramContainer;
 			matrixLayer = m.mountMatrix({
 				mode: matrixMode,
-				zIndex: 9000, // under draw.io's menus and dialogs
 				holes: function () { return diagram && diagram.offsetWidth ? [diagram.getBoundingClientRect()] : []; },
 				colour: function (mode) {
 					var dark = typeof Editor.isDarkMode === "function" && Editor.isDarkMode();
