@@ -17,7 +17,7 @@
 		trashImage: "trash", toFrontImage: "toFront", toBackImage: "toBack", fillColorImage: "fillColor", strokeColorImage: "strokeColor",
 		shadowImage: "shadow", plusImage: "plus", shapesImage: "shapes", tableImage: "table", freehandImage: "freehand",
 		sparklesImage: "sparkle", layoutImage: "layout", fullscreenImage: "fullscreen", fullscreenExitImage: "fullscreenExit",
-		rightPanelOpenImage: "format", rightPanelCloseImage: "format", layersImage: "layers", tagsImage: "tags", outlineImage: "outline",
+		rightPanelOpenImage: "formatOpen", rightPanelCloseImage: "format", layersImage: "layers", tagsImage: "tags", outlineImage: "outline",
 	};
 	var ORIGINAL = {};
 	var current = {};
@@ -77,7 +77,9 @@
 			panels.funct = function (menu, parent) {
 				ui.menus.addMenuItems(menu, ["toggleShapes", "ruler", "-", "fullscreen"], parent);
 			};
-			var oldBtn = ui.toolbar && ui.toolbar.container && ui.toolbar.container.firstElementChild;
+			var oldBtn = null;
+			var candidates = ui.toolbar && ui.toolbar.container ? ui.toolbar.container.querySelectorAll("a.geButton") : [];
+			for (var c = 0; c < candidates.length && !oldBtn; c++) if (candidates[c].style.backgroundImage.indexOf(current.dockRightImage) >= 0) oldBtn = candidates[c];
 			if (oldBtn && typeof ui.createMenuElement === "function") {
 				var btn = ui.createMenuElement("", panels.funct);
 				ui.menus.menuCreated(panels, btn, "geButton");

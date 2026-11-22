@@ -100,10 +100,32 @@ function merge(user: any): Settings {
 		agents: { ...obj(user.agents) },
 		appearance,
 		chat,
-		models: { ...obj(user.models) },
-		modelCatalog: { ...obj(user.modelCatalog) },
+		models: cleanModels(obj(user.models)),
+		modelCatalog: cleanCatalog(obj(user.modelCatalog)),
 		shapes: { locations },
 	};
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+
+function cleanModels(m: Record<string, any>): Settings["models"] {
+	const out: Record<string, { hidden?: string[]; preferred?: string }> = {};
+	for (const [agent, v] of Object.entries(m)) {
+		if (!v || typeof v !== "object") continue;
+		out[agent] = { hidden: strings(v.hidden), ...(typeof v.preferred === "string" && v.preferred ? { preferred: v.preferred } : {}) };
+	}
+	return out as Settings["models"];
+}
+
+function cleanCatalog(c: Record<string, any>): Settings["modelCatalog"] {
+	const out: Record<string, KnownModel[]> = {};
+	for (const [agent, list] of Object.entries(c)) {
+		if (!Array.isArray(list)) continue;
+		out[agent] = list
+			.filter((m) => m && typeof m.value === "string" && typeof m.name === "string")
+			.map((m) => ({ value: m.value, name: m.name, ...(typeof m.description === "string" ? { description: m.description } : {}) }));
+	}
+	return out as Settings["modelCatalog"];
 }
 
 export function settings(): Settings {
@@ -122,10 +144,24 @@ export function settings(): Settings {
 /** Saves top-level keys (nested objects are replaced whole) and tells the open windows. */
 export function updateSettings(patch: Partial<Settings>): void {
 	let onDisk: Record<string, unknown> = {};
+	let text: string | undefined;
 	try {
-		onDisk = JSON.parse(fs.readFileSync(settingsPath(), "utf8"));
+		text = fs.readFileSync(settingsPath(), "utf8");
 	} catch {
-		// start a new file
+		// no file yet: start one
+	}
+	if (text !== undefined) {
+		try {
+			onDisk = JSON.parse(text);
+		} catch {
+			// A file being edited by hand that does not parse: keep a copy, and build on what was loaded.
+			try {
+				fs.writeFileSync(settingsPath() + ".broken", text);
+			} catch {
+				// not important
+			}
+			onDisk = { ...(cached ?? {}) };
+		}
 	}
 	const next = { ...onDisk, ...patch };
 	cached = merge(next);

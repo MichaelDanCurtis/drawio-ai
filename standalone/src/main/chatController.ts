@@ -62,6 +62,8 @@ export interface ChatHost {
 
 const MAX_IMAGES = 4;
 let versionCounter = 0;
+/** Guards against windows re-recording each other's model lists (settings listeners are synchronous). */
+let rememberingModels = false;
 
 /**
  * The chat panel of one window: transcript, agent picker, and one ACP session
@@ -198,6 +200,7 @@ export class ChatController {
 				break;
 			case "resizeChat":
 				if (typeof msg.screenX === "number" && isFinite(msg.screenX)) this.host.resizeChatTo?.(msg.screenX, !!msg.done);
+				else if (msg.done) this.host.resizeChatTo?.(NaN, true);
 				break;
 			case "openSettings":
 				this.host.openSettings?.();
@@ -239,6 +242,12 @@ export class ChatController {
 	}
 
 	// ----- agent session -----
+
+	/** Settings changed: agents' launch commands may have, so re-check them, then redraw. */
+	public settingsChanged(agentsChanged: boolean): void {
+		if (agentsChanged) this.refreshStatuses();
+		this.postState();
+	}
 
 	private refreshStatuses(): void {
 		this.statuses = agentStatuses();
@@ -306,6 +315,7 @@ export class ChatController {
 		this.starting = (async () => {
 			try {
 				await session.start();
+				this.rememberModels(this.modelList(session.info).models);
 				await this.applyPreferredModel(session);
 				this.postState();
 				return session;
@@ -402,11 +412,16 @@ export class ChatController {
 
 	/** Remembers what the agent offers, so Settings can list it while the agent is not running. */
 	private rememberModels(models: KnownModel[]): void {
-		if (!models.length) return;
+		if (!models.length || rememberingModels) return;
 		const known = settings().modelCatalog[this.agentId] ?? [];
 		const slim = models.map((m) => ({ value: m.value, name: m.name, ...(m.description ? { description: m.description } : {}) }));
 		if (JSON.stringify(known) === JSON.stringify(slim)) return;
-		updateSettings({ modelCatalog: { ...settings().modelCatalog, [this.agentId]: slim } });
+		rememberingModels = true;
+		try {
+			updateSettings({ modelCatalog: { ...settings().modelCatalog, [this.agentId]: slim } });
+		} finally {
+			rememberingModels = false;
+		}
 	}
 
 	private async pickModel(value: string): Promise<void> {
@@ -572,7 +587,10 @@ export class ChatController {
 				this.postState();
 				break;
 			case "config_option_update":
-				if (this.session?.info) this.session.info.configOptions = u.configOptions;
+				if (this.session?.info) {
+					this.session.info.configOptions = u.configOptions;
+					this.rememberModels(this.modelList(this.session.info).models);
+				}
 				this.postState();
 				break;
 		}
@@ -685,7 +703,6 @@ export class ChatController {
 		const info: SessionInfo | undefined = this.session?.info;
 		const status = this.status();
 		const list = this.modelList(info);
-		this.rememberModels(list.models);
 		// Models hidden in Settings stay out of the picker, except the one in use.
 		const hidden = new Set(settings().models[this.agentId]?.hidden ?? []);
 		const models = list.models.filter((m) => !hidden.has(m.value) || m.value === list.current).map((m) => ({ id: m.id, name: m.name, description: m.description }));

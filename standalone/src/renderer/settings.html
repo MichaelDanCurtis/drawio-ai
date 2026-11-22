@@ -172,7 +172,14 @@
 		clearTimeout(savedTimer);
 		savedTimer = setTimeout(() => $("saved").classList.add("hidden"), 1200);
 	}
-	function set(patch) { post({ type: "set", patch }); saved(); }
+	function set(patch) {
+		// Applied here at once too, so two quick changes build on each other.
+		if (state) state.settings = { ...state.settings, ...patch };
+		post({ type: "set", patch });
+		saved();
+	}
+	/** A text field in `el` is being edited: redraw it later, or the typing is lost. */
+	const editing = (el) => el.contains(document.activeElement) && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) && document.activeElement.type !== "checkbox";
 
 	// sections
 	function show(id) {
@@ -213,6 +220,7 @@
 	let agentsShown = false;
 	function renderAgents(s) {
 		const list = $("agentList");
+		if (editing(list)) return;
 		const open = new Set([...list.querySelectorAll("details[open]")].map((d) => d.dataset.agent));
 		list.textContent = "";
 		state.agents.forEach((a, i) => {
@@ -335,13 +343,16 @@
 	}
 	for (const el of document.querySelectorAll("[data-editor]")) {
 		el.addEventListener("change", () => {
-			const v = el.type === "checkbox" ? el.checked : Number(el.value);
+			const min = Number(el.min) || 0, max = Number(el.max) || Infinity;
+			const v = el.type === "checkbox" ? el.checked : Math.max(min, Math.min(max, Number(el.value) || min));
+			if (el.type !== "checkbox") el.value = v;
 			set({ editor: { ...state.settings.editor, [el.dataset.editor]: v } });
 		});
 	}
 
 	function renderShapes(s) {
 		const box = $("locations");
+		if (editing(box)) return;
 		box.textContent = "";
 		const locs = s.shapes.locations;
 		if (!locs.length) {

@@ -819,10 +819,13 @@
 		if (!dragging) return;
 		dragging = false;
 		document.body.classList.remove("resizing");
-		vscode.postMessage({ type: "resizeChat", screenX: typeof e.screenX === "number" ? e.screenX : pendingX, done: true });
+		// pointercancel / lost capture can report 0: use the last real position instead.
+		const x = e.type === "pointerup" && typeof e.screenX === "number" && e.screenX > 0 ? e.screenX : pendingX;
+		vscode.postMessage({ type: "resizeChat", screenX: typeof x === "number" ? x : null, done: true });
 	}
 	grip.addEventListener("pointerup", endDrag);
 	grip.addEventListener("pointercancel", endDrag);
+	grip.addEventListener("lostpointercapture", endDrag);
 
 	for (const b of document.querySelectorAll(".suggestions button")) {
 		b.addEventListener("click", () => send(b.dataset.prompt));

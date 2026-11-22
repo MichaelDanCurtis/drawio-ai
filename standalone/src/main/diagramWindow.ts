@@ -265,19 +265,29 @@ export class DiagramWindow {
 	private applySettings(_s: Settings, patch: Partial<Settings>): void {
 		if (this.win.isDestroyed()) return;
 		if ("chat" in patch || "chatWidth" in patch) this.layout();
-		if ("appearance" in patch || "shapes" in patch || "chat" in patch) this.sendEditorPrefs();
-		if ("models" in patch || "modelCatalog" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.postState();
+		if ("appearance" in patch || "chat" in patch) this.sendEditorPrefs();
+		if ("shapes" in patch) this.sendShapes();
+		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw)
+		if ("models" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.settingsChanged("agents" in patch);
 	}
 
-	/** Icon style, the user's shape folders and the chat's state, for the editor's plugins. */
+	private sendToEditor(msg: unknown): void {
+		if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.send("drawio:toWebview", JSON.stringify(msg));
+	}
+
+	/** Icon style and the chat's state, for the editor's plugins. */
 	private sendEditorPrefs(): void {
-		if (this.editorView.webContents.isDestroyed()) return;
 		const s = settings();
-		const send = (msg: unknown) => {
-			if (!this.editorView.webContents.isDestroyed()) this.editorView.webContents.send("drawio:toWebview", JSON.stringify(msg));
-		};
-		send({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, chatVisible: this.chatVisible, chatSide: s.chat.side });
-		void shapeLibraries(s.shapes.locations).then((libraries) => send({ action: "desktopShapes", libraries }));
+		this.sendToEditor({ action: "desktopPrefs", iconStyle: s.appearance.iconStyle, chatVisible: this.chatVisible, chatSide: s.chat.side });
+	}
+
+	private shapesSeq = 0;
+	/** The user's shape folders and libraries as palettes (only the newest read is shown). */
+	private sendShapes(): void {
+		const seq = ++this.shapesSeq;
+		void shapeLibraries(settings().shapes.locations).then((libraries) => {
+			if (seq === this.shapesSeq) this.sendToEditor({ action: "desktopShapes", libraries });
+		});
 	}
 
 	private async start(server: StaticServer): Promise<void> {
@@ -362,6 +372,7 @@ export class DiagramWindow {
 			await c.whenLoaded(30_000);
 			this.loaded = true;
 			this.sendEditorPrefs();
+			this.sendShapes();
 			this.setDirty(!!this.initial && !this.file);
 			this.loadedWaiters.splice(0).forEach((r) => r());
 			this.chat.postState();
@@ -546,11 +557,21 @@ export class DiagramWindow {
 			}, 16);
 		}
 		this.sendEditorPrefs();
-		if (visible && !this.chatView.webContents.isDestroyed()) this.chatView.webContents.focus();
+		const focusView = visible ? this.chatView : this.editorView;
+		if (!focusView.webContents.isDestroyed()) focusView.webContents.focus();
 	}
 
 	/** The chat's edge is being dragged to `screenX`; the width is saved when the drag ends. */
 	private resizeChatTo(screenX: number, done: boolean): void {
+		if (!isFinite(screenX)) {
+			// the drag ended without a position: keep the width it reached
+			if (done && this.dragWidth !== undefined) {
+				const final = this.dragWidth;
+				this.dragWidth = undefined;
+				updateSettings({ chatWidth: final });
+			}
+			return;
+		}
 		const b = this.win.getContentBounds();
 		const left = settings().chat.side === "left";
 		const w = Math.round(left ? screenX - b.x : b.x + b.width - screenX);
