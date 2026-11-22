@@ -39,5 +39,7 @@
 	style.id = "drawai-theme";
 	style.textContent = STYLE;
 	(document.head || document.documentElement).appendChild(style);
+	var matrix = (/[?&]matrix=([a-z]+)/.exec(location.search) || [])[1];
+	if (matrix) document.documentElement.setAttribute("data-drawai-matrix", matrix);
 	if (typeof Draw !== "undefined") Draw.loadPlugin(function () {});
 })();

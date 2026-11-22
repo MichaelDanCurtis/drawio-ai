@@ -120,7 +120,7 @@ export class MapperDialog {
 	private async onMessage(msg: any): Promise<void> {
 		switch (msg?.type) {
 			case "ready":
-				this.post({ type: "catalog", catalog: catalog(), saved: loadSavedInputs(), cwd: this.host.cwd(), iconStyle: settings().appearance.iconStyle });
+				this.post({ type: "catalog", catalog: catalog(), saved: loadSavedInputs(), cwd: this.host.cwd(), iconStyle: settings().appearance.iconStyle, matrix: settings().appearance.matrix });
 				break;
 			case "loadOptions": {
 				const recipe = recipeById(String(msg.recipeId));

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { adapterPackages, AGENTS } from "./agents";
 import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
-import { DiagramWindow, type DrawioMenuItem } from "./diagramWindow";
+import { DiagramWindow, type DrawioMenuItem, flushDrawioStorage } from "./diagramWindow";
 import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
@@ -363,6 +363,7 @@ app.whenReady().then(async () => {
 			return w ? w.fileName() ?? "the untitled diagram" : undefined;
 		},
 		shapeSets: () => (DiagramWindow.all.size ? DiagramWindow.shapeSets : undefined),
+		refreshShapeSets: () => DiagramWindow.requestShapeSets(),
 		setShapeSet: (id, on) => DiagramWindow.setShapeSet(id, on),
 	};
 	DiagramWindow.onShapeSets = () => WorkshopWindow.refresh();
@@ -398,7 +399,9 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin" || process.env.DRAWAI_E2E) app.quit();
 });
 
+app.on("before-quit", () => flushDrawioStorage());
 app.on("will-quit", () => {
+	flushDrawioStorage();
 	desktopMcp?.dispose();
 	server.dispose();
 });

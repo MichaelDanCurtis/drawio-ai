@@ -183,6 +183,10 @@ an icon) come next.
 - **The Scratchpad** (draw.io's shelf for shapes you drag onto it) is kept in the app's data
   folder, so it is still there after a restart. draw.io would keep it in the page's own
   database, which is new on every launch because the editor's local address changes.
+  Windows share that storage (`src/main/drawioStorage.ts`): a window's save only changes the
+  keys that window changed, and the others are told, so two open diagrams cannot lose each
+  other's Scratchpad shapes. The file is written whole, then moved into place, and once more
+  before the app quits.
 - **Downloads** happen in the app's main process, only from jsDelivr (npm and GitHub's CDN)
   and, for theSVG's licence data, raw.githubusercontent.com. Every redirect is checked
   against those hosts and every answer is size-capped (`src/main/workshop/fetch.ts`).
@@ -228,7 +232,15 @@ face, a tetrahedron, a spiral, a galaxy, a ringed planet, a double helix, a hear
 more (`ui/dot-object.js`). When you start to type it shoots to the top right corner of
 the chat and stays there, small, during the conversation; in a new, empty chat it comes
 back. The dots near the pointer brighten and lean, in the object, in every head's dot
-field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel. Motion is short and ease-out only: messages, menus, cards and tour captions
+field (chat, Mapper, Settings, Workshop) and in the top corner of draw.io's Format panel.
+
+- **The matrix:** the head's dot field is also laid over every surface (`ui/matrix.js`): the
+  same dots, 7px grid and grey over the whole of each window (the chat, Settings, the Mapper,
+  the Workshop, and draw.io's toolbar, sidebars and page tabs), never over the diagram. Dots
+  near the pointer brighten and lean away, as in the field. It is drawn once and only the patch
+  around the pointer is drawn again, so it costs nothing while the mouse is still. The heads'
+  live fields sit on the same grid, so their dots fall on the matrix's. Settings → Appearance →
+  Matrix: Grey, Green or Off. Motion is short and ease-out only: messages, menus, cards and tour captions
 rise in. Under *reduce motion* nothing moves.
 
 - Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
@@ -323,7 +335,7 @@ the packaged app.
 **OmniDraw → Settings…** (Cmd/Ctrl+, or the dot mark at the start of the toolbar) opens the Settings
 window. Changes save at once and reach open windows straight away:
 
-- **Appearance:** System, Light or Dark; the toolbar on the top, left, right or bottom; the icon style.
+- **Appearance:** System, Light or Dark; the toolbar on the top, left, right or bottom; the matrix of dots over every surface (grey, green or off); the icon style.
 - **Agents & models:** for each agent, the models its picker shows and the command that
   launches it. Each agent is asked for its models when the page opens (it is started in an
   empty folder with no tools, and nothing is sent to a model); **Refresh** asks again. A

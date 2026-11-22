@@ -142,7 +142,9 @@
 	</dialog>
 <script type="module" nonce="$$nonce$$">
 	import { mountDotField } from "/ui/dots.js";
-	mountDotField(document.getElementById("field"), { density: 0.42, grid: 7 });
+	import { mountMatrix } from "/ui/matrix.js";
+	mountDotField(document.getElementById("field"), { density: 0.42, grid: 7, anchor: "viewport" });
+	window.omnidrawMatrix = mountMatrix();
 	const mark = document.querySelector(".head .brandmark");
 	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
 </script>
@@ -244,12 +246,15 @@
 	}
 
 	// ----- draw.io's own shape sets: the choice its "More Shapes" dialog offered, here with the galleries -----
-	let setsShown = "", wantSets = location.hash === "#sets";
+	let setsShown = "", setsEver = false, setsHold = 0, wantSets = location.hash === "#sets";
 	function renderSets() {
 		const box = $("shapeSets");
+		// (a report made just before a click here would flip the switch back for a moment)
+		if (Date.now() < setsHold) return void setTimeout(renderSets, setsHold - Date.now() + 20);
 		const now = JSON.stringify(state.sets || null);
 		if (now === setsShown && box.children.length) return;
-		const first = !setsShown;
+		const first = !setsEver;
+		if (state.sets) setsEver = true;
 		setsShown = now;
 		const open = new Set([...box.querySelectorAll("details[open]")].map((d) => d.dataset.group));
 		box.textContent = "";
@@ -273,6 +278,7 @@
 					e.on = sw.checked;
 					tally();
 					setsShown = JSON.stringify(state.sets);
+					setsHold = Date.now() + 500;
 					post({ type: "setShapeSet", id: e.id, on: sw.checked });
 				});
 				const row = el("label", { class: "set" }, sw, el("span", { text: e.title }));
@@ -397,6 +403,7 @@
 			// a collection being browsed changed (a shape added or removed): show it again
 			if (now && was && now.count !== was.count) setTimeout(runSearch);
 			applyIcons(m.iconStyle || "dots2d");
+			document.documentElement.dataset.matrix = m.matrix || "grey";
 			renderGalleries();
 			renderSets();
 			renderScope();

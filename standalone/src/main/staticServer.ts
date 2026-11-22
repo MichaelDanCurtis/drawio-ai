@@ -1,3 +1,4 @@
+import { storageLiteral } from "./drawioStorage";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as http from "http";
@@ -26,7 +27,8 @@ const MIME: Record<string, string> = {
 
 export interface EditorPageOptions {
 	dark: boolean | "auto";
-	localStorage: Record<string, string>;
+	/** draw.io's storage for the page; a function is asked on every load, so a reload gets today's. */
+	localStorage: Record<string, string> | (() => Record<string, string>);
 }
 
 /**
@@ -65,7 +67,10 @@ export class StaticServer {
 			// one. The app's pages get a new address (port) on every launch, so that database would be
 			// empty each time: without it draw.io falls back to localStorage, which the app keeps in
 			// its data folder. (The expression runs first thing in the page, before draw.io loads.)
-			.replace("$$localStorage$$", `(Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true }), ${JSON.stringify(o.localStorage)})`)
+			// The storage holds text the user wrote (labels of Scratchpad shapes): it goes in through a
+			// function, so "$" in it is not read as a replacement pattern, and "<" is escaped, so it cannot
+			// end the page's script. The page keeps the object where the app's plugin can update it.
+			.replace("$$localStorage$$", () => `(Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true }), (window.omnidrawStorage = ${storageLiteral(typeof o.localStorage === "function" ? o.localStorage() : o.localStorage)}))`)
 			.replace("$$additionalCode$$", "[]");
 	}
 

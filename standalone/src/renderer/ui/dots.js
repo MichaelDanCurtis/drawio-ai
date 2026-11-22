@@ -204,11 +204,23 @@ export class DotEngine {
 
   layout() {
     const { grid } = this.opts;
-    this.cols = Math.max(0, Math.floor(this.w / grid));
-    this.rows = Math.max(0, Math.floor(this.h / grid));
+    let ox, oy;
+    if (this.opts.anchor === "viewport") {
+      // on the window's dot grid (a dot in the middle of every grid cell counted from the window's
+      // corner), so this field's dots fall exactly on those of a layer that covers the window
+      const rect = this.canvas.getBoundingClientRect();
+      const first = (at) => (((grid / 2 - at) % grid) + grid) % grid;
+      ox = first(rect.left);
+      oy = first(rect.top);
+      this.cols = this.w > ox ? Math.floor((this.w - ox) / grid) + 1 : 0;
+      this.rows = this.h > oy ? Math.floor((this.h - oy) / grid) + 1 : 0;
+    } else {
+      this.cols = Math.max(0, Math.floor(this.w / grid));
+      this.rows = Math.max(0, Math.floor(this.h / grid));
+      ox = (this.w - (this.cols - 1) * grid) / 2;
+      oy = (this.h - (this.rows - 1) * grid) / 2;
+    }
     const n = this.cols * this.rows;
-    const ox = (this.w - (this.cols - 1) * grid) / 2;
-    const oy = (this.h - (this.rows - 1) * grid) / 2;
     this.xs = new Float32Array(n);
     this.ys = new Float32Array(n);
     this.seeds = new Float32Array(n);

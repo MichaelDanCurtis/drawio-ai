@@ -251,7 +251,10 @@
 	// The dot layers: one live field behind the head, and a 3D dot object that changes shape.
 	import { mountDotField } from "/ui/dots.js";
 	import { mountDotObject } from "/ui/dot-object.js";
-	const field = mountDotField(document.getElementById("field"), { density: 0.42, grid: 7 });
+	import { mountMatrix } from "/ui/matrix.js";
+	const field = mountDotField(document.getElementById("field"), { density: 0.42, grid: 7, anchor: "viewport" });
+	// the same dots over the whole chat (ui/matrix.js)
+	window.omnidrawMatrix = mountMatrix();
 
 	// The object sits in the empty chat. When you start to type (or a conversation starts) it
 	// shoots to the top right corner and lives there, small; in a new, empty chat it comes back.
@@ -572,6 +575,7 @@
 			$("collapse").querySelector("[data-icon]").setAttribute("data-icon", side === "left" ? "chevronLeft" : "chevronRight");
 			iconStyle = null;
 		}
+		document.documentElement.dataset.matrix = state.matrix || "grey";
 		const style = state.iconStyle || "dots2d";
 		if (style !== iconStyle && window.DrawAIIcons) {
 			iconStyle = style;

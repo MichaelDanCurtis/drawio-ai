@@ -736,6 +736,7 @@ export class ChatController {
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
 				iconStyle: settings().appearance.iconStyle,
+				matrix: settings().appearance.matrix,
 				chatSide: settings().chat.side,
 			},
 		});

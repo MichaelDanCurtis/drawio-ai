@@ -277,12 +277,33 @@
 			};
 			box.insertBefore(back, box.firstChild);
 			import("/ui/dots.js").then(function (m) {
-				var fieldLayer = m.mountDotField(canvas, { density: 0.42, grid: 7 });
+				var fieldLayer = m.mountDotField(canvas, { density: 0.42, grid: 7, anchor: "viewport" });
 				if (!fieldLayer) return;
 				window.omnidrawFormatDots = fieldLayer;
 				try { ui.addListener("darkModeChanged", function () { colours(); fieldLayer.engine.readColours(); }); } catch (e) { /* older draw.io */ }
 			}).catch(function () { /* the panel is complete without it */ });
 		})();
+
+		// ----- the matrix: the chat's dot field over all of the editor's chrome, never over the diagram -----
+		var matrixLayer = null;
+		var matrixMode = document.documentElement.getAttribute("data-drawai-matrix") || "grey";
+		import("/ui/matrix.js").then(function (m) {
+			var diagram = ui.diagramContainer;
+			matrixLayer = m.mountMatrix({
+				mode: matrixMode,
+				zIndex: 9000, // under draw.io's menus and dialogs
+				holes: function () { return diagram && diagram.offsetWidth ? [diagram.getBoundingClientRect()] : []; },
+				colour: function (mode) {
+					var dark = typeof Editor.isDarkMode === "function" && Editor.isDarkMode();
+					return mode === "green" ? (dark ? "#6fd69b" : "#2f8f5b") : dark ? "#7d7d7d" : "#8b8984";
+				},
+			});
+			if (!matrixLayer) return;
+			window.omnidrawMatrix = matrixLayer;
+			// the diagram's place changes when panels open and close or the toolbar moves
+			if (typeof ResizeObserver !== "undefined" && diagram) new ResizeObserver(function () { matrixLayer.check(); }).observe(diagram);
+			try { ui.addListener("darkModeChanged", function () { matrixLayer.refresh(); }); } catch (e) { /* older draw.io */ }
+		}).catch(function () { /* the editor is complete without it */ });
 
 		// ----- draw.io's own shape sets (what its "More Shapes" dialog chooses) live in the Shape Workshop -----
 		function shapeSets() {
@@ -472,13 +493,19 @@
 		window.addEventListener("message", function (evt) {
 			var data = evt.data;
 			if (typeof data === "string") {
-				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0) return;
+				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0 && data.indexOf('"desktopStorage"') < 0 && data.indexOf('"desktopReportShapeSets"') < 0) return;
 				try { data = JSON.parse(data); } catch (e) { return; }
 			}
 			if (!data) return;
 			if (data.action === "desktopPrefs") {
 				if (data.iconStyle && data.iconStyle !== style) setStyle(data.iconStyle, ui);
 				if (data.toolbar && data.toolbar !== side) setSide(data.toolbar, ui);
+				if (data.matrix && data.matrix !== matrixMode) {
+					matrixMode = data.matrix;
+					document.documentElement.setAttribute("data-drawai-matrix", matrixMode);
+					if (matrixLayer) matrixLayer.setMode(matrixMode);
+				}
+				if (matrixLayer) matrixLayer.check();
 				if (EXTRA.chatArrow) {
 					// the arrow points the way the chat goes: away to close it, back to open it
 					var right = data.chatSide !== "left";
@@ -496,6 +523,21 @@
 				if (data.seq && data.seq <= lastInsertSeq) return;
 				lastInsertSeq = data.seq || lastInsertSeq;
 				try { insertShape(data.shape); } catch (e) { ui.handleError(e); }
+			} else if (data.action === "desktopReportShapeSets") {
+				postShapeSets();
+			} else if (data.action === "desktopStorage" && data.changes && window.omnidrawStorage) {
+				// another window changed draw.io's storage: this page takes it over, so it does not write its old copy back
+				var store = window.omnidrawStorage, settingsChanged = false, padChanged = false;
+				for (var key in data.changes) {
+					var value = data.changes[key];
+					if (value === null) { delete store[key]; continue; }
+					if (typeof value !== "string" || store[key] === value) continue;
+					store[key] = value;
+					if (key.indexOf(".drawio-config") === 0) settingsChanged = true;
+					if (key === ".scratchpad") padChanged = true;
+				}
+				try { if (settingsChanged && typeof mxSettings !== "undefined") mxSettings.load(); } catch (e) { /* keeps its own */ }
+				try { if (padChanged && ui.scratchpad != null) ui.loadScratchpad(true); } catch (e) { /* shows it after a reload */ }
 			} else if (data.action === "desktopSetShapeSet" && typeof data.id === "string") {
 				try { setShapeSet(data.id, !!data.on); } catch (e) { console.warn("OmniDraw: could not switch the shape set", e); }
 			} else if (data.action === "desktopGalleryResults") {

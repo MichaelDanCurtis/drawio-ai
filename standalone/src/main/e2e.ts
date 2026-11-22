@@ -593,6 +593,20 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	log("scratchpad", { before: scratch0, after: scratch1, keptByApp: kept.includes("kept shape") || /mxlibrary/.test(kept), keptBytes: kept.length, inNewWindow: scratch2 });
 	if (!scratch0.open || scratch1.items !== scratch0.items + 1 || !/mxlibrary/.test(kept) || scratch2.items !== scratch1.items) throw new Error("The Scratchpad does not keep its shapes (see the scratchpad line above).");
 
+	// the matrix: the chat head's dot field over every surface, but never over the diagram
+	const matrix = async (wc: Electron.WebContents) => wc.executeJavaScript(`window.omnidrawMatrix ? window.omnidrawMatrix.stats() : null`);
+	const edMatrix = await matrix(ed), chatMatrix = await matrix(chat);
+	const overDiagram = await ed.executeJavaScript(`(() => {
+		const c = document.querySelector(".matrix-layer canvas"), d = document.querySelector(".geDiagramContainer").getBoundingClientRect();
+		const k = c.width / window.innerWidth, g = c.getContext("2d");
+		const lit = (x, y, w, h) => { const px = g.getImageData(Math.round(x * k), Math.round(y * k), Math.round(w * k), Math.round(h * k)).data; let n = 0; for (let i = 3; i < px.length; i += 4) if (px[i]) n++; return n; };
+		return { inDiagram: lit(d.left + 20, d.top + 20, 120, 120), inToolbar: lit(0, 0, 300, 30) };
+	})()`);
+	log("matrix", { editor: edMatrix, chat: chatMatrix, overDiagram });
+	if (!edMatrix?.dots || !chatMatrix?.dots || edMatrix.holes !== 1 || overDiagram.inDiagram !== 0 || overDiagram.inToolbar === 0) throw new Error("The matrix is not on every surface, or is over the diagram (see the matrix line above).");
+	await save("matrix-editor.png", ed);
+	await save("matrix-chat.png", chat);
+
 	// the Format panel has the chat's live dot field in its top right corner
 	await pause(600);
 	log("formatDots", await ed.executeJavaScript(`(() => {
@@ -628,7 +642,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		log(`zoomInIconBytes-${theme}-classic`, zoomIn);
 	}
 	process.env.DRAWAI_THEME = "light";
-	updateSettings({ appearance: { theme: "light", iconStyle: "dots2d", toolbar: "top" } });
+	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "dots2d", toolbar: "top" } });
 	await pause(600);
 	// the toolbar on each side
 	for (const side of ["left", "right", "bottom", "top"] as const) {

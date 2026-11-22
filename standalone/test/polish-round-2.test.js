@@ -168,3 +168,66 @@ test("an editor page always gets a Scratchpad, also with a profile from before i
 	assert.equal(withScratchpad({ ".scratchpad": kept })[".scratchpad"], kept, "shapes that are there stay");
 	assert.equal(withScratchpad({ ".scratchpad": "<mxfile/>" })[".scratchpad"], "<mxlibrary>[]</mxlibrary>", "something that is not a library is replaced");
 });
+
+test("draw.io's storage: a window only changes what it changed, so two windows cannot lose each other's Scratchpad", () => {
+	const { DrawioStorage } = require("../src/main/drawioStorage");
+	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-storage-")), "drawio-local-storage.json");
+	const store = new DrawioStorage(() => file);
+	const a = store.snapshot(), b = store.snapshot(); // what windows A and B were given
+	assert.equal(a[".scratchpad"], "<mxlibrary>[]</mxlibrary>");
+
+	// A puts a shape on the Scratchpad
+	const withShape = '<mxlibrary>[{"xml":"x","w":90,"h":40,"title":"mine"}]</mxlibrary>';
+	assert.deepEqual(store.apply({ ...a, ".scratchpad": withShape }, a), { ".scratchpad": withShape });
+	// B, which knows nothing of it, saves a setting: its old Scratchpad copy is not taken over
+	assert.deepEqual(store.apply({ ...b, ".drawio-config": '{"libraries":"general;uml"}' }, b), { ".drawio-config": '{"libraries":"general;uml"}' });
+	assert.equal(store.all()[".scratchpad"], withShape, "A's shape is still there");
+	assert.equal(store.all()[".drawio-config"], '{"libraries":"general;uml"}');
+	// a key a page removes is removed; things that are not strings are ignored
+	assert.deepEqual(store.apply({ ".scratchpad": b[".scratchpad"], junk: 7 }, b), { ".drawio-config": null });
+	assert.equal(store.all()[".scratchpad"], withShape, "and B's old Scratchpad copy still does not count as a change");
+	assert.deepEqual(store.apply("nonsense", a), {});
+
+	store.flush();
+	assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { ".scratchpad": withShape });
+	assert.ok(!fs.existsSync(file + ".tmp"), "written whole, then moved into place");
+	assert.equal(new DrawioStorage(() => file).all()[".scratchpad"], withShape, "there after a restart");
+});
+
+test("draw.io's storage: a file that cannot be read is set aside, not written over", () => {
+	const { DrawioStorage } = require("../src/main/drawioStorage");
+	const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-storage-")), "drawio-local-storage.json");
+	fs.writeFileSync(file, '{".scratchpad":"<mxlibrary>[{\\"xml\\":\\"half');
+	const store = new DrawioStorage(() => file);
+	assert.equal(store.all()[".scratchpad"], "<mxlibrary>[]</mxlibrary>");
+	assert.ok(fs.readFileSync(file + ".broken", "utf8").includes("half"), "the unreadable file is kept");
+});
+
+test("the storage given to an editor page cannot break out of the page's script", () => {
+	const { storageLiteral } = require("../src/main/drawioStorage");
+	const nasty = { ".scratchpad": "$$E=mc^2$$ US$'000 $& $` </script><script>alert(1)</script>  " };
+	const literal = storageLiteral(nasty);
+	assert.ok(!literal.includes("</script>") && !literal.includes("<"), "no tag can end the script");
+	assert.ok(!literal.includes(" "));
+	// put into the page the way the server does (a function, so "$" is not a pattern), it reads back unchanged
+	const page = "const storage = $$localStorage$$;".replace("$$localStorage$$", () => literal);
+	assert.deepEqual(new Function(page + " return storage;")(), nasty);
+});
+
+test("the matrix and the head's field share one dot grid", async () => {
+	const dots = await import("../src/renderer/ui/dots.js");
+	const canvas = { getBoundingClientRect: () => ({ left: 13, top: 4, width: 300, height: 90 }), ownerDocument: {}, width: 0, height: 0 };
+	const engine = new dots.DotEngine(canvas, {}, { anchor: "viewport", grid: 7 }, { performance: { now: () => 0 }, requestAnimationFrame: () => 0, cancelAnimationFrame: () => undefined });
+	engine.w = 300;
+	engine.h = 90;
+	engine.layout();
+	// every dot sits in the middle of a 7px cell counted from the window's corner
+	for (let i = 0; i < engine.xs.length; i += 37) {
+		assert.ok(Math.abs(((engine.xs[i] + 13 - 3.5) % 7 + 7) % 7) < 1e-6, `x of dot ${i}`);
+		assert.ok(Math.abs(((engine.ys[i] + 4 - 3.5) % 7 + 7) % 7) < 1e-6, `y of dot ${i}`);
+	}
+	assert.ok(engine.xs.length > 400);
+	const matrix = fs.readFileSync(path.join(__dirname, "../src/renderer/ui/matrix.js"), "utf8");
+	assert.match(matrix, /const GRID = 7;/);
+	assert.match(matrix, /pointerEvents: "none"/, "it never takes a click");
+});
