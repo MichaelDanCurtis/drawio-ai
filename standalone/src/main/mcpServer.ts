@@ -115,8 +115,8 @@ function toolReference(tools: McpTool[]): string {
 
 export function standaloneInstructions(fileName: string | undefined, compact = false): string {
 	return [
-		`These tools edit the draw.io diagram${fileName ? ` "${fileName}"` : ""} that is open in the Draw.AI desktop app, live: the user watches every change happen and can keep or revert your edits. Change the diagram ONLY through these drawio_* tools; never edit .drawio, .drawio.svg or .drawio.png files on disk (the open editor would not show it and the user's review would be skipped).`,
-		SYSTEM_PROMPT.replace("embedded in VS Code", "in the Draw.AI desktop app").split("\n\nAnswering:")[0],
+		`These tools edit the draw.io diagram${fileName ? ` "${fileName}"` : ""} that is open in the OmniDraw app, live: the user watches every change happen and can keep or revert your edits. Change the diagram ONLY through these drawio_* tools; never edit .drawio, .drawio.svg or .drawio.png files on disk (the open editor would not show it and the user's review would be skipped).`,
+		SYSTEM_PROMPT.replace("embedded in VS Code", "in the OmniDraw app").split("\n\nAnswering:")[0],
 		compact ? toolReference(standaloneTools()) : undefined,
 	]
 		.filter(Boolean)

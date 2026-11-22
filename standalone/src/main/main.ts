@@ -13,7 +13,27 @@ import { onSettingsChanged, settings } from "./settings";
 import { SettingsWindow } from "./settingsWindow";
 import { StaticServer } from "./staticServer";
 
-app.setName("Draw.AI");
+app.setName("OmniDraw");
+/**
+ * Before the rename the app was "Draw.AI", with its data in a folder of that name: carry the
+ * user's settings, draw.io preferences and Mapper inputs over once (the old folder is kept).
+ */
+function adoptDrawAiData(): void {
+	if (process.env.DRAWAI_E2E) return;
+	try {
+		const now = app.getPath("userData");
+		const before = path.join(app.getPath("appData"), "Draw.AI");
+		if (path.resolve(now) === path.resolve(before) || !fs.existsSync(before) || fs.existsSync(path.join(now, "settings.json"))) return;
+		fs.mkdirSync(now, { recursive: true });
+		for (const f of ["settings.json", "drawio-local-storage.json", "mapper-inputs.json"]) {
+			const from = path.join(before, f);
+			if (fs.existsSync(from) && !fs.existsSync(path.join(now, f))) fs.copyFileSync(from, path.join(now, f));
+		}
+	} catch (e) {
+		console.warn("OmniDraw: could not carry over the Draw.AI settings:", e);
+	}
+}
+adoptDrawAiData();
 /** Settings → Appearance → Theme; DRAWAI_THEME=light|dark (checks and screenshots) wins. */
 function applyTheme(): void {
 	const forced = process.env.DRAWAI_THEME;
@@ -37,11 +57,11 @@ async function connectExternalAgents(connect: boolean): Promise<void> {
 	const ok = results.some((r) => r.ok);
 	await dialog.showMessageBox({
 		type: ok ? "info" : "warning",
-		message: connect ? "Claude Code and Codex can use Draw.AI" : "Claude Code and Codex disconnected",
+		message: connect ? "Claude Code and Codex can use OmniDraw" : "Claude Code and Codex disconnected",
 		detail:
 			results.map((r) => `${r.ok ? "✓" : "✕"} ${r.agent}: ${r.message}`).join("\n") +
 			(connect && ok
-				? "\n\nIn a new Claude Code or Codex session, the draw-ai-desktop tools work on the diagrams open here (pass `file` to pick one) and on their maps: mapper_maps, mapper_find, mapper_show, mapper_path, mapper_run, mapper_findings… Keep Draw.AI open while they work."
+				? "\n\nIn a new Claude Code or Codex session, the omnidraw tools work on the diagrams open here (pass `file` to pick one) and on their maps: mapper_maps, mapper_find, mapper_show, mapper_path, mapper_run, mapper_findings… Keep OmniDraw open while they work."
 				: ""),
 	});
 }
@@ -218,7 +238,7 @@ function buildMenu(): void {
 				{ label: "Stop", accelerator: "CmdOrCtrl+.", click: () => w()?.chat.stop() },
 				{ label: "Restart Agent", click: () => void w()?.chat.onMessage({ type: "command", command: "drawai.retry" }) },
 				{ type: "separator" },
-				{ label: "Connect Claude Code / Codex to Draw.AI…", click: () => void connectExternalAgents(true) },
+				{ label: "Connect Claude Code / Codex to OmniDraw…", click: () => void connectExternalAgents(true) },
 				{ label: "Disconnect Claude Code / Codex", click: () => void connectExternalAgents(false) },
 				{ type: "separator" },
 				{ label: "Allow All Requests in This Chat", click: () => w()?.chat.setAllowAll(true) },
@@ -300,7 +320,7 @@ app.whenReady().then(async () => {
 		focused: () => DiagramWindow.focused(),
 		open: (file) => DiagramWindow.open(server, file),
 	});
-	await desktopMcp.start().catch((e) => console.error("Draw.AI: desktop MCP endpoint did not start:", e));
+	await desktopMcp.start().catch((e) => console.error("OmniDraw: desktop MCP endpoint did not start:", e));
 	buildMenu();
 	// draw.io's menus in the menu bar follow the diagram window in front.
 	DiagramWindow.onMenus = (w) => {

@@ -9,7 +9,7 @@ import type { StaticServer } from "./staticServer";
 /** Top-level settings keys the window may change (the rest are the app's own bookkeeping). */
 const EDITABLE: (keyof Settings)[] = ["appearance", "chat", "chatWidth", "models", "editor", "agents", "shapes"];
 
-/** Draw.AI → Settings…: one window for the whole app. */
+/** OmniDraw → Settings…: one window for the whole app. */
 export class SettingsWindow {
 	private static win: BrowserWindow | undefined;
 	private static installed = false;

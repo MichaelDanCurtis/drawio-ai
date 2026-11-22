@@ -99,7 +99,7 @@ export const FOLDER_FIELD: FieldDef = {
 
 /** Shared rules for every request the Mapper sends to the agent. */
 export const AGENT_RULES = [
-	"Work ONLY through the drawio_* tools of the \"draw-ai\" MCP server to read and change the diagram; never edit diagram files on disk.",
+	"Work ONLY through the drawio_* tools of the \"omnidraw\" MCP server to read and change the diagram; never edit diagram files on disk.",
 	"You may read files and run read-only inspection commands (list / describe / show / get / query) to investigate. NEVER run anything that creates, changes, deletes, deploys, restarts or costs money, and never print secrets.",
 	"Shapes the Mapper drew carry data attributes (mapper, mapperKind, mapperId and source ids such as ARNs or resource ids): keep them, and give new shapes the same attributes where you can.",
 	"Use proper icons (search the shape libraries with drawio_search_shapes) and keep the existing layout readable; add new shapes next to what they relate to.",

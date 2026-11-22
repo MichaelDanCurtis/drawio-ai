@@ -1,5 +1,5 @@
-// Draw.AI desktop: draw.io's toolbar and menu bar for the desktop app.
-//  - the Draw.AI dot mark sits before File (it opens Settings)
+// OmniDraw: draw.io's toolbar and menu bar for the desktop app.
+//  - the OmniDraw dot mark starts the toolbar (it opens Settings)
 //  - Layers, Tags and Outline are toolbar buttons, with Presentation mode next to them
 //  - the panel menu keeps only what is nowhere else (Shapes, Ruler, Fullscreen)
 //  - a chat button at the right end shows and hides the agent chat
@@ -169,7 +169,22 @@
 			mark.className = "geButton drawai-mark";
 			mark.setAttribute("title", "OmniDraw · Settings (" + ctrl + "+,)");
 			mark.setAttribute("aria-label", "OmniDraw settings");
-			mark.innerHTML = '<span class="drawai-brandmark" aria-hidden="true">' + [1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 0, 0, 0].map(function (v) { return "<i" + (v === 1 ? " data-on" : v === 2 ? " data-signal" : "") + "></i>"; }).join("") + "</span>";
+			var dotsEl = document.createElement("span");
+			dotsEl.className = "drawai-brandmark";
+			mark.appendChild(dotsEl);
+			if (window.DrawAIBrandmark) {
+				// the live mark: ink on paper, or white on black, following draw.io's own dark mode
+				var live = window.DrawAIBrandmark.mount(dotsEl, {
+					size: 18,
+					colors: function () {
+						var dark = typeof Editor.isDarkMode === "function" && Editor.isDarkMode();
+						return dark ? { on: "#ededed", off: "#333333", signal: "#e5262f" } : { on: "#141414", off: "#d2cfc8", signal: "#d71921" };
+					},
+				});
+				try { ui.addListener("darkModeChanged", function () { live.recolor(); }); } catch (e) { /* older draw.io */ }
+			} else {
+				dotsEl.innerHTML = [1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 0, 0, 0].map(function (v) { return "<i" + (v === 1 ? " data-on" : v === 2 ? " data-signal" : "") + "></i>"; }).join("");
+			}
 			mxEvent.addListener(mark, "click", function (evt) { send("settings"); mxEvent.consume(evt); });
 			bar.insertBefore(mark, bar.firstChild);
 		}
@@ -181,7 +196,7 @@
 
 		var css = document.createElement("style");
 		css.textContent = [
-			".drawai-mark { display: inline-flex !important; align-items: center; justify-content: center; width: 28px !important; flex: none; margin-right: 4px; cursor: pointer; background: none !important; }",
+			".drawai-mark { display: inline-flex !important; align-items: center; justify-content: center; width: 28px !important; flex: none; margin-right: 4px; cursor: pointer; background: none !important; filter: none !important; }",
 			".drawai-brandmark { display: inline-grid; grid-template-columns: repeat(4, 3px); gap: 2px; }",
 			".drawai-brandmark i { display: block; width: 3px; height: 3px; border-radius: 50%; background: light-dark(#d2cfc8, #333333); }",
 			".drawai-brandmark i[data-on] { background: light-dark(#141414, #ededed); }",
@@ -245,7 +260,7 @@
 				if (data.toolbar && data.toolbar !== side) setSide(data.toolbar, ui);
 				if (EXTRA.chatPanel) EXTRA.chatPanel.classList.toggle("drawai-off", !data.chatVisible);
 			} else if (data.action === "desktopShapes") {
-				try { showShapes(data.libraries); } catch (e) { console.warn("Draw.AI: could not show the shape libraries", e); }
+				try { showShapes(data.libraries); } catch (e) { console.warn("OmniDraw: could not show the shape libraries", e); }
 			}
 		});
 	});

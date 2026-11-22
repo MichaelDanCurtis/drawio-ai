@@ -27,7 +27,7 @@ export interface ShapeLocation {
 }
 
 /**
- * User settings, in <userData>/settings.json, edited in Draw.AI → Settings….
+ * User settings, in <userData>/settings.json, edited in OmniDraw → Settings….
  * Everything has a default; the file only holds what the user changed.
  */
 export interface Settings {
@@ -37,7 +37,7 @@ export interface Settings {
 	agents: Partial<Record<AgentId, { command: string; args?: string[]; env?: Record<string, string> }>>;
 	/** Width of the chat panel in pixels. */
 	chatWidth: number;
-	/** Draw.AI editor settings, with the same keys as the VS Code extension's `drawio-ai.*` settings. */
+	/** OmniDraw editor settings, with the same keys as the VS Code extension's `drawio-ai.*` settings. */
 	editor: Record<string, unknown>;
 	appearance: { theme: ThemeChoice; iconStyle: IconStyle; toolbar: ToolbarSide };
 	chat: {

@@ -22,11 +22,13 @@ import { standaloneInstructions, standaloneTools } from "./mcpServer";
  * working across app restarts.
  */
 
-export const SERVER_NAME = "draw-ai-desktop";
+export const SERVER_NAME = "omnidraw";
+/** The name used before the rename to OmniDraw: removed on Connect and Disconnect so no one keeps two. */
+export const LEGACY_SERVER_NAME = "draw-ai-desktop";
 
 const home = () => process.env.DRAWIO_AI_HOME || path.join(os.homedir(), ".drawio-ai");
 export const desktopFile = () => path.join(home(), "desktop.json");
-export const launcherPath = () => path.join(home(), "bin", process.platform === "win32" ? "draw-ai-desktop-mcp.cmd" : "draw-ai-desktop-mcp");
+export const launcherPath = () => path.join(home(), "bin", process.platform === "win32" ? "omnidraw-mcp.cmd" : "omnidraw-mcp");
 
 function writePrivate(file: string, text: string, mode = 0o600): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -49,13 +51,13 @@ export class DesktopMcp {
 	constructor(private readonly host: DesktopHost) {}
 
 	private tools(): McpTool[] {
-		const file = { type: "string", description: "Absolute path of the diagram (.drawio, .drawio.svg, .drawio.png) to work on; it is opened in Draw.AI if needed. Default: the diagram used last." };
+		const file = { type: "string", description: "Absolute path of the diagram (.drawio, .drawio.svg, .drawio.png) to work on; it is opened in OmniDraw if needed. Default: the diagram used last." };
 		const withFile = (t: McpTool): McpTool => ({ ...t, inputSchema: { ...t.inputSchema, properties: { ...((t.inputSchema as any).properties ?? {}), file } } });
 		return [
 			{
 				name: "drawio_list_diagrams",
 				readOnly: true,
-				description: "List the diagrams open in the Draw.AI desktop app (absolute paths; which one is in front).",
+				description: "List the diagrams open in OmniDraw (absolute paths; which one is in front).",
 				inputSchema: { type: "object", properties: {} },
 			},
 			...standaloneTools().map(withFile),
@@ -75,7 +77,7 @@ export class DesktopMcp {
 			return w;
 		}
 		const w = this.host.focused();
-		if (!w) throw new Error("No diagram is open in Draw.AI. Pass `file` with a diagram's absolute path to open it.");
+		if (!w) throw new Error("No diagram is open in OmniDraw. Pass `file` with a diagram's absolute path to open it.");
 		await w.whenLoaded();
 		return w;
 	}
@@ -89,7 +91,7 @@ export class DesktopMcp {
 				tools: () => this.tools(),
 				instructions: async () =>
 					[
-						"You are connected to the Draw.AI desktop app. Every tool takes an optional `file`: the absolute path of the diagram to work on (opened if needed); without it, the diagram the user used last. drawio_list_diagrams lists the open ones.",
+						"You are connected to the OmniDraw app. Every tool takes an optional `file`: the absolute path of the diagram to work on (opened if needed); without it, the diagram the user used last. drawio_list_diagrams lists the open ones.",
 						"mapper_* tools work with the maps the Mapper drew (software, databases, clouds, ML): look things up with mapper_maps / mapper_find / mapper_show / mapper_path before reading code, and use mapper_run to map something new (read-only).",
 						standaloneInstructions(undefined),
 					].join("\n\n"),
@@ -111,7 +113,7 @@ export class DesktopMcp {
 		this.server = http.createServer(listener);
 		await new Promise<void>((r) => this.server!.listen(0, "127.0.0.1", r));
 		this.port = (this.server.address() as any).port;
-		writePrivate(desktopFile(), JSON.stringify({ version: 1, pid: process.pid, url: `http://127.0.0.1:${this.port}/mcp`, token: this.token, app: "Draw.AI Desktop", startedAt: new Date().toISOString() }, null, "\t"));
+		writePrivate(desktopFile(), JSON.stringify({ version: 1, pid: process.pid, url: `http://127.0.0.1:${this.port}/mcp`, token: this.token, app: "OmniDraw", startedAt: new Date().toISOString() }, null, "\t"));
 		writeLauncher();
 	}
 
@@ -134,7 +136,7 @@ export function writeLauncher(): string {
 		writePrivate(file, ["@echo off", "set ELECTRON_RUN_AS_NODE=1", `"${process.execPath}" "${proxy}" --desktop %*`, ""].join("\r\n"), 0o700);
 	} else {
 		const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-		writePrivate(file, ["#!/bin/sh", "# Written by the Draw.AI desktop app: connects an agent to it over MCP (stdio).", `ELECTRON_RUN_AS_NODE=1 exec ${q(process.execPath)} ${q(proxy)} --desktop "$@"`, ""].join("\n"), 0o700);
+		writePrivate(file, ["#!/bin/sh", "# Written by OmniDraw: connects an agent to it over MCP (stdio).", `ELECTRON_RUN_AS_NODE=1 exec ${q(process.execPath)} ${q(proxy)} --desktop "$@"`, ""].join("\n"), 0o700);
 	}
 	return file;
 }
@@ -155,6 +157,7 @@ export async function connectAgents(connect: boolean): Promise<{ agent: string; 
 	const results: { agent: string; ok: boolean; message: string }[] = [];
 	const claude = which("claude", env);
 	if (claude) {
+		await run(claude, ["mcp", "remove", "--scope", "user", LEGACY_SERVER_NAME]);
 		await run(claude, ["mcp", "remove", "--scope", "user", SERVER_NAME]);
 		if (connect) {
 			const r = await run(claude, ["mcp", "add", "--scope", "user", SERVER_NAME, "--", launcher]);
@@ -163,6 +166,7 @@ export async function connectAgents(connect: boolean): Promise<{ agent: string; 
 	} else results.push({ agent: "Claude Code", ok: false, message: "claude is not installed." });
 	const codex = which("codex", env);
 	if (codex) {
+		await run(codex, ["mcp", "remove", LEGACY_SERVER_NAME]);
 		await run(codex, ["mcp", "remove", SERVER_NAME]);
 		if (connect) {
 			const r = await run(codex, ["mcp", "add", SERVER_NAME, "--", launcher]);

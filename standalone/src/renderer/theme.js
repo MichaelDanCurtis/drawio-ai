@@ -1,5 +1,5 @@
 /**
- * Draw.AI desktop: draw.io's own chrome in the app's look (omni-design), so the editor
+ * OmniDraw: draw.io's own chrome in the app's look (omni-design), so the editor
  * and the chat read as one app. Only draw.io's theme variables, its UI font and its
  * blue buttons change: diagrams, their fonts and their colours are never touched.
  * Loaded as a draw.io plugin, before the others.

@@ -154,7 +154,7 @@ export class DiagramWindow {
 			...DiagramWindow.placement(),
 			minWidth: 800,
 			minHeight: 500,
-			title: "Draw.AI",
+			title: "OmniDraw",
 			backgroundColor: nativeTheme.shouldUseDarkColors ? "#1e1e22" : "#ffffff",
 			show: false,
 		});
@@ -625,7 +625,7 @@ export class DiagramWindow {
 
 	private updateTitle(): void {
 		if (this.win.isDestroyed()) return;
-		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — Draw.AI`);
+		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — OmniDraw`);
 		this.win.setDocumentEdited(this.dirty);
 		if (this.file) this.win.setRepresentedFilename(this.file);
 	}

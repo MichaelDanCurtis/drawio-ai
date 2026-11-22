@@ -447,7 +447,7 @@ async function runInsights(w: DiagramWindow, config: E2eConfig, log: (k: string,
 	const dmaps = JSON.parse((await rpc("tools/call", { name: "mapper_maps", arguments: { file: config.file } })).result.content[0].text);
 	log("desktopMaps", dmaps.maps.length);
 	// The launcher, over stdio, exactly as an agent starts it.
-	const launcher = path.join(home, "bin", "draw-ai-desktop-mcp");
+	const launcher = path.join(home, "bin", "omnidraw-mcp");
 	const out = await new Promise<string>((resolve) => {
 		const child = spawn(launcher, [], { env: { ...process.env, DRAWIO_AI_HOME: home } });
 		let buf = "";

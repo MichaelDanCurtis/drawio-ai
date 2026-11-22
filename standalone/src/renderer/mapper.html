@@ -10,6 +10,7 @@
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
 <style nonce="$$nonce$$">
 	body { display: flex; flex-direction: column; }
 	.head { position: relative; isolation: isolate; flex: none; padding: 22px 24px 16px; border-bottom: 1px solid var(--border); }
@@ -77,6 +78,9 @@
 <script type="module" nonce="$$nonce$$">
 	import { mountDotField } from "/ui/dots.js";
 	const field = mountDotField(document.getElementById("field"), { density: 0.45 });
+	// the live dot mark in the head
+	const mark = document.querySelector(".head .brandmark");
+	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
 	window.drawaiPulse = (x = 0.8, y = 0.4) => field?.pulse(x, y);
 </script>
 <script nonce="$$nonce$$">

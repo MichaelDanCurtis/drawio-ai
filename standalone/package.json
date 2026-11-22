@@ -1,9 +1,9 @@
 {
-	"name": "draw-ai-desktop",
-	"productName": "Draw.AI",
+	"name": "omnidraw-desktop",
+	"productName": "OmniDraw",
 	"version": "0.1.0",
 	"private": true,
-	"description": "Standalone Draw.AI desktop app: the draw.io editor with a chat panel that drives your installed coding agents (Gemini CLI, Claude Code, Codex) over the Agent Client Protocol.",
+	"description": "OmniDraw: the draw.io editor with a chat that drives your own coding agents (Claude Code, Codex, Gemini, GitHub Copilot, Kimi) over the Agent Client Protocol, plus the Mapper.",
 	"license": "GPL-3.0",
 	"main": "out/main.js",
 	"scripts": {
@@ -47,8 +47,8 @@
 	"author": "Michael Curtis",
 	"homepage": "https://github.com/MichaelDanCurtis/drawio-ai",
 	"build": {
-		"appId": "ai.luxis.drawai.desktop",
-		"productName": "Draw.AI",
+		"appId": "ai.luxis.omnidraw",
+		"productName": "OmniDraw",
 		"copyright": "GPL-3.0; includes draw.io (Apache-2.0)",
 		"directories": {
 			"output": "dist",
