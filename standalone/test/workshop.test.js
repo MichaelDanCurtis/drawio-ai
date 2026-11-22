@@ -63,7 +63,7 @@ test("theSVG: SVGs from its npm packages (flags from @thesvg/flags)", () => {
 });
 
 test("devicon, Simple Icons, Lucide, Tabler and a GitHub listing parse; non-open logos are left out", () => {
-	const dev = src.parseDevicon(read("cdn/gh/devicons/devicon@latest/devicon.json"));
+	const dev = src.parseDevicon(read("cdn/npm/devicon@latest/devicon.json"));
 	assert.ok(dev.find((i) => i.id === "devicon:react").url.endsWith("/icons/react/react-original.svg"));
 	const si = src.parseSimpleIcons(read("cdn/npm/simple-icons@latest/data/simple-icons.json"));
 	assert.ok(si.some((i) => i.id === "simpleicons:react" && i.fill === "#61DAFB"));

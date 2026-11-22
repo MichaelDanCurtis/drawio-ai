@@ -61,7 +61,7 @@ export const SOURCE_INFO: Record<Exclude<GallerySource["kind"], "github" | "fold
 	// The licences are only in the repository's data file; the SVGs come from its npm package
 	// (the repository is over jsDelivr's 50 MB limit for GitHub, so files it has not cached fail).
 	thesvg: { label: "theSVG", index: () => raw("/glincker/thesvg/main/src/data/icons.json"), homepage: "https://thesvg.org", note: "Only icons whose own licence is CC0, MIT or Apache-2.0, and not the AWS, Azure or Google Cloud sets (their real terms differ). Brand logos stay their owners' trademarks." },
-	devicon: { label: "devicon", index: () => cdn("/gh/devicons/devicon@latest/devicon.json"), homepage: "https://devicon.dev", note: "MIT. Logos stay their owners' trademarks." },
+	devicon: { label: "devicon", index: () => cdn("/npm/devicon@latest/devicon.json"), homepage: "https://devicon.dev", note: "MIT. Logos stay their owners' trademarks." },
 	simpleicons: { label: "Simple Icons", index: () => cdn("/npm/simple-icons@latest/data/simple-icons.json"), homepage: "https://simpleicons.org", note: "CC0, except logos with their own licence (kept only when open). Logos stay their owners' trademarks." },
 	lucide: { label: "Lucide", index: () => cdn("/npm/lucide-static@latest/tags.json"), homepage: "https://lucide.dev", note: "ISC." },
 	tabler: { label: "Tabler", index: () => cdn("/npm/@tabler/icons@latest/icons.json"), homepage: "https://tabler.io/icons", note: "MIT." },
@@ -117,7 +117,8 @@ export function parseDevicon(json: unknown): GalleryItem[] {
 			id: `devicon:${name}`,
 			title: name,
 			tags: uniq([...(e.altnames ?? []), ...(e.tags ?? []), ...words(name)]),
-			url: cdn(`/gh/devicons/devicon@latest/icons/${name}/${name}-${v}.svg`),
+			// from npm: devicon's GitHub repository is over jsDelivr's size limit, so files it has not cached fail
+			url: cdn(`/npm/devicon@latest/icons/${name}/${name}-${v}.svg`),
 			licence: "MIT · trademark",
 			source: "devicon",
 		});
