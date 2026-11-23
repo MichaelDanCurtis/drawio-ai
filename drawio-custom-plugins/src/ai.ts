@@ -2080,7 +2080,9 @@ Draw.loadPlugin((ui: any) => {
 								height: first.geometry?.height ?? 0,
 								isEdge: !!first.edge,
 							};
-							if (t.cells.length > 1 || first.getChildCount?.() > 0) {
+							// (a shape the Workshop adds needs its label too: a text template is nothing without it)
+							const labelled = !!action.previews && first.value != null && first.value !== "";
+							if (t.cells.length > 1 || first.getChildCount?.() > 0 || labelled) {
 								const xml = mx.utils.getXml(graph.encodeCells(t.cells));
 								if (!action.previews) shape.xml = xml.slice(0, 6000);
 								// (a shape the Workshop adds to a diagram needs all of its XML: a very large one is left out)

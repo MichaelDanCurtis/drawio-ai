@@ -333,6 +333,12 @@ test("shape search for the Workshop: a thumbnail per shape, and shapes of severa
 		}
 	}
 	assert.ok(big, "a library shape with more than 6,000 characters of XML");
+	// a single cell with a label comes with its XML, so that the label goes into the diagram with it
+	const text = (await request({ action: "aiSearchShapes", query: "text", limit: 60, previews: true, ownOnly: true })).shapes.find((s) => s.title === "Text");
+	assert.match(text.xml, /^<mxGraphModel>[\s\S]*<mxCell [^>]*value="Text"[\s\S]*<\/mxGraphModel>$/);
+	assert.match(text.style, /^text;/);
+	const forAgents = (await request({ action: "aiSearchShapes", query: "text", limit: 25 })).shapes.find((s) => s.title === "Text");
+	assert.equal(forAgents.xml, undefined, "the agents get the style, as before");
 	// drawing thumbnails leaves the editor as it was
 	assert.equal(await page.evaluate(() => window.mxClient.NO_FO), noFo);
 	assert.equal(await page.evaluate(() => Object.keys(window.editorUi.sidebar.graph.getModel().cells).length), 2);

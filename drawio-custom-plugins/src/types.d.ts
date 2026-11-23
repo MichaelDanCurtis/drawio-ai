@@ -404,8 +404,9 @@ declare interface AiSearchShapesAction {
     limit: number;
     /**
      * For a caller that shows the shapes and adds them to a diagram (the Shape Workshop): each
-     * comes with its thumbnail as the sidebar draws it (SVG text), and a shape of several cells
-     * with all of its XML (otherwise cut at 6,000 characters, which is enough to read it).
+     * comes with its thumbnail as the sidebar draws it (SVG text), a shape of several cells
+     * with all of its XML (otherwise cut at 6,000 characters, which is enough to read it), and
+     * a single cell that has a label with its XML too (otherwise its style and size alone).
      */
     previews?: boolean;
     /** Only draw.io's own shapes: the galleries' shapes the host adds to this search are left out (up to 60 shapes). */

@@ -896,7 +896,15 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 		const styles: string[] = await ed.executeJavaScript(`(() => { const m = editorUi.editor.graph.getModel(), g = m.getCell(${JSON.stringify(group.id)}); return [g.style || "", ...(g.children || []).map((c) => c.style || "")]; })()`);
 		return /strokeColor=#00aa00/.test(styles[0]) ? styles.slice(1).every((x) => !/#00aa00/.test(x)) : undefined;
 	});
-	log("shifterChange", { selInfo, filled, iconRow, recoloured, pagedBeside, group: { ...group, selectedAsOne: groupSelected, changedAlone: groupAlone } });
+	// a shape that is its label (draw.io's Text) arrives with it
+	await type("text");
+	await until("the Text shape among the finds", async () => ((await wc.executeJavaScript(`!!document.querySelector('#grid .tile[data-key^="own:"][title^="Text ·"]')`)) ? true : undefined));
+	await wc.executeJavaScript(`document.querySelector('#grid .tile[data-key^="own:"][title^="Text ·"]').click(); true`);
+	const textLabel: string = await until("the Text shape in the diagram", async () => {
+		const v: string = await ed.executeJavaScript(`(() => { const c = editorUi.editor.graph.getSelectionCell(); return c && /^text;/.test(c.style || "") ? String(c.value || "") : ""; })()`);
+		return v || undefined;
+	});
+	log("shifterChange", { selInfo, filled, iconRow, recoloured, pagedBeside, group: { ...group, selectedAsOne: groupSelected, changedAlone: groupAlone }, textLabel });
 	// a Visio stencil becomes a collection (converted by the editor; the name is asked for first)
 	process.env.DRAWAI_E2E_STENCIL = path.join(__dirname, "../../test/ai/fixtures/import.vssx");
 	await wc.executeJavaScript(`document.getElementById("importStencil").click(); true`);
@@ -909,7 +917,7 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	});
 	const backInGallery = await until("the Gallery showing the new collection", async () => ((await wc.executeJavaScript(`document.querySelector('nav button[data-mode="gallery"]').classList.contains("active") && document.querySelectorAll("#grid .tile").length`)) ? true : undefined));
 	log("shifterStencil", { asked, ...stencil, backInGallery });
-	if (!filled || !recoloured || group.children !== 2 || !groupSelected || !groupAlone || !stencil.shapes) throw new Error("The Shape Shifter does not work as it should (see the shifter lines above).");
+	if (!filled || !recoloured || group.children !== 2 || !groupSelected || !groupAlone || textLabel !== "Text" || !stencil.shapes) throw new Error("The Shape Shifter does not work as it should (see the shifter lines above).");
 
 	// dark
 	process.env.DRAWAI_THEME = "dark";
