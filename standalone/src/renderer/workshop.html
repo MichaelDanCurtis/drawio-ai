@@ -190,7 +190,7 @@
 		<section id="creatorCol" class="hidden" aria-label="Shape Creator">
 			<div class="shift" id="createShape">
 				<h2>Describe an icon</h2>
-				<p>An agent on this computer draws it as SVG. Only your description and the images you attach are sent to it.</p>
+				<p>One of your agents (Claude Code, Codex, Gemini…) draws it as SVG. Only your description and the images you attach are sent to it.</p>
 				<label class="pick"><span>Agent</span><select id="crAgent" aria-label="Agent"></select></label>
 				<label class="pick" id="crModelRow"><span>Model</span><select id="crModel" aria-label="Model"></select></label>
 				<p class="note hidden" id="crProblem"></p>
@@ -550,7 +550,7 @@
 		models.value = keep || (a && a.model) || "";
 		$("crModelRow").classList.toggle("hidden", !(a && a.models.length));
 		const note = $("crProblem");
-		note.textContent = !creator.agents.length ? (creator.asked ? "No agent is set up on this computer. Install one and sign in to it, as for the chat." : "") : a && !a.ready ? a.problem || a.label + " is not ready." : "";
+		note.textContent = !creator.agents.length ? (creator.asked ? "None of your agents is set up yet. Install one (Claude Code, Codex, Gemini…) and sign in to it, as for the chat." : "") : a && !a.ready ? a.problem || a.label + " is not ready." : "";
 		note.classList.toggle("hidden", !note.textContent);
 		renderCreatorBusy();
 	}
