@@ -381,7 +381,11 @@ export class MapperFeature {
 	}
 
 	private describe(arg: unknown, audience: "everyone" | "developer") {
-		return this.withRecord(arg, (r, _s, editor, rt) => this.ask(editor, rt.describePrompt(r, audience)));
+		return this.withRecord(arg, async (r, _s, editor, rt) => {
+			// the descriptions become the shapes' tooltips, on the page shown: the map's
+			await this.select(editor, r, []);
+			return this.ask(editor, rt.describePrompt(r, audience));
+		});
 	}
 
 	private recentChanges(arg: unknown) {
@@ -562,6 +566,14 @@ export class MapperFeature {
 			}
 			const rt = await this.runtime();
 			const service = await this.service(editor);
+			// These tools change shapes of a map on the page shown (tooltips, change badges). Whatever page the
+			// user has gone to since, and whichever agent calls: the map's page is shown first.
+			if (name === "mapper_set_descriptions" || (name === "mapper_recent_changes" && (args as { draw?: unknown } | undefined)?.draw)) {
+				const mapId = (args as { mapId?: unknown } | undefined)?.mapId;
+				const record = service.record(typeof mapId === "string" ? mapId : undefined);
+				const rtPage = await rt.mapsOnPage(editor.drawioClient);
+				if (!rtPage.maps.has(record.id) && record.page) await editor.drawioClient.aiPages({ op: "select", page: record.page });
+			}
 			const out = await rt.callMapperTool(service, name, args, { signal: opts.signal });
 			if (!MAPPER_TOOL_SCHEMAS.find((t) => t.name === name)?.readOnly) this.view.refresh();
 			return { text: out.text, summary: out.summary, isError: out.isError };

@@ -594,6 +594,14 @@ async function runSteps() {
 		const ws = await tool("mapper_worksheet", { mapId, limit: 5 });
 		const described = await tool("mapper_set_descriptions", { mapId, items: [{ nodeId: ws.entries[0].id, description: "Keeps the shop running and answers the pages people open." }, { nodeId: "nope", description: "Nothing here at all, really." }] });
 		assert.deepEqual([described.accepted, described.applied, described.problems.length], [1, 1, 1], JSON.stringify(described));
+		// with another page showing, the agent's descriptions still reach the map's shapes: its page is shown first
+		const firstPage = JSON.parse(await invoke("drawio_pages", { action: "list" })).pages.find((p) => p.name !== run.drawnOn);
+		await invoke("drawio_pages", { action: "select", page: firstPage.id });
+		const again = await tool("mapper_set_descriptions", { mapId, items: [{ nodeId: ws.entries[1].id, description: "Takes the orders people place and passes them on to be packed." }] });
+		assert.deepEqual([again.accepted, again.applied, again.problems], [1, 1, []], JSON.stringify(again));
+		const tips = JSON.parse(await invoke("drawio_get_diagram", { maxCells: 5000 }));
+		assert.equal(tips.page.name, run.drawnOn);
+		assert.equal(tips.cells.find((c) => c.data?.mapperId === ws.entries[1].id)?.data.tooltip, "Takes the orders people place and passes them on to be packed.");
 
 		// findings: in the Maps view, shown on the map, dismissed
 		const findings = await tool("mapper_findings", { mapId });
