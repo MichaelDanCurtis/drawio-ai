@@ -167,7 +167,7 @@ async function runSteps() {
 		assert.equal(state.host, "vscode");
 		assert.equal(state.themed, true);
 		assert.equal(state.tips, true);
-		assert.deepEqual(state.buttons, { mark: true, shapes: true, panels: 3, ruler: true, present: true, workshop: false, chat: false });
+		assert.deepEqual(state.buttons, { mark: true, shapes: true, panels: 3, ruler: true, present: true, workshop: true, chat: false });
 		assert.equal(state.icons, "dots2d");
 
 		// a setting changes the open editor (it is not loaded again: the plugin answers with the new style)
@@ -749,6 +749,81 @@ async function runSteps() {
 		assert.equal(viaMcp.isError, false, JSON.stringify(viaMcp));
 		assert.ok(JSON.parse(viaMcp.content[0].text).maps.some((m) => m.id === mapId));
 		await vscode.workspace.getConfiguration("drawio-ai.mcp").update("enabled", false, vscode.ConfigurationTarget.Global);
+	});
+
+	await step("the Shape Workshop: nothing is downloaded unasked; a gallery becomes a palette and joins draw.io's search; a shape goes in; shape sets and the Scratchpad switch and are kept; the panel loads", async () => {
+		const workshop = () => vscode.commands.executeCommand("drawio-ai.workshop.state");
+		const message = (msg) => vscode.commands.executeCommand("drawio-ai.workshop.message", msg);
+		const look = () => vscode.commands.executeCommand("drawio-ai.editorLookState");
+		const cells = async () => JSON.parse(await invoke("drawio_get_diagram", {})).totalCells;
+
+		// The desktop app's default galleries are there, switched off: nothing was fetched or cached, and the editor has no palettes of theirs.
+		let st = await workshop();
+		assert.deepEqual(st.galleries.map((g) => [g.id, g.enabled, g.count ?? null]), [["thesvg", false, null], ["tech-logos", false, null], ["ui-icons", false, null]]);
+		assert.equal(fs.existsSync(path.join(st.dataDir, "galleries")), false, "something was cached before a gallery was turned on");
+		assert.deepEqual((await look()).palettes, []);
+		// the editor told the extension what draw.io's own shape sets are
+		const sets = await waitFor(async () => (await workshop()).sets, "the editor's shape sets");
+		const entries = sets.flatMap((g) => g.entries);
+		assert.ok(entries.some((e) => e.id === "general" && e.on) && entries.some((e) => e.id === ".scratchpad"), JSON.stringify(sets.map((g) => g.title)));
+
+		// a gallery from a folder on this computer (no downloads): a palette in the shapes sidebar
+		const shapes = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-shapes-"));
+		const svg = (colour) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${colour}"/></svg>`;
+		for (const [name, colour] of [["zebracrossing", "black"], ["lighthouse", "orange"]]) fs.writeFileSync(path.join(shapes, `${name}.svg`), svg(colour));
+		const mine = { id: "mine", title: "My shapes", sources: [{ kind: "folder", path: shapes }], enabled: true };
+		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries", [mine]);
+		await waitFor(async () => ((await look()).palettes.includes("My shapes") ? true : undefined), "the gallery's palette in the editor");
+		st = await workshop();
+		assert.deepEqual(st.galleries.map((g) => [g.id, g.enabled, g.count]), [["mine", true, 2]]);
+
+		// draw.io's own search, which drawio_search_shapes uses too, finds the gallery's shape
+		const found = await invoke("drawio_search_shapes", { query: "zebracrossing", limit: 10 });
+		assert.match(found, /zebracrossing/i);
+
+		// a shape from the Workshop goes into the diagram used last, once
+		const before = await cells();
+		const results = (await message({ type: "search", reqId: 1, query: "lighthouse" })).posted.find((m) => m.type === "results");
+		assert.deepEqual(results.hits.map((h) => h.title), ["lighthouse"]);
+		const put = await message({ type: "insert", galleryId: "mine", itemId: results.hits[0].id });
+		assert.deepEqual(put.posted.filter((m) => m.type === "notice").map((m) => m.message), [`Added lighthouse to ${path.basename(st.target)}.`]);
+		await waitFor(async () => ((await cells()) === before + 1 ? true : undefined), "the shape to be in the diagram");
+		await sleep(400);
+		assert.equal(await cells(), before + 1);
+
+		// a shape set and the Scratchpad are switched on from the Workshop...
+		const off = entries.find((e) => !e.on && e.id !== ".scratchpad");
+		assert.ok(off, "every shape set is already shown");
+		await message({ type: "setShapeSet", id: off.id, on: true });
+		await message({ type: "setShapeSet", id: ".scratchpad", on: true });
+		const isOn = (list, id) => list?.flatMap((g) => g.entries).some((e) => e.id === id && e.on);
+		await waitFor(async () => {
+			const now = (await workshop()).sets;
+			return isOn(now, off.id) && isOn(now, ".scratchpad") && isOn(now, "general") ? true : undefined;
+		}, "the shape set and the Scratchpad to be shown");
+		// ... and kept: a diagram opened afterwards starts with them (draw.io's storage is the extension's)
+		const second = vscode.Uri.file(path.join(path.dirname(st.target), "workshop-second.drawio"));
+		fs.writeFileSync(second.fsPath, EMPTY);
+		await vscode.commands.executeCommand("vscode.openWith", second, "drawio-ai-text");
+		await waitFor(async () => {
+			const now = await workshop();
+			return now.target === second.fsPath && isOn(now.sets, off.id) && isOn(now.sets, ".scratchpad") ? true : undefined;
+		}, "a new diagram to open with the shape set and the Scratchpad");
+		// the gallery's palette is in the new diagram too
+		await waitFor(async () => ((await look())?.palettes.includes("My shapes") ? true : undefined), "the gallery's palette in the new diagram");
+
+		// the gallery switched off: its palette leaves every open diagram
+		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries", [{ ...mine, enabled: false }]);
+		await waitFor(async () => ((await look())?.palettes.length === 0 ? true : undefined), "the palette to go");
+
+		// the panel: the desktop app's page, loaded in a webview (asked for twice at once: still one panel)
+		await Promise.all([vscode.commands.executeCommand("drawio-ai.shapeWorkshop"), vscode.commands.executeCommand("drawio-ai.shapeWorkshop")]);
+		const loaded = await waitFor(async () => {
+			const p = (await workshop()).panelPage;
+			return p?.ready && p.loaded ? p.loaded : undefined;
+		}, "the Shape Workshop page to load");
+		assert.deepEqual([loaded.sheets, loaded.scripts, loaded.modules, loaded.font], [5, true, true, true], JSON.stringify(loaded));
+		assert.equal(vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t.label === "Shape Workshop").length, 1);
 	});
 }
 

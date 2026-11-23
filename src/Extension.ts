@@ -14,6 +14,7 @@ import { registerImportCommands } from "./features/importDiagram";
 import { SidebarFeature } from "./features/SidebarFeature";
 import { EditorLookFeature } from "./features/EditorLookFeature";
 import { MapperFeature } from "./features/mapper/MapperFeature";
+import { WorkshopFeature } from "./features/workshop/WorkshopFeature";
 
 export class Extension {
 	public readonly dispose = Disposable.fn();
@@ -56,6 +57,8 @@ export class Extension {
 			ask: (text, editor, extras) => this.aiFeature.askAgent(text, editor, extras),
 		})
 	);
+
+	private readonly workshopFeature = this.dispose.track(new WorkshopFeature({ context: this.context, editorService: this.editorService }));
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.aiFeature.extraTools = this.mapperFeature.tools;

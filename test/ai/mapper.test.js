@@ -37,7 +37,7 @@ test("the page names its files by their webview address, with one nonce, and get
 	// the bridge is the first script: the page's own script reads window.drawaiMapper as it starts
 	const bridge = html.indexOf("acquireVsCodeApi()");
 	assert.ok(bridge > html.indexOf("</title>") && bridge < html.indexOf('<link rel="stylesheet"'), "the bridge is not before the page's files");
-	assert.match(html, /window\.drawaiMapper = \{/);
+	assert.match(html, /window\["drawaiMapper"\] = \{/);
 	assert.match(html, /host: "vscode"/);
 	// the desktop app's page is not changed by it
 	assert.ok(html.includes("host.post({ type: \"ready\" })"));

@@ -478,6 +478,9 @@
 		};
 
 		/** What the editor shows now. The host gets it when the tools have loaded, and when it asks ({ action: "desktopReportState" }). */
+		// the palettes the host added to the shapes sidebar: their ids, and the titles they were given
+		var palettes = [];
+		var paletteTitles = {};
 		function lookState() {
 			var q = function (sel) { return !!document.querySelector(sel); };
 			return {
@@ -490,6 +493,8 @@
 				themed: q("#drawai-theme"),
 				tips: !!window.DrawAITips,
 				presenting: !!(window.drawaiPresentation && window.drawaiPresentation.isActive()),
+				// the palettes the host added to the shapes sidebar (galleries, shape folders)
+				palettes: palettes.map(function (id) { return paletteTitles[id] || id; }),
 				// the map tours presentation mode offers on the page shown, and the one playing
 				tours: window.drawaiPresentation ? window.drawaiPresentation.state().tours : [],
 				tour: window.drawaiPresentation ? window.drawaiPresentation.state().tour : null,
@@ -516,7 +521,6 @@
 		postState();
 
 		// ----- the user's shape folders and libraries -----
-		var palettes = [];
 		function showShapes(libraries) {
 			// (draw.io's removePalette expects the palette directly in the sidebar's container,
 			// which its newer sidebar no longer guarantees: remove the elements wherever they are.)
@@ -529,6 +533,7 @@
 				ui.sidebar.palettes[palettes[i]] = null;
 			}
 			palettes = [];
+			paletteTitles = {};
 			(libraries || []).forEach(function (lib, n) {
 				var id = "drawai-shapes-" + n;
 				var images = null;
@@ -557,6 +562,7 @@
 				var label = lib.title + (lib.truncated ? " (first 400)" : "") + (lib.more > 0 ? " · search for " + lib.more.toLocaleString() + " more" : "");
 				ui.sidebar.addPaletteFunctions(id, label, lib.kind !== "gallery", fns);
 				palettes.push(id);
+				paletteTitles[id] = lib.title;
 			});
 		}
 

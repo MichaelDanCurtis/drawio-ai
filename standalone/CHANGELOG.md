@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- The **Shape Workshop** is now also in the Draw.AI extension for VS Code, from this same code
+  (its page says whose it is).
 - **Mapper**: `git` run by the Mapper no longer starts the program a repository's own
   configuration names (`core.fsmonitor`) and no longer writes the index; only a commit hash
   from a map's record reaches git's arguments (Recent changes); a tour saved again under its

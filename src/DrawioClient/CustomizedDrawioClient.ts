@@ -124,6 +124,40 @@ export class CustomizedDrawioClient extends DrawioClient<
 		this.sendCustomAction({ action: "desktopPresentationTours", tours, start });
 	}
 
+	// ----- the Shape Workshop's side of the editor -----
+
+	private readonly onShapeSetsEmitter = new EventEmitter<{ groups: unknown[] }>();
+	/** draw.io's own shape sets and which are shown, as the page reports them (when it loads, and when they change). */
+	public readonly onShapeSets = this.onShapeSetsEmitter.asEvent();
+
+	private readonly onGallerySearchEmitter = new EventEmitter<{ reqId: number; query: string; limit: number }>();
+	/** draw.io's sidebar search asks for gallery shapes: answer with galleryResults (it waits 2.5 s at most). */
+	public readonly onGallerySearch = this.onGallerySearchEmitter.asEvent();
+
+	/** The palettes the host adds to the shapes sidebar (each call replaces the last). */
+	public setShapes(libraries: unknown[]): void {
+		this.sendCustomAction({ action: "desktopShapes", libraries });
+	}
+
+	private insertSeq = 0;
+	/** Puts a shape in the middle of the view, selected. */
+	public insertShape(shape: DesktopShape): void {
+		// (the page can see a message twice; the sequence number makes it insert once)
+		this.sendCustomAction({ action: "desktopInsertShape", shape, seq: ++this.insertSeq });
+	}
+
+	public reportShapeSets(): void {
+		this.sendCustomAction({ action: "desktopReportShapeSets" });
+	}
+
+	public setShapeSet(id: string, on: boolean): void {
+		this.sendCustomAction({ action: "desktopSetShapeSet", id, on });
+	}
+
+	public galleryResults(reqId: number, shapes: DesktopShape[]): void {
+		this.sendCustomAction({ action: "desktopGalleryResults", reqId, shapes });
+	}
+
 	private lookState: DesktopLookState | undefined;
 	private lookStateRequest = 0;
 	private readonly lookStateWaiters = new Map<number, (state: DesktopLookState) => void>();
@@ -411,6 +445,14 @@ export class CustomizedDrawioClient extends DrawioClient<
 		if (evt.event === "desktopCommand") {
 			if (typeof evt.command === "string") {
 				this.onEditorCommandEmitter.emit({ command: evt.command });
+			}
+		} else if (evt.event === "desktopShapeSets") {
+			if (Array.isArray(evt.groups)) {
+				this.onShapeSetsEmitter.emit({ groups: evt.groups });
+			}
+		} else if (evt.event === "desktopGallerySearch") {
+			if (typeof evt.query === "string" && typeof evt.reqId === "number") {
+				this.onGallerySearchEmitter.emit({ reqId: evt.reqId, query: evt.query, limit: Number(evt.limit) || 24 });
 			}
 		} else if (evt.event === "desktopState") {
 			if (evt.state && typeof evt.state === "object") {

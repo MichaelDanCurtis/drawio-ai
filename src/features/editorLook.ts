@@ -76,8 +76,9 @@ export interface EditorPageKind {
  * or the editor only shows a diagram.
  *
  * `base` is the address of OMNI_DIR as the page sees it, without a slash at the end. What is
- * off: the Shape Workshop (not in the extension yet), a chat button (VS Code's chat has its own,
- * in the editor's title bar) and the desktop app's keyboard shortcuts (VS Code owns the keys).
+ * off: a chat button (VS Code's chat has its own, in the editor's title bar) and the desktop
+ * app's keyboard shortcuts (VS Code owns the keys). The Shape Workshop's side of the editor is
+ * on (its toolbar button, "+ More Shapes", the galleries' palettes and search: src/features/workshop).
  */
 export function omniConfig(look: EditorLook, base: string, page: EditorPageKind): object | null {
 	if (!look.editorTools || page.readOnly) {
@@ -91,7 +92,7 @@ export function omniConfig(look: EditorLook, base: string, page: EditorPageKind)
 		icons: look.icons,
 		toolbar: look.toolbar,
 		matrix: full ? look.matrix : "off",
-		features: { workshop: false, chat: false, shortcuts: false, toolbar: full, matrix: full },
+		features: { workshop: true, chat: false, shortcuts: false, toolbar: full, matrix: full },
 	};
 }
 

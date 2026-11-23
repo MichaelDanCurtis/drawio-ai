@@ -58,7 +58,7 @@ test("the page gets the tools' settings, and nothing when they are off or the ed
 		toolbar: "right",
 		matrix: "green",
 		// not in the extension: the Shape Workshop, a chat button of its own, the desktop app's shortcuts
-		features: { workshop: false, chat: false, shortcuts: false, toolbar: true, matrix: true },
+		features: { workshop: true, chat: false, shortcuts: false, toolbar: true, matrix: true },
 	});
 	assert.equal(look.omniConfig(on, "https://x/omni", VIEW), null);
 	assert.equal(look.omniConfig(look.cleanLook({ editorTools: false }), "https://x/omni", EDIT), null);

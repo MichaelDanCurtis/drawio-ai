@@ -64,7 +64,7 @@ module.exports = {
 		// its pages use (/ui and /plugin), with the fonts the look is set in.
 		new CopyPlugin({
 			patterns: [
-				// (brands.js and the style sheets are for the Map Something page: src/features/mapper)
+				// (brands.js and the style sheets are for the Map Something and Shape Workshop pages: src/features/mapper, workshop)
 				...["icons.js", "brandmark.js", "tips.js", "dots.js", "matrix.js", "brands.js", "fonts.css", "tokens.css", "motion.css", "depth.css", "app.css"].map((f) => ({
 					from: r(`../standalone/src/renderer/ui/${f}`),
 					to: `omni/ui/${f}`,
@@ -74,6 +74,7 @@ module.exports = {
 					to: `omni/plugin/${f}`,
 				})),
 				{ from: r("../standalone/src/renderer/mapper.html"), to: "omni/mapper.html" },
+				{ from: r("../standalone/src/renderer/workshop.html"), to: "omni/workshop.html" },
 				...OMNI_FONTS.map((f) => ({
 					from: r(`../node_modules/@fontsource/${f.replace(/-(latin).*$/, "")}/files/${f}.woff2`),
 					to: `omni/ui/fonts/${f}.woff2`,

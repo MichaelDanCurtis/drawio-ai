@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The Shape Workshop** of the OmniDraw desktop app, in VS Code, with its **Shape Gallery**. **Draw.AI: Shape Workshop…**, the Workshop button in the diagram's toolbar, or **+ More Shapes** under the shapes sidebar:
+  - Galleries of icons and logos (theSVG with open licences only, Tech logos, UI icons), a public GitHub repository, a folder of SVG or PNG files, or a draw.io library; your own collections, exported as draw.io libraries; search across them; click a shape to put it in the diagram used last.
+  - A gallery that is on is a palette in every diagram's shapes sidebar, and draw.io's own search (and the AI's `drawio_search_shapes`) finds its shapes.
+  - draw.io's own shape sets and the Scratchpad are switches in the Workshop (where the More Shapes dialog was), kept for every diagram.
+  - **Nothing is downloaded until you switch a gallery on**: the three galleries the desktop app starts with are listed, off. Downloads come only from jsDelivr and GitHub, are kept in the extension's storage, and every SVG is cleaned of scripts and external links.
 - **The Mapper** of the OmniDraw desktop app, in VS Code. **Draw.AI: Map Something…** (also in the Start view and the diagram's `…` menu) draws software, databases, Azure, AWS, Google Cloud and machine-learning systems into the open diagram:
   - The same maps as the desktop app, collected **read-only**: listing, describing and querying commands of your signed-in `az`, `aws`, `gcloud`, `kubectl` and `git` (a guard refuses anything else), fixed catalog queries in read-only database sessions (PostgreSQL, MySQL / MariaDB, SQL Server, Oracle, SQLite, MongoDB), and file reads. Passwords, connection strings and tokens are used for that run only: never stored, drawn or sent to the agent.
   - A map is drawn on a page of its own as a pending change you keep or revert. What the Mapper knows about it is kept in `.drawai/maps/` next to the diagram.
