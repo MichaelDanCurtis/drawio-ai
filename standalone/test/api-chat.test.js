@@ -43,6 +43,11 @@ const cipher = (state) => ({
 	encrypt: async (text) => (state.asked++, flip(Buffer.from(text, "utf8"))),
 	decrypt: async (bytes) => {
 		state.asked++;
+		// (`gate`: the keychain is waiting for the user, a prompt for one)
+		if (state.gate) {
+			state.waiting = true;
+			await state.gate;
+		}
 		if (state.broken) throw new Error("the keychain item is gone");
 		return { text: flip(bytes).toString("utf8") };
 	},
@@ -399,6 +404,26 @@ test("another model: the next request starts a new conversation with it, and say
 	// the model in use stays in the list when it is switched off in Settings meanwhile
 	w.settings.models["api:anthropic"] = { hidden: ["claude-old"] };
 	assert.deepEqual(session.info.configOptions[0], { id: "model", name: "Model", category: "model", type: "select", currentValue: "claude-old", options: [{ value: "claude-old", name: "Claude Old" }, { value: "claude-new", name: "Claude New" }] });
+
+	// Stop while the keychain is asked for the key, then another model picked: the conversation that was
+	// being opened does not come back with the model it began with
+	const late = await world();
+	await late.access.saveKey("anthropic", KEY);
+	const picked = open(late, "anthropic");
+	await picked.session.start();
+	let unlock;
+	late.state.gate = new Promise((resolve) => (unlock = resolve));
+	const turn = ask(picked.session, "Add a box.");
+	await until(() => late.state.waiting);
+	picked.session.cancel();
+	assert.equal(await turn, "cancelled");
+	await picked.session.setConfigOption("model", "claude-old");
+	delete late.state.gate;
+	unlock();
+	late.script.anthropic.push(fake.anthropicAnswer([{ text: "The old one here." }]));
+	assert.equal(await ask(picked.session, "Add a box."), "end_turn");
+	assert.deepEqual([sentTo(late, "/v1/messages").map((b) => b.model), picked.session.label, picked.session.info.configOptions[0].currentValue], [["claude-old"], "Claude Old", "claude-old"]);
+	assert.deepEqual(picked.seen.notes, []);
 });
 
 test("OpenAI through the same session; a model that takes no pictures is not offered the tool that makes one", async () => {

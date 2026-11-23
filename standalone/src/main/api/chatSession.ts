@@ -228,39 +228,48 @@ export class ApiChatSession implements ChatSession {
 		return this.info?.configOptions ?? undefined;
 	}
 
-	/** Opens the conversation: the model, then the key (read last: it is the one kept now). */
+	/**
+	 * Opens the conversation: the model, then the key (read last: it is the one kept now).
+	 * Asking the provider for its models or the keychain for the key can take a while, and Stop
+	 * does not wait for it (see `prompt`): the user may pick another model meanwhile. The
+	 * conversation is opened with the model that is picked when the key is there.
+	 */
 	private async open(): Promise<ApiChat> {
-		if (this.chat) return this.chat;
 		const { access, provider } = this.o;
-		if (!access.hasKey(provider.id)) throw this.noKey();
-		// (a key that was kept before its models could be listed: ask now; and once more when the key
-		// was replaced while the provider was asked, which drops that answer)
-		let failed: Awaited<ReturnType<ApiAccess["load"]>>;
-		for (let tries = 0; tries < 2 && !failed && !access.listed(provider.id); tries++) failed = await access.load(provider.id);
-		const model = this.current();
-		if (!model) {
-			if (access.listed(provider.id)) throw new ApiSetupError(`Every ${provider.company} model is switched off in Settings → Agents & models → API keys. Switch one on to use it.`);
-			if (failed?.badKey) throw new ApiSetupError(failed.problem);
-			throw new Error(failed?.problem ?? `${provider.company} listed no models for this key.`);
+		for (;;) {
+			if (this.chat) return this.chat;
+			if (!access.hasKey(provider.id)) throw this.noKey();
+			// (a key that was kept before its models could be listed: ask now; and once more when the key
+			// was replaced while the provider was asked, which drops that answer)
+			let failed: Awaited<ReturnType<ApiAccess["load"]>>;
+			for (let tries = 0; tries < 2 && !failed && !access.listed(provider.id); tries++) failed = await access.load(provider.id);
+			const model = this.current();
+			if (!model) {
+				if (access.listed(provider.id)) throw new ApiSetupError(`Every ${provider.company} model is switched off in Settings → Agents & models → API keys. Switch one on to use it.`);
+				if (failed?.badKey) throw new ApiSetupError(failed.problem);
+				throw new Error(failed?.problem ?? `${provider.company} listed no models for this key.`);
+			}
+			const kept = await access.keyFor(provider);
+			if ("problem" in kept) throw new ApiSetupError(kept.problem);
+			// (another model was picked while the keychain was asked: that one, not the one this began with)
+			if (this.chat || this.current()?.value !== model.value) continue;
+			const sees = model.images !== false;
+			this.model = model;
+			this.chat = provider.chat({
+				apiKey: kept.key,
+				model: model.value,
+				system: this.o.system(),
+				tools: this.o.tools
+					.list()
+					.filter((t) => sees || !t.picture)
+					.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+				callTool: (name, args) => this.callTool(name, args),
+				onText: (text) => this.tell({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } }),
+				images: sees,
+				baseURL: access.baseURL(provider.id),
+			});
+			return this.chat;
 		}
-		const kept = await access.keyFor(provider);
-		if ("problem" in kept) throw new ApiSetupError(kept.problem);
-		const sees = model.images !== false;
-		this.model = model;
-		this.chat = provider.chat({
-			apiKey: kept.key,
-			model: model.value,
-			system: this.o.system(),
-			tools: this.o.tools
-				.list()
-				.filter((t) => sees || !t.picture)
-				.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
-			callTool: (name, args) => this.callTool(name, args),
-			onText: (text) => this.tell({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } }),
-			images: sees,
-			baseURL: access.baseURL(provider.id),
-		});
-		return this.chat;
 	}
 
 	private tell(update: acp.SessionUpdate): void {
