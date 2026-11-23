@@ -228,6 +228,13 @@ declare interface AiApplyOpsAction {
     atomic: boolean;
     /** Keep the result as a pending AI change the user accepts or rejects. */
     review?: boolean;
+    /**
+     * The user's own change, made through the host's UI (the Shape Workshop's colours), not an
+     * AI change: it is never held for review, and a review that is pending takes it as it takes
+     * an edit made in the editor (it becomes part of what "Reject all" goes back to, unless it
+     * touches a cell the AI changed).
+     */
+    user?: boolean;
 }
 
 declare interface AiSetSelectionAction {

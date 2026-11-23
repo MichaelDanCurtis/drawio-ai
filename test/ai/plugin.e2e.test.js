@@ -488,6 +488,33 @@ test("review: several AI batches form one review and one undo step; user edits a
 	assert.equal(lastReview().pending, false, "undoing the AI's changes ends the review");
 });
 
+test("review: a change the user makes through the host (the Workshop's colours) is theirs, not the AI's", async () => {
+	const recolour = (user) =>
+		request({ action: "aiApplyOps", ops: [{ op: "update", id: "db", styleProps: { fillColor: "#ff8800" } }], atomic: true, flash: false, selectResult: false, review: false, ...(user ? { user: true } : {}) });
+	await freshBaseline();
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "api", label: "Gateway" }]);
+	// while the AI's change waits, the user recolours another shape in the Workshop
+	assert.equal((await recolour(true)).rolledBack, false);
+	await new Promise((r) => setTimeout(r, 150));
+	const evt = lastReview();
+	assert.deepEqual(evt.summary, { added: 0, changed: 1, removed: 0 }, JSON.stringify(evt.changes));
+	assert.ok(!evt.changes.some((c) => c.id === "db"), "the user's colour is not a pending AI change");
+	assert.equal((await resolve("reject")).resolved, "rejected");
+	let after = await getModel();
+	assert.equal(byId(after, "api").label, "API");
+	assert.match(byId(after, "db").style, /fillColor=#ff8800/, "Reject all keeps what the user did");
+
+	// the same change from the AI, not held for review, still belongs to the review that is open
+	await freshBaseline();
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "api", label: "Gateway" }]);
+	await recolour(false);
+	await resolve("reject");
+	after = await getModel();
+	assert.doesNotMatch(byId(after, "db").style, /#ff8800/);
+});
+
 test("review: the in-diagram bar keeps or reverts the selection", async () => {
 	await freshBaseline();
 	inbox.length = 0;

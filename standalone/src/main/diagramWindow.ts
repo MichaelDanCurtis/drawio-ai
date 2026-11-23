@@ -472,11 +472,11 @@ export class DiagramWindow {
 		return model.cells.filter((c) => c.selected === true).map((c) => ({ id: c.id, style: c.style ?? "", edge: c.kind === "edge" }));
 	}
 
-	/** Style changes the user made in the Workshop: one undo step, not held for review. */
+	/** Style changes the user made in the Workshop: one undo step, the user's own (a pending AI review takes them as an edit made in the editor). */
 	public async applyStyles(edits: { id: string; props: Record<string, string> }[]): Promise<void> {
 		const r = await this.client.aiApplyOps(
 			edits.map((e) => ({ op: "update", id: e.id, styleProps: e.props })),
-			{ selectResult: false, flash: false, atomic: true, review: false }
+			{ selectResult: false, flash: false, atomic: true, review: false, user: true }
 		);
 		const failed = r.results.find((x) => !x.ok);
 		if (failed || r.rolledBack) throw new Error(`The shapes could not be changed: ${failed?.error ?? "the change was rolled back"}`);

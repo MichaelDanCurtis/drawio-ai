@@ -890,11 +890,13 @@ Draw.loadPlugin((ui: any) => {
 		syncReviewPage();
 		const page = ui.currentPage;
 		const root = model.getRoot();
-		const reviewBefore = action.review && !review ? snapAll() : undefined;
-		aiEditing++;
+		// (the user's own change through the host is not the AI's: the undo listener takes it as a user edit)
+		const held = !!action.review && !action.user;
+		const reviewBefore = held && !review ? snapAll() : undefined;
+		if (!action.user) aiEditing++;
 		try {
 			const result = await applyOpsInner(action);
-			if (action.review && !result.rolledBack && result.results.some((r) => r.ok)) {
+			if (held && !result.rolledBack && result.results.some((r) => r.ok)) {
 				const created = reviewBefore ? { page, root, before: reviewBefore, changes: [], edit: undefined } : undefined;
 				if (result.switched) {
 					// What was applied is on the page the batch started on, which now waits with it.
@@ -909,7 +911,7 @@ Draw.loadPlugin((ui: any) => {
 			const { historyBefore: _, switched: __, ...event } = result;
 			return event;
 		} finally {
-			aiEditing--;
+			if (!action.user) aiEditing--;
 		}
 	}
 
