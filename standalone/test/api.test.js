@@ -351,8 +351,10 @@ test("Anthropic: a request, the model's tool calls and their answers, and the co
 
 	const sent = s.posts("/v1/messages").map((r) => r.body);
 	assert.equal(sent.length, 3);
-	// one shape for every model: no thinking, effort or sampling settings; the answer is streamed
-	assert.deepEqual(Object.keys(sent[0]).sort(), ["max_tokens", "messages", "model", "stream", "system", "tools"]);
+	// one shape for every model: no thinking, effort or sampling settings; the answer is streamed, and
+	// what a request goes on from is read from Anthropic's cache
+	assert.deepEqual(Object.keys(sent[0]).sort(), ["cache_control", "max_tokens", "messages", "model", "stream", "system", "tools"]);
+	for (const body of sent) assert.deepEqual(body.cache_control, { type: "ephemeral" });
 	assert.deepEqual([sent[0].model, sent[0].max_tokens, sent[0].system, sent[0].stream], ["claude-new", 32000, "You draw icons.", true]);
 	assert.deepEqual(sent[0].tools, CREATOR_TOOLS.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema })));
 	// the request: the images first, then the words
@@ -1020,8 +1022,15 @@ test("Gemini: tool calls that arrive whole and without a position, the signature
 	// what is asked: nothing but the model, the conversation and the tools, described in the part of JSON Schema Gemini takes
 	assert.deepEqual(Object.keys(sent[0]).sort(), ["messages", "model", "stream", "tools"]);
 	assert.deepEqual(sent[0].tools[0].function.parameters, { type: "object", properties: { svg: { type: "string", description: "The whole SVG document: one <svg> element with a viewBox." }, name: { type: "string", description: 'A short name for the icon, e.g. "Load balancer".' }, tags: { type: "array", items: { type: "string" }, description: "Up to 6 words someone would search for." } }, required: ["svg"] });
-	assert.deepEqual(geminiSchema({ type: "object", additionalProperties: false, $schema: "x", properties: { a: { type: "string", pattern: "^a", enum: ["a"] }, b: { type: "array", items: { type: "object", additionalProperties: true, properties: {} } } } }), { type: "object", properties: { a: { type: "string", enum: ["a"] }, b: { type: "array", items: { type: "object", properties: {} } } } });
-	assert.deepEqual([geminiSchema(null), geminiSchema("x"), geminiSchema([1])], [{}, {}, {}]);
+	// Gemini refuses an object that names no properties: one of any shape is asked for as JSON text
+	// (at any depth), and a tool that takes nothing is given one argument to leave out
+	const asText = (description) => ({ type: "string", description: `${description ? `${description} ` : ""}A JSON object, written as text.` });
+	assert.deepEqual(
+		geminiSchema({ type: "object", additionalProperties: false, $schema: "x", properties: { a: { type: "string", pattern: "^a", enum: ["a"] }, b: { type: "array", items: { type: "object", additionalProperties: true, properties: {} } }, c: { type: "object", description: "Style keys.", additionalProperties: { type: "string" } }, d: { type: "object", properties: { e: { type: "object" } }, required: ["e"] } } }),
+		{ type: "object", properties: { a: { type: "string", enum: ["a"] }, b: { type: "array", items: asText() }, c: asText("Style keys."), d: { type: "object", properties: { e: asText() }, required: ["e"] } } }
+	);
+	const nothing = { type: "object", properties: { unused: { type: "string", description: "This tool takes no arguments. Leave this out." } } };
+	assert.deepEqual([geminiSchema({ type: "object", properties: {} }), geminiSchema({ type: "object" }), geminiSchema(null), geminiSchema("x"), geminiSchema([1])], [nothing, nothing, nothing, nothing, nothing]);
 	assert.deepEqual(sent[0].messages[1], { role: "user", content: [{ type: "text", text: "Draw a key." }, { type: "image_url", image_url: { url: "data:image/jpeg;base64,AAAA" } }] });
 	// the answer goes back with the signature on the call it came on, every call with an id, all calls first and then their answers in order
 	assert.deepEqual(sent[1].messages.slice(2), [

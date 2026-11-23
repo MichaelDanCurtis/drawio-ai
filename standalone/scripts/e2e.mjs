@@ -1,6 +1,7 @@
 // End-to-end check of the real app (see src/main/e2e.ts).
 //   yarn e2e                                   editor + MCP endpoint + exports, no agent
 //   yarn e2e --agent claude|gemini|codex|copilot|kimi  also one prompt through that agent over ACP
+//   yarn e2e --api-chat                        the chat answered through an API key, with a stand-in provider (nothing is sent, no keychain)
 //   yarn e2e --agent codex --prompt "…" --file ../examples/use-cases/cloud-architecture.drawio
 //   node scripts/e2e.mjs --app dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI   the packaged app
 // The diagram is copied to a temp folder first; results land in <temp>/out.
@@ -32,6 +33,7 @@ const config = {
 	insights: process.argv.includes("--insights"),
 	workshop: process.argv.includes("--workshop"),
 	polish: process.argv.includes("--polish"),
+	apiChat: process.argv.includes("--api-chat"),
 	clickAllowAll: process.argv.includes("--click-allow-all"),
 	// yarn e2e --map software.github-actions --map-input '{"folder":"…"}' [--map-dialog] [--agent claude --ask-agent] [--dig "question"]
 	map: arg("map")

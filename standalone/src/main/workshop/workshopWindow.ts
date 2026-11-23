@@ -3,7 +3,7 @@ import * as path from "path";
 import { paths } from "../paths";
 import { onSettingsChanged, settings } from "../settings";
 import type { StaticServer } from "../staticServer";
-import { apiKeys } from "../api/keys";
+import { apiAccess } from "../api/catalog";
 import { desktopCreator, standInCreator } from "../creatorRunner";
 import { WorkshopCore, type WorkshopHost } from "./core";
 import type { CreatorPorts } from "./creator";
@@ -117,7 +117,7 @@ export class WorkshopWindow {
 			if (("models" in patch || "modelCatalog" in patch) && WorkshopWindow.window) WorkshopWindow.core.creatorChanged();
 		});
 		// an API key was added, replaced or removed: a model of that provider that is drawing with the old one is closed
-		apiKeys().onChange((id) => WorkshopWindow.core.creatorChanged((agent) => agent === `api:${id}`));
+		apiAccess().onKeyChange((id) => WorkshopWindow.core.creatorChanged((agent) => agent === `api:${id}`));
 		galleries().onChange(() => WorkshopWindow.core.postState());
 	}
 

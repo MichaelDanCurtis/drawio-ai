@@ -15,6 +15,8 @@ export interface SessionHandlers {
 	requestPermission(request: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionOutcome>;
 	/** The agent process ended (or could not start). */
 	onExit(message: string): void;
+	/** Something the user should know that is not an answer (a conversation that had to start over). */
+	onNote?(text: string): void;
 }
 
 export interface SessionInfo {
@@ -24,7 +26,25 @@ export interface SessionInfo {
 	configOptions?: acp.SessionConfigOption[] | null;
 	authMethods: acp.AuthMethod[];
 	images: boolean;
-	mcpTransport: "http" | "stdio";
+	/** How an agent program reaches the app's tools. Not set for a model used through its API: the app runs them itself. */
+	mcpTransport?: "http" | "stdio";
+}
+
+/**
+ * Whoever answers the chat: an agent program over ACP (AcpAgentSession, below), or a provider's
+ * model over its API (api/chatSession.ts). The chat talks to both the same way.
+ */
+export interface ChatSession {
+	/** Set once the session is ready for a request. */
+	readonly info: SessionInfo | undefined;
+	readonly label: string;
+	start(): Promise<SessionInfo>;
+	authenticate(methodId: string): Promise<SessionInfo>;
+	prompt(blocks: acp.ContentBlock[]): Promise<acp.StopReason>;
+	cancel(): void;
+	setConfigOption(configId: string, value: string): Promise<acp.SessionConfigOption[] | undefined>;
+	setMode(modeId: string): Promise<void>;
+	dispose(): void;
 }
 
 export class AuthRequiredError extends Error {
@@ -37,7 +57,7 @@ export class AuthRequiredError extends Error {
  * One coding agent, started in ACP mode, with one session whose cwd is the
  * diagram's folder and whose MCP servers include this window's OmniDraw tools.
  */
-export class AcpAgentSession {
+export class AcpAgentSession implements ChatSession {
 	private child: ChildProcess | undefined;
 	private connection: acp.ClientConnection | undefined;
 	private stderr: string[] = [];

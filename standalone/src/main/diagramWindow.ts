@@ -282,7 +282,7 @@ export class DiagramWindow {
 					void this.mapActions.run(action, text);
 				},
 				reportAction: (action) => void this.mapActions.action(action),
-				openSettings: () => DiagramWindow.appCommands.settings(),
+				openSettings: (section) => DiagramWindow.appCommands.settings(section),
 				collapseChat: () => this.setChatVisible(false),
 				resizeChatTo: (screenX, done) => this.resizeChatTo(screenX, done),
 			},
@@ -340,8 +340,10 @@ export class DiagramWindow {
 		if ("chat" in patch || "chatWidth" in patch) this.layout();
 		if ("appearance" in patch || "chat" in patch) this.sendEditorPrefs();
 		if ("shapes" in patch || "workshop" in patch) this.sendShapes();
-		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw)
+		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw, unless
+		// this chat is answered through an API key, whose models are the ones the provider listed)
 		if ("models" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.settingsChanged("agents" in patch);
+		else if ("modelCatalog" in patch) this.chat.catalogChanged();
 	}
 
 	private sendToEditor(msg: unknown): void {

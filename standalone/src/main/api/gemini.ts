@@ -33,18 +33,34 @@ const opened: typeof globalThis.fetch = async (input, init) => {
 	return new Response(body, { status: answer.status, statusText: answer.statusText, headers: answer.headers });
 };
 
-/** The parts of JSON Schema Gemini takes for a tool's arguments. */
+/**
+ * The parts of JSON Schema Gemini takes for a tool's arguments. It refuses an object that
+ * names no properties ("should be non-empty for OBJECT type"), whatever else is said about it:
+ * - where a tool takes an object of any shape, Gemini is told to send it as JSON text, which
+ *   is read back before the tool runs (`toolArguments` in chatSession.ts);
+ * - a tool that takes nothing is given one argument to leave out.
+ * An argument whose schema names no type is given one.
+ */
 const SCHEMA = ["type", "description", "properties", "required", "items", "enum", "format", "nullable", "minimum", "maximum", "minItems", "maxItems"];
-export function geminiSchema(schema: unknown): Record<string, unknown> {
+const named = (schema: Record<string, unknown>) => !!schema.properties && typeof schema.properties === "object" && Object.keys(schema.properties).length > 0;
+function part(schema: unknown): Record<string, unknown> {
 	if (!schema || typeof schema !== "object" || Array.isArray(schema)) return {};
+	const given = schema as Record<string, unknown>;
+	if (given.type === "object" && !named(given)) return { type: "string", description: `${typeof given.description === "string" ? `${given.description} ` : ""}A JSON object, written as text.` };
 	const out: Record<string, unknown> = {};
-	for (const [name, value] of Object.entries(schema)) {
+	for (const [name, value] of Object.entries(given)) {
 		if (!SCHEMA.includes(name)) continue;
-		if (name === "properties" && value && typeof value === "object") out[name] = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, geminiSchema(v)]));
-		else if (name === "items") out[name] = geminiSchema(value);
+		if (name === "properties" && value && typeof value === "object") out[name] = Object.fromEntries(Object.entries(value).map(([k, v]) => [k, part(v)]));
+		else if (name === "items") out[name] = part(value);
 		else out[name] = value;
 	}
+	// (Gemini wants every argument typed: one that does not say what it is, is taken by what it holds, else as text)
+	if (typeof out.type !== "string") out.type = out.properties ? "object" : out.items ? "array" : "string";
 	return out;
+}
+export function geminiSchema(schema: unknown): Record<string, unknown> {
+	if (schema && typeof schema === "object" && !Array.isArray(schema) && named(schema as Record<string, unknown>)) return part(schema);
+	return { type: "object", properties: { unused: { type: "string", description: "This tool takes no arguments. Leave this out." } } };
 }
 
 /** What Google says when it does not accept the key (with "bad request", not "unauthorised"). */

@@ -73,8 +73,10 @@ function chat(o: ApiChatOptions): ApiChat {
 			try {
 				const max_tokens = await maxTokens(signal);
 				for (let round = 0; ; round++) {
-					// (thinking and effort are left to each model's own default: one request shape for every model the key can use)
-					const stream = api.messages.stream({ model: o.model, max_tokens, system: o.system, tools, messages }, { signal });
+					// (thinking and effort are left to each model's own default: one request shape for every model the key can use.
+					// `cache_control`: what was sent before, the tools and the conversation so far, is read from Anthropic's
+					// cache at a fraction of the price when a request goes on from it, as every round of tool calls does.)
+					const stream = api.messages.stream({ model: o.model, max_tokens, system: o.system, tools, messages, cache_control: { type: "ephemeral" } }, { signal });
 					stream.on("text", (delta) => o.onText(delta));
 					const message = await stream.finalMessage();
 					if (message.stop_reason === "refusal") return forget("refusal");

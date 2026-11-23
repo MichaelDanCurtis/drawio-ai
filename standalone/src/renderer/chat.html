@@ -6,8 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!--
 	OmniDraw chat panel. Adapted from src/features/ai/chatView.html (the VS Code
-	panel): the provider/model pickers pick an ACP agent and its model or mode, and
-	agents' permission requests and thoughts get their own transcript items.
+	panel): the provider/model pickers pick an ACP agent and its model or mode, or a
+	provider whose models are used with an API key; permission requests and thoughts
+	get their own transcript items.
 	Look: the omni-design language (ui/*.css): paper and ink, mono caps labels, one
 	signal red, a live dot field behind the head, a 3D dot object when empty.
 -->
@@ -50,6 +51,8 @@
 	#pickMenu [role="menuitemradio"] small { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
 	#pickMenu [role="menuitemradio"][aria-disabled="true"] { color: var(--faint); }
 	#pickMenu .more { color: var(--muted); }
+	#pickMenu .group { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 8px 10px 4px; }
+	#pickMenu .group:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 10px; }
 
 	/* The chat closes from the edge it shares with the diagram: an arrow pointing the way it goes. */
 	/* The AI symbol: the chat's mark, in the corner the chat shares with the diagram. Clicking it
@@ -182,7 +185,7 @@
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
 		<header>
 			<button id="collapse" class="icon-btn" title="Close the AI chat (⌘J opens it again)" aria-label="Close the AI chat"><span data-icon="sparkle"></span></button>
-			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Coding agent"><span id="providerLabel">Agent</span></button>
+			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Who answers: one of your agents, or a model used with an API key"><span id="providerLabel">Agent</span></button>
 			<button id="modelBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Model or mode"><span id="modelLabel">Model</span></button>
 			<span class="spacer"></span>
 			<button id="allowAllChip" class="tag hidden" data-tone="warn" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">Allow all ✕</button>
@@ -219,7 +222,7 @@
 		<div id="empty">
 			<figure class="dotobject-stage" id="emptyStage"></figure>
 			<h2>What should we draw?</h2>
-			<p>Pick one of your coding agents above and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
+			<p>Pick one of your coding agents above, or a model you have an API key for, and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
 			<div class="suggestions">
 				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
 				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
@@ -603,7 +606,7 @@
 		$("mapActions").title = (state.pageFindings ? state.pageFindings + " finding(s) on this page's maps. " : "") + "Map actions: findings, plain-English descriptions, recent changes, refresh, tour, ask";
 		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
-		$("providerBtn").title = state.providerTitle || "Coding agent";
+		$("providerBtn").title = state.providerTitle || "Who answers: one of your agents, or a model used with an API key";
 		const status = $("status");
 		if (status.dataset.state !== (state.agentState || "off") && state.agentState === "ready") window.drawaiUI?.pulse();
 		status.dataset.state = state.agentState || "off";
@@ -796,7 +799,17 @@
 		if (pickOwner === button) return closePick(false);
 		closePick(false);
 		pickMenu.textContent = "";
+		let group;
 		for (const it of items) {
+			// (a heading where a group begins: the agents, then the providers used with an API key)
+			if (it.group && it.group !== group) {
+				const h = document.createElement("div");
+				h.className = "group";
+				h.setAttribute("role", "presentation");
+				h.textContent = it.group;
+				pickMenu.appendChild(h);
+			}
+			group = it.group;
 			const b = document.createElement("button");
 			b.setAttribute("role", "menuitemradio");
 			b.setAttribute("aria-checked", String(!!it.checked));
@@ -846,12 +859,14 @@
 	document.addEventListener("click", (e) => { if (pickOwner && !pickMenu.contains(e.target)) closePick(false); });
 	window.addEventListener("blur", () => closePick(false));
 	window.addEventListener("resize", () => closePick(false));
+	// (where in Settings the one who answers is set up: the agents, or the API keys)
+	const settingsPart = () => (String(state.providerId || "").startsWith("api:") ? "api" : "agents");
 	$("providerBtn").addEventListener("click", (e) => {
 		e.stopPropagation();
 		openPick($("providerBtn"), (state.providers || []).map((p) => {
 			const m = / — (.*)$/.exec(p.label);
-			return { label: p.label.replace(/ — .*$/, ""), detail: m ? m[1] : "", checked: p.id === state.providerId, pick: () => { if (p.id !== state.providerId) { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: p.id }); } } };
-		}), { label: "Agents & models…", pick: () => vscode.postMessage({ type: "openSettings" }) });
+			return { label: p.label.replace(/ — .*$/, ""), detail: m ? m[1] : "", group: p.group, checked: p.id === state.providerId, pick: () => { if (p.id !== state.providerId) { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: p.id }); } } };
+		}), { label: "Agents, API keys & models…", pick: () => vscode.postMessage({ type: "openSettings", section: settingsPart() }) });
 	});
 	$("modelBtn").addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -859,7 +874,7 @@
 		const items = models.length
 			? models.map((m) => ({ label: m.name, detail: m.description || "", checked: m.id === state.modelId, pick: () => { if (m.id !== state.modelId) vscode.postMessage({ type: "pickModel", modelId: m.id }); } }))
 			: [{ label: state.modelsError ? "⚠ " + state.modelsError : state.modelsLoading ? "Loading models…" : "No models", disabled: true, pick: () => undefined }];
-		openPick($("modelBtn"), items, { label: "Choose which models show…", pick: () => vscode.postMessage({ type: "openSettings" }) });
+		openPick($("modelBtn"), items, { label: "Choose which models show…", pick: () => vscode.postMessage({ type: "openSettings", section: settingsPart() }) });
 	});
 	$("settingsBtn").addEventListener("click", () => vscode.postMessage({ type: "openSettings" }));
 	$("collapse").addEventListener("click", () => vscode.postMessage({ type: "collapseChat" }));
