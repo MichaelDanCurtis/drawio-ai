@@ -1,7 +1,25 @@
 import * as fs from "fs";
+import * as yaml from "js-yaml";
 import * as path from "path";
 import type { FieldDef, MapInput } from "../types";
 import { MapperError } from "../types";
+
+/**
+ * YAML as the Mapper reads it: js-yaml's core schema, which only ever builds plain data, plus
+ * merge keys (`<<: *common`). Compose files, Kubernetes manifests and pipeline definitions
+ * lean on them: without, a service built on an anchor loses its image and what it depends on.
+ */
+export const YAML_SCHEMA = yaml.CORE_SCHEMA.withTags(yaml.mergeTag);
+
+/** One YAML document. */
+export function loadYaml(text: string): any {
+	return yaml.load(text, { schema: YAML_SCHEMA });
+}
+
+/** Every document of a YAML file (`---` between them). */
+export function loadYamlAll(text: string): any[] {
+	return yaml.loadAll(text, { schema: YAML_SCHEMA }) as any[];
+}
 
 /** Folders never worth reading when mapping a repository. */
 export const SKIP_DIRS = new Set([

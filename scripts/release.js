@@ -36,7 +36,9 @@ step("Build draw.io plugins", npx, ["webpack", "--mode", "production", "--config
 // The same files as `yarn test:ai`, so new test files are never left out of a release.
 const unitTests = (pkg.scripts["test:ai"].match(/test\/ai\/[\w.-]+\.test\.js/g) || []);
 step("Unit tests", node, ["--test", ...unitTests]);
-step("Browser tests (real draw.io in Chrome)", node, ["--test", "--test-timeout=180000", "test/ai/plugin.e2e.test.js", "test/ai/chatView.e2e.test.js"]);
+// The same files as `yarn test:ai-e2e`, for the same reason.
+const browserTests = (pkg.scripts["test:ai-e2e"].match(/test\/ai\/[\w.-]+\.test\.js/g) || []);
+step("Browser tests (real draw.io and the desktop app's pages in Chrome)", node, ["--test", "--test-timeout=180000", ...browserTests]);
 if (!args.has("--quick")) step("VS Code integration tests", node, ["test/ai/vscode/runVsCodeTests.js"]);
 step("Release check (build output)", node, ["scripts/release-check.js", "--built"]);
 step(

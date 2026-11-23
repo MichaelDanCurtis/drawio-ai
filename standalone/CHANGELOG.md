@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Mapper**: YAML merge keys (`<<: *common`) are followed, so a compose service built on an
+  anchor keeps its image, its environment and what it depends on (Connectivity, Kubernetes,
+  pipelines, MLflow, API maps).
+- **Shape Workshop**: a diagram's palettes follow what a gallery holds, not only which
+  galleries are on: a collection that gets its first shape shows up in the shapes sidebar, an
+  emptied one leaves it, and a synced gallery shows its new first page.
 - The **Shape Workshop** is now also in the Draw.AI extension for VS Code, from this same code
   (its page says whose it is).
 - The agents' `drawio_search_shapes` no longer returns gallery shapes with large images: at

@@ -10,8 +10,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as yaml from "js-yaml";
-import { readFiles, slug, type FoundFile } from "../common";
+import { readFiles, slug, type FoundFile, loadYaml, loadYamlAll } from "../common";
 import { hardcodedSecret, k8sObjectLine, keyLine, lineMatching, secretLine } from "./health";
 import {
 	type Address,
@@ -385,7 +384,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	for (const f of composeFiles) {
 		let doc: any;
 		try {
-			doc = yaml.load(f.text);
+			doc = loadYaml(f.text);
 		} catch (e: any) {
 			warnings.push(`${f.rel}: ${String(e?.message ?? e).split("\n")[0]}`);
 			continue;
@@ -500,7 +499,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 			continue;
 		}
 		try {
-			for (const d of yaml.loadAll(f.text)) {
+			for (const d of loadYamlAll(f.text)) {
 				if (!d || typeof d !== "object") continue;
 				const items = (d as any).kind === "List" && Array.isArray((d as any).items) ? (d as any).items : [d];
 				for (const it of items) if (it?.kind && it?.metadata?.name) k8sDocs.push({ doc: it, file: f.rel });
@@ -1040,7 +1039,7 @@ function configEntries(f: FoundFile): [string, string][] {
 				if (m && !line.trim().startsWith("#")) push(m[1].split("."), m[2].trim());
 			}
 		} else if (/\.json$/i.test(f.rel)) walk(JSON.parse(f.text.replace(/^﻿/, "")), [], 0);
-		else if (/\.ya?ml$/i.test(f.rel)) for (const d of yaml.loadAll(f.text)) walk(d, [], 0);
+		else if (/\.ya?ml$/i.test(f.rel)) for (const d of loadYamlAll(f.text)) walk(d, [], 0);
 		else if (/\.toml$/i.test(f.rel)) {
 			let section: string[] = [];
 			for (const line of f.text.split(/\r?\n/)) {

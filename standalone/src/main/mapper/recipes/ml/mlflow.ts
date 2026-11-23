@@ -5,8 +5,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as yaml from "js-yaml";
-import { agentRequest, digDeeperRequest, slug } from "../common";
+import { agentRequest, digDeeperRequest, slug, loadYaml } from "../common";
 import type { CheckCoverage, CollectContext, MapEdge, MapFinding, MapGraph, MapInput, MapNode, MapRow, Recipe } from "../../types";
 import { MapperError } from "../../types";
 import { firstLine, fmtNum, httpRequest, keepOnMap, ML_STYLES, redactUrl } from "./shared";
@@ -133,7 +132,7 @@ const readYaml = (p: string): any => {
 	const t = readText(p);
 	if (t === undefined) return undefined;
 	try {
-		return yaml.load(t);
+		return loadYaml(t);
 	} catch {
 		return undefined;
 	}
