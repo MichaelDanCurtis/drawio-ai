@@ -254,6 +254,7 @@ function buildMenu(): void {
 			submenu: [
 				{ label: "Shape Workshop…", accelerator: "CmdOrCtrl+Alt+K", click: () => WorkshopWindow.open(server, "gallery") },
 				{ label: "Find a Shape…", click: () => WorkshopWindow.open(server, "shifter") },
+				{ label: "Create a Shape…", click: () => WorkshopWindow.open(server, "creator") },
 				{ label: "Shape Gallery…", click: () => WorkshopWindow.open(server, "gallery") },
 				{ type: "separator" },
 				{ label: "Your Shape Folders…", click: () => openSettings("shapes") },

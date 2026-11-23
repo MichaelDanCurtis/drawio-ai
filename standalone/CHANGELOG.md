@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **Shape Creator** in the Shape Workshop (its third tab, or Shapes → Create a Shape…):
+  describe an icon and one of your agents draws it as SVG. See it at the sizes a diagram uses,
+  ask for changes, edit the source, then insert it, keep it in **My shapes** or another
+  collection, or copy the SVG. The agent runs in a folder of its own with two tools (look at
+  the icon, hand it in); everything else it asks for is refused, and what it hands in is
+  cleaned like every SVG.
+- A collection shows a shape added to it at once, also when it was being read at that moment.
 - **Shape Shifter** in the Shape Workshop (its second tab, or Shapes → Find a Shape…):
   - **Find a shape by words** across draw.io's own shapes and your galleries at once, each
     result with a picture; click to add it.

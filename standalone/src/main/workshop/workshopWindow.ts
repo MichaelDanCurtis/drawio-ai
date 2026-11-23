@@ -3,15 +3,19 @@ import * as path from "path";
 import { paths } from "../paths";
 import { onSettingsChanged, settings } from "../settings";
 import type { StaticServer } from "../staticServer";
+import { desktopCreator, standInCreator } from "../creatorRunner";
 import { WorkshopCore, type WorkshopHost } from "./core";
+import type { CreatorPorts } from "./creator";
 import { galleries, galleryConfigs, saveGalleries } from "./index";
 
 export type { WorkshopHost };
 
+let creator: CreatorPorts | undefined;
+let standIn: CreatorPorts | undefined;
+
 /**
- * The Shape Workshop: one window for the whole app. This first version is the Shape Gallery
- * (galleries on and off, add, sync, offline, collections, search, insert); Shape Shifter and
- * Shape Creator join it later.
+ * The Shape Workshop: one window for the whole app, with the Shape Gallery, the Shape Shifter
+ * and the Shape Creator.
  */
 export class WorkshopWindow {
 	private static win: BrowserWindow | undefined;
@@ -42,6 +46,10 @@ export class WorkshopWindow {
 		},
 		reveal: (file) => shell.showItemInFolder(file),
 		openExternal: (url) => void shell.openExternal(url),
+		// (the end-to-end run draws with a stand-in: no agent is started and nothing is sent anywhere)
+		get creator() {
+			return process.env.DRAWAI_E2E && process.env.DRAWAI_E2E_CREATOR ? (standIn ??= standInCreator()) : (creator ??= desktopCreator());
+		},
 		shifter: true,
 		pickStencil: async () => {
 			// (the end-to-end run has nobody to answer a file dialog)
