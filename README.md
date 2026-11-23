@@ -208,7 +208,8 @@ The agent works through 13 `mapper_*` tools (`mapper_maps`, `mapper_find`, `mapp
 -   **Galleries** of icons and logos: theSVG (open licences only), Tech logos (devicon and Simple Icons) and UI icons (Lucide and Tabler) are listed and **switched off** to start with. Switch one on to use it. You can also add a public GitHub repository of SVGs, a folder of SVG or PNG files, or a draw.io library file.
 -   **Collections** you fill yourself from any gallery, and export as a draw.io library.
 -   **Search** across the galleries that are on, and click a shape to put it in the diagram you used last.
--   A gallery that is on is also a **palette in the shapes sidebar** of every diagram (a first page of it), and **draw.io's own search** in that sidebar finds its shapes. The AI's `drawio_search_shapes` tool finds them too.
+-   A gallery that is on is also a **palette in the shapes sidebar** of every diagram (a first page of it), and **draw.io's own search** in that sidebar finds its shapes. The AI's `drawio_search_shapes` tool gets a few of the small ones too (a shape whose image is larger than about 4 KB is left out: it would fill the model's context).
+-   A gallery that is **off stays off**: it cannot be browsed, synced or made available offline until you switch it on, and restored default galleries come back switched off.
 -   **draw.io's own shape sets** (General, UML, AWS, …) and the **Scratchpad** are switches in the Workshop, where draw.io's More Shapes dialog used to be. They are kept for every diagram.
 
 Shapes are downloaded only for galleries you switched on, only from jsDelivr and GitHub (`cdn.jsdelivr.net`, `data.jsdelivr.com`, `raw.githubusercontent.com`), and are kept in the extension's storage for offline use. Every SVG is cleaned of scripts and external links before it is shown or put in a diagram. Shape Shifter and Shape Creator, the Workshop's other two parts, are not there yet.

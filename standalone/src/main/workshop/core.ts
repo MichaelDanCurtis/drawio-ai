@@ -38,6 +38,18 @@ export interface WorkshopPorts {
 	/** Shows a saved file where it is. */
 	reveal(file: string): void;
 	openExternal(url: string): void;
+	/**
+	 * A gallery that is off downloads nothing: until it is switched on it cannot be browsed,
+	 * synced or made offline, and the default galleries come back switched off. (The VS Code
+	 * extension, which sends nothing anywhere unasked. The desktop app lets a gallery that is
+	 * off be browsed.)
+	 */
+	offStaysOff?: boolean;
+}
+
+/** Whether using this gallery can download: one of its sources is on the internet. */
+export function downloads(g: GalleryConfig): boolean {
+	return g.sources.some((s) => s.kind !== "folder" && s.kind !== "library" && s.kind !== "collection");
 }
 
 /**
@@ -78,6 +90,14 @@ export class WorkshopCore {
 		return g;
 	}
 
+	/** With `offStaysOff`: refuses to use a gallery that is off and would download. */
+	private allow(g: GalleryConfig): GalleryConfig {
+		if (this.ports.offStaysOff && !g.enabled && downloads(g)) {
+			throw new Error(`“${g.title}” is off. Switch it on to use it: nothing is downloaded for a gallery that is off.`);
+		}
+		return g;
+	}
+
 	private update(id: string, patch: Partial<GalleryConfig>): void {
 		this.ports.save(this.ports.configs().map((g) => (g.id === id ? { ...g, ...patch } : g)));
 	}
@@ -113,10 +133,11 @@ export class WorkshopCore {
 				break;
 			}
 			case "sync":
-				await s.items(this.config(msg.id), true);
+				await s.items(this.allow(this.config(msg.id)), true);
 				break;
 			case "offline": {
 				const id = String(msg.id);
+				this.allow(this.config(id));
 				if (this.offlineRuns.has(id)) return;
 				this.offlineRuns.add(id);
 				try {
@@ -147,7 +168,7 @@ export class WorkshopCore {
 				break;
 			}
 			case "restoreDefaults":
-				this.ports.save(withDefaultGalleries(this.ports.configs()));
+				this.ports.save(withDefaultGalleries(this.ports.configs(), !this.ports.offStaysOff));
 				break;
 			case "setShapeSet":
 				if (typeof msg.id === "string" && /^[\w.-]{1,60}$/.test(msg.id)) this.ports.host()?.setShapeSet(msg.id, !!msg.on);
@@ -185,7 +206,7 @@ export class WorkshopCore {
 				await this.search(msg);
 				break;
 			case "insert": {
-				const g = this.config(msg.galleryId);
+				const g = this.allow(this.config(msg.galleryId));
 				const item = (await s.items(g)).find((i) => i.id === msg.itemId);
 				if (!item) throw new Error("That shape is not in the gallery any more.");
 				const shape = await s.insertable(g, item);
@@ -198,7 +219,7 @@ export class WorkshopCore {
 			}
 			case "addToCollection": {
 				const col = this.config(msg.collectionId);
-				const g = this.config(msg.galleryId);
+				const g = this.allow(this.config(msg.galleryId));
 				const item = (await s.items(g)).find((i) => i.id === msg.itemId);
 				if (!item) throw new Error("That shape is not in the gallery any more.");
 				await s.addToCollection(col, g, item);
@@ -226,6 +247,16 @@ export class WorkshopCore {
 		const s = this.ports.service();
 		const seq = ++this.searchSeq;
 		const configs = this.ports.configs();
+		// (one gallery is browsed whether it is on or off: with `offStaysOff`, only when that downloads nothing)
+		const browsed = msg.galleryId ? configs.find((c) => c.id === msg.galleryId) : undefined;
+		if (browsed) {
+			try {
+				this.allow(browsed);
+			} catch (e) {
+				this.ports.post({ type: "results", reqId: msg.reqId, hits: [] });
+				throw e;
+			}
+		}
 		const hits = await s.search(configs, String(msg.query ?? ""), { galleryId: msg.galleryId || undefined, limit: Math.min(600, Number(msg.limit) || 240) });
 		if (seq !== this.searchSeq) return;
 		this.ports.post({

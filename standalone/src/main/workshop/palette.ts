@@ -7,9 +7,9 @@ import { DEFAULT_GALLERIES, type GalleryConfig } from "./types";
  * in draw.io's own search. Nothing here imports Electron (the VS Code extension uses it too).
  */
 
-/** The galleries with the default ones that are missing added back. */
-export function withDefaultGalleries(list: GalleryConfig[]): GalleryConfig[] {
-	const missing = DEFAULT_GALLERIES.filter((d) => !list.some((g) => g.id === d.id)).map((d) => ({ ...d }));
+/** The galleries with the default ones that are missing added back: switched on, as the app starts with them, unless `enabled` says otherwise. */
+export function withDefaultGalleries(list: GalleryConfig[], enabled = true): GalleryConfig[] {
+	const missing = DEFAULT_GALLERIES.filter((d) => !list.some((g) => g.id === d.id)).map((d) => ({ ...d, enabled: enabled && d.enabled }));
 	return [...list, ...missing];
 }
 

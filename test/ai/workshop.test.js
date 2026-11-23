@@ -168,17 +168,72 @@ test("the Workshop's other half: state, search with previews, a shape put in, co
 	await w.core.onMessage({ type: "setShapeSet", id: "x y; drop", on: true });
 	assert.deepEqual(w.asked.filter((a) => a[0] === "set"), [["set", "uml", true]]);
 
-	// off and on again, and the defaults restored (they come back as the desktop app has them)
+	// off (a folder on this computer can still be browsed then: that downloads nothing) and on again
 	await w.core.onMessage({ type: "toggle", id: "mine", enabled: false });
 	assert.equal(w.configs()[0].enabled, false);
-	await w.core.onMessage({ type: "restoreDefaults" });
-	assert.deepEqual(w.configs().map((g) => g.id), ["mine", "thesvg", "tech-logos", "ui-icons"]);
+	w.posted.length = 0;
+	await w.core.onMessage({ type: "search", reqId: 8, query: "", galleryId: "mine" });
+	assert.equal(w.posted.find((m) => m.type === "results").hits.length, 4);
 	// an address that is not GitHub's is refused, and only https pages are opened
 	await assert.rejects(w.core.onMessage({ type: "addGithub", url: "https://evil.example/owner/repo" }), /not a GitHub repository address/);
 	assert.equal(w.asked.some((a) => a[0] === "open"), false);
 	w.core.dispose();
 	// nothing in all this needed the network
 	assert.deepEqual(calls, []);
+});
+
+/** A gallery service whose downloads are counted and fail. */
+function countingService() {
+	const { GalleryService } = workshop("galleries.ts");
+	const data = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-workshop-"));
+	const calls = [];
+	const service = new GalleryService(data, async (url) => {
+		calls.push(url);
+		throw new Error("offline");
+	});
+	return { service, data, calls };
+}
+
+test("in the extension a gallery that is off downloads nothing: not when browsed, synced, made offline or restored", async () => {
+	const { DEFAULT_GALLERIES } = workshop("types.ts");
+	const off = DEFAULT_GALLERIES.map((g) => ({ ...g, enabled: false }));
+	const { service, data, calls } = countingService();
+	const w = core(off.slice(0, 2), service, { offStaysOff: true });
+	await w.core.onMessage({ type: "ready" });
+	await w.settle();
+	// clicking a gallery's card browses it; "Sync now" and "Make available offline" are in its menu
+	await assert.rejects(w.core.onMessage({ type: "search", reqId: 4, query: "", galleryId: "thesvg" }), /“theSVG \(open licences\)” is off\. Switch it on to use it/);
+	// (the page gets an empty answer, so it does not wait or keep older shapes on screen)
+	assert.deepEqual(w.posted.filter((m) => m.type === "results"), [{ type: "results", reqId: 4, hits: [] }]);
+	await assert.rejects(w.core.onMessage({ type: "sync", id: "thesvg" }), /is off/);
+	await assert.rejects(w.core.onMessage({ type: "offline", id: "tech-logos" }), /is off/);
+	await assert.rejects(w.core.onMessage({ type: "insert", galleryId: "thesvg", itemId: "x" }), /is off/);
+	await assert.rejects(w.core.onMessage({ type: "addToCollection", collectionId: "tech-logos", galleryId: "thesvg", itemId: "x" }), /is off/);
+	// a search across the galleries only looks at those that are on
+	await w.core.onMessage({ type: "search", reqId: 5, query: "docker" });
+	// the default gallery that was removed comes back switched off, like the others
+	await w.core.onMessage({ type: "restoreDefaults" });
+	assert.deepEqual(w.configs().map((g) => [g.id, g.enabled]), [["thesvg", false], ["tech-logos", false], ["ui-icons", false]]);
+	await w.settle();
+	assert.deepEqual(calls, [], "something was downloaded for a gallery that is off");
+	assert.equal(fs.existsSync(path.join(data, "galleries")), false, "something was cached for a gallery that is off");
+
+	// switching one on is the user's yes: then it is read
+	await w.core.onMessage({ type: "toggle", id: "thesvg", enabled: true });
+	await w.settle();
+	assert.ok(calls.length > 0 && calls.every((u) => /^https:\/\/(cdn\.jsdelivr\.net|data\.jsdelivr\.com|raw\.githubusercontent\.com)\//.test(u)), JSON.stringify(calls));
+	w.core.dispose();
+
+	// the desktop app, as before: a gallery that is off can be browsed, and restored defaults are on
+	const desktop = countingService();
+	const d = core(off.slice(0, 2), desktop.service);
+	await d.core.onMessage({ type: "search", reqId: 1, query: "", galleryId: "thesvg" }).catch(() => undefined);
+	assert.ok(desktop.calls.length > 0, "the desktop app no longer browses a gallery that is off");
+	await d.core.onMessage({ type: "restoreDefaults" });
+	assert.deepEqual(d.configs().map((g) => [g.id, g.enabled]), [["thesvg", false], ["tech-logos", false], ["ui-icons", true]]);
+	d.core.dispose();
+	// the extension asks for it
+	assert.match(read("src/features/workshop/WorkshopFeature.ts"), /offStaysOff: true,/);
 });
 
 test("a gallery that is on becomes a palette and answers draw.io's own search; one that is off does neither", async () => {
@@ -263,7 +318,9 @@ test("the Workshop's command is contributed and registered, its editor side is o
 	for (const f of ["runtime.ts", "galleryStore.ts", "WorkshopFeature.ts"]) walk(path.join(root, "src/features/workshop", f));
 	assert.ok([...seen].some((f) => f.endsWith("standalone/src/main/workshop/galleries.ts")), "the walk did not reach the gallery service");
 	assert.ok(![...seen].some((f) => /standalone\/src\/main\/(settings|workshop\/index|workshop\/workshopWindow)\.ts$/.test(f)));
-	// downloads go through the desktop app's guarded fetch, and nothing is fetched while every gallery is off
+	// downloads go through the desktop app's guarded fetch, and the extension has none of its own
 	assert.match(feature, /new rt\.GalleryService\(this\.deps\.context\.globalStorageUri\.fsPath, rt\.workshopFetch\)/);
+	// the automation command saves a list or nothing (anything else would mean the desktop app's defaults, switched on)
+	assert.match(feature, /\(list: unknown\) => \(Array\.isArray\(list\) \? this\.save\(cleanGalleries\(list\)\) : undefined\)/);
 	assert.doesNotMatch(feature, /\bfetch\(|https?:\/\//);
 });

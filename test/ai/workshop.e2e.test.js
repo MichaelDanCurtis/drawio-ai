@@ -108,6 +108,8 @@ async function open({ dark = false, diagram = true } = {}) {
 		pickExport: async () => undefined,
 		reveal: () => undefined,
 		openExternal: () => undefined,
+		// as the extension has it: a gallery that is off downloads nothing
+		offStaysOff: true,
 	});
 	service.onChange(() => core.postState());
 	// VS Code's webview API, and the class it puts on <body> for the colour theme
@@ -147,7 +149,10 @@ test("the Workshop page loads from the extension's folder, lists the galleries, 
 	assert.equal(w.inserted.length, 1);
 	assert.match(w.inserted[0].style, /^shape=image;.*image=data:image\/svg\+xml,/);
 
-	// a gallery is switched on here, never by itself; this one would download, so the test only looks at the request to do it
+	// a gallery that is off stays off: clicking its card (to browse it) says so and downloads nothing
+	await page.click("#galleryList .gallery.off");
+	await page.waitForFunction(() => /“Tech logos” is off\. Switch it on to use it/.test(document.getElementById("toasts").textContent));
+	assert.equal(await page.$$eval("#grid .tile", (els) => els.length), 0);
 	assert.deepEqual(w.downloads, []);
 	assert.deepEqual(w.problems, []);
 	if (shots) await page.waitForTimeout(600);

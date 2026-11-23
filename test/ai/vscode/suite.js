@@ -762,6 +762,27 @@ async function runSteps() {
 		assert.deepEqual(st.galleries.map((g) => [g.id, g.enabled, g.count ?? null]), [["thesvg", false, null], ["tech-logos", false, null], ["ui-icons", false, null]]);
 		assert.equal(fs.existsSync(path.join(st.dataDir, "galleries")), false, "something was cached before a gallery was turned on");
 		assert.deepEqual((await look()).palettes, []);
+
+		// The panel: the desktop app's page, loaded in a webview (asked for twice at once: still one panel).
+		await Promise.all([vscode.commands.executeCommand("drawio-ai.shapeWorkshop"), vscode.commands.executeCommand("drawio-ai.shapeWorkshop")]);
+		const loaded = await waitFor(async () => {
+			const p = (await workshop()).panelPage;
+			return p?.ready && p.loaded ? p.loaded : undefined;
+		}, "the Shape Workshop page to load");
+		assert.deepEqual([loaded.sheets, loaded.scripts, loaded.modules, loaded.font], [5, true, true, true], JSON.stringify(loaded));
+		assert.equal(vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t.label === "Shape Workshop").length, 1);
+		// With the page open and the galleries listed, everything a user can do to a gallery that is off downloads nothing:
+		// browsing it (a click on its card), Sync now, Make available offline. Restored defaults come back off.
+		for (const msg of [{ type: "search", reqId: 1, query: "", galleryId: "thesvg" }, { type: "sync", id: "tech-logos" }, { type: "offline", id: "ui-icons" }]) {
+			assert.match((await message(msg)).error ?? "", /is off\. Switch it on to use it/, JSON.stringify(msg));
+		}
+		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries", st.galleries.slice(0, 1).map((g) => ({ id: g.id, title: g.title, sources: [{ kind: "thesvg" }], enabled: false, builtin: true })));
+		await message({ type: "restoreDefaults" });
+		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries");
+		await sleep(500);
+		st = await workshop();
+		assert.deepEqual(st.galleries.map((g) => [g.id, g.enabled, g.count ?? null]), [["thesvg", false, null], ["tech-logos", false, null], ["ui-icons", false, null]]);
+		assert.equal(fs.existsSync(path.join(st.dataDir, "galleries")), false, "something was downloaded for a gallery that is off");
 		// the editor told the extension what draw.io's own shape sets are
 		const sets = await waitFor(async () => (await workshop()).sets, "the editor's shape sets");
 		const entries = sets.flatMap((g) => g.entries);
@@ -812,18 +833,22 @@ async function runSteps() {
 		// the gallery's palette is in the new diagram too
 		await waitFor(async () => ((await look())?.palettes.includes("My shapes") ? true : undefined), "the gallery's palette in the new diagram");
 
+		// a collection filled from the Workshop becomes a palette too, and follows what it holds
+		const made = await message({ type: "newCollection", title: "Favourites" });
+		const collection = made.posted.find((m) => m.type === "selectGallery").id;
+		assert.deepEqual((await look()).palettes, ["My shapes"], "an empty collection has no palette");
+		await message({ type: "addToCollection", collectionId: collection, galleryId: "mine", itemId: results.hits[0].id });
+		await waitFor(async () => ((await look())?.palettes.includes("Favourites") ? true : undefined), "the collection's palette once it holds a shape");
+		const kept = (await message({ type: "search", reqId: 2, query: "", galleryId: collection })).posted.find((m) => m.type === "results").hits;
+		assert.deepEqual(kept.map((h) => h.title), ["lighthouse"]);
+		await message({ type: "removeFromCollection", collectionId: collection, itemId: kept[0].id });
+		await waitFor(async () => (((await look())?.palettes ?? []).includes("Favourites") ? undefined : true), "the emptied collection's palette to go");
+
 		// the gallery switched off: its palette leaves every open diagram
 		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries", [{ ...mine, enabled: false }]);
 		await waitFor(async () => ((await look())?.palettes.length === 0 ? true : undefined), "the palette to go");
+		assert.deepEqual((await workshop()).galleries.map((g) => [g.id, g.enabled]), [["mine", false]]);
 
-		// the panel: the desktop app's page, loaded in a webview (asked for twice at once: still one panel)
-		await Promise.all([vscode.commands.executeCommand("drawio-ai.shapeWorkshop"), vscode.commands.executeCommand("drawio-ai.shapeWorkshop")]);
-		const loaded = await waitFor(async () => {
-			const p = (await workshop()).panelPage;
-			return p?.ready && p.loaded ? p.loaded : undefined;
-		}, "the Shape Workshop page to load");
-		assert.deepEqual([loaded.sheets, loaded.scripts, loaded.modules, loaded.font], [5, true, true, true], JSON.stringify(loaded));
-		assert.equal(vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t.label === "Shape Workshop").length, 1);
 	});
 }
 

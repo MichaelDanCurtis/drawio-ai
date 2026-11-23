@@ -243,6 +243,20 @@ test("the Shape Workshop's side of the editor: galleries as palettes and in draw
 	await e.send(answer);
 	assert.deepEqual((await found).filter((t) => /Zebra/.test(t)), ["Zebra (gallery)"]);
 
+	// the AI's shape search uses draw.io's search too: of shapes that carry their image, it takes a few small ones
+	e.inbox.length = 0;
+	await e.send({ action: "aiSearchShapes", query: "qqzebraqq", limit: 12 });
+	const aiAsked = await e.waitFor((m) => m.event === "desktopGallerySearch");
+	const big = ICON("purple").replace("%3C/svg%3E", `%3C!--${"x".repeat(5000)}--%3E%3C/svg%3E`);
+	await e.send({
+		action: "desktopGalleryResults",
+		reqId: aiAsked.reqId,
+		shapes: [{ style: big, w: 48, h: 48, title: "Huge" }, ...["A", "B", "C", "D", "E", "F"].map((t) => ({ style: ICON("teal"), w: 48, h: 48, title: `Small ${t}` }))],
+	});
+	const aiFound = (await e.waitFor((m) => m.event === "aiSearchShapes")).shapes.filter((x) => /image=data:/.test(x.style));
+	assert.deepEqual(aiFound.map((x) => x.title), ["Small A", "Small B", "Small C", "Small D"]);
+	assert.ok(aiFound.every((x) => x.style.length < 4000));
+
 	// a shape from the Workshop goes in once, selected
 	const cells = () => e.page.evaluate(() => editorUi.editor.graph.getChildCells(editorUi.editor.graph.getDefaultParent()).length);
 	const before = await cells();

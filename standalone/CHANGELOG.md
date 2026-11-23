@@ -4,6 +4,8 @@
 
 - The **Shape Workshop** is now also in the Draw.AI extension for VS Code, from this same code
   (its page says whose it is).
+- The agents' `drawio_search_shapes` no longer returns gallery shapes with large images: at
+  most four shapes that carry their image per search, each under 4,000 characters.
 - **Mapper**: `git` run by the Mapper no longer starts the program a repository's own
   configuration names (`core.fsmonitor`) and no longer writes the index; only a commit hash
   from a map's record reaches git's arguments (Recent changes); a tour saved again under its

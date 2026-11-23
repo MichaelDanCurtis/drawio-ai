@@ -43,10 +43,12 @@ export class WorkshopFeature {
 	private readonly sets = new WeakMap<DrawioEditor, ShapeSetGroup[]>();
 	/** Per editor: the newest read of the galleries' palettes (an older one that finishes later is dropped). */
 	private readonly shapesSeq = new WeakMap<DrawioEditor, number>();
-	/** Editors that were given palettes: they are told when there are none any more. */
-	private readonly hasPalettes = new WeakSet<DrawioEditor>();
-	/** What the page's other half posted last (tests read it; the panel gets it when it is open). */
+	/** Per editor: the palettes its page was given last (the same ones are not sent again: that would rebuild its sidebar). */
+	private readonly sentPalettes = new WeakMap<DrawioEditor, string>();
+	private palettesTimer: NodeJS.Timeout | undefined;
+	/** What the page's other half posted last (tests read it; the panel gets it when it is open), and how many messages there were in all. */
 	private posted: unknown[] = [];
+	private postedTotal = 0;
 
 	constructor(private readonly deps: WorkshopDeps) {
 		const track = (d: vscode.Disposable | vscode.Disposable[]) => (Array.isArray(d) ? d : [d]).forEach((x) => this.dispose.track(x));
@@ -61,10 +63,13 @@ export class WorkshopFeature {
 		});
 		this.dispose.track({
 			dispose: () => {
+				clearTimeout(this.palettesTimer);
 				this.panel?.dispose();
 				this.core?.dispose();
 			},
 		});
+		// galleries switched in another VS Code window are taken over when this one is used again
+		this.dispose.track(vscode.window.onDidChangeWindowState((w) => w.focused && this.reload()));
 
 		const command = (id: string, run: (...args: any[]) => unknown) =>
 			vscode.commands.registerCommand(id, async (...args: any[]) => {
@@ -80,22 +85,55 @@ export class WorkshopFeature {
 			// Not in the command palette: for tests and automation.
 			vscode.commands.registerCommand("drawio-ai.workshop.state", () => this.state()),
 			vscode.commands.registerCommand("drawio-ai.workshop.message", (msg: unknown) => this.message(msg)),
-			vscode.commands.registerCommand("drawio-ai.workshop.setGalleries", (list: unknown) => this.save(cleanGalleries(list))),
+			// (only a list: cleanGalleries gives the desktop app's defaults, switched on, for anything else)
+			vscode.commands.registerCommand("drawio-ai.workshop.setGalleries", (list: unknown) => (Array.isArray(list) ? this.save(cleanGalleries(list)) : undefined)),
 		]);
 	}
 
 	// ----- the galleries -----
 
+	/**
+	 * The galleries in use: read once from the extension's global state, changed here, written
+	 * behind. (Right after a write, VS Code's state can still give an older value for a moment,
+	 * so what was just saved is not read back from it.)
+	 */
+	private galleries: GalleryConfig[] | undefined;
+	private savesPending = 0;
+
 	private configs(): GalleryConfig[] {
-		return storedGalleries(this.deps.context.globalState.get(GALLERIES_KEY));
+		this.galleries ??= storedGalleries(this.deps.context.globalState.get(GALLERIES_KEY));
+		return this.galleries;
 	}
 
 	private save(list: GalleryConfig[]): void {
-		void this.deps.context.globalState.update(GALLERIES_KEY, list).then(() => {
-			// every open diagram shows the galleries that are on
+		this.galleries = list;
+		this.savesPending++;
+		const done = () => void this.savesPending--;
+		void this.deps.context.globalState.update(GALLERIES_KEY, list).then(done, done);
+		this.galleriesChanged();
+	}
+
+	/** Takes over what another VS Code window saved, once nothing of this window's is still being written. */
+	private reload(): void {
+		if (this.savesPending) return;
+		const stored = storedGalleries(this.deps.context.globalState.get(GALLERIES_KEY));
+		if (JSON.stringify(stored) === JSON.stringify(this.configs())) return;
+		this.galleries = stored;
+		this.galleriesChanged();
+	}
+
+	/** Sends every open diagram its palettes again once the galleries have settled (a sync or a download reports often). */
+	private palettesSoon(): void {
+		clearTimeout(this.palettesTimer);
+		this.palettesTimer = setTimeout(() => {
 			for (const editor of this.deps.editorService.openedEditors) void this.sendShapes(editor);
-			this.core?.postState();
-		});
+		}, 500);
+	}
+
+	private galleriesChanged(): void {
+		// every open diagram shows the galleries that are on
+		for (const editor of this.deps.editorService.openedEditors) void this.sendShapes(editor);
+		this.core?.postState();
 	}
 
 	private async runtime(): Promise<Runtime> {
@@ -104,7 +142,11 @@ export class WorkshopFeature {
 		if (!this.service) {
 			// indexes and downloaded shapes are cached in the extension's own storage folder
 			this.service = new rt.GalleryService(this.deps.context.globalStorageUri.fsPath, rt.workshopFetch);
-			this.service.onChange(() => this.core?.postState());
+			this.service.onChange(() => {
+				this.core?.postState();
+				// what a gallery holds changed (a collection filled or emptied, a gallery synced): the diagrams' palettes follow
+				this.palettesSoon();
+			});
 		}
 		if (!this.core) {
 			this.core = new rt.WorkshopCore({
@@ -138,6 +180,8 @@ export class WorkshopFeature {
 				},
 				reveal: (file) => void vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(file)),
 				openExternal: (url) => void vscode.env.openExternal(vscode.Uri.parse(url)),
+				// Draw.AI sends nothing anywhere unasked: a gallery downloads only once the user has switched it on
+				offStaysOff: true,
 			});
 		}
 		return rt;
@@ -183,7 +227,7 @@ export class WorkshopFeature {
 			client.onGallerySearch.sub(({ reqId, query, limit }) => void this.gallerySearch(editor, reqId, query, limit)),
 			// a page that has just loaded has no palettes yet
 			client.onEditorToolsLoaded.sub(() => {
-				this.hasPalettes.delete(editor);
+				this.sentPalettes.delete(editor);
 				void this.sendShapes(editor);
 			}),
 		];
@@ -195,7 +239,7 @@ export class WorkshopFeature {
 	private async gallerySearch(editor: DrawioEditor, reqId: number, query: string, limit: number): Promise<void> {
 		let shapes: DesktopShape[] = [];
 		try {
-			if (anyGalleryOn(this.deps.context.globalState.get(GALLERIES_KEY))) {
+			if (anyGalleryOn(this.configs())) {
 				const rt = await this.runtime();
 				shapes = await rt.searchForEditor(this.service!, this.configs(), query.slice(0, 200), Math.max(1, Math.min(48, limit)));
 			}
@@ -210,7 +254,7 @@ export class WorkshopFeature {
 		const seq = (this.shapesSeq.get(editor) ?? 0) + 1;
 		this.shapesSeq.set(editor, seq);
 		const libraries: unknown[] = [];
-		if (anyGalleryOn(this.deps.context.globalState.get(GALLERIES_KEY))) {
+		if (anyGalleryOn(this.configs())) {
 			const rt = await this.runtime();
 			for (const g of this.configs().filter((x) => x.enabled)) {
 				try {
@@ -222,9 +266,10 @@ export class WorkshopFeature {
 			}
 		}
 		if (seq !== this.shapesSeq.get(editor) || !this.deps.editorService.openedEditors.has(editor) || !editor.drawioClient.editorToolsLoaded) return;
-		if (!libraries.length && !this.hasPalettes.has(editor)) return;
-		if (libraries.length) this.hasPalettes.add(editor);
-		else this.hasPalettes.delete(editor);
+		// (a page that has just loaded has none: nothing to tell it while there are none to show)
+		const next = JSON.stringify(libraries);
+		if ((this.sentPalettes.get(editor) ?? "[]") === next) return;
+		this.sentPalettes.set(editor, next);
 		editor.drawioClient.setShapes(libraries);
 	}
 
@@ -232,12 +277,14 @@ export class WorkshopFeature {
 
 	private post(msg: unknown): void {
 		this.posted.push(msg);
+		this.postedTotal++;
 		if (this.posted.length > 60) this.posted.splice(0, this.posted.length - 60);
 		// (a closed panel has no webview to post to)
 		if (this.panel) void this.panel.webview.postMessage(msg);
 	}
 
 	private async open(mode: "gallery" | "sets"): Promise<void> {
+		this.reload();
 		if (this.panel) {
 			this.panel.reveal();
 			this.post({ type: "mode", mode });
@@ -290,12 +337,14 @@ export class WorkshopFeature {
 	/** A message as the Workshop's page would send it; answers with what the page was told meanwhile. */
 	private async message(msg: unknown): Promise<{ posted: unknown[]; error?: string }> {
 		await this.runtime();
-		const from = this.posted.length;
+		const from = this.postedTotal;
+		// (only the last messages are kept: what came since is at the end of them)
+		const since = () => this.posted.slice(Math.max(0, this.posted.length - (this.postedTotal - from)));
 		try {
 			await this.core!.onMessage(msg);
-			return { posted: this.posted.slice(from) };
+			return { posted: since() };
 		} catch (e: any) {
-			return { posted: this.posted.slice(from), error: String(e?.message ?? e) };
+			return { posted: since(), error: String(e?.message ?? e) };
 		}
 	}
 
