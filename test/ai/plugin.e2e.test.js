@@ -288,10 +288,61 @@ test("selection scope returns selected cells plus adjacent context", async () =>
 	assert.equal(model.cells.find((c) => c.id === idMap.$pq).context, true);
 });
 
+test("selection scope with selectedOnly returns the selected cells alone, not what is inside or beside them", async () => {
+	const { idMap } = await apply([
+		{ op: "addShape", tempId: "$in1", label: "In 1", x: 40, y: 1000 },
+		{ op: "addShape", tempId: "$in2", label: "In 2", x: 300, y: 1000 },
+		{ op: "addShape", tempId: "$out", label: "Out", x: 600, y: 1000 },
+		{ op: "addEdge", source: "$in1", target: "$out" },
+		{ op: "group", tempId: "$box", ids: ["$in1", "$in2"], label: "Box" },
+	]);
+	await request({ action: "aiSetSelection", cellIds: [idMap.$box], reveal: false });
+	// as the agents read a selection: the group, what is in it, and what it is connected to
+	const wide = await getModel("selection");
+	assert.ok(wide.cells.some((c) => c.id === idMap.$in1) && wide.cells.some((c) => c.id === idMap.$out && c.context));
+	// as the Shape Shifter reads it: the group
+	const narrow = (await request({ action: "aiGetModel", scope: "selection", selectedOnly: true, includeStyles: true, maxCells: 1000 })).model;
+	assert.deepEqual(narrow.cells.map((c) => [c.id, c.selected]), [[idMap.$box, true]]);
+	assert.equal(typeof narrow.cells[0].style, "string");
+	await request({ action: "aiSetSelection", cellIds: [], reveal: false });
+});
+
 test("shape search returns real library styles", async () => {
 	const r = await request({ action: "aiSearchShapes", query: "aws lambda", limit: 5 });
 	assert.ok(r.shapes.length > 0, `no shapes: ${r.error}`);
 	assert.ok(r.shapes.some((s) => /mxgraph\.aws/.test(s.style)), JSON.stringify(r.shapes.map((s) => s.style)));
+	assert.ok(r.shapes.every((s) => !("preview" in s)), "no thumbnails unless asked for");
+});
+
+test("shape search for the Workshop: a thumbnail per shape, and shapes of several cells with all of their XML", async () => {
+	const noFo = await page.evaluate(() => window.mxClient.NO_FO);
+	let big;
+	for (const query of ["table", "swimlane", "class", "list", "pool"]) {
+		const r = await request({ action: "aiSearchShapes", query, limit: 60, previews: true, ownOnly: true });
+		assert.equal(r.error, undefined);
+		assert.ok(r.shapes.length > 8, `more than the agents' few for "${query}": ${r.shapes.length}`);
+		assert.ok(r.shapes.filter((s) => /^<svg[\s>]/.test(s.preview ?? "") && s.preview.length <= 40000).length >= r.shapes.length / 2, `thumbnails for "${query}"`);
+		for (const s of r.shapes) if (s.xml) assert.match(s.xml, /^<mxGraphModel>[\s\S]*<\/mxGraphModel>$/, `${s.title}: whole XML`);
+		big = big ?? r.shapes.find((s) => (s.xml ?? "").length > 6000 && { query, title: s.title, length: s.xml.length });
+		if (big) {
+			// the agents get the same shape cut to what is worth reading
+			const again = (await request({ action: "aiSearchShapes", query: big.title, limit: 25 })).shapes.filter((s) => s.title === big.title && s.xml);
+			assert.ok(again.length > 0, `the agents' search finds "${big.title}" too`);
+			assert.ok(again.some((s) => s.xml.length === 6000), `"${big.title}" is cut at 6,000 characters for the agents: ${again.map((s) => s.xml.length)}`);
+			break;
+		}
+	}
+	assert.ok(big, "a library shape with more than 6,000 characters of XML");
+	// a single cell with a label comes with its XML, so that the label goes into the diagram with it
+	const text = (await request({ action: "aiSearchShapes", query: "text", limit: 60, previews: true, ownOnly: true })).shapes.find((s) => s.title === "Text");
+	assert.match(text.xml, /^<mxGraphModel>[\s\S]*<mxCell [^>]*value="Text"[\s\S]*<\/mxGraphModel>$/);
+	assert.match(text.style, /^text;/);
+	const forAgents = (await request({ action: "aiSearchShapes", query: "text", limit: 25 })).shapes.find((s) => s.title === "Text");
+	assert.equal(forAgents.xml, undefined, "the agents get the style, as before");
+	// drawing thumbnails leaves the editor as it was
+	assert.equal(await page.evaluate(() => window.mxClient.NO_FO), noFo);
+	assert.equal(await page.evaluate(() => Object.keys(window.editorUi.sidebar.graph.getModel().cells).length), 2);
+	assert.equal(await page.evaluate(() => window.omnidrawSkipGallerySearch), undefined);
 });
 
 test("renders the page to PNG", async () => {
@@ -435,6 +486,33 @@ test("review: several AI batches form one review and one undo step; user edits a
 	const labels = (await getModel()).cells.map((c) => c.label);
 	assert.ok(!labels.includes("Three") && !labels.includes("Four"));
 	assert.equal(lastReview().pending, false, "undoing the AI's changes ends the review");
+});
+
+test("review: a change the user makes through the host (the Workshop's colours) is theirs, not the AI's", async () => {
+	const recolour = (user) =>
+		request({ action: "aiApplyOps", ops: [{ op: "update", id: "db", styleProps: { fillColor: "#ff8800" } }], atomic: true, flash: false, selectResult: false, review: false, ...(user ? { user: true } : {}) });
+	await freshBaseline();
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "api", label: "Gateway" }]);
+	// while the AI's change waits, the user recolours another shape in the Workshop
+	assert.equal((await recolour(true)).rolledBack, false);
+	await new Promise((r) => setTimeout(r, 150));
+	const evt = lastReview();
+	assert.deepEqual(evt.summary, { added: 0, changed: 1, removed: 0 }, JSON.stringify(evt.changes));
+	assert.ok(!evt.changes.some((c) => c.id === "db"), "the user's colour is not a pending AI change");
+	assert.equal((await resolve("reject")).resolved, "rejected");
+	let after = await getModel();
+	assert.equal(byId(after, "api").label, "API");
+	assert.match(byId(after, "db").style, /fillColor=#ff8800/, "Reject all keeps what the user did");
+
+	// the same change from the AI, not held for review, still belongs to the review that is open
+	await freshBaseline();
+	inbox.length = 0;
+	await applyReview([{ op: "update", id: "api", label: "Gateway" }]);
+	await recolour(false);
+	await resolve("reject");
+	after = await getModel();
+	assert.doesNotMatch(byId(after, "db").style, /#ff8800/);
 });
 
 test("review: the in-diagram bar keeps or reverts the selection", async () => {

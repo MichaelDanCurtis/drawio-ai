@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
+import * as zlib from "zlib";
 import type { GallerySource } from "./types";
-import { safeImageData } from "./svgSanitize";
+import { decodeForCheck, safeImageData } from "./svgSanitize";
+import { escapeXml, mapAttributes, mapXml, tagInfo, unescapeXml } from "./xmlScan";
 
 /** One shape in a gallery's index. SVGs from the internet are fetched (and cached) when shown. */
 export interface GalleryItem {
@@ -238,10 +240,151 @@ export function libraryItemId(e: { title?: string; xml?: string; data?: string }
 	return `lib:${createHash("sha1").update(`${e.title ?? ""}\u0000${e.xml ?? ""}\u0000${e.data ?? ""}`).digest("hex").slice(0, 16)}`;
 }
 
+/** The most a shape's XML (or an inline stencil's) may be once unpacked: draw.io keeps both deflated. */
+const MAX_SHAPE_XML = 8 * 1024 * 1024;
+
+/** draw.io's Graph.decompress: base64, inflated, URI-decoded. Undefined when the text is not that, or too large. */
+function unpack(data: string): string | undefined {
+	try {
+		return decodeURIComponent(zlib.inflateRawSync(Buffer.from(data, "base64"), { maxOutputLength: MAX_SHAPE_XML }).toString("utf8"));
+	} catch {
+		return undefined;
+	}
+}
+
+/** draw.io's Graph.compress. */
+function pack(text: string): string {
+	return zlib.deflateRawSync(Buffer.from(encodeURIComponent(text), "utf8")).toString("base64");
+}
+
+/** Marks around a picture that was checked, while a shape is cleaned (two characters no text holds). */
+const CHECKED = "\uFDD0";
+const CHECKED_END = "\uFDD1";
+
+/** An address as the browser reads it: tabs and line breaks anywhere in it are dropped, spaces and control characters at its start too. */
+function address(v: string): string {
+	return v.replace(/[\t\n\r]/g, "").replace(/^[\u0000-\u0020]+/, "");
+}
+
+/** Whether text still says "an SVG, embedded" somewhere outside the marks, however it is spelled (entities, also twice; spaces in between). */
+function uncheckedSvg(marked: string): boolean {
+	const rest = marked.replace(/\uFDD0[^\uFDD1]*\uFDD1/g, "");
+	return /data:image\/svg/i.test(decodeForCheck(unescapeXml(unescapeXml(rest))).replace(/[\u0000-\u0020]+/g, ""));
+}
+
+/**
+ * A library shape's XML with the pictures it embeds checked like every other image: an SVG
+ * is cleaned, a bitmap stays, and anything else that claims to be embedded loses its picture.
+ * Pictures are looked for where draw.io draws them from:
+ * - every key of a cell's style whose value is a `data:` address (`image`, `indicatorImage`…),
+ * - the <image> elements of an inline stencil (`shape=stencil(…)`),
+ * - and both of those kept once in the model's <defs> (`image=def(0)`).
+ * Names of files and web addresses are not embedded content and stay as they are.
+ *
+ * Returns the XML in the form it came in (deflated or plain), the very same text when there
+ * was nothing to change. Returns undefined, so that the shape is left out, for what cannot
+ * be checked: XML that cannot be read or is not a graph model (draw.io would unpack a file's
+ * pages itself), a DTD (whose entities could stand for anything), an inline stencil that is
+ * not written the way draw.io writes it, or an SVG that is embedded anywhere else (the HTML
+ * of a label, say).
+ */
+export function cleanShapeXml(xml: string): string | undefined {
+	if (typeof xml !== "string" || !xml) return undefined;
+	const plain = xml.trimStart().startsWith("<");
+	const text = plain ? xml : unpack(xml);
+	if (text === undefined || text.length > MAX_SHAPE_XML || text.includes(CHECKED) || text.includes(CHECKED_END) || /<!DOCTYPE/i.test(text)) return undefined;
+	let unreadable = false;
+	/** A `data:` address as it may stay (`form`: for a style, or for an attribute of its own), marked when it is an SVG; undefined when it may not. */
+	const picture = (uri: string, form: "style" | "img"): string | undefined => {
+		const safe = safeImageData(uri)?.[form];
+		return safe && /^data:image\/svg/i.test(safe) ? `${CHECKED}${safe}${CHECKED_END}` : safe;
+	};
+	/** An attribute's value with what `check` makes of it; as it was written when nothing changed, so that only the marks are added. */
+	const rewrite = (raw: string, check: (decoded: string) => string | undefined): string | undefined => {
+		const decoded = unescapeXml(raw);
+		const next = check(decoded);
+		if (next === undefined) return undefined;
+		if (next.replace(/[\uFDD0\uFDD1]/g, "") !== decoded) return escapeXml(next);
+		// unchanged: the checked SVGs are marked where they stand
+		let marked = raw;
+		for (const m of next.matchAll(/\uFDD0([^\uFDD1]*)\uFDD1/g)) {
+			if (!raw.includes(m[1])) return escapeXml(next);
+			if (!marked.includes(`${CHECKED}${m[1]}`)) marked = marked.split(m[1]).join(`${CHECKED}${m[1]}${CHECKED_END}`);
+		}
+		return marked === raw ? undefined : marked;
+	};
+	/** An inline stencil (packed) with the pictures of its elements checked; undefined when nothing changed. */
+	const stencil = (packed: string): string | undefined => {
+		const inner = unpack(packed);
+		if (inner === undefined || inner.includes(CHECKED) || inner.includes(CHECKED_END) || /<!DOCTYPE/i.test(inner)) return void (unreadable = true);
+		const marked = mapXml(inner, {
+			tag: (tag) =>
+				tagInfo(tag).closing
+					? tag
+					: mapAttributes(tag, (_name, raw) =>
+							rewrite(raw, (decoded) => {
+								const a = address(decoded);
+								return /^data:/i.test(a) ? picture(a, "img") ?? "" : undefined;
+							})
+					  ),
+		});
+		if (marked === undefined || uncheckedSvg(marked)) return void (unreadable = true);
+		const cleaned = marked.replace(/[\uFDD0\uFDD1]/g, "");
+		return cleaned === inner ? undefined : pack(cleaned);
+	};
+	/** One value of a style (or of a <def>): a picture, an inline stencil, or something else. Undefined: as it is; null: it goes. */
+	const value = (v: string): string | null | undefined => {
+		const a = address(v);
+		if (/^stencil\(/i.test(a)) {
+			// draw.io takes what is between "stencil(" and the last character, whatever that is: only its own form is read here
+			const m = /^stencil\(([A-Za-z0-9+/=]*)\)$/.exec(a);
+			if (!m) return void (unreadable = true);
+			const repacked = stencil(m[1]);
+			return repacked === undefined ? undefined : `stencil(${repacked})`;
+		}
+		if (/^data:/i.test(a)) return picture(a, "style") ?? null;
+		return undefined;
+	};
+	/** A cell's style (decoded, as draw.io reads it: keys end at ";"); undefined when it holds neither a picture nor a stencil. */
+	const style = (decoded: string): string | undefined => {
+		let found = false;
+		const parts = decoded.split(";").flatMap((part) => {
+			const eq = part.indexOf("=");
+			const next = eq < 0 ? undefined : value(part.slice(eq + 1));
+			if (next === undefined) return [part];
+			found = true;
+			return next === null ? [] : [`${part.slice(0, eq + 1)}${next}`];
+		});
+		return found ? parts.join(";") : undefined;
+	};
+	let root: string | undefined;
+	const marked = mapXml(text, {
+		tag: (tag) => {
+			const { name, local, closing } = tagInfo(tag);
+			root = root ?? name;
+			if (closing) return tag;
+			return mapAttributes(tag, (attribute, raw) => {
+				if (attribute === "style") return rewrite(raw, style);
+				// (a picture or a stencil that several cells share is kept once, in <defs><def data="…"/></defs>)
+				if (local === "def" && attribute === "data")
+					return rewrite(raw, (decoded) => {
+						const next = value(decoded);
+						return next === null ? "" : next;
+					});
+				return undefined;
+			});
+		},
+	});
+	if (marked === undefined || unreadable || root !== "mxGraphModel" || uncheckedSvg(marked)) return undefined;
+	const cleaned = marked.replace(/[\uFDD0\uFDD1]/g, "");
+	if (cleaned === text) return xml;
+	return plain ? cleaned : pack(cleaned);
+}
+
 /**
  * A draw.io library (<mxlibrary>[…]</mxlibrary>) → items (images or shape XML). Images are
- * checked (and SVGs cleaned): an entry whose image is not a plain embedded image is left out.
- * Throws when the file is not a library.
+ * checked (and SVGs cleaned), also the pictures inside a shape's XML: an entry whose image is
+ * not a plain embedded image is left out. Throws when the file is not a library.
  */
 export function parseMxLibrary(xml: string, source: string): GalleryItem[] {
 	const m = /<mxlibrary[^>]*>([\s\S]*)<\/mxlibrary>/.exec(xml);
@@ -259,7 +402,11 @@ export function parseMxLibrary(xml: string, source: string): GalleryItem[] {
 	list.forEach((e, i) => {
 		if (!e) return;
 		let content: { xml: string } | { data: string };
-		if (typeof e.xml === "string") content = { xml: e.xml };
+		if (typeof e.xml === "string") {
+			const clean = cleanShapeXml(e.xml);
+			if (!clean) return;
+			content = { xml: clean };
+		}
 		else if (typeof e.data === "string") {
 			const img = safeImageData(e.data);
 			if (!img) return;

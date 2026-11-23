@@ -161,9 +161,9 @@ claude mcp add --scope user draw-ai-desktop -- ~/.drawio-ai/bin/draw-ai-desktop-
 ## Shape Workshop
 
 **Shapes → Shape Workshop…** (Cmd/Ctrl+Alt+K, or the shapes button in the toolbar) opens one
-window for finding and collecting shapes. This release has the **Shape Gallery**; Shape
-Shifter (find by words or image, import stencils, restyle) and Shape Creator (an agent draws
-an icon) come next.
+window for finding, collecting and changing shapes. It has the **Shape Gallery** and the
+**Shape Shifter**; finding a shape from an image, the cloud vendors' own sets and the Shape
+Creator (an agent draws an icon) come next.
 
 - **Galleries** start with three you can turn off, remove and restore:
   - theSVG, open licences only (CC0, MIT, Apache-2.0); not its AWS, Azure or Google Cloud sets, whose labels there don't match the vendors' terms
@@ -197,17 +197,48 @@ an icon) come next.
 - **Every SVG is cleaned** before it is cached or used: no scripts, animations, event
   handlers, external links (quoted, unquoted or encoded), embedded HTML or DTDs
   (`src/main/workshop/svgSanitize.ts`). Images from libraries, folders and collections are
-  checked the same way. Each shape keeps its source and licence, also in the shape's style
+  checked the same way, also the pictures a library's shapes embed: in a style (`image=`,
+  `indicatorImage=`…), in an inline stencil, and in the model's `<defs>`. A shape that cannot
+  be checked is left out: one that holds an SVG anywhere else (the HTML of a label), is not a
+  plain graph model, has a stencil that is not written the way draw.io writes it, or whose
+  XML cannot be read (`cleanShapeXml` in `sources.ts`, on the tag-by-tag reader
+  `xmlScan.ts`). Each shape keeps its source and licence, also in the shape's style
   (`galleryItem=…;licence=…`).
 - **GitHub galleries** without a branch in their address use `main`, then `master`, then the
   newest tag. A branch with a "/" in its name can't be told apart from a folder in an
   address, so such a repository can't be added by branch yet.
 
+The **Shape Shifter** (the second tab, or **Shapes → Find a Shape…**) works on the diagram you
+used last:
+
+- **Find by words:** one search over draw.io's own shapes (all of them, also the sets that are
+  switched off) and every gallery that is on. Results come in two groups, "draw.io's own
+  shapes" and "From your galleries", each with a picture. Click one to add it: beside what is
+  selected in the diagram, or in the middle of the view when nothing is. (The Gallery adds
+  shapes the same way now.)
+- **Change a shape:** select shapes in the diagram and set their **Fill**, **Line** and
+  **Text** colour (None takes a fill or a line away; a connector has no fill). A selected
+  group or container is one shape: what is inside it is not changed with it. **Icon colour**
+  gives a gallery icon one colour: its SVG is cleaned and then rewritten tag by tag (fills and
+  strokes that paint become that colour; `none`, gradients, and what is inside a mask, a clip
+  path or a pattern stay; text and titles are not touched), and pictures that are not SVGs
+  kept in the shape are left alone. Each change is one undo step. Or **describe the change**
+  and **Ask the agent**: the request goes to the diagram's chat with the selection, and the
+  agent's edits arrive as reviewable AI edits like any other.
+- **Import a stencil:** a Visio stencil (`.vssx`, `.vss`, `.vssm`; up to 64 MB) becomes a
+  collection of your own. draw.io's converter runs in the editor page on this computer:
+  nothing is uploaded. You name the collection before it is saved, and the pictures its
+  shapes keep are checked like every other image.
+
 Code: `src/main/workshop/` (`sources.ts` parses each source, `galleries.ts` caches and
-searches, `workshopWindow.ts`), `src/renderer/workshop.html`, and the palettes, search and
-insertion in `src/renderer/desktop-toolbar.js`. Tests: `test/workshop.test.js` and
-`scripts/e2e.mjs --workshop`, both on fixtures (`test/fixtures/galleries/mirror`, served by
-the e2e script as a stand-in for jsDelivr: test runs never download anything).
+searches, `shifter.ts` is the Shape Shifter's own logic: selections, style edits, one-colour
+icons; `workshopWindow.ts`), `src/renderer/workshop.html`, and the palettes, search and
+insertion in `src/renderer/desktop-toolbar.js`. What the Shifter needs from a diagram
+(`ShifterHost` in `core.ts`: search draw.io's shapes, read the selection, apply style edits,
+ask the agent, convert a stencil) is `DiagramWindow`'s. Tests: `test/workshop.test.js`,
+`test/shifter.test.js` and `scripts/e2e.mjs --workshop`, all on fixtures
+(`test/fixtures/galleries/mirror`, served by the e2e script as a stand-in for jsDelivr: test
+runs never download anything).
 
 ## Presentation mode
 
@@ -260,6 +291,9 @@ rise in. Under *reduce motion* nothing moves.
   `src/main/shapeSets.ts`, and the page `src/renderer/workshop.html`
   (the extension: `src/features/workshop/`). Keep those files free of Electron and of
   `../settings`; what needs a window or the app's settings goes through `WorkshopPorts`.
+  The Shape Shifter is on where a program says so (`WorkshopPorts.shifter`, with
+  `pickStencil`) and gives the Workshop a `ShifterHost`; the extension does neither yet, so
+  its Shifter tab stays "Next".
 - Shared with the VS Code extension: `src/renderer/theme.js`, `desktop-toolbar.js`,
   `presentation.js` and `ui/{icons,brandmark,tips,dots,matrix}.js` are also the extension's
   editor tools (its plugin build copies them: `drawio-custom-plugins/webpack.config.ts`,

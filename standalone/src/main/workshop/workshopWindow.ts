@@ -42,6 +42,13 @@ export class WorkshopWindow {
 		},
 		reveal: (file) => shell.showItemInFolder(file),
 		openExternal: (url) => void shell.openExternal(url),
+		shifter: true,
+		pickStencil: async () => {
+			// (the end-to-end run has nobody to answer a file dialog)
+			if (process.env.DRAWAI_E2E && process.env.DRAWAI_E2E_STENCIL) return process.env.DRAWAI_E2E_STENCIL;
+			const r = await dialog.showOpenDialog(WorkshopWindow.win!, { title: "Import a Visio stencil", properties: ["openFile"], filters: [{ name: "Visio stencil", extensions: ["vssx", "vss", "vssm"] }] });
+			return r.canceled ? undefined : r.filePaths[0];
+		},
 	});
 
 	public static open(server: StaticServer, mode?: string): void {
@@ -72,7 +79,10 @@ export class WorkshopWindow {
 		});
 		win.webContents.on("will-navigate", (e) => e.preventDefault());
 		win.once("ready-to-show", () => win.show());
-		win.on("closed", () => (WorkshopWindow.win = undefined));
+		win.on("closed", () => {
+			WorkshopWindow.win = undefined;
+			WorkshopWindow.core.pageGone();
+		});
 		// the sidebar can change in the editor itself (the Scratchpad's ✕, a set enabled from a search): ask again
 		win.on("focus", () => WorkshopWindow.host?.refreshShapeSets());
 		void win.loadURL(`${server.base}/workshop.html${mode ? `#${encodeURIComponent(mode)}` : ""}`);
@@ -103,6 +113,13 @@ export class WorkshopWindow {
 
 	/** Something the Workshop shows changed elsewhere (draw.io's shape sets, the diagram in front). */
 	public static refresh(): void {
-		if (WorkshopWindow.window) WorkshopWindow.core.postState();
+		if (!WorkshopWindow.window) return;
+		WorkshopWindow.core.postState();
+		WorkshopWindow.core.postSelection();
+	}
+
+	/** The selection of the diagram used last changed: the Shape Shifter shows it. */
+	public static selection(): void {
+		if (WorkshopWindow.window) WorkshopWindow.core.postSelection();
 	}
 }

@@ -215,6 +215,8 @@ declare interface AiGetModelAction {
     maxCells: number;
     /** Id or name of the page to read; default the one shown in the editor, which stays shown. */
     page?: string;
+    /** With scope "selection": only the selected cells themselves, without what is inside them or connected to them. */
+    selectedOnly?: boolean;
 }
 
 declare interface AiApplyOpsAction {
@@ -226,6 +228,13 @@ declare interface AiApplyOpsAction {
     atomic: boolean;
     /** Keep the result as a pending AI change the user accepts or rejects. */
     review?: boolean;
+    /**
+     * The user's own change, made through the host's UI (the Shape Workshop's colours), not an
+     * AI change: it is never held for review, and a review that is pending takes it as it takes
+     * an edit made in the editor (it becomes part of what "Reject all" goes back to, unless it
+     * touches a cell the AI changed).
+     */
+    user?: boolean;
 }
 
 declare interface AiSetSelectionAction {
@@ -386,6 +395,8 @@ declare interface AiImportDiagramEvent {
     xml: string;
     /** "stencil" when a Visio stencil's shapes were laid out on a page. */
     kind: "diagram" | "stencil";
+    /** A stencil as a draw.io library (`<mxlibrary>[…]</mxlibrary>`), next to its page in `xml`. */
+    library?: string;
     pages: number;
     shapes: number;
     connectors: number;
@@ -398,6 +409,15 @@ declare interface AiSearchShapesAction {
     action: "aiSearchShapes";
     query: string;
     limit: number;
+    /**
+     * For a caller that shows the shapes and adds them to a diagram (the Shape Workshop): each
+     * comes with its thumbnail as the sidebar draws it (SVG text), a shape of several cells
+     * with all of its XML (otherwise cut at 6,000 characters, which is enough to read it), and
+     * a single cell that has a label with its XML too (otherwise its style and size alone).
+     */
+    previews?: boolean;
+    /** Only draw.io's own shapes: the galleries' shapes the host adds to this search are left out (up to 60 shapes). */
+    ownOnly?: boolean;
 }
 
 declare interface AiShapeTemplate {
@@ -409,6 +429,8 @@ declare interface AiShapeTemplate {
     isEdge: boolean;
     /** Present when the template consists of several cells (e.g. a UML class). */
     xml?: string;
+    /** The sidebar's thumbnail of the shape, as SVG text (only when asked for with `previews`). */
+    preview?: string;
 }
 
 declare interface AiSearchShapesEvent {

@@ -840,6 +840,85 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	log("shapeSets", { listed: sets, uml: { before: umlBefore, switchedOn: umlSwitch, paletteShown: umlOn, remembered: keptOn }, scratchpad: { before: padBefore, off: padOff, back: padBack }, galleriesKept: ["theSVG", "Tech logos", "UI icons"].every((t) => stillThere.some((x) => x.startsWith(t))), moreShapesOpensWorkshop: reopened, drawioDialog });
 	if (!umlOn || !keptOn || !padOff || !padBack || !reopened || drawioDialog) throw new Error("The Workshop does not switch draw.io's shape sets as it should (see the shapeSets line above).");
 
+	// ----- the Shape Shifter: find by words, change a shape, import a stencil -----
+	const cellCount = async () => (await w.client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 1 })).totalCells;
+	await wc.executeJavaScript(`document.querySelector('nav button[data-mode="shifter"]').click(); true`);
+	const type = (text: string) => wc.executeJavaScript(`(() => { const q = document.getElementById("q"); q.value = ${JSON.stringify(text)}; q.dispatchEvent(new Event("input")); return true; })()`);
+	await type("database");
+	const finds = await until("the Shifter's finds", async () => {
+		const r = await wc.executeJavaScript(
+			`(() => ({ groups: [...document.querySelectorAll("#grid .group")].map((g) => g.textContent.replace(/ · \\d+$/, "")), own: document.querySelectorAll('#grid .tile[data-key^="own:"]').length, ownPictures: [...document.querySelectorAll('#grid .tile[data-key^="own:"] img')].filter((i) => i.complete && i.naturalWidth > 0).length, gallery: document.querySelectorAll('#grid .tile:not([data-key^="own:"])').length }))()`
+		);
+		return r.own > 0 && r.gallery > 0 && r.ownPictures > 0 ? r : undefined;
+	});
+	// (shapes that are pictures of draw.io's own, not vector stencils, show the picture)
+	const pictures = (await w.searchOwnShapes("database", 36)).filter((x) => /(^|;)image=img\//.test(x.style));
+	log("shifterFind", { ...finds, pictureShapes: pictures.length, withPreview: pictures.filter((x) => (x.preview ?? "").length > 200).length });
+	if (pictures.some((x) => !x.preview)) throw new Error("A draw.io picture shape has no preview in the Shape Shifter.");
+	await shot("workshop-shifter-light.png", wc);
+	// one of draw.io's own shapes goes into the diagram, selected
+	const cellsBefore = await cellCount();
+	await wc.executeJavaScript(`document.querySelector('#grid .tile[data-key^="own:"]').click(); true`);
+	await until("the found shape in the diagram", async () => ((await cellCount()) > cellsBefore ? true : undefined));
+	const ownId = (await until("the found shape selected", async () => ((await w.selectedCells()).length === 1 ? w.selectedCells() : undefined)))[0].id;
+	// ... and the Shifter shows it as the selection: a fill colour, one undo step
+	const selInfo: string = await until("the selection in the Shifter", async () => {
+		const t: string = await wc.executeJavaScript(`document.getElementById("selInfo").textContent`);
+		return /^1 shape selected/.test(t) ? t : undefined;
+	});
+	await wc.executeJavaScript(`(() => { const i = document.querySelector('#changeShape input[data-colour="fill"]'); i.value = "#ff8800"; i.dispatchEvent(new Event("change")); return true; })()`);
+	const filled = await until("the fill colour on the shape", async () => {
+		const cells = await w.selectedCells();
+		return cells.length === 1 && /fillColor=#ff8800/.test(cells[0].style) ? true : undefined;
+	});
+	// a gallery icon goes in beside it and gets one colour
+	await wc.executeJavaScript(`document.querySelector('#grid .tile:not([data-key^="own:"])').click(); true`);
+	const iconRow = await until("the icon colour control", async () => ((await wc.executeJavaScript(`!document.getElementById("iconRow").classList.contains("hidden")`)) ? true : undefined));
+	const iconBefore = (await w.selectedCells())[0]?.style ?? "";
+	await wc.executeJavaScript(`(() => { const i = document.querySelector('#changeShape input[data-colour="icon"]'); i.value = "#0055ff"; i.dispatchEvent(new Event("change")); return true; })()`);
+	const recoloured = await until("the icon in one colour", async () => {
+		const style = (await w.selectedCells())[0]?.style ?? "";
+		const m = /image=data:image\/svg\+xml,([^;]+)/.exec(style);
+		return style !== iconBefore && m && Buffer.from(m[1], "base64").toString("utf8").includes("#0055ff") ? true : undefined;
+	});
+	const pagedBeside = (await cellCount()) - cellsBefore;
+	// a selected group is one shape: a change to it leaves what is inside as it is
+	const group: { id: string; children: number } = await ed.executeJavaScript(
+		`(() => { const g = editorUi.editor.graph, m = g.getModel(); const made = g.groupCells(null, 0, [m.getCell(${JSON.stringify(ownId)}), ...g.getSelectionCells()]); g.setSelectionCell(made); return { id: made.id, children: m.getChildCount(made) }; })()`
+	);
+	const groupSelected = await until("the group as the selection", async () => {
+		const cells = await w.selectedCells();
+		return cells.length === 1 && cells[0].id === group.id ? true : undefined;
+	});
+	await until("the Shifter to show the group", async () => ((await wc.executeJavaScript(`document.getElementById("iconRow").classList.contains("hidden")`)) ? true : undefined));
+	await wc.executeJavaScript(`(() => { const i = document.querySelector('#changeShape input[data-colour="stroke"]'); i.value = "#00aa00"; i.dispatchEvent(new Event("change")); return true; })()`);
+	const groupAlone = await until("the line colour on the group alone", async () => {
+		const styles: string[] = await ed.executeJavaScript(`(() => { const m = editorUi.editor.graph.getModel(), g = m.getCell(${JSON.stringify(group.id)}); return [g.style || "", ...(g.children || []).map((c) => c.style || "")]; })()`);
+		return /strokeColor=#00aa00/.test(styles[0]) ? styles.slice(1).every((x) => !/#00aa00/.test(x)) : undefined;
+	});
+	// a shape that is its label (draw.io's Text) arrives with it
+	await type("text");
+	await until("the Text shape among the finds", async () => ((await wc.executeJavaScript(`!!document.querySelector('#grid .tile[data-key^="own:"][title^="Text ·"]')`)) ? true : undefined));
+	await wc.executeJavaScript(`document.querySelector('#grid .tile[data-key^="own:"][title^="Text ·"]').click(); true`);
+	const textLabel: string = await until("the Text shape in the diagram", async () => {
+		const v: string = await ed.executeJavaScript(`(() => { const c = editorUi.editor.graph.getSelectionCell(); return c && /^text;/.test(c.style || "") ? String(c.value || "") : ""; })()`);
+		return v || undefined;
+	});
+	log("shifterChange", { selInfo, filled, iconRow, recoloured, pagedBeside, group: { ...group, selectedAsOne: groupSelected, changedAlone: groupAlone }, textLabel });
+	// a Visio stencil becomes a collection (converted by the editor; the name is asked for first)
+	process.env.DRAWAI_E2E_STENCIL = path.join(__dirname, "../../test/ai/fixtures/import.vssx");
+	await wc.executeJavaScript(`document.getElementById("importStencil").click(); true`);
+	const asked: string = await until("the stencil's name to be asked", async () => ((await wc.executeJavaScript(`document.getElementById("ask").open`)) ? wc.executeJavaScript(`document.getElementById("askTitle").textContent + " | " + document.getElementById("askInput").value`) : undefined));
+	await wc.executeJavaScript(`document.getElementById("askOk").click(); true`);
+	const stencil = await until("the stencil's collection", async () => {
+		const g = galleryConfigs().find((x) => x.title === "import" && x.sources.some((src) => src.kind === "collection"));
+		const n = g ? (await galleries().items(g)).length : 0;
+		return g && n > 0 ? { title: g.title, shapes: n } : undefined;
+	});
+	const backInGallery = await until("the Gallery showing the new collection", async () => ((await wc.executeJavaScript(`document.querySelector('nav button[data-mode="gallery"]').classList.contains("active") && document.querySelectorAll("#grid .tile").length`)) ? true : undefined));
+	log("shifterStencil", { asked, ...stencil, backInGallery });
+	if (!filled || !recoloured || group.children !== 2 || !groupSelected || !groupAlone || textLabel !== "Text" || !stencil.shapes) throw new Error("The Shape Shifter does not work as it should (see the shifter lines above).");
+
 	// dark
 	process.env.DRAWAI_THEME = "dark";
 	updateSettings({ appearance: { ...settings().appearance, theme: "dark" } });

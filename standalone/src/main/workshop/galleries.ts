@@ -405,6 +405,11 @@ export class GalleryService {
 		return true;
 	}
 
+	/** A new collection filled in one go (an imported stencil): its file, written whole. */
+	importCollection(id: string, items: GalleryItem[]): void {
+		this.writeCollection(id, items.map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })));
+	}
+
 	private writeCollection(id: string, items: { title: string; xml?: string; data?: string; w?: number; h?: number }[]): void {
 		const file = this.collectionFile(id);
 		fs.mkdirSync(path.dirname(file), { recursive: true });

@@ -33,7 +33,20 @@
 	nav button.active { background: var(--surface); border-color: var(--border); color: var(--ink); }
 	nav button:disabled { color: var(--faint); cursor: default; }
 	nav button .tag { margin-left: auto; padding: 0 6px; font-size: 9.5px; }
-	#galleryCol { border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 55%, transparent); display: flex; flex-direction: column; min-height: 0; }
+	#galleryCol, #shifterCol { border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 55%, transparent); display: flex; flex-direction: column; min-height: 0; }
+	/* the Shape Shifter's side: change the selected shapes, import a stencil */
+	#shifterCol { overflow: auto; padding: 12px 10px; gap: 8px; }
+	.shift { border: 1px solid var(--border); background: var(--surface); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+	.shift h2 { margin: 0; font-size: 13px; font-weight: 500; }
+	.shift p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
+	.shift .colour { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }
+	.shift .colour span { flex: 1; }
+	.shift .colour input[type=color] { width: 34px; height: 26px; padding: 0; border: 1px solid var(--control-line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+	.shift .colour input[type=color]:disabled, .shift .colour button:disabled { opacity: 0.45; cursor: default; }
+	.shift textarea { width: 100%; min-height: 58px; resize: vertical; padding: 6px 10px; font: inherit; font-size: 12.5px; }
+	.shift .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+	#grid .group { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; padding: 6px 2px 0; }
+	#grid .group:not(:first-child) { margin-top: 10px; }
 	#galleryScroll { flex: 1; overflow: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; }
 	#galleryList { display: flex; flex-direction: column; gap: 8px; }
 	/* draw.io's own shape sets (what its "More Shapes" dialog chose between), in the same list */
@@ -108,7 +121,7 @@
 	</div>
 	<main>
 		<nav aria-label="Workshop modes">
-			<button data-mode="shifter" disabled title="Find a shape by words or from an image, import stencils, change a shape — coming next"><span data-icon="search"></span>Shape Shifter<span class="tag" data-tone="plain">Next</span></button>
+			<button data-mode="shifter" disabled title="Find a shape by words, import stencils, change a shape — coming next"><span data-icon="search"></span>Shape Shifter<span class="tag" data-tone="plain">Next</span></button>
 			<button data-mode="gallery" class="active"><span data-icon="shapes"></span>Shape Gallery</button>
 			<button data-mode="creator" disabled title="Describe a shape and let an agent draw it — coming next"><span data-icon="sparkle"></span>Shape Creator<span class="tag" data-tone="plain">Next</span></button>
 		</nav>
@@ -121,6 +134,23 @@
 				<button class="btn btn-sm" id="addGallery" aria-haspopup="menu">Add a gallery…</button>
 				<button class="btn btn-sm" id="newCollection">New collection…</button>
 				<button class="btn btn-sm btn-ghost hidden" id="restoreDefaults">Restore defaults</button>
+			</div>
+		</section>
+		<section id="shifterCol" class="hidden" aria-label="Shape Shifter">
+			<div class="shift" id="changeShape">
+				<h2>Change a shape</h2>
+				<p id="selInfo">Select shapes in the diagram to change them.</p>
+				<label class="colour"><span>Fill</span><button class="btn btn-sm btn-ghost" data-none="fill" title="No fill">None</button><input type="color" data-colour="fill" value="#ffffff" aria-label="Fill colour"></label>
+				<label class="colour"><span>Line</span><button class="btn btn-sm btn-ghost" data-none="stroke" title="No line">None</button><input type="color" data-colour="stroke" value="#141414" aria-label="Line colour"></label>
+				<label class="colour"><span>Text</span><input type="color" data-colour="font" value="#141414" aria-label="Text colour"></label>
+				<label class="colour" id="iconRow" title="Gives an icon from a gallery one colour"><span>Icon colour</span><input type="color" data-colour="icon" value="#141414" aria-label="Icon colour"></label>
+				<textarea id="describe" placeholder="Or describe the change — make them rounded with a soft blue fill…" aria-label="Describe the change"></textarea>
+				<div class="actions"><button class="btn btn-sm" id="describeGo">Ask the agent</button></div>
+			</div>
+			<div class="shift">
+				<h2>Import a stencil</h2>
+				<p>Turn a Visio stencil (.vssx, .vss) into a collection of your own. It is converted on this computer.</p>
+				<div class="actions"><button class="btn btn-sm" id="importStencil">Import a Visio stencil…</button></div>
 			</div>
 		</section>
 		<section id="results" aria-label="Shapes">
@@ -161,6 +191,12 @@
 	let iconStyle = null;
 	let reqId = 0;
 	let hits = [];
+	let mode = "gallery"; // "gallery": the Shape Gallery; "shifter": the Shape Shifter
+	let wantShifter = location.hash === "#shifter"; // opened to find a shape
+	let own = []; // the Shifter's finds among draw.io's own shapes
+	let foundWithDiagram = true;
+	let selection = { count: 0, icons: 0 };
+	let askedStencil = ""; // the converted stencil whose name was asked last
 
 	function el(tag, attrs, ...kids) {
 		const e = document.createElement(tag);
@@ -183,14 +219,46 @@
 	}
 
 	// ----- a small prompt dialog -----
+	// One question at a time: a second one (a converted stencil's name arriving while another
+	// question is open) waits for the answer to the first.
+	let asking = Promise.resolve();
 	function ask(title, text, value, okLabel) {
+		const next = asking.then(() => askNow(title, text, value, okLabel));
+		asking = next.catch(() => null);
+		return next;
+	}
+	function askNow(title, text, value, okLabel) {
 		return new Promise((resolve) => {
 			const d = $("ask");
 			$("askTitle").textContent = title;
 			$("askText").textContent = text;
 			$("askInput").value = value || "";
 			$("askOk").textContent = okLabel || "OK";
-			d.onclose = () => resolve(d.returnValue === "ok" ? $("askInput").value.trim() : null);
+			// The answer is taken, and the dialog closed here, when the form is submitted or Esc is
+			// pressed. Its own "close" event is not used: it comes a frame later (never, in a window
+			// that is covered by another one), by which time the next question may already be open.
+			let answered = false;
+			const answer = (ok) => {
+				if (answered) return;
+				answered = true;
+				const typed = $("askInput").value.trim();
+				if (d.open) d.close();
+				resolve(ok ? typed : null);
+			};
+			const form = d.querySelector("form");
+			form.onsubmit = (e) => {
+				e.preventDefault();
+				answer(!!e.submitter && e.submitter.value === "ok");
+			};
+			// Enter in the field is OK (a form's own Enter presses its first button, which is Cancel)
+			$("askInput").onkeydown = (e) => {
+				if (e.key !== "Enter" || e.isComposing) return;
+				e.preventDefault();
+				form.requestSubmit($("askOk"));
+			};
+			// Esc is Cancel
+			d.oncancel = () => answer(false);
+			d.onclose = null;
 			d.showModal();
 			$("askInput").select();
 		});
@@ -340,7 +408,8 @@
 		else {
 			const on = state.galleries.filter((x) => x.enabled);
 			const n = on.reduce((a, x) => a + (x.count || 0), 0);
-			sc.append(el("span", { class: "label", text: "In " + on.length + " galleries" + (n ? " · " + n.toLocaleString() + " shapes" : "") }));
+			const galleries = on.length + (on.length === 1 ? " gallery" : " galleries");
+			sc.append(el("span", { class: "label", text: mode === "shifter" ? "In draw.io's own shapes and " + galleries : "In " + galleries + (n ? " · " + n.toLocaleString() + " shapes" : "") }));
 		}
 		if (state.diagram !== undefined) sc.append(el("span", { class: "spacer" }), el("span", { class: "label", text: state.diagram ? "Adds to " + state.diagram : "Open a diagram to add shapes" }));
 	}
@@ -352,15 +421,89 @@
 	function runSearch() {
 		renderScope();
 		const q = $("q").value.trim();
+		if (mode === "shifter") {
+			if (!q) { hits = []; own = []; ++reqId; renderGrid(); return; }
+			post({ type: "find", query: q, limit: 120, reqId: ++reqId });
+			return;
+		}
 		if (!q && !selected) { hits = []; renderGrid(); return; }
 		post({ type: "search", query: q, galleryId: selected, limit: 240, reqId: ++reqId });
 	}
+
+	// ----- the Workshop's modes -----
+	function setMode(next) {
+		if (next === "shifter" && !state.shifter) next = "gallery";
+		const changed = next !== mode;
+		mode = next;
+		document.querySelectorAll("nav button[data-mode]").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
+		$("galleryCol").classList.toggle("hidden", mode !== "gallery");
+		$("shifterCol").classList.toggle("hidden", mode !== "shifter");
+		$("q").placeholder = mode === "shifter" ? "Find a shape — router, decision, kubernetes pod, user…" : "Search shapes — server, database, kubernetes, user…";
+		if (mode === "shifter") { selected = null; post({ type: "selection" }); }
+		if (changed) { hits = []; own = []; runSearch(); }
+		$("q").focus();
+	}
+	document.querySelectorAll("nav button[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+	/** The Shifter is there when the program showing this page has it. */
+	function renderNav() {
+		const b = document.querySelector('nav button[data-mode="shifter"]');
+		b.disabled = !state.shifter;
+		b.querySelector(".tag").classList.toggle("hidden", !!state.shifter);
+		if (state.shifter) b.title = "Find a shape by words, import a stencil, change a shape";
+		if (!state.shifter && mode === "shifter") setMode("gallery");
+	}
+
+	// ----- the Shape Shifter: change the selected shapes, import a stencil -----
+	function renderSelection() {
+		const n = selection.count || 0;
+		$("selInfo").textContent = !state.diagram ? "Open a diagram to change its shapes." : n ? n + (n === 1 ? " shape" : " shapes") + " selected in " + state.diagram + "." : "Select shapes in " + state.diagram + " to change them.";
+		document.querySelectorAll("#changeShape input[type=color], #changeShape button").forEach((c) => (c.disabled = !n));
+		$("describe").disabled = !n;
+		$("iconRow").classList.toggle("hidden", !selection.icons);
+		for (const key of ["fill", "stroke", "font"]) {
+			const input = document.querySelector('#changeShape input[data-colour="' + key + '"]');
+			if (/^#[0-9a-f]{6}$/i.test(selection[key] || "") && document.activeElement !== input) input.value = selection[key];
+		}
+	}
+	document.querySelectorAll("#changeShape input[type=color]").forEach((input) => input.addEventListener("change", () => post({ type: "restyle", [input.dataset.colour]: input.value })));
+	document.querySelectorAll("#changeShape button[data-none]").forEach((b) => b.addEventListener("click", (e) => { e.preventDefault(); post({ type: "restyle", [b.dataset.none]: "none" }); }));
+	$("describeGo").addEventListener("click", () => {
+		const text = $("describe").value.trim();
+		if (!text) return void $("describe").focus();
+		post({ type: "describeChange", text });
+		$("describe").value = "";
+	});
+	$("importStencil").addEventListener("click", () => post({ type: "importStencil" }));
 
 	function renderGrid() {
 		const grid = $("grid");
 		grid.textContent = "";
 		const q = $("q").value.trim();
+		if (mode === "shifter") {
+			if (!hits.length && !own.length) {
+				const box = el("div", { id: "empty" });
+				if (!q) {
+					box.append(el("h2", { text: "Find a shape" }), el("p", { text: "One search over draw.io's own shapes and every gallery that is on. Click a shape to add it to the diagram, beside what is selected." }));
+					const chips = el("div", { class: "chips" });
+					for (const w of ["decision", "router", "actor", "database", "cloud", "container", "queue", "arrow"]) chips.append(el("button", { class: "tag", "data-tone": "plain", onclick: () => { $("q").value = w; runSearch(); }, text: w }));
+					box.append(chips);
+				} else box.append(el("h2", { text: "Nothing matches “" + q + "”" }), el("p", { text: foundWithDiagram ? "Try another word, or turn on more galleries in the Shape Gallery." : "Open a diagram to search draw.io's own shapes too, or turn on more galleries in the Shape Gallery." }));
+				grid.append(box);
+				return;
+			}
+			if (own.length) {
+				grid.append(el("div", { class: "group" }, el("span", { class: "label", text: "draw.io's own shapes · " + own.length })));
+				for (const o of own) {
+					const pic = el("span", { class: "pic" }, o.src ? el("img", { src: o.src, alt: "" }) : el("span", { class: "ph" }));
+					const tile = el("div", { class: "tile", role: "listitem", tabindex: "0", title: o.title + (o.library ? " · " + o.library : "") + " · draw.io", onclick: () => post({ type: "insertFound", key: o.key }), onkeydown: (e) => { if (e.key === "Enter") post({ type: "insertFound", key: o.key }); } }, pic, el("span", { class: "name", text: o.title }), el("span", { class: "src", text: o.library || "draw.io" }));
+					tile.dataset.key = o.key;
+					grid.append(tile);
+				}
+			}
+			if (hits.length) grid.append(el("div", { class: "group" }, el("span", { class: "label", text: "From your galleries · " + hits.length })));
+		}
 		if (!hits.length) {
+			if (mode === "shifter") return;
 			const box = el("div", { id: "empty" });
 			if (!q && !selected) {
 				box.append(el("h2", { text: "What are you looking for?" }), el("p", { text: "Search every gallery that is on, or pick a gallery on the left to browse it. Click a shape to add it to the diagram." }));
@@ -409,9 +552,27 @@
 			renderGalleries();
 			renderSets();
 			renderScope();
+			renderNav();
+			renderSelection();
+			if (wantShifter && state.shifter) { wantShifter = false; setMode("shifter"); }
 		} else if (m.type === "results" && m.reqId === reqId) {
 			hits = m.hits;
 			renderGrid();
+		} else if (m.type === "found" && m.reqId === reqId) {
+			hits = m.hits;
+			own = m.own;
+			foundWithDiagram = !!m.diagram;
+			renderGrid();
+		} else if (m.type === "selection") {
+			selection = m;
+			renderSelection();
+		} else if (m.type === "stencil") {
+			// a converted stencil waits for its name: its shapes become a collection of the user's own
+			// (a message that arrives twice asks once)
+			if (m.token === askedStencil) return;
+			askedStencil = m.token;
+			const some = m.titles.join(", ") + (m.count > m.titles.length ? "…" : "");
+			ask("Import " + m.count.toLocaleString() + (m.count === 1 ? " shape" : " shapes"), "From " + m.name + ": " + some + (m.warnings.length ? " (" + m.warnings[0] + ")" : "") + " They become a collection of your own.", m.name, "Import").then((title) => post(title ? { type: "saveStencil", token: m.token, title } : { type: "dropStencil", token: m.token }));
 		} else if (m.type === "previews" && m.reqId === reqId) {
 			for (const p of m.previews) {
 				const h = hits.find((x) => x.galleryId === p.galleryId && x.id === p.id);
@@ -427,8 +588,10 @@
 		else if (m.type === "selectGallery") {
 			if (pendingAdd) { post({ type: "addToCollection", collectionId: m.id, galleryId: pendingAdd.galleryId, itemId: pendingAdd.id }); pendingAdd = null; }
 			$("q").value = "";
+			if (mode !== "gallery") setMode("gallery");
 			select(m.id);
-		} else if (m.type === "mode" && m.mode === "gallery") $("q").focus();
+		} else if (m.type === "mode" && m.mode === "shifter") setMode("shifter");
+		else if (m.type === "mode" && m.mode === "gallery") { if (mode !== "gallery") setMode("gallery"); $("q").focus(); }
 		else if (m.type === "mode" && m.mode === "sets") showSets();
 	});
 	post({ type: "ready" });

@@ -1,3 +1,5 @@
+import { codePoint } from "./xmlScan";
+
 /**
  * Cleans an SVG from a gallery, an import or an agent before it is cached, shown or put in
  * a diagram: no scripts, no event handlers, no external references, no embedded HTML, no
@@ -12,12 +14,12 @@ export const MAX_SVG_BYTES = 512 * 1024;
 const DROP_TAGS = ["script", "foreignObject", "iframe", "object", "embed", "audio", "video", "handler", "listener", "set", "animate", "animateMotion", "animateTransform", "animateColor", "discard"];
 
 /** Numeric and a few named character references, and CSS escapes, decoded: what a browser would see. */
-function decodeForCheck(s: string): string {
+export function decodeForCheck(s: string): string {
 	return s
-		.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16) || 32))
-		.replace(/&#(\d+);?/g, (_m, d) => String.fromCodePoint(Number(d) || 32))
+		.replace(/&#x([0-9a-f]+);?/gi, (_m, h) => codePoint(parseInt(h, 16)))
+		.replace(/&#(\d+);?/g, (_m, d) => codePoint(Number(d)))
 		.replace(/&(colon|lpar|rpar|sol|period|Tab|NewLine);/gi, (_m, n) => ({ colon: ":", lpar: "(", rpar: ")", sol: "/", period: ".", tab: "", newline: "" } as Record<string, string>)[n.toLowerCase()] ?? "")
-		.replace(/\\([0-9a-f]{1,6})\s?/gi, (_m, h) => String.fromCodePoint(parseInt(h, 16) || 32))
+		.replace(/\\([0-9a-f]{1,6})\s?/gi, (_m, h) => codePoint(parseInt(h, 16)))
 		.replace(/\\(.)/g, "$1")
 		.replace(/[\u0000-\u0020]+/g, " ");
 }
@@ -33,10 +35,11 @@ export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string
 	for (const tag of DROP_TAGS) {
 		s = s.replace(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[\\s\\S]*?<\\/(?:[\\w-]+:)?${tag}\\s*>`, "gi"), "").replace(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>`, "gi"), "");
 	}
-	// event handler attributes
-	s = s.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
+	// event handler attributes (one space before each is enough to find it: "\s+" would try every
+	// start in a long run of spaces again and again)
+	s = s.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
 	// links (quoted or not): keep same-document (#id) and embedded raster images only
-	s = s.replace(/\s+((?:[\w-]+:)?href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>"']+))/gi, (m, _attr, _q, a, b, c) => {
+	s = s.replace(/\s((?:[\w-]+:)?href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>"']+))/gi, (m, _attr, _q, a, b, c) => {
 		const v = String(a ?? b ?? c ?? "").trim();
 		return /^#[\w.:-]*$/.test(v) || /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(v) ? m : "";
 	});
@@ -60,7 +63,7 @@ export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string
 export function safeImageData(data: string): { style: string; img: string } | undefined {
 	if (typeof data !== "string") return undefined;
 	const d = data.trim();
-	const raster = /^data:image\/(png|jpe?g|gif|webp)(;base64)?,([A-Za-z0-9+/=]+)$/.exec(d);
+	const raster = /^data:image\/(png|jpe?g|gif|webp|bmp|tiff)(;base64)?,([A-Za-z0-9+/=]+)$/.exec(d);
 	if (raster) return { style: `data:image/${raster[1]},${raster[3]}`, img: `data:image/${raster[1]};base64,${raster[3]}` };
 	let svg: string | undefined;
 	const b64 = /^data:image\/svg\+xml(;base64)?,([A-Za-z0-9+/=]+)$/.exec(d);

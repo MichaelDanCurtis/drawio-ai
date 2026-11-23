@@ -24,8 +24,24 @@ import { onSettingsChanged, settings, updateSettings, type Settings } from "./se
 import { shapeLibraries } from "./shapeLocations";
 import { galleries, galleryConfigs, searchForEditor } from "./workshop";
 import { galleryPalette } from "./workshop/palette";
+import { styleValue } from "./workshop/shifter";
 import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
+
+/** One of draw.io's own picture files (a style's `image=img/lib/…`) as SVG text for a preview, or undefined. */
+function webappPicture(image: string | undefined): string | undefined {
+	const m = image ? /^(?:https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/webapp\/)?((?:img|images|stencils)\/[\w./ -]+\.(svg|png|jpe?g|gif))$/i.exec(image) : undefined;
+	if (!m || m[1].includes("..")) return undefined;
+	const file = path.join(paths.webapp, m[1]);
+	try {
+		if (!file.startsWith(paths.webapp + path.sep) || fs.statSync(file).size > 512 * 1024) return undefined;
+		if (m[2].toLowerCase() === "svg") return fs.readFileSync(file, "utf8");
+		const mime = m[2].toLowerCase() === "png" ? "image/png" : m[2].toLowerCase() === "gif" ? "image/gif" : "image/jpeg";
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><image width="64" height="64" preserveAspectRatio="xMidYMid meet" href="data:${mime};base64,${fs.readFileSync(file).toString("base64")}"/></svg>`;
+	} catch {
+		return undefined;
+	}
+}
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
 let nextId = 1;
@@ -46,6 +62,8 @@ export class DiagramWindow {
 	/** draw.io's own shape sets and which are shown, as the editor used last reported them (for the Shape Workshop). */
 	public static shapeSets: ShapeSetGroup[] | undefined;
 	public static onShapeSets: (() => void) | undefined;
+	/** The selection of the diagram used last changed (for the Shape Workshop's Shifter). */
+	public static onSelection: (() => void) | undefined;
 
 	/** Asks the editor in front to say again which shape sets show (they can change in the sidebar itself). */
 	public static requestShapeSets(): void {
@@ -432,6 +450,54 @@ export class DiagramWindow {
 		}, 150);
 	}
 
+	// ----- the Shape Shifter's side (see workshop/core.ts, ShifterHost) -----
+
+	/** draw.io's own shapes that match, with the sidebar's thumbnails. */
+	public async searchOwnShapes(query: string, limit: number): Promise<AiShapeTemplate[]> {
+		await this.ready();
+		const shapes = (await this.client.aiSearchShapes(query, limit, { previews: true, ownOnly: true })).shapes;
+		// A shape that is a picture names a file of draw.io's (img/lib/…): its thumbnail links to it, and
+		// links do not survive the Workshop's cleaning. The picture itself is the preview then.
+		for (const shape of shapes) {
+			const picture = webappPicture(styleValue(shape.style, "image"));
+			if (picture) shape.preview = picture;
+		}
+		return shapes;
+	}
+
+	/** The selected cells themselves (not what is inside a selected container or group) and their styles. */
+	public async selectedCells(): Promise<{ id: string; style: string; edge: boolean }[]> {
+		if (!this.loaded || this.client.currentSelection.length === 0) return [];
+		const model = await this.client.aiGetModel({ scope: "selection", selectedOnly: true, includeStyles: true, maxCells: 2000 });
+		return model.cells.filter((c) => c.selected === true).map((c) => ({ id: c.id, style: c.style ?? "", edge: c.kind === "edge" }));
+	}
+
+	/** Style changes the user made in the Workshop: one undo step, the user's own (a pending AI review takes them as an edit made in the editor). */
+	public async applyStyles(edits: { id: string; props: Record<string, string> }[]): Promise<void> {
+		const r = await this.client.aiApplyOps(
+			edits.map((e) => ({ op: "update", id: e.id, styleProps: e.props })),
+			{ selectResult: false, flash: false, atomic: true, review: false, user: true }
+		);
+		const failed = r.results.find((x) => !x.ok);
+		if (failed || r.rolledBack) throw new Error(`The shapes could not be changed: ${failed?.error ?? "the change was rolled back"}`);
+	}
+
+	/** Hands a request about the selection to the agent in this window's chat. */
+	public async askAboutSelection(request: string, shown: string): Promise<void> {
+		if (!this.chatVisible) this.toggleChat();
+		await this.chat.send(request, { cellIds: this.client.currentSelection }, [], shown);
+	}
+
+	/** A Visio stencil as a draw.io library, converted by this window's editor (the open diagram is not touched). */
+	public async convertStencil(file: string): Promise<{ library: string; warnings: string[] }> {
+		await this.ready();
+		const stat = fs.statSync(file);
+		if (!stat.isFile() || stat.size > 64 * 1024 * 1024) throw new Error(`${path.basename(file)} is not a file, or is larger than 64 MB.`);
+		const result = await this.client.importDiagram("visio", path.basename(file), fs.readFileSync(file));
+		if (!result.library) throw new Error(`${path.basename(file)} is a Visio drawing, not a stencil. Open it with File → Import… to get its pages.`);
+		return { library: result.library, warnings: result.warnings };
+	}
+
 	/** Asks the agent to investigate the selected mapped shapes further (read-only). */
 	public async digDeeper(question: string): Promise<void> {
 		const shapes = this.loaded ? await mappedSelection(this.client).catch(() => []) : [];
@@ -456,6 +522,22 @@ export class DiagramWindow {
 
 	public whenLoaded(): Promise<void> {
 		return this.loaded ? Promise.resolve() : new Promise((r) => this.loadedWaiters.push(r));
+	}
+
+	/** Loaded, or an error when that takes too long (a window closed before it loaded never does). */
+	private async ready(ms = 15_000): Promise<void> {
+		if (this.loaded) return;
+		let timer: NodeJS.Timeout | undefined;
+		try {
+			await Promise.race([
+				this.whenLoaded(),
+				new Promise<never>((_resolve, reject) => {
+					timer = setTimeout(() => reject(new Error("The diagram is still loading. Try again in a moment.")), ms);
+				}),
+			]);
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	private wireEditorEvents(): void {
@@ -494,6 +576,8 @@ export class DiagramWindow {
 			this.chat.postState();
 			this.refreshMapped();
 			this.mapActions.refreshSummary();
+			// (the Shape Shifter shows what is selected in the diagram used last)
+			if (this === DiagramWindow.focused()) DiagramWindow.onSelection?.();
 		});
 		c.onAiReview.sub(() => this.chat.postState());
 		let lastLasso: { cellIds: string[] } | undefined;

@@ -21,6 +21,8 @@ export interface ImportResult {
 	xml: string;
 	/** "stencil" when a Visio stencil's shapes were laid out on a page. */
 	kind: "diagram" | "stencil";
+	/** A stencil as a draw.io library (`<mxlibrary>[…]</mxlibrary>`), for a shapes collection. */
+	library?: string;
 	pages: number;
 	shapes: number;
 	connectors: number;
@@ -329,8 +331,11 @@ function toDiagramFile(ui: any, raw: unknown, name: string, warnings: Warnings, 
 	let kind: ImportResult["kind"] = "diagram";
 	const pages: { name: string; id: string; model: Element }[] = [];
 	let masters = 0;
+	let libraryXml: string | undefined;
 	if (root.nodeName === "mxlibrary") {
 		kind = "stencil";
+		// (the Visio codec writes NaN for shapes it could not measure: not JSON)
+		libraryXml = `<mxlibrary>${(root.textContent || "[]").replace(/:\s*NaN\b/g, ":null")}</mxlibrary>`;
 		const library = libraryPage(ui, root);
 		masters = library.shapes;
 		pages.push({ name: name || "Stencil", id: W.Editor.guid(), model: library.model });
@@ -383,7 +388,7 @@ function toDiagramFile(ui: any, raw: unknown, name: string, warnings: Warnings, 
 	doc.appendChild(file);
 	// A stencil counts its shapes, not the cells they are drawn with or their name labels.
 	const counts = kind === "stencil" ? { shapes: masters, connectors: 0 } : { shapes, connectors };
-	return { xml: W.mxUtils.getXml(file), kind, pages: pages.length, ...counts, warnings: warnings.list() };
+	return { xml: W.mxUtils.getXml(file), kind, ...(libraryXml ? { library: libraryXml } : {}), pages: pages.length, ...counts, warnings: warnings.list() };
 }
 
 /** A Visio stencil comes back as a draw.io library: lay its shapes out on a page, each with its name below. */

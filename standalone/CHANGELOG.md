@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- **Shape Shifter** in the Shape Workshop (its second tab, or Shapes → Find a Shape…):
+  - **Find a shape by words** across draw.io's own shapes and your galleries at once, each
+    result with a picture; click to add it.
+  - **Change a shape**: fill, line and text colour of what is selected in the diagram, one
+    colour for a gallery icon, or describe the change and ask the diagram's agent.
+  - **Import a Visio stencil** (`.vssx`, `.vss`, `.vssm`) as a collection of your own,
+    converted on this computer.
+- A shape added from the **Shape Workshop** now goes beside what is selected in the diagram
+  (in the middle of the view when nothing is selected).
+- The Workshop's question dialog (a name for a collection, an address): **Enter** is OK (it
+  was Cancel), **Esc** is always Cancel, and the answer is taken when you press OK, also in a
+  window that is covered by another one.
+- Pictures inside the shapes of a draw.io library (also a collection's, and a converted
+  stencil's) are checked like every other image: SVGs are cleaned of scripts and links, and
+  what only claims to be an image is dropped from the shape. A shape that cannot be checked
+  (an SVG in the HTML of a label, a file's pages instead of a shape) is left out.
+- Cleaning an SVG no longer takes minutes when it holds a very long run of spaces, or throws
+  on a character reference that names no character.
 - **Mapper**: YAML merge keys (`<<: *common`) are followed, so a compose service built on an
   anchor keeps its image, its environment and what it depends on (Connectivity, Kubernetes,
   pipelines, MLflow, API maps).
