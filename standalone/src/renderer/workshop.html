@@ -8,7 +8,8 @@
 <!--
 	OmniDraw: the Shape Workshop. Shape Gallery: galleries on and off, add (GitHub, folder,
 	library), sync, offline, collections, search across galleries, click to add to the diagram.
-	Shape Shifter and Shape Creator come next.
+	Shape Shifter: find by words, change a shape, import a stencil. Shape Creator: an agent
+	draws an icon from a description.
 -->
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
@@ -45,6 +46,39 @@
 	.shift .colour input[type=color]:disabled, .shift .colour button:disabled { opacity: 0.45; cursor: default; }
 	.shift textarea { width: 100%; min-height: 58px; resize: vertical; padding: 6px 10px; font: inherit; font-size: 12.5px; }
 	.shift .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+	/* the Shape Creator: its form on the side, what the agent drew on the right */
+	#creatorCol { border-right: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 55%, transparent); display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 12px 10px; gap: 8px; }
+	.shift .pick { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+	.shift .pick select { width: 100%; min-height: 30px; font-size: 12.5px; }
+	.shift .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+	.shift .note { color: var(--danger); }
+	#crPrompt { min-height: 92px; }
+	#crImages { display: flex; gap: 6px; flex-wrap: wrap; }
+	#crImages .thumb { position: relative; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #ffffff; }
+	#crImages .thumb img { width: 100%; height: 100%; object-fit: cover; }
+	#crImages .thumb button { position: absolute; inset: 0; border: 0; background: rgb(10 10 10 / 55%); color: #fff; font: inherit; font-size: 11px; opacity: 0; cursor: pointer; }
+	#crImages .thumb:hover button, #crImages .thumb button:focus-visible { opacity: 1; }
+	#crStatus { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--muted); }
+	#crStatus .dot-loader { flex: none; margin-top: 5px; }
+	#crSaid { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
+	#creatorOut { display: none; flex: 1; overflow: auto; padding: 16px; flex-direction: column; gap: 10px; }
+	#results.creating > .searchbar, #results.creating > .scope, #results.creating > #grid { display: none; }
+	#results.creating > #creatorOut { display: flex; }
+	.made { display: grid; grid-template-columns: auto 1fr; gap: 14px; border: 1px solid var(--border); background: var(--surface); border-radius: 14px; padding: 12px; animation: rise var(--dur) var(--ease-enter) backwards; }
+	.made .looks { display: flex; flex-direction: column; gap: 6px; }
+	.made .strip { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; }
+	/* on white and on black, as on a light and a dark canvas */
+	.made .strip.paper { background: #ffffff; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 8%); }
+	.made .strip.black { background: #000000; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%); }
+	.made .what { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+	.made .row1 { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+	.made .row1 b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.made .row1 .drop { margin-left: auto; flex: none; padding: 0 8px; align-self: center; }
+	.made .tags { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.made .actions, .made .revise { display: flex; gap: 6px; flex-wrap: wrap; }
+	.made .revise input { flex: 1; min-width: 160px; min-height: 28px; padding: 4px 10px; font-size: 12.5px; }
+	.made .source { width: 100%; min-height: 120px; resize: vertical; font-family: var(--font-mono); font-size: 11px; padding: 8px 10px; }
+	.made .sourcebox { display: flex; flex-direction: column; gap: 6px; }
 	#grid .group { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; padding: 6px 2px 0; }
 	#grid .group:not(:first-child) { margin-top: 10px; }
 	#galleryScroll { flex: 1; overflow: auto; padding: 12px 10px; display: flex; flex-direction: column; gap: 8px; }
@@ -153,12 +187,35 @@
 				<div class="actions"><button class="btn btn-sm" id="importStencil">Import a Visio stencil…</button></div>
 			</div>
 		</section>
+		<section id="creatorCol" class="hidden" aria-label="Shape Creator">
+			<div class="shift" id="createShape">
+				<h2>Describe an icon</h2>
+				<p>One of your agents (Claude Code, Codex, Gemini…) draws it as SVG. Only your description and the images you attach are sent to it.</p>
+				<label class="pick"><span>Agent</span><select id="crAgent" aria-label="Agent"></select></label>
+				<label class="pick" id="crModelRow"><span>Model</span><select id="crModel" aria-label="Model"></select></label>
+				<p class="note hidden" id="crProblem"></p>
+				<div class="two">
+					<label class="pick"><span>Look</span><select id="crStyle" aria-label="Look"><option value="any">Any</option><option value="line">Line</option><option value="solid">Solid</option><option value="isometric">Isometric</option><option value="dots">Dot matrix</option></select></label>
+					<label class="pick"><span>How many</span><select id="crCount" aria-label="How many"><option value="1">One icon</option><option value="3">Three variations</option></select></label>
+				</div>
+				<textarea id="crPrompt" placeholder="A load balancer: one arrow in, three arrows out…" aria-label="Describe the icon"></textarea>
+				<div id="crImages" aria-label="Attached images"></div>
+				<div class="actions">
+					<button class="btn btn-sm btn-primary" id="crGo">Create</button>
+					<button class="btn btn-sm hidden" id="crStop">Stop</button>
+					<button class="btn btn-sm btn-ghost" id="crAttach" title="Attach up to four images that show what you mean (or paste one)">Attach image…</button>
+					<input type="file" id="crFile" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp" multiple>
+				</div>
+				<div id="crStatus" class="hidden" role="status"><span class="dot-loader hidden" id="crLoader" aria-hidden="true"><i></i><i></i><i></i></span><span id="crSaid"></span></div>
+			</div>
+		</section>
 		<section id="results" aria-label="Shapes">
 			<div class="searchbar">
 				<input type="text" id="q" placeholder="Search shapes — server, database, kubernetes, user…" aria-label="Search shapes" autocomplete="off" spellcheck="false">
 			</div>
 			<div class="scope" id="scope"></div>
 			<div id="grid" role="list"></div>
+			<div id="creatorOut" aria-label="Icons the agent drew"></div>
 		</section>
 	</main>
 	<div class="menu hidden" role="menu" id="menu"></div>
@@ -197,6 +254,9 @@
 	let foundWithDiagram = true;
 	let selection = { count: 0, icons: 0 };
 	let askedStencil = ""; // the converted stencil whose name was asked last
+	let wantCreator = location.hash === "#creator"; // opened to create a shape
+	// the Shape Creator: the agents on offer, what was drawn (newest first), what the agent says while it draws
+	const creator = { agents: [], last: null, made: [], busy: false, said: "", heard: 0, images: [], asked: false };
 
 	function el(tag, attrs, ...kids) {
 		const e = document.createElement(tag);
@@ -416,9 +476,13 @@
 
 	let searchTimer;
 	$("q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 160); });
-	document.addEventListener("keydown", (e) => { if (e.key === "/" && document.activeElement !== $("q") && !$("ask").open) { e.preventDefault(); $("q").focus(); } });
+	document.addEventListener("keydown", (e) => {
+		const typing = /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || "");
+		if (e.key === "/" && !typing && mode !== "creator" && !$("ask").open) { e.preventDefault(); $("q").focus(); }
+	});
 
 	function runSearch() {
+		if (mode === "creator") return;
 		renderScope();
 		const q = $("q").value.trim();
 		if (mode === "shifter") {
@@ -432,25 +496,201 @@
 
 	// ----- the Workshop's modes -----
 	function setMode(next) {
-		if (next === "shifter" && !state.shifter) next = "gallery";
+		if ((next === "shifter" && !state.shifter) || (next === "creator" && !state.creator)) next = "gallery";
 		const changed = next !== mode;
 		mode = next;
 		document.querySelectorAll("nav button[data-mode]").forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
 		$("galleryCol").classList.toggle("hidden", mode !== "gallery");
 		$("shifterCol").classList.toggle("hidden", mode !== "shifter");
+		$("creatorCol").classList.toggle("hidden", mode !== "creator");
+		$("results").classList.toggle("creating", mode === "creator");
+		if (mode === "creator") {
+			// (the agents are asked for each time the tab is shown: one may have been installed meanwhile)
+			post({ type: "creatorAgents" });
+			renderMade();
+			$("crPrompt").focus();
+			return;
+		}
 		$("q").placeholder = mode === "shifter" ? "Find a shape — router, decision, kubernetes pod, user…" : "Search shapes — server, database, kubernetes, user…";
 		if (mode === "shifter") { selected = null; post({ type: "selection" }); }
 		if (changed) { hits = []; own = []; runSearch(); }
 		$("q").focus();
 	}
 	document.querySelectorAll("nav button[data-mode]").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
-	/** The Shifter is there when the program showing this page has it. */
+	/** The Shifter and the Creator are there when the program showing this page has them. */
 	function renderNav() {
-		const b = document.querySelector('nav button[data-mode="shifter"]');
-		b.disabled = !state.shifter;
-		b.querySelector(".tag").classList.toggle("hidden", !!state.shifter);
-		if (state.shifter) b.title = "Find a shape by words, import a stencil, change a shape";
-		if (!state.shifter && mode === "shifter") setMode("gallery");
+		for (const [name, title] of [["shifter", "Find a shape by words, import a stencil, change a shape"], ["creator", "Describe an icon and let an agent draw it"]]) {
+			const b = document.querySelector('nav button[data-mode="' + name + '"]');
+			b.disabled = !state[name];
+			b.querySelector(".tag").classList.toggle("hidden", !!state[name]);
+			if (state[name]) b.title = title;
+			if (!state[name] && mode === name) setMode("gallery");
+		}
+	}
+
+	// ----- the Shape Creator: an agent draws an icon from a description -----
+	const currentAgent = () => creator.agents.find((a) => a.id === $("crAgent").value);
+	function renderCreatorForm() {
+		const agents = $("crAgent");
+		const keep = agents.value || (creator.last && creator.last.agent) || "";
+		agents.textContent = "";
+		for (const a of creator.agents) agents.append(el("option", { value: a.id, text: a.label + (a.ready ? "" : " (not ready)") }));
+		const pick = creator.agents.find((a) => a.id === keep) || creator.agents.find((a) => a.ready) || creator.agents[0];
+		if (pick) agents.value = pick.id;
+		renderCreatorModels();
+	}
+	function renderCreatorModels() {
+		const a = currentAgent();
+		const models = $("crModel");
+		const keep = models.dataset.agent === (a ? a.id : "") ? models.value : "";
+		models.textContent = "";
+		models.dataset.agent = a ? a.id : "";
+		models.append(el("option", { value: "", text: "The agent's own choice" }));
+		for (const m of a ? a.models : []) models.append(el("option", { value: m.value, text: m.name }));
+		models.value = keep || (a && a.model) || "";
+		$("crModelRow").classList.toggle("hidden", !(a && a.models.length));
+		const note = $("crProblem");
+		note.textContent = !creator.agents.length ? (creator.asked ? "None of your agents is set up yet. Install one (Claude Code, Codex, Gemini…) and sign in to it, as for the chat." : "") : a && !a.ready ? a.problem || a.label + " is not ready." : "";
+		note.classList.toggle("hidden", !note.textContent);
+		renderCreatorBusy();
+	}
+	function renderCreatorBusy() {
+		const a = currentAgent();
+		$("crGo").disabled = creator.busy || !a || !a.ready;
+		$("crGo").classList.toggle("hidden", creator.busy);
+		$("crStop").classList.toggle("hidden", !creator.busy);
+		$("crStatus").classList.toggle("hidden", !creator.busy && !creator.said);
+		$("crLoader").classList.toggle("hidden", !creator.busy);
+		$("crSaid").textContent = creator.said.slice(-280);
+		document.querySelectorAll("#creatorOut .revise button, #creatorOut .revise input").forEach((c) => (c.disabled = creator.busy));
+	}
+	$("crAgent").addEventListener("change", renderCreatorModels);
+
+	/** Sends a request to the agent (a new icon, or a change to one). */
+	function startCreating(msg) {
+		if (creator.busy) return;
+		creator.busy = true;
+		creator.said = "";
+		renderCreatorBusy();
+		post(msg);
+	}
+	$("crGo").addEventListener("click", () => {
+		const prompt = $("crPrompt").value.trim();
+		if (!prompt) return void $("crPrompt").focus();
+		startCreating({ type: "create", agent: $("crAgent").value, model: $("crModel").value, prompt, style: $("crStyle").value, variations: Number($("crCount").value), images: creator.images.map((i) => ({ mimeType: i.mimeType, base64: i.base64 })) });
+	});
+	$("crPrompt").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); $("crGo").click(); } });
+	$("crStop").addEventListener("click", () => post({ type: "stopCreating" }));
+
+	// images that show what is meant: attached, pasted or dropped; up to four
+	function renderImages() {
+		const box = $("crImages");
+		box.textContent = "";
+		creator.images.forEach((img, i) => box.append(el("div", { class: "thumb" }, el("img", { src: "data:" + img.mimeType + ";base64," + img.base64, alt: "Attached image " + (i + 1) }), el("button", { title: "Remove this image", onclick: () => { creator.images.splice(i, 1); renderImages(); }, text: "Remove" }))));
+	}
+	function attach(files) {
+		for (const file of files) {
+			if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) { toast(file.name + " is not a PNG, JPEG, GIF or WebP image.", true); continue; }
+			if (file.size > 5 * 1024 * 1024) { toast(file.name + " is larger than 5 MB.", true); continue; }
+			const reader = new FileReader();
+			reader.onload = () => {
+				if (creator.images.length >= 4) return void toast("Four images at most.", true);
+				creator.images.push({ mimeType: file.type, base64: String(reader.result).replace(/^data:[^,]*,/, "") });
+				renderImages();
+			};
+			reader.readAsDataURL(file);
+		}
+	}
+	$("crAttach").addEventListener("click", () => $("crFile").click());
+	$("crFile").addEventListener("change", () => { attach([...$("crFile").files]); $("crFile").value = ""; });
+	$("crPrompt").addEventListener("paste", (e) => {
+		const files = [...((e.clipboardData && e.clipboardData.files) || [])];
+		if (files.length) { e.preventDefault(); attach(files); }
+	});
+	$("createShape").addEventListener("dragover", (e) => e.preventDefault());
+	$("createShape").addEventListener("drop", (e) => { e.preventDefault(); attach([...((e.dataTransfer && e.dataTransfer.files) || [])]); });
+
+	function copyText(text) {
+		const done = () => toast("Copied the SVG.");
+		const old = () => {
+			const t = el("textarea", { style: "position:fixed;opacity:0" });
+			t.value = text;
+			document.body.append(t);
+			t.select();
+			try { document.execCommand("copy"); done(); } catch (e) { toast("Could not copy. Open Source and copy it from there.", true); }
+			t.remove();
+		};
+		if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, old);
+		else old();
+	}
+
+	/** One icon the agent drew: at 16, 24 and 64 pixels on white and on black, with what can be done with it. */
+	function madeCard(c) {
+		const strip = (tone) => el("div", { class: "strip " + tone }, ...[16, 24, 64].map((size) => el("img", { src: c.src, alt: "", width: size, height: size })));
+		const source = el("textarea", { class: "source", spellcheck: "false", "aria-label": "SVG source of " + c.title });
+		// (what is typed here and not applied yet stays when the list is drawn again)
+		source.value = c.sourceDraft === undefined ? c.svg : c.sourceDraft;
+		source.addEventListener("input", () => (c.sourceDraft = source.value));
+		const sourceBox = el("div", { class: "sourcebox" + (c.sourceOpen ? "" : " hidden") }, source, el("div", { class: "actions" }, el("button", { class: "btn btn-sm", text: "Apply", title: "Use the SVG as edited here", onclick: () => post({ type: "editCreated", id: c.id, svg: source.value }) })));
+		const revise = el("input", { type: "text", placeholder: "Ask for a change — thicker lines…", "aria-label": "Ask for a change to " + c.title });
+		revise.value = c.reviseText || "";
+		revise.disabled = creator.busy;
+		revise.addEventListener("input", () => (c.reviseText = revise.value));
+		const go = () => {
+			const text = revise.value.trim();
+			if (!text) return void revise.focus();
+			c.reviseText = "";
+			revise.value = "";
+			startCreating({ type: "revise", id: c.id, text, agent: $("crAgent").value, model: $("crModel").value });
+		};
+		revise.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); go(); } });
+		const saveTo = (anchor) => {
+			const items = [{ label: "My shapes", run: () => post({ type: "saveCreated", id: c.id }) }];
+			const others = state.galleries.filter((g) => isCollection(g) && g.id !== "my-shapes");
+			if (others.length) items.push("-", ...others.map((g) => ({ label: g.title, run: () => post({ type: "saveCreated", id: c.id, collectionId: g.id }) })));
+			openMenu(anchor, items);
+		};
+		return el("article", { class: "made", "data-made": c.id },
+			el("div", { class: "looks" }, strip("paper"), strip("black")),
+			el("div", { class: "what" },
+				el("div", { class: "row1" }, el("b", { text: c.title }), el("span", { class: "tags", text: c.tags.join(" · ") }),
+					el("button", { class: "btn btn-sm btn-ghost drop", "data-do": "remove", text: "✕", title: "Remove this icon from the list", "aria-label": "Remove " + c.title, onclick: () => { creator.made = creator.made.filter((x) => x !== c); post({ type: "dropCreated", id: c.id }); renderMade(); } })),
+				el("div", { class: "actions" },
+					el("button", { class: "btn btn-sm btn-primary", "data-do": "insert", text: "Insert", title: "Add it to the diagram you used last", onclick: () => post({ type: "insertCreated", id: c.id }) }),
+					el("button", { class: "btn btn-sm", "data-do": "save", text: "Save…", title: "Keep it in My shapes or one of your collections", onclick: (e) => { e.stopPropagation(); saveTo(e.currentTarget); } }),
+					el("button", { class: "btn btn-sm", "data-do": "copy", text: "Copy SVG", onclick: () => copyText(c.svg) }),
+					el("button", { class: "btn btn-sm btn-ghost", "data-do": "source", text: "Source", title: "See and edit the SVG", "aria-expanded": c.sourceOpen ? "true" : "false", onclick: (e) => { c.sourceOpen = !c.sourceOpen; sourceBox.classList.toggle("hidden", !c.sourceOpen); e.currentTarget.setAttribute("aria-expanded", String(c.sourceOpen)); } })),
+				el("div", { class: "revise" }, revise, el("button", { class: "btn btn-sm", text: "Revise", disabled: creator.busy, onclick: go })),
+				sourceBox));
+	}
+	function renderMade() {
+		const out = $("creatorOut");
+		out.textContent = "";
+		if (!creator.made.length) {
+			out.append(el("div", { class: "soon" }, el("h2", { text: "Describe an icon, and an agent draws it" }), el("p", { text: "What it draws shows here at the sizes a diagram uses, on white and on black. Ask for changes until it is right, then insert it or keep it in My shapes." })));
+			return;
+		}
+		for (const c of creator.made) out.append(madeCard(c));
+	}
+
+	/** Draws an SVG for the agent to look at (white behind it) and gives the picture back. */
+	function rasterise(m) {
+		const size = Math.max(64, Math.min(512, Number(m.size) || 384));
+		const img = new Image();
+		const answer = (png) => post({ type: "rasterised", reqId: m.reqId, png });
+		img.onload = () => {
+			try {
+				const canvas = el("canvas", { width: size, height: size });
+				const g = canvas.getContext("2d");
+				g.fillStyle = "#ffffff";
+				g.fillRect(0, 0, size, size);
+				const pad = Math.round(size / 12);
+				g.drawImage(img, pad, pad, size - 2 * pad, size - 2 * pad);
+				answer(canvas.toDataURL("image/png"));
+			} catch (e) { answer(null); }
+		};
+		img.onerror = () => answer(null);
+		img.src = m.src;
 	}
 
 	// ----- the Shape Shifter: change the selected shapes, import a stencil -----
@@ -555,6 +795,7 @@
 			renderNav();
 			renderSelection();
 			if (wantShifter && state.shifter) { wantShifter = false; setMode("shifter"); }
+			if (wantCreator && state.creator) { wantCreator = false; setMode("creator"); }
 		} else if (m.type === "results" && m.reqId === reqId) {
 			hits = m.hits;
 			renderGrid();
@@ -590,7 +831,34 @@
 			$("q").value = "";
 			if (mode !== "gallery") setMode("gallery");
 			select(m.id);
-		} else if (m.type === "mode" && m.mode === "shifter") setMode("shifter");
+		} else if (m.type === "creatorAgents") {
+			creator.agents = Array.isArray(m.agents) ? m.agents : [];
+			creator.last = m.last || null;
+			creator.asked = true;
+			renderCreatorForm();
+		} else if (m.type === "creating") {
+			creator.busy = m.state !== "idle";
+			if (m.state === "starting") creator.said = "Starting " + (m.agent || "the agent") + "…\n";
+			renderCreatorBusy();
+		} else if (m.type === "creatorText") {
+			// (each piece once, also when a message arrives twice)
+			if (m.n <= creator.heard) return;
+			creator.heard = m.n;
+			creator.said = (creator.said + String(m.text || "")).slice(-2000);
+			renderCreatorBusy();
+		} else if (m.type === "created") {
+			// (the same icon again is a change to it: an edit, or a message that arrived twice)
+			const at = creator.made.findIndex((c) => c.id === m.id);
+			// (an edit that was applied replaces what was typed; the same icon again leaves it)
+			const was = at >= 0 ? creator.made[at] : null;
+			const c = { id: m.id, title: m.title, tags: m.tags || [], svg: m.svg, src: m.src, sourceOpen: !!was && was.sourceOpen, reviseText: was ? was.reviseText : "", sourceDraft: was && was.svg === m.svg ? was.sourceDraft : undefined };
+			if (at >= 0) creator.made[at] = c;
+			else creator.made = [c, ...creator.made].slice(0, 24);
+			if (mode === "creator") renderMade();
+		} else if (m.type === "rasterise") {
+			rasterise(m);
+		} else if (m.type === "mode" && m.mode === "creator") setMode("creator");
+		else if (m.type === "mode" && m.mode === "shifter") setMode("shifter");
 		else if (m.type === "mode" && m.mode === "gallery") { if (mode !== "gallery") setMode("gallery"); $("q").focus(); }
 		else if (m.type === "mode" && m.mode === "sets") showSets();
 	});

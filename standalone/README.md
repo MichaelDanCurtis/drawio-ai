@@ -161,9 +161,9 @@ claude mcp add --scope user draw-ai-desktop -- ~/.drawio-ai/bin/draw-ai-desktop-
 ## Shape Workshop
 
 **Shapes → Shape Workshop…** (Cmd/Ctrl+Alt+K, or the shapes button in the toolbar) opens one
-window for finding, collecting and changing shapes. It has the **Shape Gallery** and the
-**Shape Shifter**; finding a shape from an image, the cloud vendors' own sets and the Shape
-Creator (an agent draws an icon) come next.
+window for finding, collecting, changing and making shapes. It has the **Shape Gallery**, the
+**Shape Shifter** and the **Shape Creator**; finding a shape from an image and the cloud
+vendors' own sets come next.
 
 - **Galleries** start with three you can turn off, remove and restore:
   - theSVG, open licences only (CC0, MIT, Apache-2.0); not its AWS, Azure or Google Cloud sets, whose labels there don't match the vendors' terms
@@ -230,15 +230,54 @@ used last:
   nothing is uploaded. You name the collection before it is saved, and the pictures its
   shapes keep are checked like every other image.
 
+The **Shape Creator** (the third tab, or **Shapes → Create a Shape…**) has an agent draw an
+icon:
+
+- **Describe it.** Pick one of the agents the chat uses (and a model, when the agent has told
+  the app which it offers), a look (line, solid, isometric, dot matrix) and one icon or three
+  variations; attach, paste or drop up to four images that show what you mean. Only your
+  description and those images go to the agent.
+- **The agent runs apart from any diagram:** in an empty folder of its own, and the Workshop
+  gives it a tool endpoint with two tools: `workshop_render_preview` returns a picture of its
+  SVG (drawn by the Workshop page) so it can check its work, and `workshop_submit_svg` hands
+  an icon in. When it asks the app for permission, one use of one of those two tools is
+  allowed and everything else is refused (what was refused shows in the status line);
+  nothing is ever allowed "always", which would be written into the agent's own
+  configuration. The app does not take the agent's own tools away: what the agent's own
+  settings already allow without asking (rules you set up in the agent itself, servers it is
+  connected to) stays as it is there.
+- **What it hands in is cleaned** like every SVG before it is shown, and has to be one
+  well-formed `<svg>` element (an SVG shown as an image is read as XML: a tag left open or a
+  second document after the first would draw nothing) with a `viewBox` that draws something;
+  otherwise the agent is told what to fix. Six icons at most per request.
+- **Look at it** at 16, 24 and 64 pixels on white and on black. **Ask for a change** ("thicker
+  lines"): the same agent, still running, gets the request and the icon as it is now.
+  **Source** shows the SVG; what you edit there is cleaned again when you apply it.
+- **Keep it:** Insert puts it into the diagram used last as an image shape; Save keeps it in
+  **My shapes** (a collection like any other: a palette in the shapes sidebar, found by
+  search, exportable) or another of your collections; Copy SVG puts the source on the
+  clipboard. Icons are drawn with `var(--fill, #141414)` and `var(--stroke, #141414)`, so
+  the Shifter's Icon colour recolours them.
+- **Stop** asks the agent to stop; an agent that has not stopped five seconds later is
+  closed. The same happens to a request that runs for eight minutes. The agent is closed, its
+  folder removed and its endpoint shut when the Workshop window closes, when you choose
+  another agent or model, and when it ends by itself.
+
 Code: `src/main/workshop/` (`sources.ts` parses each source, `galleries.ts` caches and
 searches, `shifter.ts` is the Shape Shifter's own logic: selections, style edits, one-colour
 icons; `workshopWindow.ts`), `src/renderer/workshop.html`, and the palettes, search and
 insertion in `src/renderer/desktop-toolbar.js`. What the Shifter needs from a diagram
 (`ShifterHost` in `core.ts`: search draw.io's shapes, read the selection, apply style edits,
-ask the agent, convert a stencil) is `DiagramWindow`'s. Tests: `test/workshop.test.js`,
-`test/shifter.test.js` and `scripts/e2e.mjs --workshop`, all on fixtures
-(`test/fixtures/galleries/mirror`, served by the e2e script as a stand-in for jsDelivr: test
-runs never download anything).
+ask the agent, convert a stencil) is `DiagramWindow`'s. The Creator: `workshop/creator.ts`
+(what the agent is asked, what is accepted, and `CreatorCore`, the page's other half for it),
+`src/main/creatorSession.ts` (the agent's session: folder, tool endpoint, permissions) and
+`creatorRunner.ts` (which agents there are). Tests: `test/workshop.test.js`,
+`test/shifter.test.js`, `test/creator.test.js` and `scripts/e2e.mjs --workshop`, all on
+fixtures (`test/fixtures/galleries/mirror`, served by the e2e script as a stand-in for
+jsDelivr: test runs never download anything). No test starts a real agent: the unit tests use
+`test/helpers/fake-acp-agent.js`, which speaks the agent protocol on stdio and reaches only
+the tool endpoint it is given, and the end-to-end run uses a stand-in inside the app
+(`DRAWAI_E2E_CREATOR`).
 
 ## Presentation mode
 
@@ -292,8 +331,9 @@ rise in. Under *reduce motion* nothing moves.
   (the extension: `src/features/workshop/`). Keep those files free of Electron and of
   `../settings`; what needs a window or the app's settings goes through `WorkshopPorts`.
   The Shape Shifter is on where a program says so (`WorkshopPorts.shifter`, with
-  `pickStencil`) and gives the Workshop a `ShifterHost`; the extension does neither yet, so
-  its Shifter tab stays "Next".
+  `pickStencil`) and gives the Workshop a `ShifterHost`; the Shape Creator is on where a
+  program gives `WorkshopPorts.creator` (`CreatorPorts`: its agents, and a way to start one).
+  The extension does neither yet, so both tabs stay "Next" there.
 - Shared with the VS Code extension: `src/renderer/theme.js`, `desktop-toolbar.js`,
   `presentation.js` and `ui/{icons,brandmark,tips,dots,matrix}.js` are also the extension's
   editor tools (its plugin build copies them: `drawio-custom-plugins/webpack.config.ts`,

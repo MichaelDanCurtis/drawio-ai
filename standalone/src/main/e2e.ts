@@ -919,10 +919,53 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	log("shifterStencil", { asked, ...stencil, backInGallery });
 	if (!filled || !recoloured || group.children !== 2 || !groupSelected || !groupAlone || textLabel !== "Text" || !stencil.shapes) throw new Error("The Shape Shifter does not work as it should (see the shifter lines above).");
 
+	// ----- the Shape Creator: an agent draws an icon (here a stand-in: no agent is started, nothing is sent anywhere) -----
+	process.env.DRAWAI_E2E_CREATOR = "1";
+	const made = () => wc.executeJavaScript(`[...document.querySelectorAll("#creatorOut .made .row1 b")].map((b) => b.textContent)`) as Promise<string[]>;
+	await wc.executeJavaScript(`document.querySelector('nav button[data-mode="creator"]').click(); true`);
+	const agents: string[] = await until("the Creator's agents", async () => {
+		const list: string[] = await wc.executeJavaScript(`[...document.querySelectorAll("#crAgent option")].map((o) => o.textContent)`);
+		return list.length ? list : undefined;
+	});
+	await wc.executeJavaScript(`(() => { document.getElementById("crPrompt").value = "a load balancer"; document.getElementById("crCount").value = "3"; document.getElementById("crGo").click(); return true; })()`);
+	const drawn = await until("three icons from the stand-in", async () => ((await made()).length === 3 ? made() : undefined));
+	const saidWhile: string = await until("the request to end", async () => ((await wc.executeJavaScript(`!document.getElementById("crGo").classList.contains("hidden")`)) ? wc.executeJavaScript(`document.getElementById("crSaid").textContent`) : undefined));
+	// one goes into the diagram as an image shape
+	const cellsBeforeIcon = await cellCount();
+	await wc.executeJavaScript(`document.querySelector('#creatorOut .made button[data-do="insert"]').click(); true`);
+	const insertedIcon = await until("the created icon in the diagram", async () => {
+		if ((await cellCount()) <= cellsBeforeIcon) return undefined;
+		const style = (await w.selectedCells())[0]?.style ?? "";
+		return /^shape=image;.*image=data:image\/svg\+xml,/.test(style) ? true : undefined;
+	});
+	// ... and is kept in My shapes, which is a collection like any other: a gallery, and a palette in the editor
+	await wc.executeJavaScript(`document.querySelector('#creatorOut .made button[data-do="save"]').click(); true`);
+	await wc.executeJavaScript(`[...document.querySelectorAll("#menu button")].find((b) => b.textContent === "My shapes").click(); true`);
+	const kept = await until("the icon in My shapes", async () => {
+		const g = galleryConfigs().find((x) => x.id === "my-shapes");
+		const items = g ? await galleries().items(g) : [];
+		return g && items.length === 1 ? { title: g.title, shapes: items.map((i) => i.title) } : undefined;
+	});
+	const myPalette = await until("the My shapes palette in the editor", async () => (((await ed.executeJavaScript("window.omnidrawShapes.palettes()")) as string[]).some((t) => /^My shapes/.test(t)) ? true : undefined)).catch(() => false);
+	// a change is asked of the same stand-in
+	await wc.executeJavaScript(`(() => { const i = document.querySelector("#creatorOut .made .revise input"); i.value = "thicker lines"; i.dispatchEvent(new Event("input")); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return true; })()`);
+	const revised = await until("the revised icon", async () => ((await made()).length === 4 ? (await made())[0] : undefined));
+	await until("the revision to end", async () => ((await wc.executeJavaScript(`!document.getElementById("crGo").classList.contains("hidden")`)) ? true : undefined));
+	// (a window behind another one is not drawn again: bring it forward for its picture)
+	ww.show();
+	ww.moveTop();
+	await pause(900);
+	await shot("workshop-creator-light.png", wc);
+	log("creator", { agents, drawn, saidWhile, insertedIcon, kept, myPalette, revised });
+	if (drawn.length !== 3 || !/looked at it/.test(saidWhile) || !insertedIcon || kept.shapes.length !== 1 || !myPalette || revised !== "Revised 1") throw new Error("The Shape Creator does not work as it should (see the creator line above).");
+
 	// dark
 	process.env.DRAWAI_THEME = "dark";
 	updateSettings({ appearance: { ...settings().appearance, theme: "dark" } });
 	await pause(800);
+	await shot("workshop-creator-dark.png", wc);
+	await wc.executeJavaScript(`document.querySelector('nav button[data-mode="gallery"]').click(); true`);
+	await pause(300);
 	await shot("workshop-search-dark.png", wc);
 	process.env.DRAWAI_THEME = "light";
 	updateSettings({ appearance: { ...settings().appearance, theme: "light" } });

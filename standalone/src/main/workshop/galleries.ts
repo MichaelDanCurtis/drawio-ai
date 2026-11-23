@@ -163,6 +163,15 @@ export class GalleryService {
 		return this.load(g);
 	}
 
+	/**
+	 * Reads a gallery again after its file was written here (a collection that got a shape): a
+	 * read that was already under way may have seen the file as it was, so it is waited for first.
+	 */
+	private async reread(g: GalleryConfig): Promise<GalleryItem[]> {
+		await this.loading.get(g.id)?.catch(() => undefined);
+		return this.load(g);
+	}
+
 	/** Reads a gallery's sources (one read at a time per gallery). */
 	private load(g: GalleryConfig): Promise<GalleryItem[]> {
 		const running = this.loading.get(g.id);
@@ -392,7 +401,16 @@ export class GalleryService {
 		const current = this.readCollection(collection);
 		const entry = "xml" in ins ? { title: ins.title, xml: ins.xml, w: ins.w, h: ins.h } : { title: ins.title, data: dataFromStyle(ins.style), w: ins.w, h: ins.h };
 		this.writeCollection(collection.id, [...current.map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })), entry]);
-		await this.items(collection, true);
+		await this.reread(collection);
+	}
+
+	/** Adds a shape that is not from a gallery (an icon the Shape Creator made) to a collection, as an image. */
+	async addShape(collection: GalleryConfig, entry: { title: string; data: string; w: number; h: number }): Promise<void> {
+		const data = safeImageData(entry.data)?.img;
+		if (!data) throw new Error(`${entry.title} is not an image that can be kept.`);
+		const current = this.readCollection(collection);
+		this.writeCollection(collection.id, [...current.map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })), { title: entry.title, data, w: entry.w, h: entry.h }]);
+		await this.reread(collection);
 	}
 
 	/** Takes a shape out of a collection by its id (ids come from the shape itself, so a stale list cannot remove the wrong one). */
@@ -401,7 +419,7 @@ export class GalleryService {
 		const keep = current.filter((c) => c.id !== itemId);
 		if (keep.length === current.length) return false;
 		this.writeCollection(collection.id, keep.map((c) => ({ title: c.title, xml: c.xml, data: c.data, w: c.w, h: c.h })));
-		await this.items(collection, true);
+		await this.reread(collection);
 		return true;
 	}
 

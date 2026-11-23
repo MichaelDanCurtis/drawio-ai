@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil). In the extension that tab still says "Next".
+The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). In the extension those tabs still say "Next".
 
 ### Changed
 
 - A shape added from the **Shape Workshop** goes beside what is selected in the diagram (in the middle of the view when nothing is selected).
 - The Workshop's question dialog (a name for a collection, an address): **Enter** is OK (it was Cancel), and **Esc** is always Cancel.
+- A collection in the Shape Workshop shows a shape added to it at once, also when it was being read at that moment.
 
 ### Security
 
