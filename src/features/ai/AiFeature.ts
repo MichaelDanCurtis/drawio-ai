@@ -17,6 +17,7 @@ import { path } from "../../utils/path";
 import { linkData, splitLines } from "./codeLinks";
 import { CodeLinkService } from "./CodeLinkService";
 import { McpService } from "./McpService";
+import { fileNameOf } from "../diskUri";
 import { AgentConnector, ConnectArgs } from "./agentConnect";
 import { exportDiagramToWorkspace } from "./exportDiagram";
 import { importForAgent } from "../importDiagram";
@@ -621,7 +622,7 @@ export class AiFeature {
 }
 
 function fileName(editor: DrawioEditor): string {
-	return decodeURIComponent(editor.uri.path.split("/").pop() ?? "");
+	return fileNameOf(editor.uri);
 }
 
 /** Reads supported source files below the given files/folders (skipping build output and dependencies). */

@@ -324,3 +324,24 @@ test("the Workshop's command is contributed and registered, its editor side is o
 	assert.match(feature, /\(list: unknown\) => \(Array\.isArray\(list\) \? this\.save\(cleanGalleries\(list\)\) : undefined\)/);
 	assert.doesNotMatch(feature, /\bfetch\(|https?:\/\//);
 });
+
+test("a diagram's name is taken as it is on disk, and a remote folder counts as on disk only where the extension runs", () => {
+	const { fileNameOf, isOnDisk } = require(path.join(root, "src/features/diskUri.ts"));
+	// (a Uri's path is already decoded: decoding it again throws on a percent sign, which took the Workshop's state with it)
+	assert.equal(fileNameOf({ path: "/work/100%.drawio" }), "100%.drawio");
+	assert.equal(fileNameOf({ path: "/work/a b/Größe %41.drawio.svg" }), "Größe %41.drawio.svg");
+	assert.equal(fileNameOf({ path: "" }), "");
+	assert.equal(isOnDisk({ scheme: "file" }, false), true);
+	assert.equal(isOnDisk({ scheme: "vscode-remote" }, true), true);
+	assert.equal(isOnDisk({ scheme: "vscode-remote" }, false), false);
+	assert.equal(isOnDisk({ scheme: "untitled" }, true), false);
+	assert.equal(isOnDisk({ scheme: "vscode-vfs" }, true), false);
+	// no feature decodes a Uri's path a second time
+	const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : e.name.endsWith(".ts") ? [path.join(dir, e.name)] : []));
+	for (const file of walk(path.join(root, "src/features"))) assert.doesNotMatch(fs.readFileSync(file, "utf8"), /decodeURIComponent\([^)]*\.uri\.path/, path.relative(root, file));
+	// folders, libraries and exports the user picks go through the same question
+	const feature = read("src/features/workshop/WorkshopFeature.ts");
+	assert.match(feature, /return picked\?\.\[0\] \? this\.onDisk\(picked\[0\], /);
+	assert.match(feature, /return to \? this\.onDisk\(to, "That place"\) : undefined;/);
+	assert.doesNotMatch(feature, /scheme === "file"/);
+});

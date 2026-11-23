@@ -9,6 +9,7 @@ import { cleanShapeSets, ShapeSetGroup } from "../../../standalone/src/main/shap
 import type { WorkshopCore, WorkshopHost } from "../../../standalone/src/main/workshop/core";
 import type { GalleryService } from "../../../standalone/src/main/workshop/galleries";
 import { cleanGalleries, GalleryConfig } from "../../../standalone/src/main/workshop/types";
+import { fileNameOf, isOnDisk } from "../diskUri";
 import { cleanLook, OMNI_DIR } from "../editorLook";
 import { pageNonce } from "../omniPage";
 import { anyGalleryOn, GALLERIES_KEY, storedGalleries } from "./galleryStore";
@@ -171,12 +172,17 @@ export class WorkshopFeature {
 						filters: folder ? undefined : { "draw.io library": ["xml", "drawiolib"] },
 						openLabel: "Add",
 					});
-					return picked?.[0]?.scheme === "file" ? picked[0].fsPath : undefined;
+					return picked?.[0] ? this.onDisk(picked[0], folder ? "That folder" : "That library") : undefined;
 				},
 				pickExport: async (name) => {
-					const folder = vscode.workspace.workspaceFolders?.find((f) => f.uri.scheme === "file")?.uri.fsPath ?? os.homedir();
-					const to = await vscode.window.showSaveDialog({ title: "Export as a draw.io library", defaultUri: vscode.Uri.file(nodePath.join(folder, name)), filters: { "draw.io library": ["xml"] } });
-					return to?.scheme === "file" ? to.fsPath : undefined;
+					// (a workspace folder's own address: in a remote workspace that is a remote one)
+					const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
+					const to = await vscode.window.showSaveDialog({
+						title: "Export as a draw.io library",
+						defaultUri: folder ? vscode.Uri.joinPath(folder, name) : vscode.Uri.file(nodePath.join(os.homedir(), name)),
+						filters: { "draw.io library": ["xml"] },
+					});
+					return to ? this.onDisk(to, "That place") : undefined;
 				},
 				reveal: (file) => void vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(file)),
 				openExternal: (url) => void vscode.env.openExternal(vscode.Uri.parse(url)),
@@ -185,6 +191,16 @@ export class WorkshopFeature {
 			});
 		}
 		return rt;
+	}
+
+	/**
+	 * The path of a file or folder the user chose, when the extension can use it with Node's fs:
+	 * on this computer, or on the remote machine when the extension runs there. Says so when not.
+	 */
+	private onDisk(uri: vscode.Uri, what: string): string | undefined {
+		if (isOnDisk(uri, this.deps.context.extension.extensionKind === vscode.ExtensionKind.Workspace)) return uri.fsPath;
+		void vscode.window.showWarningMessage(`Draw.AI Shape Workshop: ${what} is not on the machine Draw.AI runs on, so it cannot be used here.`);
+		return undefined;
 	}
 
 	/** Where the Workshop puts shapes, and whose shape sets it shows: the diagram used last. */
@@ -363,5 +379,5 @@ export class WorkshopFeature {
 }
 
 function fileName(editor: DrawioEditor): string {
-	return decodeURIComponent(editor.uri.path.split("/").pop() ?? "");
+	return fileNameOf(editor.uri);
 }
