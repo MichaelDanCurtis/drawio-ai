@@ -20,6 +20,12 @@
   (an SVG in the HTML of a label, a file's pages instead of a shape) is left out.
 - Cleaning an SVG no longer takes minutes when it holds a very long run of spaces, or throws
   on a character reference that names no character.
+- Cleaning an SVG takes time in step with its size, whatever it is made of. A crafted SVG from
+  a gallery or a library (`<!--`, `<script ` or `url(` thousands of times, never closed) could
+  hold the app for half a minute. An SVG in which a comment, a processing instruction, a CDATA
+  section, a DOCTYPE, a tag or a dropped element (a script, an animation) never ends is now
+  left out, where part of it used to stay; a script is dropped whatever its prefix
+  (`a.b:script` used to pass).
 - **Mapper**: YAML merge keys (`<<: *common`) are followed, so a compose service built on an
   anchor keeps its image, its environment and what it depends on (Connectivity, Kubernetes,
   pipelines, MLflow, API maps).

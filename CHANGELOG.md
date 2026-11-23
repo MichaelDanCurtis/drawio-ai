@@ -18,6 +18,7 @@ The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by w
 
 - Pictures inside the shapes of a draw.io library added to the Shape Workshop (also a collection's) are checked like every other image: SVGs are cleaned of scripts and links, and what only claims to be an image is dropped from the shape. A shape that cannot be checked (an SVG in the HTML of a label, a file's pages instead of a shape) is left out.
 - Cleaning an SVG no longer takes minutes when it holds a very long run of spaces, or throws on a character reference that names no character.
+- Cleaning an SVG takes time in step with its size, whatever it is made of. A crafted SVG from a gallery or a library (`<!--`, `<script ` or `url(` thousands of times, never closed) could hold the extension host for half a minute. An SVG in which a comment, a processing instruction, a CDATA section, a DOCTYPE, a tag or a dropped element (a script, an animation) never ends is now left out, where part of it used to stay; a script is dropped whatever its prefix (`a.b:script` used to pass).
 
 ## [0.4.0]
 

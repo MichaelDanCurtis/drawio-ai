@@ -15,7 +15,7 @@ const FIX = path.join(__dirname, "fixtures", "galleries", "mirror");
 const read = (p) => JSON.parse(fs.readFileSync(path.join(FIX, p), "utf8"));
 
 const src = require("../src/main/workshop/sources");
-const { sanitizeSvg, safeImageData, svgSize, svgStyleUri } = require("../src/main/workshop/svgSanitize");
+const { MAX_SVG_BYTES, sanitizeSvg, safeImageData, svgSize, svgStyleUri } = require("../src/main/workshop/svgSanitize");
 const { workshopFetch } = require("../src/main/workshop/fetch");
 const http = require("http");
 const { GalleryService, rank } = require("../src/main/workshop/galleries");
@@ -220,6 +220,111 @@ test("the sanitizer: namespaced scripts, animations that swap links, encoded and
 	assert.equal(sanitizeSvg('<svg><rect style="fill:url&#40;https://evil.example/f&#41;"/></svg>'), undefined, "entities in CSS");
 	assert.match(sanitizeSvg(`<svg><rect fill="url('#g')"/><rect fill="url(#h)"/></svg>`), /url\('#g'\).*url\(#h\)/, "same-document gradients stay");
 	assert.match(sanitizeSvg('<svg><filter><feImage href="#x"/></filter></svg>'), /href="#x"/);
+});
+
+test("the sanitizer: size costs no more than size, also when one opener fills the SVG and never closes", async (t) => {
+	// an SVG as large as one may be, made of `opener` again and again
+	const filled = (opener, before = "<svg>", after = "</svg>") => before + opener.repeat(Math.floor((MAX_SVG_BYTES - before.length - after.length) / opener.length)) + after;
+	const cases = {
+		"<?": filled("<?"),
+		"<!--": filled("<!--"),
+		"<![CDATA[": filled("<![CDATA["),
+		"<!DOCTYPE ": filled("<!DOCTYPE ", "", ""), // (a ">" anywhere after it would end the first one)
+		"<!DOCTYPE svg [": filled("<!DOCTYPE svg ["),
+		"<script ": filled("<script "),
+		"<script>": filled("<script>"),
+		"<a:set ": filled("<a:set "),
+		"url( in a style attribute": filled("url(", '<svg><rect style="fill:', '"/></svg>'),
+		"url( in a style element": filled("url(", "<svg><style>a{fill:", "}</style></svg>"),
+		'<a b="': filled('<a b="'),
+	};
+	// (the slowest of these takes some 10 ms, and the fastest of them took 1.5 s)
+	const QUICK = 500;
+	for (const [name, svg] of Object.entries(cases)) {
+		await t.test(name, () => {
+			assert.ok(svg.length <= MAX_SVG_BYTES && svg.length > MAX_SVG_BYTES - 32, "as large as an SVG may be");
+			const started = performance.now();
+			const out = sanitizeSvg(svg);
+			const took = Math.round(performance.now() - started);
+			assert.ok(took < QUICK, `took ${took} ms`);
+			assert.equal(out, undefined, "not a usable SVG");
+		});
+	}
+	// ... and what does close is taken out, or kept, as fast
+	const closed = {
+		"<!---->": [filled("<!---->"), /^<svg xmlns="[^"]+"><\/svg>$/],
+		"<?x?>": [filled("<?x?>"), /^<svg xmlns="[^"]+"><\/svg>$/],
+		"<set><set/></set>": [filled("<set><set/></set>"), /^<svg xmlns="[^"]+"><\/svg>$/],
+		"url(x) ": [filled("url(x) ", '<svg><rect style="fill:', '"/></svg>'), /^<svg xmlns="[^"]+"><rect style="fill:(none )+"\/><\/svg>$/],
+		"an ordinary drawing": [filled('<path d="M0 0h1v1z" fill="url(#g)"/>', '<svg xmlns="http://www.w3.org/2000/svg">'), /^<svg xmlns="[^"]+">(<path d="M0 0h1v1z" fill="url\(#g\)"\/>)+<\/svg>$/],
+	};
+	for (const [name, [svg, expected]] of Object.entries(closed)) {
+		await t.test(name, () => {
+			const started = performance.now();
+			const out = sanitizeSvg(svg);
+			const took = Math.round(performance.now() - started);
+			assert.ok(took < QUICK, `took ${took} ms`);
+			assert.match(out, expected);
+		});
+	}
+});
+
+test("the sanitizer: what it took out or refused, it still does, read tag by tag", () => {
+	const SVG = '<svg xmlns="http://www.w3.org/2000/svg">';
+	const rect = `${SVG}<rect/></svg>`;
+	// script elements: plain, with a prefix, in capitals, empty, one inside another, inside another dropped element
+	assert.equal(sanitizeSvg("<svg><script>alert(1)</script><rect/></svg>"), rect);
+	assert.equal(sanitizeSvg('<svg xmlns:s="http://www.w3.org/2000/svg"><s:script>alert(1)</s:script><rect/></svg>'), '<svg xmlns="http://www.w3.org/2000/svg" xmlns:s="http://www.w3.org/2000/svg"><rect/></svg>');
+	assert.equal(sanitizeSvg('<svg><SCRIPT type="text/javascript">alert(1)</SCRIPT ><rect/></svg>'), rect);
+	assert.equal(sanitizeSvg('<svg><script href="https://evil.example/x.js"/><rect/></svg>'), rect);
+	assert.equal(sanitizeSvg("<svg><script><script>a()</script>b()</script><rect/></svg>"), rect, "all of a script inside a script (b() and a closing tag used to stay)");
+	assert.equal(sanitizeSvg("<svg><foreignObject><div><script>a()</script></div><foreignObject/></foreignObject><rect/></svg>"), rect);
+	assert.equal(sanitizeSvg('<svg><animate attributeName="href" values="javascript:alert(1)"/><animateTransform/><x:set to="1"></x:set><rect/></svg>'), rect);
+	// a prefix is whatever stands before the last colon (these two used to pass as they were)
+	for (const prefix of ["a.b", "é"]) assert.equal(sanitizeSvg(`<svg xmlns:${prefix}="http://www.w3.org/2000/svg"><${prefix}:script>alert(1)</${prefix}:script><rect/></svg>`), `<svg xmlns="http://www.w3.org/2000/svg" xmlns:${prefix}="http://www.w3.org/2000/svg"><rect/></svg>`);
+	// an empty dropped element is dropped alone (it used to take everything up to the next closing tag of its name)
+	assert.equal(sanitizeSvg('<svg><set a="b"/><rect id="kept"/><set>x</set></svg>'), `${SVG}<rect id="kept"/></svg>`);
+	// one that never closes, or that is no tag of its own, leaves no usable SVG (the text of the script used to stay)
+	for (const svg of ["<svg><script>alert(1)</svg>", "<svg><script>a()</script><rect/><s:script>b()</svg>", '<svg><rect title="<script>alert(1)</script>"/></svg>', "<svg><script-x>alert(1)</script-x></svg>", '<svg><rect title="<set to=1>"/></svg>', '<svg><rect title=" onx=<set>hello</set>"/></svg>'])
+		assert.equal(sanitizeSvg(svg), undefined, svg);
+	// ... and so does one that is closed and not open: everything up to that closing tag used to go, and what is
+	// between is not kept on a guess
+	const unopened = ["<svg><rect/></script></svg>", '<svg><foreignObject><script></foreignObject><rect id="k"/></script></svg>', '<svg><script>a()</script x><rect id="k"/></script></svg>', '<svg><script src=x/><rect id="k"/></script></svg>'];
+	for (const svg of unopened) assert.equal(sanitizeSvg(svg), undefined, svg);
+
+	// event handlers, links, styles
+	assert.equal(sanitizeSvg(`<svg onload="a()"><rect onclick='b()' onmouseover=c() width="1"/></svg>`), `${SVG}<rect width="1"/></svg>`);
+	assert.equal(sanitizeSvg(`<svg><a href="https://evil.example/"><use xlink:href="//evil.example/x.svg#a"/><image href='http://evil.example/p.png'/><image href=evil.png /></a></svg>`), `${SVG}<a><use/><image/><image /></a></svg>`);
+	assert.equal(sanitizeSvg('<svg><style>@import url("https://evil.example/x.css"); .a{fill:red}</style><rect/></svg>'), `${SVG}<style> .a{fill:red}</style><rect/></svg>`);
+	assert.equal(
+		sanitizeSvg(`<svg><rect style="fill:url(https://evil.example/f.svg#a);stroke:url( #b)" filter="url('evil.svg#f')" mask="URL(x)"/></svg>`),
+		`${SVG}<rect style="fill:none;stroke:none" filter="none" mask="none"/></svg>`
+	);
+	assert.equal(sanitizeSvg(`<svg><rect fill="url(#a)" stroke="url('#b')" filter='url("#c")'/></svg>`), `${SVG}<rect fill="url(#a)" stroke="url('#b')" filter='url("#c")'/></svg>`);
+	assert.equal(sanitizeSvg('<svg><rect style="fill:url(https://evil.example/f"/></svg>'), undefined, "a url( that never closes");
+	// javascript: spelled with entities: taken out of a link, and anywhere else the SVG is refused
+	assert.equal(sanitizeSvg('<svg><a href="&#106;avascript:alert(1)"><rect/></a></svg>'), `${SVG}<a><rect/></a></svg>`);
+	assert.equal(sanitizeSvg('<svg><a xlink:title="&#x6a;avascript:alert(1)"><rect/></a></svg>'), undefined);
+	assert.equal(sanitizeSvg('<svg><a data-x="java&Tab;script&colon;alert(1)"><rect/></a></svg>'), undefined);
+	assert.equal(sanitizeSvg('<svg><rect style="background:url(&#106;avascript:alert(1))"/></svg>'), `${SVG}<rect style="background:none)"/></svg>`);
+
+	// the prolog, the DOCTYPE with what it declares, comments, processing instructions and CDATA go with all they hold
+	const dressed =
+		'\uFEFF<?xml version="1.0" encoding="UTF-8"?>\n<!-- Generator: x > y <script>z()</script> -->\n' +
+		'<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [\n\t<!ENTITY ns_svg "http://www.w3.org/2000/svg">\n] >\n' +
+		'<svg viewBox="0 0 1 1"><style><![CDATA[.a{fill:url(https://evil.example/f)}]]></style><?php x ?><rect/></svg>\n';
+	assert.equal(sanitizeSvg(dressed), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><style></style><rect/></svg>');
+	assert.equal(sanitizeSvg("<!doctype svg><svg><rect/></svg>"), rect);
+	// one that never ends (it used to stay in what came back), a DOCTYPE whose "[" never gets its "]>" (it used
+	// to end at the first ">"), a declaration on its own, a comment that taking another out puts together, a tag
+	// that never ends: no usable SVG
+	const open = ["<svg><!-- <rect/></svg>", "<svg><? <rect/></svg>", "<svg><style><![CDATA[ .a{fill:red} </style></svg>", '<!DOCTYPE svg [ <!ENTITY x "y"> <svg><rect/></svg>'];
+	for (const svg of [...open, '<svg><!ENTITY x "y"><rect/></svg>', "<svg><!-<!-- -->- x --><rect/></svg>", '<svg><path d="M0 0/></svg>']) assert.equal(sanitizeSvg(svg), undefined, svg);
+	// what is not an SVG at all is an answer, not an error
+	assert.equal(sanitizeSvg("<svg @import</svg>"), undefined);
+	// text stays text
+	const prose = `${SVG}<text>a &lt; b &amp; c</text><title>one = two</title></svg>`;
+	assert.equal(sanitizeSvg(prose), prose);
 });
 
 test("images from libraries, folders and collections: plain images only, SVGs cleaned", () => {
