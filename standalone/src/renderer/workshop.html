@@ -628,7 +628,9 @@
 	function madeCard(c) {
 		const strip = (tone) => el("div", { class: "strip " + tone }, ...[16, 24, 64].map((size) => el("img", { src: c.src, alt: "", width: size, height: size })));
 		const source = el("textarea", { class: "source", spellcheck: "false", "aria-label": "SVG source of " + c.title });
-		source.value = c.svg;
+		// (what is typed here and not applied yet stays when the list is drawn again)
+		source.value = c.sourceDraft === undefined ? c.svg : c.sourceDraft;
+		source.addEventListener("input", () => (c.sourceDraft = source.value));
 		const sourceBox = el("div", { class: "sourcebox" + (c.sourceOpen ? "" : " hidden") }, source, el("div", { class: "actions" }, el("button", { class: "btn btn-sm", text: "Apply", title: "Use the SVG as edited here", onclick: () => post({ type: "editCreated", id: c.id, svg: source.value }) })));
 		const revise = el("input", { type: "text", placeholder: "Ask for a change — thicker lines…", "aria-label": "Ask for a change to " + c.title });
 		revise.value = c.reviseText || "";
@@ -847,7 +849,9 @@
 		} else if (m.type === "created") {
 			// (the same icon again is a change to it: an edit, or a message that arrived twice)
 			const at = creator.made.findIndex((c) => c.id === m.id);
-			const c = { id: m.id, title: m.title, tags: m.tags || [], svg: m.svg, src: m.src, sourceOpen: at >= 0 && creator.made[at].sourceOpen, reviseText: at >= 0 ? creator.made[at].reviseText : "" };
+			// (an edit that was applied replaces what was typed; the same icon again leaves it)
+			const was = at >= 0 ? creator.made[at] : null;
+			const c = { id: m.id, title: m.title, tags: m.tags || [], svg: m.svg, src: m.src, sourceOpen: !!was && was.sourceOpen, reviseText: was ? was.reviseText : "", sourceDraft: was && was.svg === m.svg ? was.sourceDraft : undefined };
 			if (at >= 0) creator.made[at] = c;
 			else creator.made = [c, ...creator.made].slice(0, 24);
 			if (mode === "creator") renderMade();

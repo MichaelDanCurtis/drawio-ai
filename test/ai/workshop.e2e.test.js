@@ -406,7 +406,13 @@ test("the Shape Creator is off where the program has none, and on where it has: 
 	await page.click('#creatorOut .made:first-child button[data-do="source"]');
 	const source = await page.$eval("#creatorOut .made:first-child .source", (t) => t.value);
 	assert.match(source, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 48 48"><rect /);
-	await page.fill("#creatorOut .made:first-child .source", source.replace("<rect", '<script>alert(1)</script><rect onclick="x()" stroke="#ff0000"'));
+	const draft = source.replace("<rect", '<script>alert(1)</script><rect onclick="x()" stroke="#ff0000"');
+	await page.fill("#creatorOut .made:first-child .source", draft);
+	// what is typed and not applied yet survives the list being drawn again: another tab and back, another icon removed
+	await page.click('nav button[data-mode="gallery"]');
+	await page.click('nav button[data-mode="creator"]');
+	await page.click('#creatorOut .made:last-child button[data-do="remove"]');
+	assert.deepEqual([await page.$$eval("#creatorOut .made", (els) => els.length), await page.$eval("#creatorOut .made:first-child .source", (t) => t.value), await page.$eval("#creatorOut .made:first-child .sourcebox", (b) => b.classList.contains("hidden"))], [2, draft, false]);
 	await page.click('#creatorOut .made:first-child .sourcebox button');
 	await page.waitForFunction((old) => document.querySelector("#creatorOut .made:first-child img").src !== old, before);
 	const applied = await page.$eval("#creatorOut .made:first-child .source", (t) => t.value);
@@ -420,12 +426,12 @@ test("the Shape Creator is off where the program has none, and on where it has: 
 	// ask for a change: the agent gets it with the icon as it is now, and hands in a new one
 	await page.fill("#creatorOut .made:first-child .revise input", "thicker lines");
 	await page.press("#creatorOut .made:first-child .revise input", "Enter");
-	await page.waitForFunction(() => document.querySelectorAll("#creatorOut .made").length === 4);
+	await page.waitForFunction(() => document.querySelectorAll("#creatorOut .made").length === 3);
 	assert.equal(w.drawing.opened.length, 1, "the same agent, still running");
 	assert.match(w.drawing.prompts[1].text, /^Change the icon “Balancer 3” like this: thicker lines\n\nThe icon as it is now[\s\S]*stroke="#ff0000"/);
 	assert.equal(await page.$eval("#creatorOut .made:first-child .row1 b", (e) => e.textContent), "Revised 1");
 	await page.click('#creatorOut .made:first-child button[data-do="remove"]');
-	assert.equal(await page.$$eval("#creatorOut .made", (els) => els.length), 3);
+	assert.equal(await page.$$eval("#creatorOut .made", (els) => els.length), 2);
 
 	// a request can be stopped
 	await page.waitForFunction(() => !document.getElementById("crGo").classList.contains("hidden"));
@@ -436,13 +442,13 @@ test("the Shape Creator is off where the program has none, and on where it has: 
 	assert.deepEqual(await page.$$eval("#crGo, #creatorOut .made:first-child .revise input", (els) => els.map((e) => e.classList.contains("hidden") || e.disabled)), [true, true]);
 	await page.click("#crStop");
 	await page.waitForFunction(() => /Stopped\./.test(document.getElementById("toasts").textContent) && document.getElementById("crStop").classList.contains("hidden"));
-	assert.equal(await page.$$eval("#creatorOut .made", (els) => els.length), 3);
+	assert.equal(await page.$$eval("#creatorOut .made", (els) => els.length), 2);
 
 	// the other tabs are as they were, and what was drawn is still here on coming back
 	await page.click('nav button[data-mode="gallery"]');
 	assert.deepEqual([await page.$eval("#grid", (g) => getComputedStyle(g).display), await page.$eval("#creatorOut", (o) => getComputedStyle(o).display)], ["grid", "none"]);
 	await page.click('nav button[data-mode="creator"]');
-	assert.equal(await page.$$eval("#creatorOut .made", (els) => els.length), 3);
+	assert.equal(await page.$$eval("#creatorOut .made", (els) => els.length), 2);
 	assert.deepEqual(w.problems, []);
 	assert.deepEqual(w.downloads, []);
 	await page.close();
