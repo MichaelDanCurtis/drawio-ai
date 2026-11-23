@@ -327,6 +327,43 @@ test("the sanitizer: what it took out or refused, it still does, read tag by tag
 	assert.equal(sanitizeSvg(prose), prose);
 });
 
+test("the sanitizer: taking one thing out never puts another together", () => {
+	// each of these came back with the handler, the link or the element its two halves make
+	const spliced = [
+		'<svg o href="x"nload="alert(1)"><rect/></svg>', // onload, once the link between its halves is gone
+		'<svg o@import;nload="alert(1)"><rect/></svg>',
+		'<svg><rect  onclick="a()"onload="b()"/></svg>', // onload, at the space onclick leaves
+		'<svg><a hr href="x"ef="https://evil.example/"><rect/></a></svg>',
+		'<svg><a hr@import;ef="https://evil.example/"><rect/></a></svg>',
+		"<svg><foreign@import;Object><p>hi</p></foreign@import;Object></svg>",
+		'<svg><foreign onx="1"Object><p>hi</p></foreignObject></svg>',
+		'<svg><rect style="width:expressionexpression((1))"/></svg>',
+		"<svg><@import;!-- x --><rect/></svg>",
+		"<svg><@import;?x ?><rect/></svg>",
+		"<svg><style>a{fill:red}@import</style></svg>", // the end of the SVG goes with the @import
+	];
+	for (const svg of spliced) assert.equal(sanitizeSvg(svg), undefined, svg);
+	// halves that an earlier step puts together are seen by the later ones, as before
+	assert.equal(sanitizeSvg('<svg><a hr onx="1"ef="https://evil.example/"><rect/></a></svg>'), '<svg xmlns="http://www.w3.org/2000/svg"><a><rect/></a></svg>');
+	assert.equal(sanitizeSvg('<svg><rect style="fill:u@import;rl(https://evil.example/f)"/></svg>'), '<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:none"/></svg>');
+	// what comes back can be cleaned again and stays as it is, with or without a colour, small or large
+	const bad = '<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x "y">]><svg viewBox="0 0 24 24" onload="alert(1)"><script>alert(2)</script><foreignObject><div>hi</div></foreignObject><a href="https://evil.example"><rect width="5" height="5" style="fill:url(https://evil.example/f)"/></a><use xlink:href="#ok"/><image href="data:image/png;base64,AAAA"/></svg>';
+	const paths = (room) => "<svg>" + '<path d="M0 0h1v1z"/>'.repeat(Math.floor((MAX_SVG_BYTES - room) / 21)) + "</svg>";
+	const large = paths(100); // (room for the xmlns and the colour it gets)
+	for (const svg of [bad, large, '<svg><style>@import "x.css"; .a{fill:url(#g)}</style><text>one = two, on = off</text></svg>']) {
+		for (const fill of [undefined, "#61DAFB"]) {
+			const out = sanitizeSvg(svg, { fill });
+			assert.ok(out, svg.slice(0, 80));
+			assert.ok(sanitizeSvg(out) === out, `cleaned again, it changed: ${svg.slice(0, 80)}`);
+			assert.ok(sanitizeSvg(out, { fill: "#000000" }) === (fill ? out : out.replace("<svg", '<svg fill="#000000"')), `a colour changed more than the colour: ${svg.slice(0, 80)}`);
+		}
+	}
+	// one that its xmlns takes over the size limit could not be cleaned again (a collection's shapes are): it is refused now
+	const full = paths(11);
+	assert.ok(full.length <= MAX_SVG_BYTES && full.length + 35 > MAX_SVG_BYTES);
+	assert.equal(sanitizeSvg(full), undefined);
+});
+
 test("images from libraries, folders and collections: plain images only, SVGs cleaned", () => {
 	assert.equal(safeImageData("data:image/png;base64,AA;image=https://evil.example/t.png"), undefined, "cannot end the style's image key");
 	assert.equal(safeImageData("https://evil.example/t.png"), undefined);

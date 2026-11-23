@@ -155,6 +155,15 @@ function clean(svg: string): string | undefined {
 
 export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string | undefined {
 	if (typeof input !== "string" || !input || input.length > MAX_SVG_BYTES) return undefined;
+	const once = cleanedOnce(input, opts);
+	// Taking one thing out can put another together (` o href="x"nload="…"`, <foreign@import;Object>): what
+	// is clean stays as it is when it is cleaned again, and anything else is refused. So is an SVG that its
+	// xmlns or its colour takes over the size limit: it could not be cleaned again later.
+	return once !== undefined && once.length <= MAX_SVG_BYTES && cleanedOnce(once) === once ? once : undefined;
+}
+
+/** `input` as sanitizeSvg returns it, before it is known that nothing more would be taken out of that. */
+function cleanedOnce(input: string, opts: { fill?: string } = {}): string | undefined {
 	// prolog, doctype (no entities), comments, processing instructions, CDATA
 	const bare = withoutMarkup(input.replace(/^\uFEFF/, ""))?.trim();
 	// one that never ends, or that taking the others out put together, is nothing a browser would show

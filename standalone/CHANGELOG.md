@@ -26,6 +26,9 @@
   section, a DOCTYPE, a tag or a dropped element (a script, an animation) never ends is now
   left out, where part of it used to stay; a script is dropped whatever its prefix
   (`a.b:script` used to pass).
+- A cleaned SVG has to stay as it is when it is cleaned again. One in which taking a link or
+  an `@import` out put an event handler, a link or a `foreignObject` together from its two
+  halves (`o href="x"nload="…"`) came back with it; it is now left out.
 - **Mapper**: YAML merge keys (`<<: *common`) are followed, so a compose service built on an
   anchor keeps its image, its environment and what it depends on (Connectivity, Kubernetes,
   pipelines, MLflow, API maps).
