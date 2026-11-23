@@ -105,6 +105,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
 			}
 			case "session/set_config_option":
 				if (process.env.FAKE_AGENT_EXIT_ON_MODEL) process.exit(4);
+				if (process.env.FAKE_AGENT_IGNORE_MODEL) return; // never answered
 				model = msg.params.value;
 				return answer({ configOptions: [{ id: "model", name: "Model", category: "model", type: "select", currentValue: model, options: [{ value: "small", name: "Small" }, { value: "large", name: "Large" }] }] });
 			case "session/prompt":

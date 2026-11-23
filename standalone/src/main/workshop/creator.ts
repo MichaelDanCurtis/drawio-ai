@@ -1,5 +1,6 @@
 import type { GalleryService, Insertable } from "./galleries";
 import { MAX_SVG_BYTES, sanitizeSvg, svgImgUri, svgSize, svgStyleUri } from "./svgSanitize";
+import { mapXml, tagInfo } from "./xmlScan";
 import type { GalleryConfig } from "./types";
 
 /**
@@ -214,6 +215,50 @@ export interface Created {
 }
 
 const NOT_ACCEPTABLE = "That is not an SVG this app accepts. It must be one <svg> element, with no script, event handler, <foreignObject>, DTD or link to anything outside it.";
+const NOT_WELL_FORMED =
+	"The SVG is not well-formed XML, so it cannot be drawn. There has to be one <svg> element with nothing after it, every element closed and properly nested, every attribute value in quotes and given once, and no & except in &amp; &lt; &gt; &quot; &apos; or a numbered reference.";
+
+const XML_NAME = /^[A-Za-z_][\w.:-]*$/;
+
+/**
+ * Whether a cleaned SVG is one well-formed element: a picture that is not does not draw at
+ * all (an SVG shown as an image is read as XML, which forgives nothing). The cleaner looks at
+ * what an SVG holds, not at how it is built: two documents in a row, a tag left open, an
+ * attribute without quotes or an entity XML does not know all pass it.
+ */
+function oneWellFormedElement(svg: string): boolean {
+	// (a stray & or an entity that XML does not define ends the reading)
+	if (/&(?!(?:amp|lt|gt|quot|apos|#\d+|#x[0-9a-fA-F]+);)/.test(svg)) return false;
+	const open: string[] = [];
+	let roots = 0;
+	let ok = true;
+	const walked = mapXml(svg, {
+		text: (text) => {
+			if (!open.length && text.trim()) ok = false;
+			return text;
+		},
+		tag: (tag) => {
+			const { name, closing, empty } = tagInfo(tag);
+			if (!XML_NAME.test(name)) ok = false;
+			else if (closing) {
+				if (open.pop() !== name || !/^<\/[^\s>]+\s*>$/.test(tag)) ok = false;
+			} else {
+				if (!open.length) roots++;
+				// its attributes, one after the other: each named once, with its value in quotes and no "<" in it
+				const seen = new Set<string>();
+				const rest = tag.replace(/\s+([^\s=<>"'/]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g, (_all, attribute: string, a?: string, b?: string) => {
+					if (seen.has(attribute) || !XML_NAME.test(attribute) || (a ?? b ?? "").includes("<")) ok = false;
+					seen.add(attribute);
+					return "";
+				});
+				if (!/^<[^\s/>]+\s*\/?>$/.test(rest)) ok = false;
+				if (!empty) open.push(name);
+			}
+			return tag;
+		},
+	});
+	return walked !== undefined && ok && roots === 1 && open.length === 0;
+}
 
 /** An SVG as the Creator accepts it: cleaned, with a viewBox. Returns what is wrong otherwise (words for the agent, or the user who edited it). */
 export function creatorSvg(svg: unknown): { svg: string } | { error: string } {
@@ -226,6 +271,7 @@ export function creatorSvg(svg: unknown): { svg: string } | { error: string } {
 		clean = undefined;
 	}
 	if (!clean) return { error: NOT_ACCEPTABLE };
+	if (!oneWellFormedElement(clean)) return { error: NOT_WELL_FORMED };
 	const root = /^<svg\b[^>]*>/i.exec(clean)?.[0] ?? "";
 	if (!/\sviewBox\s*=\s*["']\s*-?[\d.]+[\s,]+-?[\d.]+[\s,]+[\d.]+[\s,]+[\d.]+\s*["']/.test(root)) return { error: `The <svg> element needs a viewBox, for example viewBox="0 0 48 48".` };
 	if (!/<(path|rect|circle|ellipse|line|polyline|polygon|use|text|image)\b/i.test(clean)) return { error: "The SVG draws nothing: it has no shapes." };

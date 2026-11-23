@@ -163,31 +163,36 @@ export async function openCreatorSession(o: CreatorSessionOptions): Promise<Crea
 		});
 		// (a first start through npx downloads the adapter: stopping that halfway could leave a broken copy)
 		const wait = o.startMs ?? (path.basename(o.spec.command) === "npx" ? 180_000 : 45_000);
-		let timer: NodeJS.Timeout | undefined;
-		let info;
-		try {
-			info = await Promise.race([
-				session.start(),
-				new Promise<never>((_resolve, reject) => (timer = setTimeout(() => reject(new Error(`${o.def.label} did not answer in time.`)), wait))),
-			]);
-		} catch (e: any) {
-			if (e instanceof AuthRequiredError) throw new Error(String(e.message).split("\n").slice(0, 2).join(" "));
-			throw new Error(String(e?.message ?? exit ?? e).split("\n")[0]);
-		} finally {
-			clearTimeout(timer);
-		}
-		if (o.model) {
-			const { models, current } = modelsFromSession(info);
+		const running = session;
+		// Starting is everything up to an agent that can be asked: its session, and the model chosen.
+		// One limit covers all of it (an agent that leaves the model unanswered would wait for ever otherwise).
+		const start = async () => {
+			const opened = await running.start();
+			if (!o.model) return opened;
+			const { models, current } = modelsFromSession(opened);
 			const target = models.find((m) => m.value === o.model);
 			const [kind, id, ...rest] = (target?.id ?? "").split(":");
 			if (target && current !== o.model && kind === "opt") {
 				try {
-					await session.setConfigOption(id, rest.join(":"));
+					await running.setConfigOption(id, rest.join(":"));
 				} catch {
 					// the agent keeps its own choice... unless it is ending: its process is seen to end a moment after its connection closes
 					if (!exit) await new Promise((r) => setTimeout(r, 300));
 				}
 			}
+			return opened;
+		};
+		const starting = start();
+		starting.catch(() => undefined);
+		let timer: NodeJS.Timeout | undefined;
+		let info;
+		try {
+			info = await Promise.race([starting, new Promise<never>((_resolve, reject) => (timer = setTimeout(() => reject(new Error(`${o.def.label} did not answer in time.`)), wait)))]);
+		} catch (e: any) {
+			if (e instanceof AuthRequiredError) throw new Error(String(e.message).split("\n").slice(0, 2).join(" "));
+			throw new Error(String(e?.message ?? exit ?? e).split("\n")[0]);
+		} finally {
+			clearTimeout(timer);
 		}
 		// (an agent that ended while it started is not one to hand out)
 		if (exit !== undefined || disposed) throw new Error(String(exit ?? `${o.def.label} stopped.`).split("\n")[0]);

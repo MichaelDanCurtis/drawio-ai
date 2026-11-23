@@ -75,6 +75,27 @@ test("what is accepted from the agent: a cleaned SVG with a viewBox that draws s
 	assert.match(creator.creatorSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><g/></svg>').error, /draws nothing/);
 	assert.match(creator.creatorSvg(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><path d="${"M0 0".repeat(200000)}"/></svg>`).error, /too large/);
 	assert.match(creator.creatorSvg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><title>&#99999999;</title><path d="M0 0h4"/></svg>').svg, /^<svg /);
+	// an SVG shown as an image is read as XML, which forgives nothing: what would not draw is refused, with what to fix
+	const svgWith = (inner, root = "") => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"${root}>${inner}</svg>`;
+	for (const [what, bad] of [
+		["two documents", ICON + ICON],
+		["an element left open", svgWith('<g><path d="M0 0h4"/>')],
+		["elements closed in the wrong order", svgWith('<g><a><path d="M0 0h4"/></g></a>')],
+		["a closing tag too many", svgWith('<path d="M0 0h4"/></g>')],
+		["a value without quotes", svgWith('<path d="M0 0h4" stroke-width=2/>')],
+		["an attribute given twice", svgWith('<path d="M0 0h4" d="M1 1h4"/>')],
+		["an attribute without a value", svgWith('<path d="M0 0h4" hidden/>')],
+		["a < in a value", svgWith('<path d="M0 0h4" aria-label="a < b"/>')],
+		["an entity XML does not know", svgWith('<title>a&nbsp;b</title><path d="M0 0h4"/>')],
+		["a stray &", svgWith('<title>this & that</title><path d="M0 0h4"/>')],
+		["text after the picture", svgWith('<path d="M0 0h4"/>') + " done"],
+		["a name XML does not allow", svgWith('<1path d="M0 0h4"/><path d="M0 0h4"/>')],
+	])
+		assert.match(creator.creatorSvg(bad).error ?? "accepted", /not well-formed XML|not an SVG this app accepts/, what);
+	assert.match(creator.creatorSvg(ICON + ICON).error, /^The SVG is not well-formed XML, so it cannot be drawn\. There has to be one <svg> element/);
+	// ... and what XML allows is not: nesting, either kind of quote, ">" in a value, the five entities, references by number, prefixes
+	const fine = svgWith(`<title>a &amp; b &lt; c &#38; &#x26;</title><g id='a' data-note="x > y"><g><path d="M0 0h4"/></g><use xlink:href="#a" /></g>`, ' xmlns:xlink="http://www.w3.org/1999/xlink"');
+	assert.deepEqual(creator.creatorSvg(fine), { svg: fine });
 
 	assert.deepEqual(creator.creatorLabels("  Load\n balancer <b> ", ["Network", "network", " LB ", 7, "x".repeat(40), "a", "b", "c", "d", "e", "f", "g"], "Icon 1"), {
 		title: "Load balancer b",
@@ -680,6 +701,8 @@ test("the agent session: its folder is removed when it is closed, and a start th
 
 	// an agent that ends while its model is chosen is not handed out as if it ran
 	await assert.rejects(openFake({ model: "large", env: { FAKE_AGENT_EXIT_ON_MODEL: "1" } }), /^Error: Fake agent stopped \(exit code 4\)\.$/);
+	// ... and one that leaves the choice of model unanswered does not hold the start for ever: the one limit covers it
+	await assert.rejects(openFake({ model: "large", env: { FAKE_AGENT_IGNORE_MODEL: "1" }, startMs: 500 }), /^Error: Fake agent did not answer in time\.$/);
 	// an agent that ends at once, and one that never answers: one line of why, nothing left behind
 	await assert.rejects(openFake({ spec: { command: process.execPath, args: ["-e", "process.exit(3)"], env: process.env } }), (e) => !/\n/.test(e.message) && e.message.length > 0);
 	await assert.rejects(openFake({ spec: { command: process.execPath, args: ["-e", "setTimeout(() => {}, 60000)"], env: process.env }, startMs: 300 }), /Fake agent did not answer in time\./);

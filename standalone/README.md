@@ -247,8 +247,9 @@ icon:
   settings already allow without asking (rules you set up in the agent itself, servers it is
   connected to) stays as it is there.
 - **What it hands in is cleaned** like every SVG before it is shown, and has to be one
-  `<svg>` with a `viewBox` that draws something; otherwise the agent is told what to fix. Six
-  icons at most per request.
+  well-formed `<svg>` element (an SVG shown as an image is read as XML: a tag left open or a
+  second document after the first would draw nothing) with a `viewBox` that draws something;
+  otherwise the agent is told what to fix. Six icons at most per request.
 - **Look at it** at 16, 24 and 64 pixels on white and on black. **Ask for a change** ("thicker
   lines"): the same agent, still running, gets the request and the icon as it is now.
   **Source** shows the SVG; what you edit there is cleaned again when you apply it.
