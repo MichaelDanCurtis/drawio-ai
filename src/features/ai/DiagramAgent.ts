@@ -111,7 +111,14 @@ export class DiagramAgent {
 					result = { text: "Cancelled by the user.", summary: "Cancelled", isError: true };
 				} else {
 					run.sink.toolStart(call);
-					result = await this.toolbox.invoke(call.name, call.input, { scoped: true });
+					// Stop during a tool call reaches the tool: a map being collected does not go on and draw a page afterwards.
+					const stopped = new AbortController();
+					const onStop = run.token.onCancellationRequested(() => stopped.abort());
+					try {
+						result = await this.toolbox.invoke(call.name, call.input, { scoped: true, signal: stopped.signal });
+					} finally {
+						onStop.dispose();
+					}
 					run.sink.toolEnd(call, result);
 				}
 				results.push({

@@ -2,7 +2,7 @@ import * as http from "http";
 import { fileURLToPath } from "url";
 import { CLIENT_HEADER, handleMcpMessage, McpHandlerDeps } from "../features/ai/mcp";
 import { mcpInstructions } from "../features/ai/systemPrompt";
-import { toMcpTools } from "../features/ai/toolSchemas";
+import { allMcpTools } from "../features/ai/allTools";
 import { AgentInstance, pickInstance, readInstances, Route } from "./discovery";
 
 // The agent bridge: a stdio MCP server that Claude Code, Codex and other agents
@@ -37,7 +37,7 @@ export class AgentBridge {
 
 	private readonly deps: McpHandlerDeps = {
 		serverVersion: this.options.version,
-		tools: toMcpTools,
+		tools: allMcpTools,
 		// tools/call never reaches handleMcpMessage: receive() forwards it as is.
 		callTool: async () => ({ text: NOT_RUNNING, isError: true }),
 		instructions: () => this.instructions(),

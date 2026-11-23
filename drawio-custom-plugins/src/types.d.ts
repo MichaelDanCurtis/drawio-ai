@@ -5,7 +5,7 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
     | AiPagesAction | AiExportPdfAction
-    | DesktopPrefsAction | DesktopPresentationAction | DesktopReportStateAction;
+    | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
@@ -26,6 +26,14 @@ declare interface DesktopPrefsAction {
 declare interface DesktopPresentationAction {
     action: "desktopPresentation";
     enabled: boolean;
+}
+
+/** The diagram's map tours, for presentation mode to offer and play (it finds their shapes on each page). */
+declare interface DesktopPresentationToursAction {
+    action: "desktopPresentationTours";
+    tours: { mapId: string; title: string; steps: { title: string; caption: string; nodeIds: string[] }[] }[];
+    /** Play the first tour that has shapes on the page shown. */
+    start: boolean;
 }
 
 declare interface DesktopReportStateAction {
@@ -60,6 +68,10 @@ declare interface DesktopLookState {
     themed: boolean;
     tips: boolean;
     presenting: boolean;
+    /** Titles of the map tours presentation mode offers on the page shown. */
+    tours: string[];
+    /** The tour playing. */
+    tour: { title: string; step: number; steps: number; highlighted: number; caption: string } | null;
     buttons: { mark: boolean; shapes: boolean; panels: number; ruler: boolean; present: boolean; workshop: boolean; chat: boolean };
 }
 

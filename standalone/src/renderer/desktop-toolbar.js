@@ -490,6 +490,9 @@
 				themed: q("#drawai-theme"),
 				tips: !!window.DrawAITips,
 				presenting: !!(window.drawaiPresentation && window.drawaiPresentation.isActive()),
+				// the map tours presentation mode offers on the page shown, and the one playing
+				tours: window.drawaiPresentation ? window.drawaiPresentation.state().tours : [],
+				tour: window.drawaiPresentation ? window.drawaiPresentation.state().tour : null,
 				buttons: {
 					mark: q(".drawai-mark"),
 					shapes: q("[data-drawai='shapes-toggle']"),

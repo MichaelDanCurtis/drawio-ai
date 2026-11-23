@@ -69,3 +69,21 @@ When the user asks for a file, use `drawio_export`: `vsdx` (Microsoft Visio: eve
 - `drawio_list_diagrams`: List Draw.io Diagrams
 - `drawio_search_diagrams`: Search Draw.io Diagrams
 - `drawio_create`: Create Draw.io Diagram (writes a file)
+
+## Maps
+
+The Mapper draws software, databases, Azure, AWS, Google Cloud and ML systems into the open diagram from facts it collects read-only (inventory commands, catalog queries, file reads), and keeps what it knows about each map next to the diagram. Start with `mapper_maps`; look things up with `mapper_find`, `mapper_show` and `mapper_path` before reading files; `mapper_run` makes a new map (`mapper_list_recipes` says what each one needs). Never repeat passwords, tokens or connection strings in an answer.
+
+- `mapper_maps`: List Maps
+- `mapper_list_recipes`: List What Can Be Mapped
+- `mapper_run`: Map Something (draws on the diagram)
+- `mapper_find`: Find on Maps
+- `mapper_show`: Show Map Node
+- `mapper_path`: Path Between Map Nodes
+- `mapper_findings`: Map Findings
+- `mapper_worksheet`: Map Description Worksheet
+- `mapper_set_descriptions`: Describe Map Shapes (draws on the diagram)
+- `mapper_recent_changes`: Recent Changes on Map (draws on the diagram)
+- `mapper_refresh`: Refresh Map (draws on the diagram)
+- `mapper_set_tour`: Save Map Tour (saves a tour)
+- `mapper_answer`: Answer from Maps (draws on the diagram)

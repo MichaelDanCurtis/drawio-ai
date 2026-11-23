@@ -4,9 +4,9 @@ import type { Server } from "http";
 import type { DrawioEditor } from "../../DrawioEditorService";
 import { AgentInstance, drawioAiHome, readInstances, removeInstance, writeInstance, writeLauncher } from "../../agent-bridge/discovery";
 import type { DiagramToolbox } from "./DiagramToolbox";
+import { allMcpTools } from "./allTools";
 import { createMcpListener } from "./mcp";
 import { mcpInstructions } from "./systemPrompt";
-import { toMcpTools } from "./toolSchemas";
 
 const TOKEN_KEY = "drawio-ai.mcp.token";
 
@@ -97,7 +97,8 @@ export class McpService {
 			port: () => this.actualPort,
 			deps: {
 				serverVersion: String(this.context.extension.packageJSON.version ?? "0.0.0"),
-				tools: toMcpTools,
+				tools: allMcpTools,
+				// (the toolbox hands the Mapper's tools to the Mapper)
 				callTool: (name, args, meta) => this.toolbox.invoke(name, args, { onTarget: (editor) => this.markBusy(editor, name, meta.client) }),
 				instructions: async () => mcpInstructions(await this.templatePrompt().catch(() => undefined)),
 			},

@@ -20,9 +20,24 @@ const extensionConfig: webpack.Configuration = {
 		fs: "commonjs fs",
 		path: "commonjs path",
 		http: "commonjs http",
+		// The Mapper reads SQLite files with Node's own module, where there is one.
+		"node:sqlite": "commonjs node:sqlite",
+		// Add-ons the Mapper's database drivers only try to load (native code, cloud sign-in):
+		// not shipped, so the drivers find them missing, as they expect to.
+		...Object.fromEntries(
+			["pg-native", "kerberos", "@mongodb-js/zstd", "@aws-sdk/credential-providers", "gcp-metadata", "snappy", "socks", "mongodb-client-encryption"].map((m) => [m, `commonjs ${m}`])
+		),
 	},
 	resolve: {
 		extensions: [".ts", ".js"],
+		// One js-yaml for the extension's own code and the Mapper's (standalone/ has a copy when
+		// the desktop app's packages are installed).
+		// The same goes for the Mapper's database drivers (PostgreSQL, MySQL, SQL Server, Oracle,
+		// MongoDB), which are part of the bundle: always the versions in this folder's yarn.lock.
+		alias: {
+			"js-yaml$": r("./node_modules/js-yaml"),
+			...Object.fromEntries(["pg", "mysql2", "mssql", "oracledb", "mongodb"].map((m) => [m, r(`./node_modules/${m}`)])),
+		},
 	},
 	module: {
 		rules: [

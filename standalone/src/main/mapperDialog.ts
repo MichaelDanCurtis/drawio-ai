@@ -3,15 +3,14 @@ import * as fs from "fs";
 import * as path from "path";
 import { agentEnv } from "./agents";
 import { createContext } from "./mapper/context";
-import { describePrompt } from "./mapper/prompts";
+import { MapperDialogCore, MapRunOutcome, visible } from "./mapper/dialog";
 import type { MapperService } from "./mapper/service";
-import { catalog, recipeById } from "./mapper/registry";
-import { agentRequest } from "./mapper/recipes/common";
-import { CollectResult, MapInput, MapperError, Recipe } from "./mapper/types";
+import type { MapInput } from "./mapper/types";
 import { paths } from "./paths";
 import { settings } from "./settings";
-import { safeInputs } from "./mapper/redact";
 import type { StaticServer } from "./staticServer";
+
+export { visible };
 
 /** What the Mapper needs from the diagram window it maps into. */
 export interface MapperHost {
@@ -36,11 +35,7 @@ function loadSavedInputs(): Record<string, MapInput> {
 	}
 }
 
-/** Remembers the last inputs per recipe, without secrets. */
-function saveInputs(recipe: Recipe, input: MapInput): void {
-	const all = loadSavedInputs();
-	const secret = new Set(recipe.fields.filter((f) => f.secret || f.type === "password").map((f) => f.id));
-	all[recipe.id] = safeInputs(input, secret);
+function writeSavedInputs(all: Record<string, MapInput>): void {
 	try {
 		fs.writeFileSync(inputsFile(), JSON.stringify(all, null, 1), { mode: 0o600 });
 	} catch {
@@ -54,16 +49,35 @@ export class MapperDialog {
 	private static installed = false;
 
 	private win: BrowserWindow | undefined;
-	private running: AbortController | undefined;
+	/** The page's other half (shared with the VS Code extension's panel). */
+	private readonly core: MapperDialogCore;
 
 	constructor(private readonly host: MapperHost, private readonly server: StaticServer) {
 		MapperDialog.installIpc();
+		this.core = new MapperDialogCore({
+			post: (msg) => this.post(msg),
+			cwd: () => this.host.cwd(),
+			ready: () => this.host.ready(),
+			service: () => this.host.service,
+			context: (signal, progress) => createContext({ cwd: this.host.cwd(), env: agentEnv(), signal, progress }),
+			askAgent: (text, shown) => this.host.askAgent(text, shown),
+			showChat: () => this.host.showChat(),
+			loadInputs: loadSavedInputs,
+			saveInputs: writeSavedInputs,
+			pick: async (kind, current) => {
+				if (!this.win) return undefined;
+				const r = await dialog.showOpenDialog(this.win, { defaultPath: current || this.host.cwd(), properties: kind === "folder" ? ["openDirectory"] : ["openFile"] });
+				return r.canceled ? undefined : r.filePaths[0];
+			},
+			look: () => ({ iconStyle: settings().appearance.iconStyle, matrix: settings().appearance.matrix }),
+			close: () => this.close(),
+		});
 	}
 
 	private static installIpc(): void {
 		if (MapperDialog.installed) return;
 		MapperDialog.installed = true;
-		ipcMain.on("mapper:toHost", (e, msg) => void MapperDialog.byView.get(e.sender.id)?.onMessage(msg));
+		ipcMain.on("mapper:toHost", (e, msg) => void MapperDialog.byView.get(e.sender.id)?.core.onMessage(msg));
 	}
 
 	public open(category?: string): void {
@@ -93,7 +107,7 @@ export class MapperDialog {
 		win.webContents.on("will-navigate", (e) => e.preventDefault());
 		win.once("ready-to-show", () => win.show());
 		win.on("closed", () => {
-			this.running?.abort();
+			this.core.abort();
 			for (const [k, v] of MapperDialog.byView) if (v === this) MapperDialog.byView.delete(k);
 			this.win = undefined;
 		});
@@ -113,120 +127,8 @@ export class MapperDialog {
 		if (this.win && !this.win.isDestroyed()) this.win.webContents.send("mapper:toWebview", msg);
 	}
 
-	private context(signal: AbortSignal, onProgress?: (t: string) => void) {
-		return createContext({ cwd: this.host.cwd(), env: agentEnv(), signal, progress: onProgress });
-	}
-
-	private async onMessage(msg: any): Promise<void> {
-		switch (msg?.type) {
-			case "ready":
-				this.post({ type: "catalog", catalog: catalog(), saved: loadSavedInputs(), cwd: this.host.cwd(), iconStyle: settings().appearance.iconStyle, matrix: settings().appearance.matrix });
-				break;
-			case "loadOptions": {
-				const recipe = recipeById(String(msg.recipeId));
-				if (!recipe?.loadOptions) return;
-				const ac = new AbortController();
-				const timer = setTimeout(() => ac.abort(), 60_000);
-				try {
-					const options = await recipe.loadOptions(String(msg.fieldId), msg.input ?? {}, this.context(ac.signal));
-					this.post({ type: "options", recipeId: recipe.id, fieldId: msg.fieldId, options });
-				} catch (e: any) {
-					this.post({ type: "options", recipeId: recipe.id, fieldId: msg.fieldId, options: [], error: errorText(e) });
-				} finally {
-					clearTimeout(timer);
-				}
-				break;
-			}
-			case "pick": {
-				if (!this.win) return;
-				const folder = msg.kind === "folder";
-				const r = await dialog.showOpenDialog(this.win, {
-					defaultPath: msg.current || this.host.cwd(),
-					properties: folder ? ["openDirectory"] : ["openFile"],
-				});
-				if (!r.canceled && r.filePaths[0]) this.post({ type: "picked", fieldId: msg.fieldId, path: r.filePaths[0] });
-				break;
-			}
-			case "run":
-				await this.run(String(msg.recipeId), msg.input ?? {}, !!msg.askAgent, !!msg.describe);
-				break;
-			case "cancel":
-				this.running?.abort();
-				break;
-			case "close":
-				this.close();
-				break;
-		}
-	}
-
 	/** Collect → draw → (optionally) hand to the agent. */
-	public async run(recipeId: string, input: MapInput, askAgent: boolean, describe = false): Promise<{ result?: CollectResult; error?: string; mapId?: string }> {
-		const recipe = recipeById(recipeId);
-		if (!recipe) return { error: `Unknown map ${recipeId}` };
-		if (this.running) {
-			this.post({ type: "failed", message: "A map is already being made." });
-			return { error: "busy" };
-		}
-		const missing = recipe.fields.filter((f) => f.required && !String(input[f.id] ?? "").trim() && visible(recipe, f.id, input));
-		if (missing.length) {
-			this.post({ type: "failed", message: `Fill in: ${missing.map((f) => f.label).join(", ")}` });
-			return { error: "missing fields" };
-		}
-		if (!this.host.ready()) {
-			this.post({ type: "failed", message: "The diagram is still loading. Try again in a moment." });
-			return { error: "not ready" };
-		}
-		saveInputs(recipe, input);
-		const ac = new AbortController();
-		this.running = ac;
-		this.post({ type: "running", recipeId });
-		const progress = (text: string) => this.post({ type: "progress", text });
-		try {
-			let result: CollectResult | undefined;
-			let drawn = "";
-			let record: import("./mapper/store").MapRecord | undefined;
-			if (recipe.collect) {
-				// Collects read-only, draws the map and its health badges, and stores its record.
-				const out = await this.host.service.run(recipe.id, input, { signal: ac.signal, progress });
-				result = out.result;
-				record = out.record;
-				if (out.drawn) drawn = `Drew ${out.drawn.cells} cells on ${out.drawn.newPage ? "a new page" : "this page"} "${out.drawn.page}" (pending: keep or revert it).${out.badges ? ` ${out.record.findings.length} finding(s) marked on the Health layer.` : ""}`;
-			}
-			const wantsAgent = recipe.mode === "agent" || (askAgent && !!recipe.agentPrompt);
-			if (describe && record && record.graph.nodes.length) {
-				this.host.showChat();
-				this.host.askAgent(describePrompt(record, "everyone"), `🗺 Describe "${record.title}" in plain English`);
-			} else if (wantsAgent && recipe.agentPrompt) {
-				const task = recipe.agentPrompt(input, result);
-				const text = agentRequest(
-					`${task}${drawn ? `\n\nThe Mapper has just drawn the map on the page "${result?.graph?.title ?? ""}" from read-only data (${result?.summary ?? ""}); build on it.` : ""}`,
-					result?.facts
-				);
-				this.host.showChat();
-				this.host.askAgent(text, `🗺 ${recipe.title}${result?.summary ? ` — ${result.summary}` : ""}`);
-			}
-			const summary = [result?.summary, drawn, wantsAgent || describe ? "Handed to the agent in the chat." : ""].filter(Boolean).join(" ");
-			this.post({ type: "done", summary: summary || "Done.", warnings: result?.warnings ?? [], close: !result?.warnings?.length });
-			return { result, mapId: record?.id };
-		} catch (e: any) {
-			const message = errorText(e);
-			this.post({ type: "failed", message, hint: e instanceof MapperError ? e.hint : undefined });
-			return { error: message };
-		} finally {
-			this.running = undefined;
-		}
+	public run(recipeId: string, input: MapInput, askAgent: boolean, describe = false): Promise<MapRunOutcome> {
+		return this.core.run(recipeId, input, askAgent, describe);
 	}
-}
-
-/** A field applies when its condition holds and the field it depends on applies too. */
-export function visible(recipe: Recipe, fieldId: string, input: MapInput, depth = 0): boolean {
-	const f = recipe.fields.find((x) => x.id === fieldId);
-	if (!f?.showIf) return true;
-	if (depth < 10 && !visible(recipe, f.showIf.field, input, depth + 1)) return false;
-	return f.showIf.values.includes(String(input[f.showIf.field] ?? recipe.fields.find((x) => x.id === f.showIf!.field)?.default ?? ""));
-}
-
-function errorText(e: any): string {
-	const s = String(e?.message ?? e);
-	return s.length > 800 ? s.slice(0, 800) + "…" : s;
 }

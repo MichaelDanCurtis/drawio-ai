@@ -1,5 +1,6 @@
 // Keeps everything VS Code's chat reads about the diagram tools in sync with
-// src/features/ai/toolSchemas.ts and src/features/ai/systemPrompt.ts:
+// src/features/ai/toolSchemas.ts, standalone/src/main/mapper/toolSchemas.ts (the Mapper's
+// tools) and src/features/ai/systemPrompt.ts:
 // - package.json#contributes.languageModelTools
 // - media/chat/draw-ai.agent.md, the "Draw.AI" custom agent (its tool names
 //   include the extension id, so rerun this after changing the publisher)
@@ -32,7 +33,7 @@ function toManifest(schema) {
 		toolReferenceName: referenceName(schema.name),
 		canBeReferencedInPrompt: true,
 		icon: "$(sparkle)",
-		tags: ["drawio", "diagram"],
+		tags: schema.tags ?? ["drawio", "diagram"],
 		userDescription: schema.displayName,
 		modelDescription: schema.description,
 		inputSchema: schema.inputSchema,
@@ -58,7 +59,15 @@ function agentMarkdown(pkg, schemas, prompt) {
 	].join("\n");
 }
 
-const schemas = loadTs("src/features/ai/toolSchemas.ts").TOOL_SCHEMAS;
+// The Mapper's tools (the desktop app's own definitions): same manifest entries, tagged as maps.
+const mapperSchemas = loadTs("standalone/src/main/mapper/toolSchemas.ts").MAPPER_TOOL_SCHEMAS.map((t) => ({
+	name: t.name,
+	displayName: t.title,
+	description: t.description,
+	inputSchema: t.inputSchema,
+	tags: ["drawio", "diagram", "map"],
+}));
+const schemas = [...loadTs("src/features/ai/toolSchemas.ts").TOOL_SCHEMAS, ...mapperSchemas];
 const prompt = loadTs("src/features/ai/systemPrompt.ts");
 const pkg = JSON.parse(fs.readFileSync(packageFile, "utf8"));
 const expectedTools = schemas.map(toManifest);

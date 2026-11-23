@@ -1,8 +1,7 @@
 import type { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
 import type { ChatController } from "./chatController";
 import { mapsOnPage } from "./mapper/draw";
-import { askPrompt, describePrompt, tourPrompt } from "./mapper/prompts";
-import { agentRequest } from "./mapper/recipes/common";
+import { askPrompt, describePrompt, fixFindingPrompt, tourPrompt } from "./mapper/prompts";
 import { recipeById } from "./mapper/registry";
 import { SEVERITY, MapperService } from "./mapper/service";
 import { activeFindings, MapRecord } from "./mapper/store";
@@ -176,11 +175,8 @@ export class MapActions {
 					break;
 				case "finding-fix": {
 					if (!finding) return;
-					const shapes = finding.nodeIds.map((id) => r.graph.nodes.find((n) => n.id === id)).filter(Boolean);
 					await this.chat.send(
-						agentRequest(
-							`Fix this finding from the map "${r.title}" (map ${r.id}): ${finding.title}.${finding.detail ? `\nEvidence: ${finding.detail}` : ""}${finding.fix ? `\nSuggested fix: ${finding.fix}` : ""}\nThe shapes concerned: ${JSON.stringify(shapes.map((n) => ({ id: n!.id, label: n!.label, data: n!.data, files: n!.files })))}.\nFind where it is defined (code, IaC, config) and propose the change; make file changes only with the user's approval, and never change live cloud resources or databases yourself — give the commands for the user to run instead.`
-						),
+						fixFindingPrompt(r, finding),
 						{ cellIds: [] },
 						[],
 						`🛠 Fix: ${finding.title}`

@@ -247,6 +247,13 @@ rise in. Under *reduce motion* nothing moves.
 - Tokens, motion and the dot modules: `src/renderer/ui/` (from the `omni-design`
   skill), served at `/ui/`. The fonts are self-hosted from `@fontsource` packages
   (`build.mjs` copies them).
+- The Mapper is shared with the VS Code extension as it is: `src/main/mapper/` (recipes,
+  layout, drawing, records, lookups, tools; nothing of Electron in it), the Map Something
+  page `src/renderer/mapper.html` with `ui/*.css` and `ui/brands.js`, and the page's other
+  half `src/main/mapper/dialog.ts` (`MapperDialogCore`; `mapperDialog.ts` gives it a window,
+  the extension a webview panel: `src/features/mapper/`). Keep `mapper/toolSchemas.ts` free
+  of imports (the extension's manifest is generated from it), name host-specific wording
+  through `setToolSource` and `tourPrompt`'s `play`, and keep the page's files under `/ui/`.
 - Shared with the VS Code extension: `src/renderer/theme.js`, `desktop-toolbar.js`,
   `presentation.js` and `ui/{icons,brandmark,tips,dots,matrix}.js` are also the extension's
   editor tools (its plugin build copies them: `drawio-custom-plugins/webpack.config.ts`,

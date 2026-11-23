@@ -119,6 +119,11 @@ export class CustomizedDrawioClient extends DrawioClient<
 		this.sendCustomAction({ action: "desktopPresentation", enabled });
 	}
 
+	/** Gives presentation mode the diagram's map tours; `start` plays the first one on the page shown. */
+	public setPresentationTours(tours: DesktopPresentationToursAction["tours"], start: boolean): void {
+		this.sendCustomAction({ action: "desktopPresentationTours", tours, start });
+	}
+
 	private lookState: DesktopLookState | undefined;
 	private lookStateRequest = 0;
 	private readonly lookStateWaiters = new Map<number, (state: DesktopLookState) => void>();

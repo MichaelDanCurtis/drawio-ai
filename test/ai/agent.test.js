@@ -98,6 +98,25 @@ test("every tool call gets a result even when cancelled mid-round", async () => 
 	assert.deepEqual(results, calls);
 });
 
+test("Stop during a tool call reaches the tool as an aborted signal", async () => {
+	const t = token();
+	const client = scriptedClient([[{ type: "toolCall", id: "a", name: "mapper_run", input: { recipe: "x" } }]]);
+	const seen = [];
+	const agent = new DiagramAgent(
+		fakeToolbox(async (name, input, options) => {
+			seen.push([name, options.scoped, options.signal.aborted]);
+			// a long tool (a map being collected) ends when the user stops the request
+			const stopped = new Promise((resolve) => options.signal.addEventListener("abort", () => resolve({ text: "Cancelled", summary: "Cancelled", isError: true })));
+			t.cancel();
+			return stopped;
+		})
+	);
+	const { messages } = await agent.run({ client, history: [], userText: "map it", context: "", sink: sink().sink, token: t, maxRounds: 5 });
+	assert.deepEqual(seen, [["mapper_run", true, false]]);
+	const result = messages.flatMap((m) => m.parts).find((p) => p.type === "toolResult");
+	assert.deepEqual([result.callId, result.text, result.isError], ["a", "Cancelled", true]);
+});
+
 test("provider errors are returned with the partial turn, not thrown", async () => {
 	const client = {
 		providerId: "openai",

@@ -6,7 +6,7 @@ import { getAiSettings } from "./aiSettings";
 import { analyze, codeRefs, DiagramKind, detectKind, Entity, formatAnalysis, SourceFile } from "./codeAnalysis";
 import { registerChatParticipant, registerLanguageModelTools } from "./copilotIntegration";
 import { DiagramAgent } from "./DiagramAgent";
-import { DiagramToolbox } from "./DiagramToolbox";
+import { DiagramToolbox, ExtraTools } from "./DiagramToolbox";
 import { DiagramWorkspace } from "./DiagramWorkspace";
 import { VsCodeLmClient } from "./providers/VsCodeLmProvider";
 import { readImage } from "./images";
@@ -71,6 +71,19 @@ export class AiFeature {
 		new DiagramWorkspace(this.editorService, () => this.targetEditor())
 	);
 	private readonly agent = new DiagramAgent(this.toolbox);
+
+	/**
+	 * The Mapper's tools, served wherever the diagram tools are: the MCP server, `@drawio` and
+	 * the old chat panel (VS Code's chat gets them as language-model tools from the Mapper itself).
+	 */
+	public set extraTools(tools: ExtraTools) {
+		this.toolbox.extra = tools;
+	}
+
+	/** Sends a request about `editor`'s diagram to VS Code's chat, as the diagram's own requests are sent. */
+	public askAgent(text: string, editor: DrawioEditor, extras: { attachments?: { name: string; text: string }[]; selection?: SelectionContext } = {}): Promise<boolean> {
+		return this.ask(text, extras.selection ?? { cellIds: [] }, { editor, attachments: extras.attachments });
+	}
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
