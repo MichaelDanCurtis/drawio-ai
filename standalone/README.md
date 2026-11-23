@@ -9,8 +9,9 @@ the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent ed
 open diagram live through OmniDraw's diagram tools, and you keep or revert its
 changes.
 
-The app has no model API keys of its own. You can add yours (Anthropic, OpenAI, Kimi) to use
-a provider's models without an agent program: see [API keys](#api-keys). For now that is
+The app has no model API keys of its own. You can add yours (Anthropic, OpenAI, Gemini, Grok,
+Kimi, OpenRouter) to use a provider's models without an agent program: see
+[API keys](#api-keys). For now that is
 for the Shape Creator; the chat still needs an agent.
 
 ## Run it
@@ -291,9 +292,18 @@ the tool endpoint it is given, and the end-to-end run uses a stand-in inside the
 
 ## API keys
 
-**Settings → Agents & models → API keys** (the second half of that section). Paste a key from
-Anthropic, OpenAI or Kimi (Moonshot AI's international platform, `api.moonshot.ai`) to use
-that provider's models without an agent program. Usage is billed by the provider to that key.
+**Settings → Agents & models → API keys** (the second half of that section). Paste a key to
+use that provider's models without an agent program. Usage is billed by the provider to that
+key.
+
+| Provider | Key from | Notes |
+| --- | --- | --- |
+| Anthropic | the Claude Console | |
+| OpenAI | platform.openai.com | Needs OpenAI to keep responses for a while (an organisation can switch that off). |
+| Gemini | Google AI Studio | Reached at Google's address for OpenAI's protocol. |
+| Grok | console.x.ai | Over the API xAI calls deprecated (no end date given); attached images as JPEG or PNG. |
+| Kimi | Moonshot AI's international platform (`api.moonshot.ai`) | A key from the China platform is refused. |
+| OpenRouter | openrouter.ai | One key for many providers' models. Only models that can call tools are listed (the newest 500). Nothing that names this app is sent. Which providers a request may go to, and what they may keep, is set in your OpenRouter account. |
 
 - **Where a key is kept.** Encrypted with a secret the operating system holds for the app
   (Electron's `safeStorage`: the macOS Keychain), in `api-keys.json` in the app's data folder,
@@ -330,15 +340,22 @@ Code: `src/main/api/`: `keyStore.ts` (the file and its encryption; `keys.ts` giv
 use), `keysPanel.ts` (the Settings page's other half), `chat.ts` (what a provider is to the
 app: it lists models and holds a conversation that runs the app's tools), `anthropic.ts`
 (the Messages API through `@anthropic-ai/sdk`), `openai.ts` (the Responses API through
-`openai`), `kimi.ts` (chat completions at Moonshot's address, through `openai`), `env.ts`
-(why nothing is taken from the environment), `creator.ts` (the Shape Creator drawing this
-way). Tests: `test/api.test.js` and `test/ai/settings.e2e.test.js` (in the repository root),
+`openai`), `completions.ts` (OpenAI's chat-completions protocol, which the other four speak
+at an address of their own, through `openai`; what differs between them is named there) with
+`gemini.ts`, `grok.ts`, `kimi.ts` and `openrouter.ts`, `env.ts` (why nothing is taken from
+the environment), `creator.ts` (the Shape Creator drawing this way). Tests: `test/api.test.js` and `test/ai/settings.e2e.test.js` (in the repository root),
 against local stand-ins for the three APIs (`test/helpers/fake-providers.js`, which refuse a
 conversation that is not whole, as the real ones do) and a test cipher instead of the
 keychain: no test reaches a provider, uses a real key or touches the keychain.
 
-Not tried against the real services yet: the request shapes follow each provider's
-documentation and SDK, and the tests check what is sent and what is made of the answers.
+The tests never reach a real provider: the request shapes follow each provider's
+documentation and SDK (as of November 2026), and the tests check what is sent and what is
+made of the answers. A provider's first real request is where a wrong assumption would show.
+What each of the four on `completions.ts` does differently, as its documentation has it:
+Gemini wants the signature of its thinking back on each tool call, sends tool calls whole
+and without a position, and says what went wrong as a list; Grok sends tool calls whole too
+and can say what went wrong as a plain sentence; Kimi wants its reasoning text back;
+OpenRouter wants the reasoning back as the list of parts it came as.
 
 ## Presentation mode
 

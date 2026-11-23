@@ -117,7 +117,8 @@ async function fakeApi(answer) {
 			if (res.destroyed) return;
 			if (reply.sse) {
 				res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", ...(reply.headers ?? {}) });
-				for (const e of reply.sse) res.write(`${e.event ? `event: ${e.event}\n` : ""}data: ${typeof e.data === "string" ? e.data : JSON.stringify(e.data)}\n\n`);
+				// (`comment`: a line that is not an event, as some providers send to keep the connection open)
+				for (const e of reply.sse) res.write(e.comment ? `: ${e.comment}\n\n` : `${e.event ? `event: ${e.event}\n` : ""}data: ${typeof e.data === "string" ? e.data : JSON.stringify(e.data)}\n\n`);
 				if (reply.hold) {
 					open.add(res);
 					res.on("close", () => open.delete(res));
@@ -127,7 +128,8 @@ async function fakeApi(answer) {
 			}
 			// (the SDKs try again after some failures: a test that wants one request says so)
 			res.writeHead(reply.status ?? 200, { "content-type": "application/json", "x-should-retry": "false", ...(reply.headers ?? {}) });
-			res.end(JSON.stringify(reply.json ?? {}));
+			// (`text`: an answer that is not JSON, as it is)
+			res.end(reply.text ?? JSON.stringify(reply.json ?? {}));
 		};
 	});
 	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -205,20 +207,31 @@ const openAiModels = (models) => ({ json: { object: "list", data: models.map((m)
 
 /**
  * The chunks of one answer: `reasoning` and `text` as the model wrote them, `calls`
- * ({ id, name, arguments }) in pieces as they arrive, then why it ended.
+ * ({ id, name, arguments }) in pieces as they arrive, then why it ended. For the providers
+ * that do it differently: `details` (the model's reasoning as a list of parts, one list per
+ * chunk), `whole` (each call in one chunk, without a position; `more` on a call is what the
+ * provider adds to it), `usage` (a last chunk that repeats why it ended), `comments` (lines
+ * that are not events), `error` (what went wrong, said in the middle of the answer).
  */
-function completionsAnswer({ reasoning, text, calls = [], finish = calls.length ? "tool_calls" : "stop" }) {
+function completionsAnswer({ reasoning, details = [], text, calls = [], finish = calls.length ? "tool_calls" : "stop", whole = false, usage = false, comments = false, error }) {
 	const chunk = (delta, finish_reason = null) => ({ data: { id: "cmpl_fake", object: "chat.completion.chunk", created: 1, model: "fake", choices: [{ index: 0, delta, finish_reason }] } });
 	const events = [chunk({ role: "assistant", content: "" })];
+	if (comments) events.unshift({ comment: "PROCESSING" });
 	if (reasoning) for (const reasoning_content of pieces(reasoning)) events.push(chunk({ reasoning_content }));
+	for (const reasoning_details of details) events.push(chunk({ reasoning_details }));
+	if (comments) events.push({ comment: "PROCESSING" });
 	if (text) for (const content of pieces(text)) events.push(chunk({ content }));
 	calls.forEach((c, index) => {
 		const args = typeof c.arguments === "string" ? c.arguments : JSON.stringify(c.arguments);
+		if (whole) return void events.push(chunk({ tool_calls: [{ ...(c.id === undefined ? {} : { id: c.id }), type: "function", function: { name: c.name, arguments: args }, ...(c.more ?? {}) }] }));
 		const [first, ...rest] = pieces(args);
-		events.push(chunk({ tool_calls: [{ index, id: c.id, type: "function", function: { name: c.name, arguments: first } }] }));
+		events.push(chunk({ tool_calls: [{ index, id: c.id, type: "function", function: { name: c.name, arguments: first }, ...(c.more ?? {}) }] }));
 		for (const more of rest) events.push(chunk({ tool_calls: [{ index, function: { arguments: more } }] }));
 	});
-	events.push(chunk({}, finish), { data: "[DONE]" });
+	if (error) return { sse: [...events, { data: { id: "cmpl_fake", error: { code: 502, message: error }, choices: [{ index: 0, delta: { content: "" }, finish_reason: "error" }] } }, { data: "[DONE]" }] };
+	events.push(chunk({}, finish));
+	if (usage) events.push({ data: { id: "cmpl_fake", object: "chat.completion.chunk", created: 1, model: "fake", choices: [{ index: 0, delta: { content: "" }, finish_reason: finish }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } } });
+	events.push({ data: "[DONE]" });
 	return { sse: events };
 }
 

@@ -19,6 +19,9 @@ const { anthropicProvider, anthropicClient, ANTHROPIC_BASE } = require("../src/m
 const { openAiProvider, openAiClient, OPENAI_BASE } = require("../src/main/api/openai");
 const { kimiProvider, kimiAnswerRoom, KIMI_BASE } = require("../src/main/api/kimi");
 const { ApiKeysPanel } = require("../src/main/api/keysPanel");
+const { geminiProvider, geminiSchema, GEMINI_BASE } = require("../src/main/api/gemini");
+const { openRouterProvider, OPENROUTER_BASE } = require("../src/main/api/openrouter");
+const { grokProvider, GROK_BASE } = require("../src/main/api/grok");
 const { API_PROVIDERS } = require("../src/main/api/providers");
 const { withoutProviderEnv } = require("../src/main/api/env");
 const { apiCreatorAgents, openApiCreator } = require("../src/main/api/creator");
@@ -910,6 +913,417 @@ test("Kimi: an answer with nothing in it, a request the API calls malformed, a m
 	assert.deepEqual(["kimi-k3.1-pro", "kimi-k3", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k-vision-preview", "moonshot-v1-auto"].map(kimiAnswerRoom), [16000, 16000, 4096, 16000, 16000, 16000]);
 });
 
+// ----- Gemini -----
+
+test("Gemini: its models from Google's own list, the key in a header and never in the address; a key that is not accepted", async () => {
+	let reply = () => ({
+		json: {
+			models: [
+				{ name: "models/gemini-3.8-flash", displayName: "Gemini 3.8 Flash", supportedGenerationMethods: ["generateContent", "countTokens"] },
+				{ name: "models/gemini-4-hydrogen", displayName: "Gemini 4 Hydrogen", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/gemini-4-argon", displayName: "", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/gemini-4-neon-image", displayName: "Gemini 4 Neon Image", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/gemini-embedding-002", displayName: "Embedding", supportedGenerationMethods: ["embedContent"] },
+				{ name: "models/gemini-3.8-flash-tts", displayName: "Speech", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/gemini-live-4", displayName: "Live", supportedGenerationMethods: ["bidiGenerateContent"] },
+				{ name: "models/gemma-4-27b", displayName: "Gemma", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/imagen-5", displayName: "Imagen", supportedGenerationMethods: ["predict"] },
+				{ name: "models/gemini-flash-latest", displayName: "Gemini Flash Latest", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/gemini-exp-1206", displayName: "Gemini Experimental 1206", supportedGenerationMethods: ["generateContent"] },
+				{ name: "models/gemini-3.10-flash", displayName: "Gemini 3.10 Flash", supportedGenerationMethods: ["generateContent"] },
+				{ displayName: "no name" },
+				null,
+			],
+		},
+	});
+	const s = await api((r) => (r.method === "GET" && r.path.startsWith("/v1beta/models") ? reply(r) : undefined));
+	const base = `${s.url}/v1beta/openai`;
+	// the newest first, by the version a name begins with (3.10 is after 3.8); names without one (aliases, experiments) last;
+	// what does not hold a conversation is left out
+	assert.deepEqual(await geminiProvider.models(KEY, { baseURL: base }), [
+		{ value: "gemini-4-argon", name: "gemini-4-argon" },
+		{ value: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen" },
+		{ value: "gemini-3.10-flash", name: "Gemini 3.10 Flash" },
+		{ value: "gemini-3.8-flash", name: "Gemini 3.8 Flash" },
+		{ value: "gemini-exp-1206", name: "Gemini Experimental 1206" },
+		{ value: "gemini-flash-latest", name: "Gemini Flash Latest" },
+	]);
+	const asked = s.requests.pop();
+	assert.equal(asked.path, "/v1beta/models?pageSize=1000");
+	assert.deepEqual([asked.headers["x-goog-api-key"], asked.headers.authorization, asked.path.includes(KEY)], [KEY, undefined, false]);
+	assert.deepEqual([geminiProvider.id, geminiProvider.label, geminiProvider.company, GEMINI_BASE], ["gemini", "Gemini API", "Gemini", "https://generativelanguage.googleapis.com/v1beta/openai"]);
+
+	// Google says "bad request", not "unauthorised", for a key it does not accept: told apart from other bad requests
+	const fails = async (answer, pattern, badKey = false) => {
+		reply = () => answer;
+		await assert.rejects(geminiProvider.models(KEY, { baseURL: base }), (e) => {
+			assert.ok(e instanceof ApiError, String(e));
+			assert.match(e.message, pattern);
+			assert.equal(e.badKey, badKey);
+			assert.doesNotMatch(e.message, new RegExp(KEY));
+			return true;
+		});
+	};
+	const error = (code, message, status, reason) => ({ status: code, json: { error: { code, message, status, details: reason ? [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason }] : [] } } });
+	await fails(error(400, "API key not valid. Please pass a valid API key.", "INVALID_ARGUMENT", "API_KEY_INVALID"), /^Gemini did not accept the API key\. Check it in Settings → Agents & models → API keys\.$/, true);
+	await fails(error(400, "Request contains an invalid argument.", "INVALID_ARGUMENT", "API_KEY_INVALID"), /^Gemini did not accept the API key/, true);
+	await fails(error(401, "Request had invalid authentication credentials.", "UNAUTHENTICATED"), /^Gemini did not accept the API key/, true);
+	await fails(error(400, "Invalid page size.", "INVALID_ARGUMENT"), /^Gemini answered with an error \(400\): Invalid page size\.$/);
+	await fails(error(403, `The key ${KEY} was reported as leaked.`, "PERMISSION_DENIED"), /^Gemini refused this key \(it may be blocked, or may not use this API\): The key \(the key\) was reported as leaked\.$/);
+	await fails(error(429, "Resource has been exhausted (e.g. check quota).", "RESOURCE_EXHAUSTED"), /^Gemini is limiting requests for this key right now, or it has used up what it may: Resource has been exhausted/);
+	await fails({ status: 503, text: "<html>not json at all</html>" }, /^Gemini answered with an error \(503\): Service Unavailable$/);
+	// an answer that is not the list it should be lists nothing
+	for (const odd of [{ text: "null" }, { text: "<html>a page</html>" }, { json: { models: "something else" } }]) {
+		reply = () => odd;
+		assert.deepEqual(await geminiProvider.models(KEY, { baseURL: base }), []);
+	}
+	// time running out while the answer comes in is not an empty list
+	reply = () => ({ json: { models: [] }, delay: 400 });
+	await assert.rejects(geminiProvider.models(KEY, { baseURL: base, signal: AbortSignal.timeout(60) }));
+	// an answer that points to another address is not followed: the key in the header would go along
+	const elsewhere = await api(() => ({ json: { models: [] } }));
+	reply = () => ({ status: 302, headers: { location: `${elsewhere.url}/v1beta/models` }, json: {} });
+	await assert.rejects(geminiProvider.models(KEY, { baseURL: base }), /Gemini's API could not be reached/);
+	assert.equal(elsewhere.requests.length, 0);
+	const gone = await api(() => undefined);
+	await gone.close();
+	await assert.rejects(geminiProvider.models(KEY, { baseURL: `${gone.url}/v1beta/openai` }), /Gemini's API could not be reached/);
+});
+
+test("Gemini: tool calls that arrive whole and without a position, the signature of its thinking that goes back with them, what it takes of a schema, errors that come as a list", async () => {
+	const script = [];
+	const s = await api((r) => (r.method === "POST" && r.path === "/v1beta/openai/chat/completions" ? script.shift() : undefined));
+	const said = [];
+	const box = toolbox({ workshop_render_preview: { text: "Here it is.", image: PNG }, workshop_submit_svg: { text: "Taken." } });
+	const chat = geminiProvider.chat({ apiKey: KEY, model: "gemini-4-hydrogen", system: "You draw icons.", tools: TOOLS, callTool: box.callTool, onText: (t) => said.push(t), baseURL: `${s.url}/v1beta/openai` });
+	const send = (text, images = []) => chat.send(text, images, new AbortController().signal);
+	const last = () => s.posts("/chat/completions").pop();
+
+	// two calls in one answer: each whole in one chunk, no position; only the first carries the signature, the second has no id; the answer ends as "stop"
+	script.push(
+		fake.completionsAnswer({
+			text: "Looking. ",
+			whole: true,
+			finish: "stop",
+			usage: true,
+			calls: [
+				{ id: "call_1839541", name: "workshop_render_preview", arguments: { svg: ICON }, more: { extra_content: { google: { thought_signature: "c2lnbmF0dXJl" } } } },
+				{ id: "", name: "workshop_submit_svg", arguments: { svg: ICON, name: "Key" } },
+			],
+		}),
+		fake.completionsAnswer({ text: "Done." })
+	);
+	assert.equal(await send("Draw a key.", [{ mimeType: "image/jpeg", base64: "AAAA" }]), "end_turn");
+	assert.equal(said.join(""), "Looking. Done.");
+	assert.deepEqual(box.calls, [["workshop_render_preview", { svg: ICON }], ["workshop_submit_svg", { svg: ICON, name: "Key" }]]);
+	const sent = s.posts("/chat/completions").map((r) => r.body);
+	// what is asked: nothing but the model, the conversation and the tools, described in the part of JSON Schema Gemini takes
+	assert.deepEqual(Object.keys(sent[0]).sort(), ["messages", "model", "stream", "tools"]);
+	assert.deepEqual(sent[0].tools[0].function.parameters, { type: "object", properties: { svg: { type: "string", description: "The whole SVG document: one <svg> element with a viewBox." }, name: { type: "string", description: 'A short name for the icon, e.g. "Load balancer".' }, tags: { type: "array", items: { type: "string" }, description: "Up to 6 words someone would search for." } }, required: ["svg"] });
+	assert.deepEqual(geminiSchema({ type: "object", additionalProperties: false, $schema: "x", properties: { a: { type: "string", pattern: "^a", enum: ["a"] }, b: { type: "array", items: { type: "object", additionalProperties: true, properties: {} } } } }), { type: "object", properties: { a: { type: "string", enum: ["a"] }, b: { type: "array", items: { type: "object", properties: {} } } } });
+	assert.deepEqual([geminiSchema(null), geminiSchema("x"), geminiSchema([1])], [{}, {}, {}]);
+	assert.deepEqual(sent[0].messages[1], { role: "user", content: [{ type: "text", text: "Draw a key." }, { type: "image_url", image_url: { url: "data:image/jpeg;base64,AAAA" } }] });
+	// the answer goes back with the signature on the call it came on, every call with an id, all calls first and then their answers in order
+	assert.deepEqual(sent[1].messages.slice(2), [
+		{
+			role: "assistant",
+			content: "Looking. ",
+			tool_calls: [
+				{ id: "call_1839541", type: "function", function: { name: "workshop_render_preview", arguments: JSON.stringify({ svg: ICON }) }, extra_content: { google: { thought_signature: "c2lnbmF0dXJl" } } },
+				{ id: "call_1", type: "function", function: { name: "workshop_submit_svg", arguments: JSON.stringify({ svg: ICON, name: "Key" }) } },
+			],
+		},
+		{ role: "tool", tool_call_id: "call_1839541", content: "Here it is." },
+		{ role: "tool", tool_call_id: "call_1", content: "Taken." },
+		{ role: "user", content: [{ type: "text", text: "The picture the tool returned:" }, { type: "image_url", image_url: { url: `data:image/png;base64,${PNG.base64}` } }] },
+	]);
+	assert.equal(last().refused, undefined);
+	assert.equal(last().headers.authorization, `Bearer ${KEY}`);
+	assert.equal(last().headers["x-goog-api-key"], undefined, "one way of naming the key: Google refuses two");
+
+	// what went wrong comes as a list with the error in it: read all the same
+	const listed = (code, message, status, reason) => ({ status: code, json: [{ error: { code, message, status, details: reason ? [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason }] : [] } }] });
+	const fails = async (answer, pattern, badKey = false) => {
+		script.push(answer);
+		await assert.rejects(send("x"), (e) => {
+			assert.ok(e instanceof ApiError, String(e));
+			assert.match(e.message, pattern);
+			assert.equal(e.badKey, badKey);
+			return true;
+		});
+	};
+	await fails(listed(400, "API key not valid. Please pass a valid API key.", "INVALID_ARGUMENT", "API_KEY_INVALID"), /^Gemini did not accept the API key\. Check it in Settings → Agents & models → API keys\.$/, true);
+	await fails(listed(400, "Function call is missing a thought_signature in functionCall parts.", "INVALID_ARGUMENT"), /^Gemini answered with an error \(400\): Function call is missing a thought_signature/);
+	// (Google's sentence for "too many requests" speaks of a quota: not taken for an empty account)
+	await fails(listed(429, "You exceeded your current quota, please check your plan and billing details.", "RESOURCE_EXHAUSTED"), /^Gemini is limiting requests for this key right now, or it has used up what it may: You exceeded your current quota/);
+	// what went wrong said as something that is no JSON, or as a list without an error in it
+	await fails({ status: 502, text: "<html>Bad gateway</html>" }, /^Gemini answered with an error \(502\)/);
+	await fails({ status: 500, json: [{ something: "else" }] }, /^Gemini answered with an error \(500\)/);
+	await fails({ status: 500, text: "" }, /^Gemini answered with an error \(500\)/);
+	await fails(listed(402, "Your prepayment credits are depleted.", "FAILED_PRECONDITION"), /^This Gemini key has no credit left: Your prepayment credits are depleted\.$/);
+	await fails(listed(403, "Your API key was reported as leaked.", "PERMISSION_DENIED"), /^Gemini refused this key \(it may be blocked, or may not use this API\): Your API key was reported as leaked\.$/);
+	await fails(listed(404, "models/gemini-9 is not found for API version v1beta.", "NOT_FOUND"), /^Gemini does not know that model\. Choose another one\.$/);
+	// (and an error said the usual way is read the usual way)
+	await fails({ status: 500, json: { error: { code: 500, message: "Internal error encountered.", status: "INTERNAL" } } }, /^Gemini answered with an error \(500\): Internal error encountered\.$/);
+});
+
+// ----- Grok -----
+
+test("Grok: the models that hold a conversation, tool calls whole and without a position, what went wrong said as a plain sentence", async () => {
+	let listing = () => ({
+		json: {
+			models: [
+				{ id: "grok-4.6", created: 200, input_modalities: ["text", "image"], output_modalities: ["text"], aliases: [] },
+				{ id: "grok-4.7", created: 300, input_modalities: ["text", "image"], output_modalities: ["text"] },
+				{ id: "grok-4.20-0309-non-reasoning", created: 100, input_modalities: ["text"], output_modalities: ["text"] },
+				{ id: "grok-4.20-multi-agent-0309", created: 150, input_modalities: ["text"], output_modalities: ["text"] },
+				{ id: "grok-build-0.1", created: 250, input_modalities: ["text"], output_modalities: ["text"] },
+				{ id: "grok-imagine-2", created: 400, input_modalities: ["text"], output_modalities: ["image"] },
+				{ created: 1 },
+			],
+		},
+	});
+	const script = [];
+	const s = await api((r) => (r.method === "GET" && r.path === "/v1/language-models" ? listing(r) : r.method === "POST" && r.path === "/v1/chat/completions" ? script.shift() : undefined));
+	const base = `${s.url}/v1`;
+	assert.deepEqual(await grokProvider.models(KEY, { baseURL: base }), [{ value: "grok-4.7", name: "grok-4.7" }, { value: "grok-4.6", name: "grok-4.6" }, { value: "grok-4.20-0309-non-reasoning", name: "grok-4.20-0309-non-reasoning", images: false }]);
+	assert.equal(s.requests.pop().headers.authorization, `Bearer ${KEY}`);
+	assert.deepEqual([grokProvider.id, grokProvider.label, grokProvider.company, GROK_BASE], ["grok", "Grok API", "xAI", "https://api.x.ai/v1"]);
+	listing = () => ({ json: { data: [] } });
+	assert.deepEqual(await grokProvider.models(KEY, { baseURL: base }), []);
+	// a key that is not one: "unauthorised", or "bad request" with words about the key
+	for (const answer of [{ status: 401, json: { code: "unauthenticated", error: "Incorrect API key provided." } }, { status: 400, json: { code: "invalid-argument", error: `Incorrect API key provided: ${KEY}. You can obtain an API key from the console.` } }]) {
+		listing = () => answer;
+		await assert.rejects(grokProvider.models(KEY, { baseURL: base }), (e) => e instanceof ApiError && e.badKey && e.message === "Grok did not accept the API key. Check it in Settings → Agents & models → API keys.");
+	}
+
+	const said = [];
+	const box = toolbox({ workshop_render_preview: { text: "Here it is.", image: PNG }, workshop_submit_svg: { text: "Taken." } });
+	const chat = grokProvider.chat({ apiKey: KEY, model: "grok-4.7", system: "You draw icons.", tools: TOOLS, callTool: box.callTool, onText: (t) => said.push(t), baseURL: base });
+	const send = (text) => chat.send(text, [], new AbortController().signal);
+	const last = () => s.posts("/chat/completions").pop();
+	// two calls, each whole in one chunk and without a position; the answer ends as "end_turn", not as "tool_calls"
+	script.push(
+		fake.completionsAnswer({ reasoning: "Thinking it over.", text: "Looking. ", whole: true, finish: "end_turn", calls: [{ id: "call_a", name: "workshop_render_preview", arguments: { svg: ICON } }, { id: "call_b", name: "workshop_submit_svg", arguments: { svg: ICON, name: "Key" } }] }),
+		fake.completionsAnswer({ text: "Done.", finish: "end_turn" })
+	);
+	assert.equal(await send("Draw a key."), "end_turn");
+	assert.equal(said.join(""), "Looking. Done.");
+	assert.deepEqual(box.calls, [["workshop_render_preview", { svg: ICON }], ["workshop_submit_svg", { svg: ICON, name: "Key" }]]);
+	const sent = s.posts("/chat/completions").map((r) => r.body);
+	assert.deepEqual(Object.keys(sent[0]).sort(), ["messages", "model", "stream", "tools"]);
+	// (its reasoning is not sent back: xAI asks for nothing of it here)
+	assert.deepEqual(sent[1].messages.slice(2), [
+		{ role: "assistant", content: "Looking. ", tool_calls: [{ id: "call_a", type: "function", function: { name: "workshop_render_preview", arguments: JSON.stringify({ svg: ICON }) } }, { id: "call_b", type: "function", function: { name: "workshop_submit_svg", arguments: JSON.stringify({ svg: ICON, name: "Key" }) } }] },
+		{ role: "tool", tool_call_id: "call_a", content: "Here it is." },
+		{ role: "tool", tool_call_id: "call_b", content: "Taken." },
+		{ role: "user", content: [{ type: "text", text: "The picture the tool returned:" }, { type: "image_url", image_url: { url: `data:image/png;base64,${PNG.base64}` } }] },
+	]);
+	assert.equal(last().refused, undefined);
+
+	// what went wrong comes as a plain sentence beside a code: shown as it is
+	script.push({ status: 404, json: { code: "not-found", error: "The model grok-9 does not exist or your team does not have access to it." } });
+	await assert.rejects(send("x"), (e) => e instanceof ApiError && e.message === "Grok does not know that model. Choose another one.");
+	script.push({ status: 403, json: { code: "permission-denied", error: "Your team has used all of its credits." } });
+	await assert.rejects(send("x"), (e) => e instanceof ApiError && e.message === "Grok refused this request for this key (no access to the model, or no balance): Your team has used all of its credits.");
+	script.push({ status: 500, json: { code: "internal", error: "Something broke." } });
+	await assert.rejects(send("x"), (e) => e instanceof ApiError && e.message === "Grok answered with an error (500): Something broke.");
+});
+
+// ----- OpenRouter -----
+
+test("OpenRouter: the models that can call tools, with what each takes; nothing that names this app is sent", async () => {
+	let reply = () => ({
+		json: {
+			data: [
+				{ id: "openai/gpt-6.2-astra", name: "OpenAI: GPT-6.2 Astra", created: 300, architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] }, supported_parameters: ["tools", "max_tokens"] },
+				{ id: "anthropic/claude-fable-5.2", name: "Anthropic: Claude Fable 5.2", created: 400, architecture: { input_modalities: ["text", "image", "file"], output_modalities: ["text"] } },
+				{ id: "meta/llama-words", name: "", created: 200, architecture: { input_modalities: ["text"], output_modalities: ["text"] } },
+				{ id: "google/gemini-4-neon-image", name: "Image maker", created: 500, architecture: { input_modalities: ["text"], output_modalities: ["image"] } },
+				{ id: "someone/unsaid", created: 100 },
+				{ name: "no id" },
+				null,
+			],
+			total_count: 7,
+		},
+	});
+	const s = await api((r) => (r.method === "GET" && r.path.startsWith("/api/v1/models") ? reply(r) : undefined));
+	const base = `${s.url}/api/v1`;
+	assert.deepEqual(await openRouterProvider.models(KEY, { baseURL: base }), [
+		{ value: "anthropic/claude-fable-5.2", name: "Anthropic: Claude Fable 5.2" },
+		{ value: "openai/gpt-6.2-astra", name: "OpenAI: GPT-6.2 Astra" },
+		{ value: "meta/llama-words", name: "meta/llama-words", images: false },
+		{ value: "someone/unsaid", name: "someone/unsaid" },
+	]);
+	const asked = s.requests.pop();
+	assert.equal(asked.path, "/api/v1/models?supported_parameters=tools");
+	assert.equal(asked.headers.authorization, `Bearer ${KEY}`);
+	for (const name of ["http-referer", "x-title", "x-openrouter-title", "x-openrouter-categories", "referer"]) assert.equal(asked.headers[name], undefined, name);
+	assert.deepEqual([openRouterProvider.id, openRouterProvider.label, openRouterProvider.company, OPENROUTER_BASE], ["openrouter", "OpenRouter", "OpenRouter", "https://openrouter.ai/api/v1"]);
+	// an answer that is not the list it should be lists nothing
+	reply = () => ({ json: { models: "something else" } });
+	assert.deepEqual(await openRouterProvider.models(KEY, { baseURL: base }), []);
+
+	// OpenRouter's list is open to anyone, so it says nothing about a key: the key's own page does, and is asked first
+	const real = await api((r) => {
+		if (r.method === "GET" && r.path === "/api/v1/key") return r.headers.authorization === `Bearer ${KEY}` ? { json: { data: { label: "sk-or-v1-abc…xyz", usage: 0, limit: null } } } : { status: 401, json: { error: { code: 401, message: "User not found." } } };
+		if (r.method === "GET" && r.path.startsWith("/api/v1/models")) return { json: { data: [{ id: "openai/gpt-6.2-astra", name: "OpenAI: GPT-6.2 Astra", created: 300 }] } };
+		return undefined;
+	});
+	assert.deepEqual(await openRouterProvider.models(KEY, { baseURL: `${real.url}/api/v1` }), [{ value: "openai/gpt-6.2-astra", name: "OpenAI: GPT-6.2 Astra" }]);
+	assert.deepEqual(real.requests.map((r) => r.path), ["/api/v1/key", "/api/v1/models?supported_parameters=tools"]);
+	await assert.rejects(openRouterProvider.models(OTHER_KEY, { baseURL: `${real.url}/api/v1` }), (e) => e instanceof ApiError && e.badKey && e.message === "OpenRouter did not accept the API key. Check it in Settings → Agents & models → API keys.");
+	assert.equal(real.requests.pop().path, "/api/v1/key", "the list is not asked for with a key that is not one");
+	// (a key's page that cannot be had for another reason does not stand in the way: `s` above has none)
+	reply = () => ({ status: 401, json: { error: { code: 401, message: "No auth credentials found" } } });
+	await assert.rejects(openRouterProvider.models(KEY, { baseURL: base }), (e) => e instanceof ApiError && e.badKey && /^OpenRouter did not accept the API key/.test(e.message));
+});
+
+test("OpenRouter: the model's reasoning goes back as it came, part by part; lines that are not events, an answer that says twice why it ended, an error in the middle of one", async () => {
+	const script = [];
+	const s = await api((r) => (r.method === "POST" && r.path === "/api/v1/chat/completions" ? script.shift() : undefined));
+	const said = [];
+	const box = toolbox({ workshop_render_preview: { text: "Here it is.", image: PNG }, workshop_submit_svg: { text: "Taken." } });
+	const chat = openRouterProvider.chat({ apiKey: KEY, model: "anthropic/claude-fable-5.2", system: "You draw icons.", tools: TOOLS, callTool: box.callTool, onText: (t) => said.push(t), baseURL: `${s.url}/api/v1` });
+	const send = (text) => chat.send(text, [], new AbortController().signal);
+	const last = () => s.posts("/chat/completions").pop();
+
+	script.push(
+		fake.completionsAnswer({
+			comments: true,
+			usage: true,
+			details: [
+				[{ type: "reasoning.text", text: "A key has ", index: 0, format: "anthropic-claude-v1", id: "rs_1" }],
+				[{ type: "reasoning.text", text: "a bow and a bit.", index: 0 }],
+				[{ type: "reasoning.text", signature: "c2ln", index: 0 }],
+				[{ type: "reasoning.encrypted", data: "ZW5j", index: 1, format: "anthropic-claude-v1", id: "rs_2" }],
+			],
+			text: "Looking. ",
+			calls: [{ id: "call_1", name: "workshop_render_preview", arguments: { svg: ICON } }],
+		}),
+		fake.completionsAnswer({ usage: true, calls: [{ id: "call_2", name: "workshop_submit_svg", arguments: { svg: ICON, name: "Key" } }] }),
+		fake.completionsAnswer({ text: "Done.", usage: true })
+	);
+	assert.equal(await send("Draw a key."), "end_turn");
+	assert.equal(said.join(""), "Looking. Done.");
+	// (an answer that says twice why it ended runs its tools once)
+	assert.deepEqual(box.calls.map((c) => c[0]), ["workshop_render_preview", "workshop_submit_svg"]);
+	const sent = s.posts("/chat/completions").map((r) => r.body);
+	// routed only to a provider that takes the tools; nothing else is asked for, and nothing names this app
+	assert.deepEqual(Object.keys(sent[0]).sort(), ["messages", "model", "provider", "stream", "tools"]);
+	assert.deepEqual(sent[0].provider, { require_parameters: true });
+	for (const name of ["http-referer", "x-title", "x-openrouter-title", "referer"]) assert.equal(last().headers[name], undefined, name);
+	// the reasoning's parts are put together from their pieces, in order, and go back with the answer before the tool's
+	assert.deepEqual(sent[1].messages.slice(2, 4), [
+		{
+			role: "assistant",
+			content: "Looking. ",
+			reasoning_details: [
+				{ type: "reasoning.text", text: "A key has a bow and a bit.", index: 0, format: "anthropic-claude-v1", id: "rs_1", signature: "c2ln" },
+				{ type: "reasoning.encrypted", data: "ZW5j", index: 1, format: "anthropic-claude-v1", id: "rs_2" },
+			],
+			tool_calls: [{ id: "call_1", type: "function", function: { name: "workshop_render_preview", arguments: JSON.stringify({ svg: ICON }) } }],
+		},
+		{ role: "tool", tool_call_id: "call_1", content: "Here it is." },
+	]);
+	assert.equal(sent[2].messages[5].reasoning_details, undefined, "an answer without reasoning gets none");
+	assert.equal(last().refused, undefined);
+
+	// what goes wrong in the middle of an answer is said, and that request forgotten
+	const kept = last().body.messages.length + 1;
+	script.push(fake.completionsAnswer({ text: "Half", error: `Provider returned error for ${KEY}` }));
+	await assert.rejects(send("two"), (e) => e instanceof ApiError && e.message === "OpenRouter answered with an error: Provider returned error for (the key)");
+	// (and an answer that only ends as "error")
+	script.push(fake.completionsAnswer({ text: "Half", finish: "error" }));
+	await assert.rejects(send("two and a half"), (e) => e instanceof ApiError && e.message === "OpenRouter could not finish the request. Try again.");
+	// in words: no credit, moderation, no provider that can take the request
+	const fails = async (status, message, pattern, badKey = false) => {
+		script.push({ status, json: { error: { code: status, message, metadata: {} } } });
+		await assert.rejects(send("x"), (e) => {
+			assert.ok(e instanceof ApiError, String(e));
+			assert.match(e.message, pattern);
+			assert.equal(e.badKey, badKey);
+			return true;
+		});
+	};
+	await fails(401, "User not found.", /^OpenRouter did not accept the API key\. Check it in Settings → Agents & models → API keys\.$/, true);
+	await fails(402, "Insufficient credits. Add more to continue.", /^This OpenRouter key has no credit left: Insufficient credits\. Add more to continue\.$/);
+	await fails(403, "Your input was flagged.", /^OpenRouter refused this request \(moderation, or a limit set on the key\): Your input was flagged\.$/);
+	await fails(404, "No endpoints found that support tool use.", /^OpenRouter has no provider for that model that can take this request \(its tools, or the privacy settings of your OpenRouter account\): No endpoints found that support tool use\.$/);
+	await fails(429, "Rate limit exceeded", /^OpenRouter is limiting requests for this key right now\. Try again in a moment\.$/);
+	script.push(fake.completionsAnswer({ text: "Here." }));
+	assert.equal(await send("three"), "end_turn");
+	assert.equal(last().body.messages.length, kept + 1, "none of the requests that failed is in the conversation");
+});
+
+// ----- the pieces of an answer, however a provider sends them -----
+
+test("chat completions: tool calls are put together whatever a provider does with positions and ids; the reasoning's parts too", async () => {
+	const script = [];
+	const s = await api((r) => (r.method === "POST" && r.path === "/api/v1/chat/completions" ? script.shift() : undefined));
+	const box = toolbox();
+	const chunk = (delta, finish_reason = null) => ({ data: { id: "c", object: "chat.completion.chunk", created: 1, model: "m", choices: [{ index: 0, delta, finish_reason }] } });
+	const answer = (...deltas) => ({ sse: [chunk({ role: "assistant", content: "" }), ...deltas.map((d) => chunk(d)), chunk({}, "tool_calls"), { data: "[DONE]" }] });
+	// what a fresh conversation makes of one answer: the calls it runs, and what goes back of the answer
+	const made = async (...deltas) => {
+		box.calls.length = 0;
+		script.push(answer(...deltas), fake.completionsAnswer({ text: "Done." }));
+		const chat = openRouterProvider.chat({ apiKey: KEY, model: "m", system: "s", tools: TOOLS, callTool: box.callTool, onText: () => undefined, baseURL: `${s.url}/api/v1` });
+		assert.equal(await chat.send("x", [], new AbortController().signal), "end_turn");
+		const back = s.posts("/chat/completions").pop();
+		assert.equal(back.refused, undefined);
+		return { calls: box.calls.map((c) => [c[0], c[1]]), back: back.body.messages[2] };
+	};
+	const one = (svg) => JSON.stringify({ svg });
+	const call = (extra) => ({ type: "function", ...extra });
+
+	// every call at the same position, told apart by their ids (a provider that numbers none of them)
+	let r = await made({ tool_calls: [call({ index: 0, id: "a", function: { name: "workshop_render_preview", arguments: one("A") } })] }, { tool_calls: [call({ index: 0, id: "b", function: { name: "workshop_submit_svg", arguments: one("B") } })] });
+	assert.deepEqual(r.calls, [["workshop_render_preview", { svg: "A" }], ["workshop_submit_svg", { svg: "B" }]]);
+	assert.deepEqual(r.back.tool_calls.map((c) => c.id), ["a", "b"]);
+
+	// the usual way: a position, the id and name once, the arguments in pieces; two calls interleaved
+	r = await made(
+		{ tool_calls: [call({ index: 0, id: "a", function: { name: "workshop_render_preview", arguments: '{"sv' } })] },
+		{ tool_calls: [call({ index: 1, id: "b", function: { name: "workshop_submit_svg", arguments: '{"svg":' } })] },
+		{ tool_calls: [{ index: 0, function: { arguments: 'g":"A"}' } }] },
+		{ tool_calls: [{ index: 1, function: { arguments: '"B"}' } }] }
+	);
+	assert.deepEqual(r.calls, [["workshop_render_preview", { svg: "A" }], ["workshop_submit_svg", { svg: "B" }]]);
+
+	// no position: the id and name repeated on every piece of a call
+	r = await made(
+		{ tool_calls: [call({ id: "a", function: { name: "workshop_render_preview", arguments: '{"sv' } })] },
+		{ tool_calls: [call({ id: "a", function: { name: "workshop_render_preview", arguments: 'g":"A"}' } })] },
+		{ tool_calls: [call({ id: "b", function: { name: "workshop_submit_svg", arguments: one("B") } })] }
+	);
+	assert.deepEqual(r.calls, [["workshop_render_preview", { svg: "A" }], ["workshop_submit_svg", { svg: "B" }]]);
+	assert.deepEqual(r.back.tool_calls.map((c) => [c.id, c.function.name]), [["a", "workshop_render_preview"], ["b", "workshop_submit_svg"]]);
+
+	// no position: the id and name first, then pieces with neither; a position that is null; a call without an id gets one
+	r = await made(
+		{ tool_calls: [call({ index: null, id: "a", function: { name: "workshop_render_preview", arguments: "" } })] },
+		{ tool_calls: [{ index: null, function: { arguments: '{"svg":' } }] },
+		{ tool_calls: [{ function: { arguments: '"A"}' } }] },
+		{ tool_calls: [call({ id: "", function: { name: "workshop_submit_svg", arguments: one("B") } })] },
+		{ tool_calls: [call({ function: { name: "workshop_submit_svg", arguments: one("C") } })] }
+	);
+	assert.deepEqual(r.calls, [["workshop_render_preview", { svg: "A" }], ["workshop_submit_svg", { svg: "B" }], ["workshop_submit_svg", { svg: "C" }]]);
+	assert.deepEqual(r.back.tool_calls.map((c) => c.id), ["a", "call_1", "call_2"]);
+
+	// what a provider adds to a call goes back on that call, and cannot stand in for its id, kind or function
+	r = await made({ tool_calls: [{ index: 0, id: "a", type: "function", function: { name: "workshop_render_preview", arguments: one("A") }, extra_content: { google: { thought_signature: "sig" } }, something: null }] });
+	assert.deepEqual(r.back.tool_calls, [{ id: "a", type: "function", function: { name: "workshop_render_preview", arguments: one("A") }, extra_content: { google: { thought_signature: "sig" } } }]);
+
+	// the reasoning's parts: pieces of one part joined (by kind and position, by kind and id, or going on with the part before
+	// when a piece has neither), parts of different kinds at one position kept apart
+	const reasons = async (...lists) => (await made(...lists.map((reasoning_details) => ({ reasoning_details })), { tool_calls: [call({ index: 0, id: "a", function: { name: "workshop_render_preview", arguments: one("A") } })] })).back.reasoning_details;
+	assert.deepEqual(await reasons([{ type: "reasoning.text", text: "Thi", index: 0 }], [{ type: "reasoning.text", text: "nk", index: 0 }], [{ type: "reasoning.encrypted", data: "ZW5j", index: 0 }]), [{ type: "reasoning.text", text: "Think", index: 0 }, { type: "reasoning.encrypted", data: "ZW5j", index: 0 }]);
+	assert.deepEqual(await reasons([{ type: "reasoning.text", text: "Thi", id: "r1" }], [{ type: "reasoning.summary", summary: "A sum", id: "r2" }], [{ type: "reasoning.text", text: "nk", id: "r1" }], [{ type: "reasoning.summary", summary: "mary", id: "r2" }]), [{ type: "reasoning.text", text: "Think", id: "r1" }, { type: "reasoning.summary", summary: "A summary", id: "r2" }]);
+	assert.deepEqual(await reasons([{ type: "reasoning.text", text: "Thi" }], [{ type: "reasoning.text", text: "nk" }], [{ type: "reasoning.text", signature: "c2ln" }], [{ type: "reasoning.encrypted", data: "ZW5j" }]), [{ type: "reasoning.text", text: "Think", signature: "c2ln" }, { type: "reasoning.encrypted", data: "ZW5j" }]);
+	assert.equal(await reasons("not a list", [null, 7]), undefined);
+});
+
 // ----- keeping a key, and the models it can use -----
 
 /** The app's API access with its parts in reach: a key file, settings in memory, the providers at local stand-ins. */
@@ -1090,7 +1504,10 @@ test("the Settings page's other half for API keys: what it shows, one request at
 	assert.deepEqual(panel.rows(), [
 		{ id: "anthropic", agent: "api:anthropic", label: "Anthropic API", company: "Anthropic", keyHint: "sk-ant-…", hasKey: false, loadingModels: false, rejected: false },
 		{ id: "openai", agent: "api:openai", label: "OpenAI API", company: "OpenAI", keyHint: "sk-…", hasKey: false, loadingModels: false, rejected: false },
+		{ id: "gemini", agent: "api:gemini", label: "Gemini API", company: "Gemini", keyHint: "AIza… or AQ.…", hasKey: false, loadingModels: false, rejected: false },
+		{ id: "grok", agent: "api:grok", label: "Grok API", company: "xAI", keyHint: "xai-…", hasKey: false, loadingModels: false, rejected: false },
 		{ id: "kimi", agent: "api:kimi", label: "Kimi API", company: "Kimi", keyHint: "sk-…", hasKey: false, loadingModels: false, rejected: false },
+		{ id: "openrouter", agent: "api:openrouter", label: "OpenRouter", company: "OpenRouter", keyHint: "sk-or-v1-…", hasKey: false, loadingModels: false, rejected: false },
 	]);
 	// messages that are not about API keys are someone else's; one for a provider that does not exist does nothing
 	assert.equal(panel.onMessage({ type: "ready" }), undefined);
@@ -1210,7 +1627,10 @@ test("the Shape Creator with an API key: listed beside the agents, drawing with 
 	assert.deepEqual(listed.agents, [
 		{ id: "api:anthropic", kind: "api", label: "Anthropic API", ready: false, problem: "Add your Anthropic API key in Settings → Agents & models → API keys to use it.", models: [] },
 		{ id: "api:openai", kind: "api", label: "OpenAI API", ready: false, problem: "Add your OpenAI API key in Settings → Agents & models → API keys to use it.", models: [] },
+		{ id: "api:gemini", kind: "api", label: "Gemini API", ready: false, problem: "Add your Gemini API key in Settings → Agents & models → API keys to use it.", models: [] },
+		{ id: "api:grok", kind: "api", label: "Grok API", ready: false, problem: "Add your xAI API key in Settings → Agents & models → API keys to use it.", models: [] },
 		{ id: "api:kimi", kind: "api", label: "Kimi API", ready: false, problem: "Add your Kimi API key in Settings → Agents & models → API keys to use it.", models: [] },
+		{ id: "api:openrouter", kind: "api", label: "OpenRouter", ready: false, problem: "Add your OpenRouter API key in Settings → Agents & models → API keys to use it.", models: [] },
 	]);
 	await c.send({ type: "creatorSettings" });
 	assert.equal(c.settingsOpened(), 1);
@@ -1340,7 +1760,7 @@ test("the Shape Creator with an API key: OpenAI and Kimi draw through the same t
 	assert.equal(await w.a.saveKey("kimi", OTHER_KEY), undefined);
 	const c = studio(w);
 	await c.send({ type: "ready" });
-	assert.deepEqual(apiCreatorAgents(w.a).map((a) => [a.id, a.ready, a.model ?? null]), [["api:anthropic", false, null], ["api:openai", true, "gpt-6.2-astra"], ["api:kimi", true, "kimi-k3.1-pro"]]);
+	assert.deepEqual(apiCreatorAgents(w.a).map((a) => [a.id, a.ready, a.model ?? null]), [["api:anthropic", false, null], ["api:openai", true, "gpt-6.2-astra"], ["api:gemini", false, null], ["api:grok", false, null], ["api:kimi", true, "kimi-k3.1-pro"], ["api:openrouter", false, null]]);
 
 	responses.push(fake.responsesAnswer("resp_1", [{ call: "workshop_render_preview", id: "call_1", arguments: { svg: ICON } }]), fake.responsesAnswer("resp_2", [{ call: "workshop_submit_svg", id: "call_2", arguments: { svg: ICON, name: "Astra's key" } }]), fake.responsesAnswer("resp_3", [{ text: "Done." }]));
 	await c.send({ type: "create", agent: "api:openai", model: "gpt-6.2-astra", prompt: "a key" });
@@ -1413,7 +1833,7 @@ test("the Shape Creator with an API key: the rules are said again after a reques
 
 	// a model the provider says takes no pictures: it gets the description only, the user is told, and a preview is words
 	assert.equal(await w.a.saveKey("kimi", OTHER_KEY), undefined);
-	assert.deepEqual(apiCreatorAgents(w.a)[2].models, [{ value: "kimi-k3", name: "kimi-k3" }, { value: "moonshot-v1-32k", name: "moonshot-v1-32k" }]);
+	assert.deepEqual(apiCreatorAgents(w.a).find((a) => a.id === "api:kimi").models, [{ value: "kimi-k3", name: "kimi-k3" }, { value: "moonshot-v1-32k", name: "moonshot-v1-32k" }]);
 	completions.push(fake.completionsAnswer({ calls: [{ id: "call_1", name: "workshop_render_preview", arguments: { svg: ICON } }] }), fake.completionsAnswer({ calls: [{ id: "call_2", name: "workshop_submit_svg", arguments: { svg: ICON, name: "Drawn blind" } }] }), fake.completionsAnswer({ text: "Done." }));
 	await c.send({ type: "create", agent: "api:kimi", model: "moonshot-v1-32k", prompt: "a key", images: [{ mimeType: "image/png", base64: "AAAA" }] });
 	assert.equal(c.of("created").pop().title, "Drawn blind");
@@ -1445,5 +1865,55 @@ test("the Shape Creator with an API key: the rules are said again after a reques
 	assert.equal(w.a.wasRejected("anthropic"), false);
 	await assert.rejects(c.send({ type: "create", agent: "api:anthropic", prompt: "a key" }), /Anthropic did not accept the API key/);
 	assert.equal(w.a.wasRejected("anthropic"), true);
+	c.core.pageGone();
+});
+
+test("the Shape Creator with an API key: Gemini, Grok and OpenRouter draw through the same two tools, each with its own key", { timeout: 30000 }, async () => {
+	const answers = { gemini: [], grok: [], openrouter: [] };
+	const s = await api((r) => {
+		if (r.method === "GET" && r.path.startsWith("/v1beta/models")) return { json: { models: [{ name: "models/gemini-4-hydrogen", displayName: "Gemini 4 Hydrogen", supportedGenerationMethods: ["generateContent"] }] } };
+		if (r.method === "GET" && r.path === "/v1/language-models") return { json: { models: [{ id: "grok-4.7", created: 300, input_modalities: ["text", "image"], output_modalities: ["text"] }] } };
+		if (r.method === "GET" && r.path.startsWith("/api/v1/models")) return { json: { data: [{ id: "anthropic/claude-fable-5.2", name: "Anthropic: Claude Fable 5.2", created: 400, architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] } }] } };
+		if (r.method === "POST" && r.path === "/v1beta/openai/chat/completions") return answers.gemini.shift();
+		if (r.method === "POST" && r.path === "/v1/chat/completions") return answers.grok.shift();
+		if (r.method === "POST" && r.path === "/api/v1/chat/completions") return answers.openrouter.shift();
+		return undefined;
+	});
+	const w = access({ gemini: `${s.url}/v1beta/openai`, grok: `${s.url}/v1`, openrouter: `${s.url}/api/v1` });
+	const keys = { gemini: "test-key-for-the-stand-in-gemini", grok: "test-key-for-the-stand-in-grok", openrouter: "test-key-for-the-stand-in-openrouter" };
+	for (const [id, key] of Object.entries(keys)) assert.equal(await w.a.saveKey(id, key), undefined, id);
+	assert.deepEqual(apiCreatorAgents(w.a).filter((a) => a.ready).map((a) => [a.id, a.label, a.models]), [
+		["api:gemini", "Gemini API", [{ value: "gemini-4-hydrogen", name: "Gemini 4 Hydrogen" }]],
+		["api:grok", "Grok API", [{ value: "grok-4.7", name: "grok-4.7" }]],
+		["api:openrouter", "OpenRouter", [{ value: "anthropic/claude-fable-5.2", name: "Anthropic: Claude Fable 5.2" }]],
+	]);
+	const c = studio(w);
+	await c.send({ type: "ready" });
+	// each looks at its drawing, then hands it in: the way its provider sends tool calls
+	const looks = (how) => [
+		fake.completionsAnswer({ ...how, calls: [{ id: "call_1", name: "workshop_render_preview", arguments: { svg: ICON }, ...(how.more ? { more: how.more } : {}) }] }),
+		fake.completionsAnswer({ ...how, calls: [{ id: "call_2", name: "workshop_submit_svg", arguments: { svg: ICON, name: how.title } }] }),
+		fake.completionsAnswer({ text: "Done.", finish: how.finish ?? "stop" }),
+	];
+	answers.gemini.push(...looks({ title: "Gemini's key", whole: true, finish: "stop", more: { extra_content: { google: { thought_signature: "c2ln" } } } }));
+	answers.grok.push(...looks({ title: "Grok's key", whole: true, finish: "end_turn" }));
+	answers.openrouter.push(...looks({ title: "OpenRouter's key", usage: true, details: [[{ type: "reasoning.encrypted", data: "ZW5j", index: 0 }]] }));
+	const drawn = [];
+	for (const [agent, model, path] of [["api:gemini", "gemini-4-hydrogen", "/v1beta/openai/chat/completions"], ["api:grok", "grok-4.7", "/v1/chat/completions"], ["api:openrouter", "anthropic/claude-fable-5.2", "/api/v1/chat/completions"]]) {
+		await c.send({ type: "create", agent, model, prompt: "a key" });
+		drawn.push(c.of("created").pop().title);
+		const posts = s.requests.filter((r) => r.method === "POST" && r.path === path);
+		assert.equal(posts.length, 3, agent);
+		assert.ok(posts.every((r) => r.headers.authorization === `Bearer ${keys[agent.slice(4)]}` && !r.refused), `${agent}: its own key, and a conversation the provider accepts`);
+		// it looked at its work: the picture the page drew went back to it, after the tool's answer
+		assert.equal(posts[1].body.messages.pop().content[1].image_url.url, `data:image/png;base64,${PNG.base64}`, agent);
+	}
+	assert.deepEqual(drawn, ["Gemini's key", "Grok's key", "OpenRouter's key"]);
+	assert.deepEqual(c.of("creating").filter((m) => m.state === "working").map((m) => m.agent), ["Gemini API · Gemini 4 Hydrogen", "Grok API · grok-4.7", "OpenRouter · Anthropic: Claude Fable 5.2"]);
+	// what each provider needs back went back: Gemini's signature on its call, OpenRouter's reasoning with its answer
+	const second = (path) => s.requests.filter((r) => r.method === "POST" && r.path === path)[1].body.messages[2];
+	assert.deepEqual(second("/v1beta/openai/chat/completions").tool_calls[0].extra_content, { google: { thought_signature: "c2ln" } });
+	assert.deepEqual(second("/api/v1/chat/completions").reasoning_details, [{ type: "reasoning.encrypted", data: "ZW5j", index: 0 }]);
+	assert.doesNotMatch(JSON.stringify(c.posted) + JSON.stringify(w.settings), /test-key-for-the-stand-in/);
 	c.core.pageGone();
 });

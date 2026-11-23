@@ -2,8 +2,9 @@
 
 ## [Unreleased]
 
-- **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's or Kimi's models with
-  your own API key, without an agent program. A key is checked with its provider, then kept
+- **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's, Gemini's, Grok's or
+  Kimi's models, or the many behind OpenRouter, with your own API key, without an agent
+  program. A key is checked with its provider, then kept
   encrypted with a secret from the macOS Keychain; it is never written to `settings.json`,
   never shown again, and nothing about it is taken from environment variables. For now these
   models can draw in the **Shape Creator**, where they are listed beside the agents; the

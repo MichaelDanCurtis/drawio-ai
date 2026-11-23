@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). In the extension those tabs still say "Next". The desktop app can also use Anthropic's, OpenAI's or Kimi's models with your own API key (Settings → Agents & models), for the Shape Creator to begin with; the extension works with agents as before.
+The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). In the extension those tabs still say "Next". The desktop app can also use Anthropic's, OpenAI's, Gemini's, Grok's and Kimi's models, and those behind OpenRouter, with your own API key (Settings → Agents & models), for the Shape Creator to begin with; the extension works with agents as before.
 
 ### Changed
 
