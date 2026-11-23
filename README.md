@@ -8,7 +8,7 @@
 
 1. Open or create a diagram: any `.drawio`, `.drawio.svg` or `.drawio.png` file, or **Draw.io: New Draw.io Diagram**.
 2. Open the chat: the ✦ button in the editor title bar, or **Draw.AI: Open Draw.AI in Chat**. This is VS Code's own chat with the **Draw.AI** agent chosen. It uses the model you pick in the chat (GitHub Copilot, or any other chat model extension).
-3. Describe a change. Every answer ends with buttons: **Keep Changes** / **Revert Changes** while AI edits are pending, **Lasso Select**, **Mark Up**, **Review**, **Export PDF** and **Export…**, plus suggestions such as *Tidy up the layout*. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
+3. Describe a change. The AI's edits appear in the diagram and stay pending until you keep or revert them with the review bar in the editor. To change only part of the diagram, select shapes first, or press `Alt+L` and draw around them.
 
 In the diagram: `Alt+K` asks the AI about the selection inline, `Alt+L` starts the lasso, `Alt+M` starts markup.
 

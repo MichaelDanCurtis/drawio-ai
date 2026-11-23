@@ -5,13 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0]
 
 ### Changed
 
 - Requests from a diagram (`Alt+K`, lasso, markup, review, sketch, from code) and **Open Draw.AI in Chat** now go to the **Draw.AI agent** in VS Code's chat, not to `@drawio`. VS Code's Copilot chat runtime (the default since November 2026) does not run extension chat participants, and the Local runtime that does is removed in February 2027. Pending changes are kept or reverted with the buttons in the diagram's title bar. Set `drawio-ai.chat.target` to `participant` to keep using `@drawio` while the Local runtime exists. VS Code older than 1.142, which does not know the agent, keeps using `@drawio` by itself
 
-- YAML files (**Diagram from Code…**, the Mapper) are read with js-yaml 5 (was 3), whose loader only knows the safe schema. Merge keys (`<<: *common`) in compose files are still followed.
+- YAML files (**Diagram from Code…**, the Mapper) are read with js-yaml 5 (was 3), whose loader only knows the safe schema. Merge keys (`<<: *common`) are followed in both, so a compose service built on an anchor keeps its image and what it depends on.
 
 ### Added
 
@@ -34,9 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **The look**: warm paper in light mode and black in dark mode, with the dot matrix behind the toolbars and panels (dots near the pointer brighten and lean away; it is never drawn over the diagram), four icon styles (Classic, Dot matrix 2D, Dot matrix 3D, Realistic 3D), the toolbar at the top, left, right or bottom, and quick tooltips.
   - Settings under **Draw.AI › Look**: `drawio-ai.look.theme` (`omni` or `drawio` for draw.io's standard colours and font), `drawio-ai.look.icons`, `drawio-ai.look.matrix`, `drawio-ai.look.toolbar`. Icons, the matrix and the toolbar's place change in the open editor without loading it again. `drawio-ai.look.editorTools: false` gives the editor as it was. Light or dark still follows `drawio-ai.appearance`.
   - With draw.io's `min`, `simple` and `sketch` themes, which have toolbars of their own, the editor gets presentation mode (from the command) and quick tooltips only.
-- The Draw.AI icon is back in the activity bar, with two views:
-  - **Start**: New Diagram, Open Draw.AI in Chat, Diagram from Code…, Diagram from Sketch…, Import from Another Tool…, Export to PDF…, Design Templates… and Connect Claude Code / Codex…
+- The Draw.AI icon is back in the activity bar, with three views:
+  - **Start**: New Diagram, Open Draw.AI in Chat, Diagram from Code…, Map Something…, Shape Workshop…, Diagram from Sketch…, Import from Another Tool…, Export to PDF…, Design Templates… and Connect Claude Code / Codex…
   - **Diagrams**: every diagram in the workspace (`.drawio`, `.dio`, `.drawio.svg`, `.drawio.png`), kept up to date as files are added or removed. A diagram opens in Draw.AI whatever the default editor for its type is; **Open to the Side** and **Reveal in Explorer View** are on each row
+  - **Maps**: the maps of the diagram used last (see the Mapper above).
 
 ### Fixed
 
