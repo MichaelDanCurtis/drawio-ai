@@ -353,6 +353,7 @@ app.whenReady().then(async () => {
 	DiagramWindow.installIpc();
 	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog(), settings: (section) => openSettings(section), workshop: (mode) => WorkshopWindow.open(server, mode ?? "gallery") };
 	SettingsWindow.openWorkshop = () => WorkshopWindow.open(server, "gallery");
+	WorkshopWindow.openSettings = (section) => openSettings(section);
 	WorkshopWindow.host = {
 		insert: async (shape) => {
 			const w = DiagramWindow.focused();

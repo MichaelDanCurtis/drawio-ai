@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's or Kimi's models with
+  your own API key, without an agent program. A key is checked with its provider, then kept
+  encrypted with a secret from the macOS Keychain; it is never written to `settings.json`,
+  never shown again, and nothing about it is taken from environment variables. For now these
+  models can draw in the **Shape Creator**, where they are listed beside the agents; the
+  diagram chat is next.
+- Shape Creator: an agent that is not ready says why in full (the note was cut off at the
+  first line), with a link to where it is set up in Settings.
+- A shape of a Visio stencil that has no name is called "Shape 3" (by its place) and no
+  longer "null".
 - **Shape Creator** in the Shape Workshop (its third tab, or Shapes → Create a Shape…):
   describe an icon and one of your agents draws it as SVG. See it at the sizes a diagram uses,
   ask for changes, edit the source, then insert it, keep it in **My shapes** or another

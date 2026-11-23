@@ -57,7 +57,7 @@ after(async () => {
 });
 
 /** Opens the page with the Workshop's other half behind it, as the extension's panel does. */
-async function open({ dark = false, diagram = true, shifter = false, creator = false } = {}) {
+async function open({ dark = false, diagram = true, shifter = false, creator = false, apis = false } = {}) {
 	const data = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-workshop-e2e-"));
 	const shapes = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-shapes-e2e-"));
 	for (const [name, colour] of [["postgres", "#336791"], ["redis", "#d82c20"], ["kafka", "#222222"], ["nginx", "#009639"]]) fs.writeFileSync(path.join(shapes, `${name}.svg`), SVG(colour));
@@ -80,7 +80,7 @@ async function open({ dark = false, diagram = true, shifter = false, creator = f
 	const sets = [];
 	const loaded = [];
 	// what the Shape Creator's scripted agent was asked and saw
-	const drawing = { opened: [], prompts: [], looked: [] };
+	const drawing = { opened: [], prompts: [], looked: [], settings: [] };
 	const ICON = (fill, n) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect x="6" y="${10 + n}" width="36" height="24" rx="4" fill="${fill}"/></svg>`;
 	// the Shape Shifter's side of a diagram, faked: two of draw.io's shapes, one selected cell, a stencil of three shapes
 	const applied = [];
@@ -138,7 +138,15 @@ async function open({ dark = false, diagram = true, shifter = false, creator = f
 						agents: () => [
 							{ id: "ready", label: "Ready agent", ready: true, models: [{ value: "small", name: "Small" }, { value: "large", name: "Large" }], model: "small" },
 							{ id: "broken", label: "Broken agent", ready: false, problem: "Broken agent is not installed.", models: [] },
+							// as the desktop app has it: providers' models with the user's own API key, and a way to Settings
+							...(apis
+								? [
+										{ id: "api:anthropic", kind: "api", label: "Anthropic API", ready: false, problem: "Add your Anthropic API key in Settings → Agents & models → API keys to use it.", models: [] },
+										{ id: "api:openai", kind: "api", label: "OpenAI API", ready: true, models: [{ value: "gpt-new", name: "gpt-new" }, { value: "gpt-old", name: "gpt-old" }], model: "gpt-old" },
+								  ]
+								: []),
 						],
+						...(apis ? { settings: (agent) => void drawing.settings.push(agent) } : {}),
 						open: async (o) => {
 							drawing.opened.push({ agent: o.agent, model: o.model });
 							let stop;
@@ -177,7 +185,7 @@ async function open({ dark = false, diagram = true, shifter = false, creator = f
 	}, dark);
 	await page.goto(`${base}/page`);
 	await page.waitForSelector("#galleryList .gallery");
-	return { page, problems, inserted, sets, loaded, downloads, applied, askedAgent, selected, service, drawing, configs: () => configs };
+	return { page, problems, inserted, sets, loaded, downloads, applied, askedAgent, selected, service, drawing, core, configs: () => configs };
 }
 
 test("the Workshop page loads from the extension's folder, lists the galleries, finds a shape and puts it in the diagram", async () => {
@@ -297,7 +305,7 @@ test("the Shape Shifter is off where the program has none (the extension, for no
 	await page.click("#importStencil");
 	await page.waitForFunction(() => document.getElementById("ask").open);
 	assert.equal(await page.$eval("#askTitle", (e) => e.textContent), "Import 3 shapes");
-	assert.match(await page.$eval("#askText", (e) => e.textContent), /^From Network: Router 1, Router 2, Router 3 /);
+	assert.equal(await page.$eval("#askText", (e) => e.textContent), "From Network: Router 1, Router 2, Router 3. They become a collection of your own.");
 	// (Enter in the field is OK, not the form's first button, which is Cancel)
 	await page.fill("#askInput", "Network kit");
 	await page.press("#askInput", "Enter");
@@ -337,6 +345,73 @@ test("the Shape Shifter is off where the program has none (the extension, for no
 	await page.close();
 });
 
+test("the Shape Creator lists models used with an API key beside the agents: a model is always named, and a missing key leads to Settings", async () => {
+	const w = await open({ creator: true, apis: true });
+	const { page } = w;
+	await page.waitForFunction(() => !document.querySelector('nav button[data-mode="creator"]').disabled);
+	await page.click('nav button[data-mode="creator"]');
+	await page.waitForFunction(() => document.querySelectorAll("#crAgent option").length === 4);
+	assert.match(await page.$eval("#createShape p", (p) => p.textContent), /^One of your agents \(Claude Code, Codex, Gemini…\), or a model you have an API key for, draws it as SVG\. Only your description and the images you attach are sent to it\.$/);
+	// agent programs first, then the providers
+	assert.deepEqual(
+		await page.$$eval("#crAgent optgroup", (groups) => groups.map((g) => [g.label, [...g.querySelectorAll("option")].map((o) => [o.value, o.textContent])])),
+		[
+			["Agents", [["ready", "Ready agent"], ["broken", "Broken agent (not ready)"]]],
+			["With an API key", [["api:anthropic", "Anthropic API (no key)"], ["api:openai", "OpenAI API"]]],
+		]
+	);
+	assert.equal(await page.$eval("#crAgent", (e) => e.value), "ready");
+
+	// with an API key one of the provider's models is always named: the one picked last
+	await page.selectOption("#crAgent", "api:openai");
+	assert.deepEqual(await page.$$eval("#crModel option", (els) => els.map((e) => e.textContent)), ["gpt-new", "gpt-old"]);
+	assert.deepEqual([await page.$eval("#crModel", (e) => e.value), await page.$eval("#crGo", (b) => b.disabled), await page.$eval("#crProblem", (e) => e.classList.contains("hidden"))], ["gpt-old", false, true]);
+	await page.fill("#crPrompt", "a key");
+	await page.click("#crGo");
+	await page.waitForFunction(() => document.querySelectorAll("#creatorOut .made").length === 1);
+	assert.deepEqual(w.drawing.opened, [{ agent: "api:openai", model: "gpt-old" }]);
+
+	// a provider without a key says what it needs, cannot be asked, and Settings is one click away
+	await page.selectOption("#crAgent", "api:anthropic");
+	assert.deepEqual(
+		[await page.$eval("#crProblemText", (e) => e.textContent), await page.$eval("#crGo", (b) => b.disabled), await page.$eval("#crModelRow", (r) => r.classList.contains("hidden")), await page.$eval("#crSettings", (b) => b.classList.contains("hidden"))],
+		["Add your Anthropic API key in Settings → Agents & models → API keys to use it.", true, true, false]
+	);
+	// (the app is told whose settings are wanted: this provider's key, or that agent's program)
+	const settled = async (n) => {
+		for (let i = 0; i < 100 && w.drawing.settings.length < n; i++) await new Promise((r) => setTimeout(r, 20));
+		return w.drawing.settings;
+	};
+	await page.click("#crSettings");
+	assert.deepEqual(await settled(1), ["api:anthropic"]);
+	await page.selectOption("#crAgent", "broken");
+	assert.equal(await page.$eval("#crSettings", (b) => b.classList.contains("hidden")), false);
+	await page.click("#crSettings");
+	assert.deepEqual(await settled(2), ["api:anthropic", "broken"]);
+	// an agent that is ready has nothing to say
+	await page.selectOption("#crAgent", "ready");
+	assert.deepEqual([await page.$eval("#crProblem", (e) => e.classList.contains("hidden")), await page.$$eval("#crModel option", (els) => els.map((e) => e.textContent))], [true, ["The agent's own choice", "Small", "Large"]]);
+
+	// what was chosen stays when the app tells the page again who can draw (a key was saved, a model hidden in Settings):
+	// the agent's own choice of model, and a model that is not the one picked last
+	const again = async () => {
+		await page.evaluate(() => (window.__lists = (window.__lists || 0) + 1));
+		w.core.creatorChanged();
+		await page.waitForFunction(() => document.querySelectorAll("#crAgent option").length === 4);
+		await new Promise((r) => setTimeout(r, 150));
+	};
+	assert.equal(await page.$eval("#crModel", (e) => e.value), "small");
+	await page.selectOption("#crModel", "");
+	await again();
+	assert.deepEqual([await page.$eval("#crAgent", (e) => e.value), await page.$eval("#crModel", (e) => e.value)], ["ready", ""]);
+	await page.selectOption("#crAgent", "api:openai");
+	await page.selectOption("#crModel", "gpt-new");
+	await again();
+	assert.deepEqual([await page.$eval("#crAgent", (e) => e.value), await page.$eval("#crModel", (e) => e.value)], ["api:openai", "gpt-new"]);
+	assert.deepEqual(w.problems, []);
+	await page.close();
+});
+
 test("the Shape Creator is off where the program has none, and on where it has: describe, look, insert, save, change", async () => {
 	const none = await open();
 	assert.equal(await none.page.$eval('nav button[data-mode="creator"]', (b) => b.disabled), true);
@@ -358,7 +433,9 @@ test("the Shape Creator is off where the program has none, and on where it has: 
 	assert.deepEqual([await page.$eval("#crAgent", (e) => e.value), await page.$eval("#crModel", (e) => e.value)], ["ready", "small"]);
 	// an agent that cannot be started says why, and cannot be asked
 	await page.selectOption("#crAgent", "broken");
-	assert.deepEqual([await page.$eval("#crProblem", (e) => e.textContent), await page.$eval("#crGo", (b) => b.disabled), await page.$eval("#crModelRow", (r) => r.classList.contains("hidden"))], ["Broken agent is not installed.", true, true]);
+	assert.deepEqual([await page.$eval("#crProblemText", (e) => e.textContent), await page.$eval("#crGo", (b) => b.disabled), await page.$eval("#crModelRow", (r) => r.classList.contains("hidden"))], ["Broken agent is not installed.", true, true]);
+	// (this program has no Settings to send the user to)
+	assert.equal(await page.$eval("#crSettings", (b) => b.classList.contains("hidden")), true);
 	await page.selectOption("#crAgent", "ready");
 	assert.equal(await page.$eval("#crGo", (b) => b.disabled), false);
 

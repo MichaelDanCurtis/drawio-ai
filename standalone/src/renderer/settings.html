@@ -67,6 +67,12 @@
 	.refresh-btn:hover:not(:disabled) { color: var(--ink); background: var(--surface-3); }
 	.refresh-btn:disabled { cursor: default; }
 	.model .last { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+	#agentTabs { margin: 8px 0 16px; }
+	#programsTab > p.lead, #apiTab > p.lead { color: var(--muted); margin: 0 0 18px; }
+	.agent .keyrow { display: flex; gap: 8px; align-items: center; padding: 8px 0; }
+	.agent .keyrow input { flex: 1; min-width: 0; min-height: 30px; padding: 4px 10px; font-family: var(--font-mono); font-size: 12px; }
+	.agent .keyrow .note { flex: 1; color: var(--muted); font-size: 12px; }
+	.agent .models .bad { color: var(--danger); font-size: 12px; padding: 4px 0 8px; }
 	.agent details { border-top: 1px solid var(--border); padding: 8px 14px 12px; }
 	.agent details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 	.agent details .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
@@ -134,8 +140,18 @@
 
 			<section id="agents">
 				<h2>Agents &amp; models</h2>
-				<p class="lead">Each agent is asked for its own models when you open this page (Refresh asks again). Untick a model to leave it out of the chat's picker. A new chat starts with the model you picked last.</p>
-				<div id="agentList"></div>
+				<div class="seg" role="group" aria-label="Agents, or API keys" id="agentTabs">
+					<button data-tab="programs" aria-pressed="true">Agents</button>
+					<button data-tab="api" aria-pressed="false">API keys</button>
+				</div>
+				<div id="programsTab">
+					<p class="lead">Each agent is asked for its own models when you open this page (Refresh asks again). Untick a model to leave it out of the chat's picker. A new chat starts with the model you picked last.</p>
+					<div id="agentList"></div>
+				</div>
+				<div id="apiTab" class="hidden">
+					<p class="lead">Use a provider's models with your own API key, without an agent program. A key is kept encrypted with a secret from this computer's keychain: it is never written to the settings file, never shown again, and sent only to its provider. The provider bills what is used to that key.</p>
+					<div id="apiList"></div>
+				</div>
 			</section>
 
 			<section id="chat">
@@ -210,9 +226,19 @@
 
 	// sections
 	function show(id) {
+		// ("api" is the API keys' half of Agents & models)
+		if (id === "api" || id === "agents") showAgentTab(id === "api" ? "api" : "programs");
+		if (id === "api") id = "agents";
 		for (const b of document.querySelectorAll("nav [data-section]")) b.classList.toggle("active", b.dataset.section === id);
 		for (const s of document.querySelectorAll("section")) s.classList.toggle("active", s.id === id);
 	}
+	// Agents & models has two halves: the agent programs, and the providers used with an API key
+	function showAgentTab(tab) {
+		for (const b of document.querySelectorAll("#agentTabs button")) b.setAttribute("aria-pressed", String(b.dataset.tab === tab));
+		$("programsTab").classList.toggle("hidden", tab !== "programs");
+		$("apiTab").classList.toggle("hidden", tab !== "api");
+	}
+	for (const b of document.querySelectorAll("#agentTabs button")) b.addEventListener("click", () => showAgentTab(b.dataset.tab));
 	for (const b of document.querySelectorAll("nav [data-section]")) b.addEventListener("click", () => show(b.dataset.section));
 	if (location.hash) show(decodeURIComponent(location.hash.slice(1)));
 
@@ -440,6 +466,148 @@
 	$("addLibrary").onclick = () => post({ type: "addShapeLocation", kind: "file" });
 	$("openFile").onclick = () => post({ type: "openSettingsFile" });
 
+	/** The providers whose models can be used with an API key: a key to save, or the models it gives. */
+	function renderApis(s) {
+		const list = $("apiList");
+		const seen = new Set();
+		for (const a of state.apis || []) {
+			seen.add(a.id);
+			const old = [...list.children].find((c) => c.dataset.api === a.id);
+			// a card that shows what it showed before is left as it is: a click or a Tab that is under way on it goes through
+			const shows = JSON.stringify([a, (s.modelCatalog || {})[a.agent] || [], (s.models || {})[a.agent] || {}]);
+			if (old && old.dataset.shows === shows) {
+				delete old.dataset.late;
+				continue;
+			}
+			const field = old ? old.querySelector(".keyrow input") : null;
+			// a key that is being typed is left alone, cursor and all: its card is drawn again when it is left
+			if (field && field === document.activeElement && !a.hasKey && !a.loadingModels) {
+				old.dataset.late = "1";
+				continue;
+			}
+			// (what was typed and not saved yet stays in the field)
+			const card = apiCard(a, s, field ? field.value : "");
+			card.dataset.shows = shows;
+			if (old) old.replaceWith(card);
+			else list.appendChild(card);
+		}
+		for (const c of [...list.children]) if (!seen.has(c.dataset.api)) c.remove();
+	}
+	// (only a card whose drawing was put off, and only once the focus has left it: what is being clicked or tabbed to elsewhere stays in place)
+	$("apiList").addEventListener("focusout", (e) => {
+		const card = e.target instanceof Element ? e.target.closest(".agent") : null;
+		if (card && card.dataset.late && !(e.relatedTarget instanceof Node && card.contains(e.relatedTarget))) setTimeout(() => state && card.dataset.late && renderApis(state.settings), 0);
+	});
+
+	function apiCard(a, s, typed) {
+		const card = document.createElement("div");
+		card.className = "agent";
+		card.dataset.api = a.id;
+		card.style.animation = "none";
+		const head = document.createElement("header");
+		const name = document.createElement("b");
+		name.textContent = a.label;
+		const sp = document.createElement("span");
+		sp.className = "spacer";
+		const tag = document.createElement("span");
+		tag.className = "tag";
+		tag.dataset.tone = a.rejected ? "warn" : a.hasKey ? "ok" : "plain";
+		tag.textContent = a.rejected ? "Not accepted" : a.hasKey ? "Key saved" : "No key";
+		if (a.hasKey) {
+			const refresh = document.createElement("button");
+			refresh.className = "refresh-btn";
+			refresh.disabled = !!a.loadingModels;
+			refresh.textContent = a.loadingModels ? "Asking…" : "Refresh";
+			refresh.title = "Ask " + a.company + " which models this key can use now";
+			refresh.onclick = () => post({ type: "refreshApiModels", provider: a.id });
+			head.append(name, sp, refresh, tag);
+		} else head.append(name, sp, tag);
+		card.appendChild(head);
+
+		const body = document.createElement("div");
+		body.className = "models";
+		const row = document.createElement("div");
+		row.className = "keyrow";
+		if (a.hasKey) {
+			const note = document.createElement("span");
+			note.className = "note";
+			note.textContent = "A key from " + a.company + " is kept in the keychain.";
+			const remove = document.createElement("button");
+			remove.className = "btn btn-sm btn-danger";
+			remove.textContent = "Remove key";
+			// (while the provider is being asked with it, the key stays)
+			remove.disabled = !!a.loadingModels;
+			remove.onclick = () => post({ type: "removeApiKey", provider: a.id });
+			row.append(note, remove);
+		} else {
+			const input = document.createElement("input");
+			input.type = "password";
+			input.autocomplete = "off";
+			input.spellcheck = false;
+			input.placeholder = a.loadingModels ? "Checking the key with " + a.company + "…" : "Paste your " + a.company + " API key (" + a.keyHint + ")";
+			input.setAttribute("aria-label", a.company + " API key");
+			input.disabled = !!a.loadingModels;
+			input.value = typed;
+			const save = document.createElement("button");
+			save.className = "btn btn-sm";
+			save.textContent = a.loadingModels ? "Checking…" : "Save key";
+			save.disabled = input.disabled;
+			const go = () => {
+				const key = input.value.trim();
+				if (!key) return void input.focus();
+				// (the field is emptied at once: the key is not kept in the page)
+				input.value = "";
+				input.blur();
+				post({ type: "setApiKey", provider: a.id, key });
+			};
+			save.onclick = go;
+			input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go(); } };
+			row.append(input, save);
+		}
+		body.appendChild(row);
+		if (a.error) {
+			const e = document.createElement("div");
+			e.className = "bad";
+			e.textContent = a.error;
+			body.appendChild(e);
+		}
+		const known = a.hasKey ? (s.modelCatalog || {})[a.agent] || [] : [];
+		const prefs = (s.models || {})[a.agent] || {};
+		const hidden = new Set(prefs.hidden || []);
+		if (a.hasKey && !known.length && !a.error) {
+			const e = document.createElement("div");
+			e.className = "empty";
+			e.textContent = a.loadingModels ? "Asking " + a.company + " for its models…" : "Refresh to list the models this key can use.";
+			body.appendChild(e);
+		}
+		for (const m of known) {
+			const line = document.createElement("div");
+			line.className = "model" + (hidden.has(m.value) ? " hidden-model" : "");
+			const cb = document.createElement("input");
+			cb.type = "checkbox";
+			cb.checked = !hidden.has(m.value);
+			cb.title = "Offer this model where models are picked";
+			cb.onchange = () => { post({ type: "setModelVisible", agent: a.agent, value: m.value, visible: cb.checked }); saved(); };
+			const nm = document.createElement("div");
+			nm.className = "name";
+			const t = document.createElement("div");
+			t.textContent = m.name;
+			nm.appendChild(t);
+			if (m.images === false) {
+				const d = document.createElement("span");
+				d.textContent = "Takes no pictures: it is given words only";
+				nm.appendChild(d);
+			}
+			const last = document.createElement("span");
+			last.className = "last";
+			if (prefs.preferred === m.value) { last.textContent = "Picked last"; last.title = "The next request to " + a.label + " starts with this model"; }
+			line.append(cb, nm, last);
+			body.appendChild(line);
+		}
+		card.appendChild(body);
+		return card;
+	}
+
 	bridge.onMessage((m) => {
 		if (m.type === "state") {
 			state = m;
@@ -447,6 +615,7 @@
 			$("openFile").title = m.file;
 			renderAppearance(m.settings);
 			renderAgents(m.settings);
+			renderApis(m.settings);
 			renderChat(m.settings);
 			renderEditor(m.settings);
 			renderShapes(m.settings);
