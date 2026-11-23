@@ -6,9 +6,17 @@
   Kimi's models, or the many behind OpenRouter, with your own API key, without an agent
   program. A key is checked with its provider, then kept
   encrypted with a secret from the macOS Keychain; it is never written to `settings.json`,
-  never shown again, and nothing about it is taken from environment variables. For now these
-  models can draw in the **Shape Creator**, where they are listed beside the agents; the
-  diagram chat is next.
+  never shown again, and nothing about it is taken from environment variables. These models
+  are listed beside the agents wherever an agent is used:
+  - the **chat** (and with it the Shifter's "Ask the agent" and the Mapper's requests): pick
+    a provider under "With an API key", then a model. The app runs the diagram's tools
+    itself; a tool that changes something asks first (Allow, Always allow in this chat,
+    Deny), and edits are yours to keep or revert as with an agent;
+  - the **Shape Creator**.
+- The chat's tool lines and permission cards name the Mapper's tools in words ("Mapping…")
+  as they do the diagram's.
+- Requests to Anthropic's API read what was sent before from its cache (cheaper rounds of
+  tool calls).
 - Shape Creator: an agent that is not ready says why in full (the note was cut off at the
   first line), with a link to where it is set up in Settings.
 - A shape of a Visio stencil that has no name is called "Shape 3" (by its place) and no

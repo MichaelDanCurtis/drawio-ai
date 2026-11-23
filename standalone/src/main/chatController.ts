@@ -4,12 +4,15 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ToolResult } from "../../../src/features/ai/DiagramToolbox";
 import { describeContext, SelectionContext } from "../../../src/features/ai/systemPrompt";
-import { AcpAgentSession, AuthRequiredError, SessionInfo } from "./acpSession";
+import { AcpAgentSession, AuthRequiredError, ChatSession, SessionInfo } from "./acpSession";
 import { adaptersSettled, noteAdapterFailure } from "./adapterVersions";
 import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./agents";
-import type { WindowMcpServer } from "./mcpServer";
+import { apiAccess } from "./api/catalog";
+import { apiChatAgents, ApiChatSession, ApiSetupError } from "./api/chatSession";
+import type { ApiProvider } from "./api/chat";
+import { chatSystemPrompt, type WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
-import { KnownModel, settings, settingsPath, updateSettings } from "./settings";
+import { ChatAgent, KnownModel, settings, settingsPath, updateSettings } from "./settings";
 import { modelsFromSession } from "./modelNames";
 import { rememberModels } from "./modelProbe";
 import type { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
@@ -54,32 +57,38 @@ export interface ChatHost {
 	pageMaps?(): { maps: number; findings: number };
 	mapAction?(action: string, text: string): void;
 	reportAction?(action: unknown): void;
-	/** Opens the Settings window. */
-	openSettings?(): void;
+	/** Opens the Settings window (`section`: on that part of it, "api" for the API keys). */
+	openSettings?(section?: string): void;
 	/** Slides the chat out of the window. */
 	collapseChat?(): void;
 	/** The chat's edge is dragged to `screenX` (screen coordinates); `done` when released. */
 	resizeChatTo?(screenX: number, done: boolean): void;
 }
 
+/**
+ * Who can answer a chat, as the picker lists them: the agent programs, then the providers
+ * whose models are used with an API key (`api`: no program is started for those).
+ */
+type Answerer = Omit<AgentStatus, "id"> & { id: ChatAgent; api?: boolean; detail?: string };
+
 const MAX_IMAGES = 4;
 let versionCounter = 0;
-/** Guards against windows re-recording each other's model lists (settings listeners are synchronous). */
 
 /**
- * The chat panel of one window: transcript, agent picker, and one ACP session
- * with the picked coding agent. Port of the extension's ChatViewProvider, with
- * its own model providers replaced by the user's agents.
+ * The chat panel of one window: transcript, agent picker, and one session with whoever was
+ * picked to answer: a coding agent over ACP, or a provider's model over its API with the
+ * user's key (api/chatSession.ts). Port of the extension's ChatViewProvider, with its own
+ * model providers replaced by the user's agents and API keys.
  */
 export class ChatController {
 	private view: WebContents | undefined;
 	private transcript: TranscriptItem[] = [];
 	private version = ++versionCounter;
-	private session: AcpAgentSession | undefined;
-	private starting: Promise<AcpAgentSession | undefined> | undefined;
+	private session: ChatSession | undefined;
+	private starting: Promise<ChatSession | undefined> | undefined;
 	private sessionError: string | undefined;
 	private authMethods: acp.AuthMethod[] = [];
-	private statuses: AgentStatus[] = [];
+	private statuses: Answerer[] = [];
 	private busy = false;
 	private lassoActive = false;
 	private firstPrompt = true;
@@ -92,8 +101,10 @@ export class ChatController {
 	private allowAll = settings().chat.allowAllByDefault;
 	private nextPermission = 1;
 	private toolSummaries: { name: string; result: ToolResult }[] = [];
-	/** This window's agent; the saved setting is only the default for new windows. */
-	private agent: AgentId = settings().agent;
+	/** Who answers in this window; the saved setting is only the default for new windows. */
+	private agent: ChatAgent = settings().agent;
+	/** Ends this chat's watch on the API keys. */
+	private unwatch: (() => void)[] = [];
 	/** Stop was pressed during the current turn (possibly before the agent finished starting). */
 	private turnCancelled = false;
 	/** Tests: answer permission requests automatically. */
@@ -107,6 +118,16 @@ export class ChatController {
 			if (this.toolSummaries.length > 50) this.toolSummaries.shift();
 		};
 		this.refreshStatuses();
+		// (a saved choice that is no longer one: an agent of an earlier version, a provider that is gone)
+		if (!this.statuses.some((s) => s.id === this.agent)) this.agent = "claude";
+		const access = apiAccess();
+		this.unwatch.push(
+			access.onKeyChange((id) => this.apiKeyChanged(id)),
+			access.onRejected(() => {
+				this.refreshStatuses();
+				this.postState();
+			})
+		);
 	}
 
 	/** The transcript so far (tests read it). */
@@ -114,8 +135,18 @@ export class ChatController {
 		return this.transcript;
 	}
 
-	public get agentId(): AgentId {
+	public get agentId(): ChatAgent {
 		return this.agent;
+	}
+
+	/** The provider whose model answers this chat with the user's API key, when it is not an agent program. */
+	private api(): ApiProvider | undefined {
+		return apiAccess().providerOfAgent(this.agent);
+	}
+
+	/** What the one who answers is called ("Claude Code", "Anthropic API"). */
+	private agentLabel(id: ChatAgent = this.agent): string {
+		return apiAccess().providerOfAgent(id)?.label ?? agentDef(id as AgentId).label;
 	}
 
 	public attach(view: WebContents): void {
@@ -204,7 +235,7 @@ export class ChatController {
 				else if (msg.done) this.host.resizeChatTo?.(NaN, true);
 				break;
 			case "openSettings":
-				this.host.openSettings?.();
+				this.host.openSettings?.(msg.section === "agents" || msg.section === "api" ? msg.section : undefined);
 				break;
 		}
 	}
@@ -229,8 +260,12 @@ export class ChatController {
 				void this.ensureSession().catch(() => undefined);
 				break;
 			case "drawai.copyInstall":
-				clipboard.writeText(agentDef(this.agentId).install);
+				if (this.api()) break;
+				clipboard.writeText(agentDef(this.agentId as AgentId).install);
 				this.push({ kind: "note", text: "Install command copied to the clipboard." });
+				break;
+			case "drawai.openApiKeys":
+				this.host.openSettings?.("api");
 				break;
 			case "drawai.openSettings":
 				if (this.host.openSettings) this.host.openSettings();
@@ -250,21 +285,45 @@ export class ChatController {
 		this.postState();
 	}
 
-	private refreshStatuses(): void {
-		this.statuses = agentStatuses();
+	/** The models a provider listed for its key changed (in Settings, or as a request found them). */
+	public catalogChanged(): void {
+		if (this.api()) this.postState();
 	}
 
-	private status(): AgentStatus | undefined {
+	/**
+	 * A provider's key was kept, replaced or removed. The conversation with that provider was
+	 * held with the key that is gone: a request under way ends as stopped, and the next one
+	 * starts over with the key kept now.
+	 */
+	private apiKeyChanged(id: string): void {
+		this.refreshStatuses();
+		if (this.agent !== `api:${id}`) return void this.postState();
+		const held = this.busy || this.transcript.some((t) => t.kind === "user");
+		this.stop();
+		this.resetSession();
+		if (held) this.push({ kind: "note", text: `The ${this.agentLabel()} key changed: a new conversation starts.` });
+		this.postState();
+		void this.ensureSession().catch(() => undefined);
+	}
+
+	private refreshStatuses(): void {
+		this.statuses = [
+			...agentStatuses().map((s): Answerer => ({ ...s, ...(!s.installed ? { detail: "not installed" } : !s.signedIn ? { detail: "sign-in?" } : {}) })),
+			...apiChatAgents(apiAccess()).map((a): Answerer => ({ id: a.id as ChatAgent, label: a.label, api: true, installed: true, signedIn: a.hasKey, ...(a.detail ? { detail: a.detail } : {}), ...(a.problem ? { problem: a.problem } : {}) })),
+		];
+	}
+
+	private status(): Answerer | undefined {
 		return this.statuses.find((s) => s.id === this.agentId);
 	}
 
-	private switchAgent(id: AgentId): void {
+	private switchAgent(id: ChatAgent): void {
 		if (!this.statuses.some((s) => s.id === id)) return;
 		this.stop();
 		this.resetSession();
 		this.agent = id;
 		updateSettings({ agent: id });
-		if (this.transcript.length) this.push({ kind: "note", text: `Switched to ${agentDef(id).label}: a new conversation starts.` });
+		if (this.transcript.length) this.push({ kind: "note", text: `Switched to ${this.agentLabel(id)}: a new conversation starts.` });
 		this.postState();
 		void this.ensureSession().catch(() => undefined);
 	}
@@ -280,14 +339,61 @@ export class ChatController {
 		for (const resolve of this.permissions.values()) resolve({ outcome: "cancelled" });
 	}
 
+	/**
+	 * A session with a provider's model, used with the user's API key. Nothing is started and
+	 * nothing is asked of the keychain or the provider: it is ready when a key is kept.
+	 */
+	private startApi(provider: ApiProvider): Promise<ChatSession | undefined> {
+		const session: ApiChatSession = new ApiChatSession({
+			access: apiAccess(),
+			provider,
+			system: () => chatSystemPrompt(this.mcp.maps),
+			tools: { list: () => this.mcp.chatTools(), call: (name, args, signal) => this.mcp.call(name, args, { signal }) },
+			handlers: {
+				onUpdate: (u) => {
+					if (this.session === session) this.onUpdate(u);
+				},
+				requestPermission: (req, signal) => this.requestPermission(req, signal),
+				onExit: () => undefined,
+				onNote: (text) => {
+					if (this.session === session) this.push({ kind: "note", text });
+				},
+			},
+		});
+		this.session = session;
+		this.sessionError = undefined;
+		this.starting = (async () => {
+			try {
+				await session.start();
+				return session;
+			} catch (e: any) {
+				if (this.session !== session) return undefined;
+				// (nothing was started that could be tried again: the next request looks for the key anew)
+				this.starting = undefined;
+				this.handleStartError(e, session);
+				throw e;
+			} finally {
+				if (this.session === session) this.starting = undefined;
+			}
+		})();
+		// (shown once it is no longer starting: a provider whose models are not listed yet has none to wait for)
+		void this.starting.then(
+			() => this.session === session && this.postState(),
+			() => undefined
+		);
+		return this.starting;
+	}
+
 	/** Starts the picked agent and its session if needed; reports problems in the panel. */
-	private ensureSession(waited = false): Promise<AcpAgentSession | undefined> {
+	private ensureSession(waited = false): Promise<ChatSession | undefined> {
 		if (this.session?.info) return Promise.resolve(this.session);
 		if (this.starting) return this.starting;
+		const provider = this.api();
+		if (provider) return this.startApi(provider);
 		// just after launch, the lookup of the newest adapters may still be under way: wait for it once
 		const settling = waited ? undefined : adaptersSettled();
 		if (settling) {
-			const waiting: Promise<AcpAgentSession | undefined> = settling.then(() => {
+			const waiting: Promise<ChatSession | undefined> = settling.then(() => {
 				if (this.starting === waiting) this.starting = undefined;
 				this.refreshStatuses();
 				return this.ensureSession(true);
@@ -295,7 +401,7 @@ export class ChatController {
 			this.starting = waiting;
 			return waiting;
 		}
-		const def = agentDef(this.agentId);
+		const def = agentDef(this.agentId as AgentId);
 		const status = this.status();
 		if (status && !status.installed) {
 			this.sessionError = `${def.label} is not installed`;
@@ -352,7 +458,7 @@ export class ChatController {
 		return this.starting;
 	}
 
-	private handleStartError(e: any, session: AcpAgentSession): void {
+	private handleStartError(e: any, session: ChatSession): void {
 		if (e instanceof AuthRequiredError) {
 			this.authMethods = e.methods;
 			this.sessionError = "Sign-in needed";
@@ -360,7 +466,8 @@ export class ChatController {
 		} else {
 			session.dispose();
 			this.session = undefined;
-			this.sessionError = String(e?.message ?? e).split("\n")[0];
+			// (the chip beside the model has room for a few words; the request's own error says the rest)
+			this.sessionError = e instanceof ApiSetupError ? String(e.message).split(". ")[0] : String(e?.message ?? e).split("\n")[0];
 		}
 		this.postState();
 	}
@@ -368,11 +475,12 @@ export class ChatController {
 	private async signIn(): Promise<void> {
 		const session = this.session;
 		const method = this.authMethods[0];
+		if (this.api()) return void this.host.openSettings?.("api");
 		if (!session || !method) {
-			this.push({ kind: "note", text: `Run \`${agentDef(this.agentId).signIn}\` in a terminal, then press Retry.` });
+			this.push({ kind: "note", text: `Run \`${agentDef(this.agentId as AgentId).signIn}\` in a terminal, then press Retry.` });
 			return;
 		}
-		this.push({ kind: "note", text: `Signing in to ${agentDef(this.agentId).label} (${method.name})… follow the browser or terminal prompt.` });
+		this.push({ kind: "note", text: `Signing in to ${this.agentLabel()} (${method.name})… follow the browser or terminal prompt.` });
 		try {
 			await session.authenticate(method.id);
 			this.authMethods = [];
@@ -386,13 +494,15 @@ export class ChatController {
 
 	private errorAction(e: any): { title: string; command: string } | undefined {
 		const status = this.status();
+		// (a key that is missing, unreadable or not accepted, or no model switched on: put right in Settings)
+		if (e instanceof ApiSetupError) return { title: "Open Settings", command: "drawai.openApiKeys" };
 		if (e instanceof AuthRequiredError) return e.methods.length ? { title: "Sign In", command: "drawai.signIn" } : { title: "Retry", command: "drawai.retry" };
 		if (status && !status.installed) return { title: "Copy Install Command", command: "drawai.copyInstall" };
 		return { title: "Retry", command: "drawai.retry" };
 	}
 
 	/** Switches a new session to the model chosen in Settings, if the agent offers it. */
-	private async applyPreferredModel(session: AcpAgentSession): Promise<void> {
+	private async applyPreferredModel(session: ChatSession): Promise<void> {
 		const preferred = settings().models[this.agentId]?.preferred;
 		if (!preferred || preferred.startsWith("mode:") || !session.info) return;
 		const { models, current } = this.modelList(session.info);
@@ -413,7 +523,8 @@ export class ChatController {
 
 	/** Remembers what the agent offers, so Settings can list it while the agent is not running. */
 	private rememberModels(models: KnownModel[]): void {
-		rememberModels(this.agentId, models);
+		// (what a provider lists for a key is kept by api/access.ts, with more than a session knows of it)
+		if (!this.api()) rememberModels(this.agentId as AgentId, models);
 	}
 
 	private async pickModel(value: string): Promise<void> {
@@ -464,7 +575,7 @@ export class ChatController {
 		let stop: string | undefined;
 		let error: string | undefined;
 		try {
-			let session: AcpAgentSession | undefined;
+			let session: ChatSession | undefined;
 			try {
 				session = await this.ensureSession();
 			} catch (e: any) {
@@ -481,14 +592,16 @@ export class ChatController {
 			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
 			const context = describeContext(this.host.fileName(), selection);
-			const preamble = this.firstPrompt ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
+			// (an agent program is told where it is and which tools to use; a model used through its API has only these tools, and is told so with every request)
+			const viaApi = session instanceof ApiChatSession;
+			const preamble = this.firstPrompt && !viaApi ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
 			this.firstPrompt = false;
 			const blocks: acp.ContentBlock[] = [{ type: "text", text: `${preamble}<context>\n${context}\n</context>\n\n${text}` }];
 			if (images.length) {
 				if (session.info.images) {
 					for (const img of images) blocks.push({ type: "image", mimeType: img.mimeType, data: img.base64 });
 				} else {
-					this.push({ kind: "note", text: `${session.label} does not accept images over ACP; sent the text only.` });
+					this.push({ kind: "note", text: viaApi ? `${session.label} takes no pictures; sent the text only.` : `${session.label} does not accept images over ACP; sent the text only.` });
 				}
 			}
 			this.assistant = undefined;
@@ -500,7 +613,7 @@ export class ChatController {
 			else if (stop === "max_tokens" || stop === "max_turn_requests") this.push({ kind: "note", text: `${session.label} stopped early (${stop.replace(/_/g, " ")}).` });
 		} catch (e: any) {
 			error = String(e?.message ?? e);
-			this.push({ kind: "error", text: error, action: this.session ? undefined : { title: "Restart Agent", command: "drawai.retry" } });
+			this.push({ kind: "error", text: error, action: e instanceof ApiSetupError ? this.errorAction(e) : this.session ? undefined : { title: "Restart Agent", command: "drawai.retry" } });
 		} finally {
 			for (const t of this.transcript) if (t.kind === "tool" && t.status === "running") t.status = stop === "end_turn" ? "ok" : "error";
 			client.aiSetStatus(false);
@@ -592,9 +705,9 @@ export class ChatController {
 		}
 	}
 
-	/** The summary our MCP server produced for a finished drawio_* call ("Applied 4 edits"). */
+	/** The summary the window's tools produced for a finished call of one of them ("Applied 4 edits"). */
 	private takeSummary(title: string): string | undefined {
-		const name = /drawio_[a-z_]+/.exec(title)?.[0];
+		const name = ownTool(title);
 		if (!name) return undefined;
 		const i = this.toolSummaries.findIndex((s) => s.name === name);
 		if (i < 0) return undefined;
@@ -621,6 +734,8 @@ export class ChatController {
 	}
 
 	private requestPermission(req: acp.RequestPermissionRequest, signal: AbortSignal): Promise<acp.RequestPermissionOutcome> {
+		// (a request that was given up before it got here: a card for it would wait for ever)
+		if (signal.aborted) return Promise.resolve({ outcome: "cancelled" });
 		const id = `p${this.nextPermission++}`;
 		const item: Extract<TranscriptItem, { kind: "permission" }> = {
 			kind: "permission",
@@ -671,6 +786,7 @@ export class ChatController {
 	}
 
 	public dispose(): void {
+		for (const end of this.unwatch.splice(0)) end();
 		this.stop();
 		this.resetSession();
 	}
@@ -703,11 +819,10 @@ export class ChatController {
 		const hidden = new Set(settings().models[this.agentId]?.hidden ?? []);
 		const models = list.models.filter((m) => !hidden.has(m.value) || m.value === list.current).map((m) => ({ id: m.id, name: m.name, description: m.description }));
 		const modelId = list.currentId;
-		const providers = this.statuses.map((s) => ({
-			id: s.id,
-			label: `${s.label}${!s.installed ? " — not installed" : !s.signedIn ? " — sign-in?" : ""}`,
-		}));
+		const providers = this.statuses.map((s) => ({ id: s.id, label: `${s.label}${s.detail ? ` — ${s.detail}` : ""}`, group: s.api ? "With an API key" : "Agents" }));
 		const starting = !!this.starting;
+		// (a key the provider stopped accepting: the session is there, and no request will get through)
+		const trouble = status?.api ? status.problem : undefined;
 		this.post({
 			type: "state",
 			state: {
@@ -722,16 +837,20 @@ export class ChatController {
 				transcriptVersion: this.version,
 				providers,
 				providerId: this.agentId,
-				providerTitle: status?.problem ?? (status?.launch ? `Runs: ${status.launch}` : undefined),
+				providerTitle: status?.problem ?? (status?.api ? "Uses your API key. OmniDraw runs the tools itself." : status?.launch ? `Runs: ${status.launch}` : undefined),
 				models,
 				modelId,
 				modelsLoading: starting,
 				modelsError: this.sessionError ?? (!starting && !info && status?.problem ? status.problem.split("\n")[0] : undefined),
-				agentState: info ? "ready" : starting ? "starting" : this.sessionError || status?.problem ? "problem" : "",
-				agentInfo: info
-					? `${info.agentName} · ACP session ready · OmniDraw tools over MCP (${info.mcpTransport})${status?.viaNpx ? " · adapter via npx" : ""}`
+				agentState: info && !trouble ? "ready" : starting ? "starting" : this.sessionError || status?.problem ? "problem" : "",
+				agentInfo: trouble
+					? trouble
+					: info
+					? info.mcpTransport
+						? `${info.agentName} · ACP session ready · OmniDraw tools over MCP (${info.mcpTransport})${status?.viaNpx ? " · adapter via npx" : ""}`
+						: `${info.agentName} · your API key · OmniDraw runs the tools itself`
 					: starting
-					? `Starting ${agentDef(this.agentId).label}${status?.viaNpx ? " (fetching the ACP adapter with npx)" : ""}…`
+					? `Starting ${this.agentLabel()}${status?.viaNpx ? " (fetching the ACP adapter with npx)" : ""}…`
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
@@ -773,19 +892,42 @@ const TOOL_LABELS: Record<string, string> = {
 	drawio_get_template: "Reading the design template…",
 	drawio_get_xml: "Reading XML…",
 	drawio_export: "Exporting…",
+	mapper_maps: "Reading the maps…",
+	mapper_list_recipes: "Looking up what can be mapped…",
+	mapper_run: "Mapping…",
+	mapper_find: "Searching the map…",
+	mapper_show: "Reading the map…",
+	mapper_path: "Tracing a path on the map…",
+	mapper_findings: "Reading the map's findings…",
+	mapper_worksheet: "Reading the map's worksheet…",
+	mapper_set_descriptions: "Writing descriptions…",
+	mapper_recent_changes: "Reading recent changes…",
+	mapper_refresh: "Refreshing the map…",
+	mapper_set_tour: "Saving a tour…",
+	mapper_answer: "Drawing the answer…",
 };
+
+/**
+ * One of the window's own tools in a title, however the agent wraps its name ("omnidraw:
+ * drawio_lint", "mcp__omnidraw__drawio_lint"). Only a name that is one: a title that merely
+ * holds something like it ("cat mapper_notes.txt") is shown as the agent gave it.
+ */
+function ownTool(title: string): string | undefined {
+	const name = /(?:drawio|mapper)_[a-z_]+/.exec(title)?.[0];
+	return name && Object.hasOwn(TOOL_LABELS, name) ? name : undefined;
+}
 
 /** "mcp__draw-ai__drawio_apply_operations" → "Editing diagram…"; other titles as the agent gave them. */
 function toolTitle(title: string, _input?: unknown): string {
-	const name = /drawio_[a-z_]+/.exec(title)?.[0];
-	if (name && TOOL_LABELS[name]) return TOOL_LABELS[name];
+	const name = ownTool(title);
+	if (name) return TOOL_LABELS[name];
 	return title.length > 120 ? title.slice(0, 117) + "…" : title;
 }
 
 /** "mcp__draw-ai__drawio_get_diagram" → "use OmniDraw's drawio_get_diagram (reading diagram)". */
 function permissionTitle(title: string): string {
-	const name = /drawio_[a-z_]+/.exec(title)?.[0];
-	if (name) return `use OmniDraw's ${name}${TOOL_LABELS[name] ? ` (${TOOL_LABELS[name].replace(/…$/, "").toLowerCase()})` : ""}`;
+	const name = ownTool(title);
+	if (name) return `use OmniDraw's ${name} (${TOOL_LABELS[name].replace(/…$/, "").toLowerCase()})`;
 	return `run: ${title.length > 120 ? title.slice(0, 117) + "…" : title}`;
 }
 

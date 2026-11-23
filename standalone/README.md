@@ -10,9 +10,8 @@ open diagram live through OmniDraw's diagram tools, and you keep or revert its
 changes.
 
 The app has no model API keys of its own. You can add yours (Anthropic, OpenAI, Gemini, Grok,
-Kimi, OpenRouter) to use a provider's models without an agent program: see
-[API keys](#api-keys). For now that is
-for the Shape Creator; the chat still needs an agent.
+Kimi, OpenRouter) to use a provider's models without an agent program, in the chat and
+everywhere else an agent is used: see [API keys](#api-keys).
 
 ## Run it
 
@@ -63,7 +62,8 @@ installed and look signed in; when one is not, the chat says what to run (and of
   (allow once / always / reject) and waits for you. **Allow all** on a request approves it and everything
   else the agent asks for in that chat (shown as one-line ⚡ entries) until New Chat,
   switching agents, or a click on the ⚡ Allow all chip at the top; also under the
-  **Agent** menu.
+  **Agent** menu. Under **With an API key** the same picker lists the providers whose models
+  answer without an agent program: see [the chat with an API key](#the-chat-with-an-api-key).
 - **Review**: the agent's edits appear as pending changes; **Accept** keeps them,
   **Reject** reverts them (also under the **Agent** menu).
 - **File menu** (both the app menu and draw.io's own File menu in the editor): New,
@@ -332,8 +332,40 @@ key.
 - **A conversation that broke is forgotten.** A request that is stopped, declined or fails is
   not kept in the conversation with the model, so the next one starts from something the
   provider accepts; the Shape Creator then says its rules again.
-- **Where they can be used:** the Shape Creator, for now. The diagram chat (and with it the
-  Shifter's "Ask the agent" and the Mapper's requests) is next.
+- **Where they can be used:** wherever an agent is: the diagram chat (and with it the
+  Shifter's "Ask the agent" and the Mapper's requests, which go through the chat), and the
+  Shape Creator.
+
+### The chat with an API key
+
+The chat's picker lists your agents and, under **With an API key**, the providers (the ones
+you have a key for first). Pick one, then one of its models; the model picked last is the one
+a new chat starts with.
+
+- **No program, no endpoint.** An agent program is started in the diagram's folder and reaches
+  the diagram's tools over MCP. A model used through its API has neither: the app offers it
+  this window's tools (the `drawio_*` ones and the Mapper's) and runs them itself. What goes
+  to the provider is your request with what you selected, the images you attached, and what
+  the tools answer (what they read of the diagram, a picture of it, a map's facts).
+- **What is asked first.** A tool that only reads runs as the model calls it. One that changes
+  the diagram, writes a file or collects a map shows the same card an agent's request does:
+  **Allow**, **Always allow in this chat** (that tool, until New Chat) or **Deny**, with
+  **Allow all** beside them. A call you do not allow is not run; the model is told, and goes
+  on without it. Edits arrive as pending changes to keep or revert, as with an agent.
+- **A conversation is held with one model.** Picking another model starts a new conversation
+  with it (the chat says so): what one model wrote and thought is not something another can
+  go on from. So does a key that is replaced or removed; a request under way then ends as
+  stopped.
+- **Nothing happens until you send a request.** A window that opens with a provider picked
+  sends nothing and does not ask the keychain; the key is read when a request goes out.
+- **When something is wrong with the key or the models** (no key, one the provider stopped
+  accepting, every model switched off), the request's error has an **Open Settings** button
+  that lands on the API keys.
+- **Long chats.** The whole conversation goes to the provider with every request (OpenAI
+  keeps it on its side). With Anthropic, what was sent before is read from its cache at a
+  fraction of the price. When a conversation outgrows the model, the provider refuses the
+  request; the app then starts the conversation over and says so. **New Chat** does the same
+  on purpose.
 
 Code: `src/main/api/`: `keyStore.ts` (the file and its encryption; `keys.ts` gives it
 `safeStorage`), `access.ts` (keeping, checking and removing a key, and the models it can
@@ -343,17 +375,25 @@ app: it lists models and holds a conversation that runs the app's tools), `anthr
 `openai`), `completions.ts` (OpenAI's chat-completions protocol, which the other four speak
 at an address of their own, through `openai`; what differs between them is named there) with
 `gemini.ts`, `grok.ts`, `kimi.ts` and `openrouter.ts`, `env.ts` (why nothing is taken from
-the environment), `creator.ts` (the Shape Creator drawing this way). Tests: `test/api.test.js` and `test/ai/settings.e2e.test.js` (in the repository root),
+the environment), `creator.ts` (the Shape Creator drawing this way), `chatSession.ts` (the
+chat answered this way: to `chatController.ts` it is a session like an agent's, see
+`ChatSession` in `acpSession.ts`). Tests: `test/api.test.js`, `test/api-chat.test.js` and
+`test/ai/settings.e2e.test.js` (in the repository root),
 against local stand-ins for the three APIs (`test/helpers/fake-providers.js`, which refuse a
 conversation that is not whole, as the real ones do) and a test cipher instead of the
-keychain: no test reaches a provider, uses a real key or touches the keychain.
+keychain: no test reaches a provider, uses a real key or touches the keychain. In the real
+app, `node scripts/e2e.mjs --api-chat` runs the chat with a provider that is none
+(`api/standIn.ts`): the window, the chat page, the tools, the permission cards and the key
+file are the real ones.
 
 The tests never reach a real provider: the request shapes follow each provider's
 documentation and SDK (as of November 2026), and the tests check what is sent and what is
 made of the answers. A provider's first real request is where a wrong assumption would show.
 What each of the four on `completions.ts` does differently, as its documentation has it:
 Gemini wants the signature of its thinking back on each tool call, sends tool calls whole
-and without a position, and says what went wrong as a list; Grok sends tool calls whole too
+and without a position, says what went wrong as a list, and refuses a tool argument that is
+an object of any shape (it is asked for as JSON text and read back) or a tool without
+arguments (it is given one to leave out); Grok sends tool calls whole too
 and can say what went wrong as a plain sentence; Kimi wants its reasoning text back;
 OpenRouter wants the reasoning back as the list of parts it came as.
 

@@ -79,6 +79,11 @@ export class ApiAccess {
 		return () => this.watchers.delete(listener);
 	}
 
+	/** `listener` is told which provider's key was kept, replaced or removed. */
+	public onKeyChange(listener: (id: string) => void): () => void {
+		return this.env.keys.onChange(listener);
+	}
+
 	/** The kept key of a provider, or what to tell the user when there is none to use. (This asks the keychain.) */
 	public async keyFor(provider: ApiProvider): Promise<{ key: string } | { problem: string }> {
 		const key = await this.env.keys.get(provider.id);

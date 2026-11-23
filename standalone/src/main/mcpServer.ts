@@ -125,6 +125,32 @@ export function standaloneInstructions(fileName: string | undefined, compact = f
 }
 
 /**
+ * What a model used through its API is told it is here for. (An agent program reads
+ * `standaloneInstructions` from the endpoint; this model has no endpoint, and only these tools.)
+ */
+export function chatSystemPrompt(mapper: boolean): string {
+	return [
+		SYSTEM_PROMPT.replace("embedded in VS Code", "in the OmniDraw app"),
+		mapper
+			? "Maps: the Mapper draws software, databases, cloud environments and ML systems into the diagram from facts it collects read-only. The mapper_* tools work with the maps of this diagram: start with mapper_maps, look things up with mapper_find, mapper_show and mapper_path, and make a new map with mapper_run (mapper_list_recipes says what it needs). Never repeat passwords, tokens or connection strings in an answer."
+			: undefined,
+		"Tools that change something (the diagram, a file, a map) ask the user first. When the user does not allow one, do not call it again unless they ask for it, and say what you left undone.",
+	]
+		.filter(Boolean)
+		.join("\n\n");
+}
+
+/**
+ * Tools that change something with some arguments only: whether a call does. (Listing the
+ * pages, or showing one, changes nothing. `mapper_recent_changes` is not here although it
+ * draws only when asked to: it runs git in the mapped folder either way, which is beyond the
+ * diagram.)
+ */
+const READS_TOO: Record<string, (args: Record<string, unknown>) => boolean> = {
+	drawio_pages: (a) => a.action !== "list" && a.action !== "select",
+};
+
+/**
  * Model Context Protocol endpoint for one window's diagram, on 127.0.0.1 with a
  * random bearer token. The window's ACP session gets it in `session/new`.
  */
@@ -144,11 +170,26 @@ export class WindowMcpServer {
 		private readonly mapper?: () => MapperService
 	) {}
 
-	/** Runs a tool the way the endpoint does (the desktop-wide endpoint routes calls here). */
-	public async call(name: string, args: unknown): Promise<ToolResult> {
-		const result = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args) : await this.toolbox.invoke(name, args as any, { scoped: true });
+	/**
+	 * Runs a tool the way the endpoint does (the desktop-wide endpoint routes calls here, and a
+	 * model used through its API has the app run them). `signal`: the caller gave up; a map
+	 * being collected stops.
+	 */
+	public async call(name: string, args: unknown, opts: { signal?: AbortSignal } = {}): Promise<ToolResult> {
+		const result = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args, opts) : await this.toolbox.invoke(name, args as any, { scoped: true, ...(opts.signal ? { signal: opts.signal } : {}) });
 		this.onToolResult?.(name, result);
 		return result;
+	}
+
+	/** This window's tools, whole, as a model used through its API is offered them (see api/chatSession.ts). */
+	public chatTools(): (McpTool & { picture?: boolean; changes?(args: Record<string, unknown>): boolean })[] {
+		const mapperTools = this.mapper ? MAPPER_TOOLS.map(({ run, ...t }) => t) : [];
+		return [...standaloneTools().map((t) => (TOOL_SCHEMAS.find((s) => s.name === t.name)?.requiresVision ? { ...t, picture: true } : t)), ...mapperTools].map((t) => (READS_TOO[t.name] ? { ...t, changes: READS_TOO[t.name] } : t));
+	}
+
+	/** Whether this window has the Mapper's tools. */
+	public get maps(): boolean {
+		return !!this.mapper;
 	}
 
 	public get url(): string {

@@ -40,6 +40,8 @@ export interface E2eConfig {
 	polish?: boolean;
 	/** Check the Shape Workshop: gallery palettes, draw.io's search, Workshop search and insert, GitHub galleries, collections. */
 	workshop?: boolean;
+	/** Check the chat answered through an API key, with a stand-in provider (api/standIn.ts): nothing is sent anywhere, and the keychain is not asked. */
+	apiChat?: boolean;
 }
 
 /**
@@ -67,6 +69,11 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		fs.mkdirSync(config.out, { recursive: true });
 		// Pick the agent before the window opens: the chat starts it as soon as it is ready.
 		if (config.agent) settings().agent = config.agent; // this run only; not written to settings.json
+		if (config.apiChat) {
+			// (before anything asks for the app's API access: this run's is the stand-in's)
+			process.env.DRAWAI_E2E_API = "1";
+			settings().agent = "api:stand-in";
+		}
 		const t0 = Date.now();
 		const w = await DiagramWindow.open(server, config.file);
 		await w.whenLoaded();
@@ -109,6 +116,8 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		const before = await w.client.getXml();
 		if (config.workshop) {
 			await runWorkshop(w, server, config, log);
+		} else if (config.apiChat) {
+			await runApiChat(w, config, log);
 		} else if (config.polish) {
 			await runPolish(w, server, config, log);
 		} else if (config.insights) {
@@ -237,6 +246,143 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 		fs.writeFileSync(path.join(config.out, "after-dig.png"), (await w.editorView.webContents.capturePage()).toPNG());
 		fs.writeFileSync(path.join(config.out, "chat.png"), (await w.chatView.webContents.capturePage()).toPNG());
 	}
+}
+
+/**
+ * The chat answered through an API key instead of an agent program. The provider is a
+ * stand-in (api/standIn.ts): the window, the chat page, the key store's file, the tools and
+ * the permission cards are the real ones; nothing is sent anywhere and the keychain is not asked.
+ */
+async function runApiChat(w: DiagramWindow, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const { apiAccess } = await import("./api/catalog");
+	const { STAND_IN_ID, STAND_IN_KEY } = await import("./api/standIn");
+	const page = w.chatView.webContents;
+	const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	const until = async <T>(what: string, fn: () => T | Promise<T>, ms = 15_000): Promise<T> => {
+		for (const end = Date.now() + ms; ; await pause(100)) {
+			const v = await fn();
+			if (v) return v;
+			if (Date.now() > end) throw new Error(`Waited too long for ${what}.`);
+		}
+	};
+	const expect = (ok: unknown, what: string) => {
+		if (!ok) throw new Error(`The chat with an API key: ${what}`);
+	};
+	const shown = (): Promise<{ provider: string; model: string; dot: string }> =>
+		page.executeJavaScript(`({ provider: document.getElementById("providerLabel").textContent, model: document.getElementById("modelLabel").textContent, dot: document.getElementById("status").dataset.state })`);
+	const turn = (text: string) => {
+		const done = waitForTurn(w);
+		void w.chat.send(text);
+		return done;
+	};
+	const waiting = (): Promise<string[]> => page.executeJavaScript(`Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto) .options button")).map((b) => b.textContent)`);
+	/** Presses a button of the permission card that is waiting, as the user would. */
+	const answer = (name: string) =>
+		until(`the "${name}" button of a permission card`, () =>
+			page.executeJavaScript(`(() => { const b = Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto) .options button")).find((b) => b.textContent === ${JSON.stringify(name)}); if (b) b.click(); return !!b; })()`)
+		);
+	const last = <K extends string>(kind: K) => [...w.chat.items].reverse().find((i) => i.kind === kind) as any;
+	const has = async (label: string) => (await w.client.getXml()).includes(label);
+	const save = async (name: string) => fs.writeFileSync(path.join(config.out, name), (await page.capturePage()).toPNG());
+
+	// no key yet: the provider is listed, and a request says where a key goes
+	await until("the chat page", async () => (await shown()).provider === "Stand-in API");
+	log("apiChatNoKey", await shown());
+	expect((await shown()).dot === "problem", "a provider without a key is not shown as ready.");
+	const refused = await turn("Add a shape labelled 'No key'.");
+	const said = last("error");
+	log("apiChatNoKeyTurn", { ...refused, action: said?.action });
+	expect(/There is no Stand-in API key/.test(said?.text ?? "") && said?.action?.command === "drawai.openApiKeys", "a request without a key does not point to Settings.");
+
+	// the picker: the agents, then the providers used with an API key
+	await page.executeJavaScript(`document.getElementById("providerBtn").click()`);
+	await pause(300);
+	const menu: string[] = await page.executeJavaScript(
+		`Array.from(document.querySelectorAll("#pickMenu > *")).map((e) => e.classList.contains("group") ? "# " + e.textContent : e.getAttribute("role") === "menuitemradio" ? e.children[1].textContent + (e.querySelector("small") ? " (" + e.querySelector("small").textContent + ")" : "") : "").filter(Boolean)`
+	);
+	log("apiChatPicker", menu);
+	await save("chat-api-picker.png");
+	await page.executeJavaScript(`document.getElementById("providerBtn").click()`);
+	expect(menu[0] === "# Agents" && menu.indexOf("# With an API key") > 1 && menu.includes("Stand-in API (no key)") && menu.includes("Anthropic API (no key)"), "the picker does not list the agents and then the providers.");
+
+	// a key is kept: the chat is ready without a request, a program or the keychain
+	expect((await apiAccess().saveKey(STAND_IN_ID, STAND_IN_KEY)) === undefined, "the stand-in's key was not kept.");
+	await until("the chat to be ready", async () => (await shown()).dot === "ready");
+	log("apiChatReady", await shown());
+	expect((await shown()).model === "Stand-in Large", "the model picked for a new chat is not the first one listed.");
+
+	// a tool that changes the diagram asks first; one that reads does not
+	const before = await w.client.getXml();
+	let done = turn("Add a shape labelled 'Denied shape'.");
+	await until("a permission card", async () => (await waiting()).length);
+	log("apiChatAsks", { title: last("permission")?.title, buttons: await waiting() });
+	await answer("Deny");
+	log("apiChatDenied", { ...(await done), reply: last("assistant")?.text, outcome: last("permission")?.outcome });
+	expect((await w.client.getXml()) === before && /did not allow/.test(last("assistant")?.text ?? ""), "a call that was not allowed changed the diagram, or the model was not told.");
+	expect(w.chat.items.filter((i) => i.kind === "permission").length === 1, "reading the diagram asked for permission.");
+
+	done = turn("Add a shape labelled 'Hello from the API'.");
+	await answer("Allow");
+	log("apiChatAllowed", { ...(await done), reply: last("assistant")?.text, tools: w.chat.items.filter((i) => i.kind === "tool").slice(-2).map((i: any) => `${i.status}: ${i.summary}`) });
+	expect(await has("Hello from the API"), "the shape was not added.");
+
+	// Stop while a card waits: the request ends as stopped, and nothing is changed
+	done = turn("Add a shape labelled 'Stopped shape'.");
+	await until("a permission card", async () => (await waiting()).length);
+	w.chat.stop();
+	const stopped = await done;
+	log("apiChatStopped", { ...stopped, outcome: last("permission")?.outcome });
+	expect(stopped.stop === "cancelled" && !(await has("Stopped shape")), "Stop did not end the request, or the shape was added all the same.");
+
+	// another model, picked in the page: a new conversation, and the one a new chat starts with
+	await page.executeJavaScript(`document.getElementById("modelBtn").click()`);
+	await pause(300);
+	await page.executeJavaScript(`Array.from(document.querySelectorAll("#pickMenu [role=menuitemradio]")).find((b) => b.children[1].textContent === "Stand-in Small").click()`);
+	await until("the other model", async () => (await shown()).model === "Stand-in Small");
+	log("apiChatModel", { ...(await shown()), note: last("note")?.text, preferred: settings().models["api:stand-in"]?.preferred });
+	expect(/Switched to Stand-in Small/.test(last("note")?.text ?? "") && settings().models["api:stand-in"]?.preferred === "stand-in-small", "picking a model did not start a new conversation with it.");
+
+	// "Always allow in this chat": asked once, then not again for that tool
+	done = turn("Add a shape labelled 'Second shape'.");
+	await answer("Always allow in this chat");
+	await done;
+	const cards = w.chat.items.filter((i) => i.kind === "permission").length;
+	const third = await turn("Add a shape labelled 'Third shape'.");
+	log("apiChatAlways", { ...third, reply: last("assistant")?.text, cards: [cards, w.chat.items.filter((i) => i.kind === "permission").length] });
+	expect(third.stop === "end_turn" && (await has("Third shape")) && w.chat.items.filter((i) => i.kind === "permission").length === cards && /stand-in-small \(request 2 of this conversation\)/.test(last("assistant")?.text ?? ""), "a tool allowed for the chat asked again, or the model picked was not the one used in a conversation of its own.");
+
+	// a request from elsewhere in the app (the Shifter's "Ask the agent", the Mapper) goes the same way
+	const asked = waitForTurn(w);
+	void w.askAboutSelection("Add a shape labelled 'Asked from the Workshop'.", "🎨 Asked from the Workshop");
+	log("apiChatAskedElsewhere", await asked);
+	expect(await has("Asked from the Workshop"), "a request handed to the chat from elsewhere was not answered.");
+	await pause(600);
+	await save("chat-api.png");
+
+	// the key is nowhere it should not be
+	const data = app.getPath("userData");
+	const keyFile = fs.readFileSync(path.join(data, "api-keys.json"), "utf8");
+	const leaks = [fs.readFileSync(path.join(data, "settings.json"), "utf8"), keyFile, JSON.stringify(w.chat.items), await page.executeJavaScript("document.documentElement.outerHTML")].map((text) => text.includes(STAND_IN_KEY));
+	log("apiChatKeySeen", { settings: leaks[0], keyFile: leaks[1], transcript: leaks[2], page: leaks[3], keyFileHasEntry: keyFile.includes('"stand-in"') });
+	expect(!leaks.some(Boolean) && keyFile.includes('"stand-in"'), "the key is readable somewhere.");
+
+	// the key is removed: the conversation ends there
+	apiAccess().removeKey(STAND_IN_ID);
+	await until("the chat to notice", async () => (await shown()).dot === "problem");
+	log("apiChatKeyRemoved", { ...(await shown()), note: last("note")?.text });
+	expect(/key changed/.test(last("note")?.text ?? ""), "removing the key did not end the conversation.");
+
+	// a key is kept again: a new conversation, whose tool calls are new lines under the old ones
+	const lines = w.chat.items.filter((i) => i.kind === "tool").length;
+	await apiAccess().saveKey(STAND_IN_ID, STAND_IN_KEY);
+	await until("the chat to be ready again", async () => (await shown()).dot === "ready");
+	done = turn("Add a shape labelled 'After the new key'.");
+	await answer("Allow");
+	const again = await done;
+	const added = w.chat.items.filter((i) => i.kind === "tool").slice(lines).map((i: any) => `${i.status}: ${i.summary}`);
+	log("apiChatNewKey", { ...again, reply: last("assistant")?.text, lines: added });
+	expect(again.stop === "end_turn" && /request 1 of this conversation/.test(last("assistant")?.text ?? "") && added.length === 2 && added.every((l) => l.startsWith("ok: ")), "a request after the key was replaced went on with the old conversation, or its tool calls were taken for earlier ones.");
+	fs.writeFileSync(path.join(config.out, "transcript.json"), JSON.stringify(w.chat.items, null, 2));
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {
