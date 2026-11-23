@@ -2,13 +2,16 @@
 
 *Formerly the Draw.AI desktop app. The VS Code extension keeps the name Draw.AI.*
 
-A desktop app for draw.io diagrams with an AI chat beside the editor. It does not
-use its own model API keys: the chat drives a coding agent you already have
-installed and signed in to — **Claude Code**, **Gemini** (Google's Antigravity CLI, or
-Gemini CLI), **Codex**, **GitHub Copilot** or **Kimi** — over the
-[Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
+A desktop app for draw.io diagrams with an AI chat beside the editor. The chat drives a
+coding agent you already have installed and signed in to — **Claude Code**, **Gemini**
+(Google's Antigravity CLI, or Gemini CLI), **Codex**, **GitHub Copilot** or **Kimi** — over
+the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
 open diagram live through OmniDraw's diagram tools, and you keep or revert its
 changes.
+
+The app has no model API keys of its own. You can add yours (Anthropic, OpenAI, Kimi) to use
+a provider's models without an agent program: see [API keys](#api-keys). For now that is
+for the Shape Creator; the chat still needs an agent.
 
 ## Run it
 
@@ -230,13 +233,19 @@ used last:
   nothing is uploaded. You name the collection before it is saved, and the pictures its
   shapes keep are checked like every other image.
 
-The **Shape Creator** (the third tab, or **Shapes → Create a Shape…**) has an agent draw an
-icon:
+The **Shape Creator** (the third tab, or **Shapes → Create a Shape…**) has an agent, or a
+model you have an API key for, draw an icon:
 
-- **Describe it.** Pick one of the agents the chat uses (and a model, when the agent has told
-  the app which it offers), a look (line, solid, isometric, dot matrix) and one icon or three
-  variations; attach, paste or drop up to four images that show what you mean. Only your
-  description and those images go to the agent.
+- **Describe it.** Pick who draws: one of the agents the chat uses (and a model, when the
+  agent has told the app which it offers), or a provider you have given an
+  [API key](#api-keys) for and one of its models. Then a look (line, solid, isometric, dot
+  matrix) and one icon or three variations; attach, paste or drop up to four images that show
+  what you mean. Only your description and those images go to whoever draws.
+- **With an API key** there is no program, folder or tool endpoint: the app talks to the
+  provider itself, the model gets the same two tools and nothing else, and the tools run in
+  the app. What goes to the provider is the request, the images you attached, and what the
+  tools answer (the picture of its own drawing). The rest of this list is about agents; what
+  is accepted, Stop and the time limit are the same for both.
 - **The agent runs apart from any diagram:** in an empty folder of its own, and the Workshop
   gives it a tool endpoint with two tools: `workshop_render_preview` returns a picture of its
   SVG (drawn by the Workshop page) so it can check its work, and `workshop_submit_svg` hands
@@ -271,13 +280,65 @@ insertion in `src/renderer/desktop-toolbar.js`. What the Shifter needs from a di
 ask the agent, convert a stencil) is `DiagramWindow`'s. The Creator: `workshop/creator.ts`
 (what the agent is asked, what is accepted, and `CreatorCore`, the page's other half for it),
 `src/main/creatorSession.ts` (the agent's session: folder, tool endpoint, permissions) and
-`creatorRunner.ts` (which agents there are). Tests: `test/workshop.test.js`,
+`creatorRunner.ts` (which agents there are; `api/creator.ts` for the models used with an API
+key). Tests: `test/workshop.test.js`,
 `test/shifter.test.js`, `test/creator.test.js` and `scripts/e2e.mjs --workshop`, all on
 fixtures (`test/fixtures/galleries/mirror`, served by the e2e script as a stand-in for
 jsDelivr: test runs never download anything). No test starts a real agent: the unit tests use
 `test/helpers/fake-acp-agent.js`, which speaks the agent protocol on stdio and reaches only
 the tool endpoint it is given, and the end-to-end run uses a stand-in inside the app
 (`DRAWAI_E2E_CREATOR`).
+
+## API keys
+
+**Settings → Agents & models → API keys** (the second half of that section). Paste a key from
+Anthropic, OpenAI or Kimi (Moonshot AI's international platform, `api.moonshot.ai`) to use
+that provider's models without an agent program. Usage is billed by the provider to that key.
+
+- **Where a key is kept.** Encrypted with a secret the operating system holds for the app
+  (Electron's `safeStorage`: the macOS Keychain), in `api-keys.json` in the app's data folder,
+  readable by your user only. A file there that the app cannot read, or that is not one it
+  wrote, is never written over (the second is set aside as `api-keys.json.unreadable`). It is never written to `settings.json`, a diagram or a log,
+  never shown again after you paste it, never sent to an agent, and sent only to its own
+  provider's address. What a provider says when something goes wrong is shown, but never the
+  key, should it quote the key back. macOS may ask for your login keychain the first time a
+  key is saved or used. The keychain is not asked when Settings or the Shape Creator merely
+  opens.
+- **Nothing comes from the environment.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `*_CUSTOM_HEADERS` and the like are not read: the
+  key is the one you saved, and it goes to the provider's own address. (What Node itself takes
+  from the environment for every connection, a proxy or extra certificates, applies here as
+  it does to everything else the app fetches.)
+- **A key is checked before it is kept.** The provider is asked which models the key can use.
+  A key it does not accept is not kept. If the provider cannot be reached, the key is kept and
+  **Refresh** asks again. A kept key the provider later stops accepting is marked
+  **Not accepted**. A restricted key that may not list models is kept, and what it may not do
+  is said.
+- **Models.** What the provider lists for the key, newest first; untick one to leave it out of
+  the pickers. The model you picked last is offered first next time. Only the names of models
+  are stored in `settings.json` (under `api:<provider>`). A model that takes no pictures
+  (Kimi says which of its models; of OpenAI's, the older ones known for it) is marked: it is
+  given words only, also where a tool would show it a picture.
+- **A conversation that broke is forgotten.** A request that is stopped, declined or fails is
+  not kept in the conversation with the model, so the next one starts from something the
+  provider accepts; the Shape Creator then says its rules again.
+- **Where they can be used:** the Shape Creator, for now. The diagram chat (and with it the
+  Shifter's "Ask the agent" and the Mapper's requests) is next.
+
+Code: `src/main/api/`: `keyStore.ts` (the file and its encryption; `keys.ts` gives it
+`safeStorage`), `access.ts` (keeping, checking and removing a key, and the models it can
+use), `keysPanel.ts` (the Settings page's other half), `chat.ts` (what a provider is to the
+app: it lists models and holds a conversation that runs the app's tools), `anthropic.ts`
+(the Messages API through `@anthropic-ai/sdk`), `openai.ts` (the Responses API through
+`openai`), `kimi.ts` (chat completions at Moonshot's address, through `openai`), `env.ts`
+(why nothing is taken from the environment), `creator.ts` (the Shape Creator drawing this
+way). Tests: `test/api.test.js` and `test/ai/settings.e2e.test.js` (in the repository root),
+against local stand-ins for the three APIs (`test/helpers/fake-providers.js`, which refuse a
+conversation that is not whole, as the real ones do) and a test cipher instead of the
+keychain: no test reaches a provider, uses a real key or touches the keychain.
+
+Not tried against the real services yet: the request shapes follow each provider's
+documentation and SDK, and the tests check what is sent and what is made of the answers.
 
 ## Presentation mode
 

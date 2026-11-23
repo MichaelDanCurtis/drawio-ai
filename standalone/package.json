@@ -17,12 +17,14 @@
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "^2.8.0",
+		"@anthropic-ai/sdk": "1.6.0",
 		"@hediet/std": "^0.6.0",
 		"js-sha256": "^1.1.0",
 		"js-yaml": "^5.5.0",
 		"mongodb": "^7.9.1",
 		"mssql": "^12.8.0",
 		"mysql2": "^3.24.6",
+		"openai": "7.53.0",
 		"oracledb": "^26.0.0",
 		"pg": "^8.23.1"
 	},

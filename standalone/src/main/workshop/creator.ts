@@ -23,6 +23,11 @@ export interface CreatorAgent {
 	/** The models it offered when it last ran, and the one preferred. */
 	models: { value: string; name: string }[];
 	model?: string;
+	/**
+	 * "api": a provider's models used with the user's own API key, not an agent program. One of
+	 * its models is always named: there is no "its own choice".
+	 */
+	kind?: "api";
 }
 
 export interface CreatorImage {
@@ -49,6 +54,11 @@ export interface CreatorSession {
 	images: boolean;
 	/** Sends a request; resolves with why the agent stopped ("end_turn", "cancelled"…). */
 	prompt(text: string, images: CreatorImage[]): Promise<string>;
+	/**
+	 * It remembers nothing of an earlier request, though it was open for one (a conversation
+	 * over an API forgets a request that was stopped or failed): the next one says the rules again.
+	 */
+	fresh?(): boolean;
 	cancel(): void;
 	dispose(): void;
 }
@@ -61,6 +71,8 @@ export interface CreatorPorts {
 	 * its process ends.
 	 */
 	open(options: { agent: string; model?: string; tools: CreatorTools; onText(text: string): void; onExit(message: string): void }): Promise<CreatorSession>;
+	/** Opens where `agent` is set up (its program, or its API key), when this program has such a place. */
+	settings?(agent: string): void;
 }
 
 /** What CreatorCore needs of the Workshop it is part of. */
@@ -345,6 +357,21 @@ export class CreatorCore {
 		this.turn = undefined;
 	}
 
+	/** Tells the page who can draw (again, when that changed: a key was added, a model hidden). */
+	public postAgents(): void {
+		const creator = this.env.creator();
+		this.env.post({ type: "creatorAgents", agents: creator?.agents() ?? [], last: this.last ?? null, settings: !!creator?.settings });
+	}
+
+	/**
+	 * What `agent` runs with changed (its API key was replaced or removed): the one that is
+	 * open is closed, so that the next request starts it afresh. A request it is working on
+	 * ends as stopped.
+	 */
+	public restart(agent: (id: string) => boolean): void {
+		if (this.session && agent(this.sessionKey.split("\n")[0])) this.dropSession();
+	}
+
 	/** Closes the agent that is running, if any. */
 	private dropSession(): void {
 		this.session?.dispose();
@@ -378,7 +405,7 @@ export class CreatorCore {
 
 	/** Whether a message is the Creator's. */
 	public static handles(type: unknown): boolean {
-		return typeof type === "string" && ["creatorAgents", "create", "revise", "stopCreating", "rasterised", "insertCreated", "saveCreated", "editCreated", "dropCreated"].includes(type);
+		return typeof type === "string" && ["creatorAgents", "creatorSettings", "create", "revise", "stopCreating", "rasterised", "insertCreated", "saveCreated", "editCreated", "dropCreated"].includes(type);
 	}
 
 	public async onMessage(msg: any): Promise<void> {
@@ -396,7 +423,10 @@ export class CreatorCore {
 	private async handle(msg: any): Promise<void> {
 		switch (msg?.type) {
 			case "creatorAgents":
-				this.env.post({ type: "creatorAgents", agents: this.env.creator()?.agents() ?? [], last: this.last ?? null });
+				this.postAgents();
+				break;
+			case "creatorSettings":
+				this.env.creator()?.settings?.(String(msg.agent ?? "").slice(0, 40));
 				break;
 			case "create": {
 				const r = creatorRequest(msg);
@@ -413,7 +443,7 @@ export class CreatorCore {
 				if (!agent) throw new Error("Choose an agent first.");
 				const model = named ? modelNamed(msg.model) : this.last?.model;
 				// (an agent that drew it knows the rules; one started for this revision gets them again)
-				const fresh = this.sessionKey !== `${agent}\n${model ?? ""}`;
+				const fresh = this.sessionKey !== `${agent}\n${model ?? ""}` || !!this.session?.fresh?.();
 				await this.run({ agent, model }, () => (fresh ? `${creatorRevision(text, current)}\n\nRules for the SVG:\n${RULES.map((x) => `- ${x}`).join("\n")}` : creatorRevision(text, current)), []);
 				break;
 			}
@@ -529,7 +559,8 @@ export class CreatorCore {
 				this.sessionOwner = owner;
 			}
 			const session = this.session;
-			this.last = who;
+			// (who drew last, for the page's next visit: not the request itself, which has the images in it)
+			this.last = { agent: who.agent, ...(who.model ? { model: who.model } : {}) };
 			state("working", { agent: session.label });
 			turn.timer = setTimeout(() => this.stopTurn(), CREATOR_TIMING.turnMs);
 			stop = await session.prompt(text(session), session.images ? images : []);
@@ -543,6 +574,8 @@ export class CreatorCore {
 							? "Stopped."
 							: stop === "refusal"
 							? `${session.label} declined this request.`
+							: stop === "max_tokens"
+							? `${session.label} ran out of room before it handed in an icon. Ask for something simpler, or choose another model.`
 							: `${session.label} finished without handing in an icon. Ask again, or try another agent.`,
 				});
 			}

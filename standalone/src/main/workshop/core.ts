@@ -139,6 +139,12 @@ export class WorkshopCore {
 		this.pageGone();
 	}
 
+	/** Who can draw for the Shape Creator changed (a key was added or removed, a model hidden): the page is told. */
+	public creatorChanged(restart?: (agent: string) => boolean): void {
+		if (restart) this.creator.restart(restart);
+		this.creator.postAgents();
+	}
+
 	/** The page was closed: what waited for it (a search, a selection, a converted stencil without a name) is dropped. */
 	public pageGone(): void {
 		this.pageSeq++;

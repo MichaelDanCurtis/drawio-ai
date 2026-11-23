@@ -1,24 +1,34 @@
 import { agentDef, agentStatuses, launchSpec, type AgentId } from "./agents";
+import { apiAccess } from "./api/catalog";
+import { apiCreatorAgents, openApiCreator } from "./api/creator";
 import { openCreatorSession } from "./creatorSession";
 import { paths } from "./paths";
 import { settings } from "./settings";
 import { PREVIEW_TOOL, SUBMIT_TOOL, type CreatorAgent, type CreatorPorts } from "./workshop/creator";
 
 /**
- * The Shape Creator's agents in the desktop app: the ones the chat knows (installed and
- * signed in on this computer), each started on its own for drawing (creatorSession.ts).
+ * Who can draw for the Shape Creator in the desktop app: the agent programs the chat knows
+ * (installed and signed in on this computer), each started on its own for drawing
+ * (creatorSession.ts), and the models of the providers the user has given an API key for
+ * (api/creator.ts), which need no program at all. `openSettings` shows where both are set up.
  */
-export function desktopCreator(): CreatorPorts {
+export function desktopCreator(openSettings?: (agent: string) => void): CreatorPorts {
 	return {
-		agents: (): CreatorAgent[] =>
-			agentStatuses().map((s) => {
+		...(openSettings ? { settings: openSettings } : {}),
+		agents: (): CreatorAgent[] => [
+			...agentStatuses().map((s) => {
 				const hidden = settings().models[s.id]?.hidden ?? [];
 				const preferred = settings().models[s.id]?.preferred;
 				// (a "mode" is not a model: it can be a permission mode, which the Creator never switches)
 				const models = (settings().modelCatalog[s.id] ?? []).filter((m) => !m.value.startsWith("mode:") && !hidden.includes(m.value)).map((m) => ({ value: m.value, name: m.name }));
-				return { id: s.id, label: s.label, ready: !s.problem, ...(s.problem ? { problem: s.problem.split("\n")[0] } : {}), models, ...(preferred && models.some((m) => m.value === preferred) ? { model: preferred } : {}) };
+				// (what is wrong, in one line: an install command on a line of its own follows its sentence)
+				return { id: s.id, label: s.label, ready: !s.problem, ...(s.problem ? { problem: s.problem.replace(/\s*\n\s*/g, " ").trim() } : {}), models, ...(preferred && models.some((m) => m.value === preferred) ? { model: preferred } : {}) };
 			}),
+			...apiCreatorAgents(apiAccess()),
+		],
 		open: async ({ agent, model, tools, onText, onExit }) => {
+			const drawn = await openApiCreator(apiAccess(), { agent, model, tools, onText });
+			if (drawn) return drawn;
 			const status = agentStatuses().find((a) => a.id === agent);
 			if (!status) throw new Error("That agent is not known here.");
 			if (!status.installed) throw new Error(status.problem?.split("\n")[0] ?? `${status.label} is not installed.`);

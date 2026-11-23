@@ -52,6 +52,7 @@
 	.shift .pick select { width: 100%; min-height: 30px; font-size: 12.5px; }
 	.shift .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 	.shift .note { color: var(--danger); }
+	.shift .note button { border: 0; background: none; padding: 0; font: inherit; color: var(--link); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
 	#crPrompt { min-height: 92px; }
 	#crImages { display: flex; gap: 6px; flex-wrap: wrap; }
 	#crImages .thumb { position: relative; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); background: #ffffff; }
@@ -190,10 +191,10 @@
 		<section id="creatorCol" class="hidden" aria-label="Shape Creator">
 			<div class="shift" id="createShape">
 				<h2>Describe an icon</h2>
-				<p>One of your agents (Claude Code, Codex, Gemini…) draws it as SVG. Only your description and the images you attach are sent to it.</p>
-				<label class="pick"><span>Agent</span><select id="crAgent" aria-label="Agent"></select></label>
+				<p>One of your agents (Claude Code, Codex, Gemini…), or a model you have an API key for, draws it as SVG. Only your description and the images you attach are sent to it.</p>
+				<label class="pick"><span>Drawn by</span><select id="crAgent" aria-label="Drawn by"></select></label>
 				<label class="pick" id="crModelRow"><span>Model</span><select id="crModel" aria-label="Model"></select></label>
-				<p class="note hidden" id="crProblem"></p>
+				<p class="note hidden" id="crProblem"><span id="crProblemText"></span> <button class="hidden" id="crSettings">Open Settings…</button></p>
 				<div class="two">
 					<label class="pick"><span>Look</span><select id="crStyle" aria-label="Look"><option value="any">Any</option><option value="line">Line</option><option value="solid">Solid</option><option value="isometric">Isometric</option><option value="dots">Dot matrix</option></select></label>
 					<label class="pick"><span>How many</span><select id="crCount" aria-label="How many"><option value="1">One icon</option><option value="3">Three variations</option></select></label>
@@ -256,7 +257,7 @@
 	let askedStencil = ""; // the converted stencil whose name was asked last
 	let wantCreator = location.hash === "#creator"; // opened to create a shape
 	// the Shape Creator: the agents on offer, what was drawn (newest first), what the agent says while it draws
-	const creator = { agents: [], last: null, made: [], busy: false, said: "", heard: 0, images: [], asked: false };
+	const creator = { agents: [], last: null, made: [], busy: false, said: "", heard: 0, images: [], asked: false, settings: false };
 
 	function el(tag, attrs, ...kids) {
 		const e = document.createElement(tag);
@@ -534,7 +535,13 @@
 		const agents = $("crAgent");
 		const keep = agents.value || (creator.last && creator.last.agent) || "";
 		agents.textContent = "";
-		for (const a of creator.agents) agents.append(el("option", { value: a.id, text: a.label + (a.ready ? "" : " (not ready)") }));
+		// agent programs first, then the providers whose models are used with an API key
+		const programs = creator.agents.filter((a) => a.kind !== "api");
+		const apis = creator.agents.filter((a) => a.kind === "api");
+		const option = (a) => el("option", { value: a.id, text: a.label + (a.ready ? "" : a.kind === "api" ? " (no key)" : " (not ready)") });
+		if (programs.length && apis.length) {
+			agents.append(el("optgroup", { label: "Agents" }, ...programs.map(option)), el("optgroup", { label: "With an API key" }, ...apis.map(option)));
+		} else for (const a of creator.agents) agents.append(option(a));
 		const pick = creator.agents.find((a) => a.id === keep) || creator.agents.find((a) => a.ready) || creator.agents[0];
 		if (pick) agents.value = pick.id;
 		renderCreatorModels();
@@ -542,16 +549,23 @@
 	function renderCreatorModels() {
 		const a = currentAgent();
 		const models = $("crModel");
-		const keep = models.dataset.agent === (a ? a.id : "") ? models.value : "";
+		// (what was chosen for this agent stays, "its own choice" too, when the list is drawn again)
+		const keep = models.dataset.agent === (a ? a.id : "") ? models.value : null;
 		models.textContent = "";
 		models.dataset.agent = a ? a.id : "";
-		models.append(el("option", { value: "", text: "The agent's own choice" }));
+		// (an agent program has a model of its own to fall back on; with an API key one is always named)
+		if (!a || a.kind !== "api") models.append(el("option", { value: "", text: "The agent's own choice" }));
 		for (const m of a ? a.models : []) models.append(el("option", { value: m.value, text: m.name }));
-		models.value = keep || (a && a.model) || "";
+		models.value = keep !== null ? keep : (a && a.model) || "";
+		// (a model that is no longer offered: the one picked last, or the first)
+		if (models.selectedIndex < 0) models.value = (a && a.model) || "";
+		if (models.selectedIndex < 0 && models.options.length) models.selectedIndex = 0;
 		$("crModelRow").classList.toggle("hidden", !(a && a.models.length));
 		const note = $("crProblem");
-		note.textContent = !creator.agents.length ? (creator.asked ? "None of your agents is set up yet. Install one (Claude Code, Codex, Gemini…) and sign in to it, as for the chat." : "") : a && !a.ready ? a.problem || a.label + " is not ready." : "";
-		note.classList.toggle("hidden", !note.textContent);
+		const problem = !creator.agents.length ? (creator.asked ? "None of your agents is set up yet. Install one (Claude Code, Codex, Gemini…) and sign in to it, as for the chat." : "") : a && !a.ready ? a.problem || a.label + " is not ready." : "";
+		$("crProblemText").textContent = problem;
+		$("crSettings").classList.toggle("hidden", !problem || !creator.settings);
+		note.classList.toggle("hidden", !problem);
 		renderCreatorBusy();
 	}
 	function renderCreatorBusy() {
@@ -565,6 +579,7 @@
 		document.querySelectorAll("#creatorOut .revise button, #creatorOut .revise input").forEach((c) => (c.disabled = creator.busy));
 	}
 	$("crAgent").addEventListener("change", renderCreatorModels);
+	$("crSettings").addEventListener("click", () => post({ type: "creatorSettings", agent: $("crAgent").value }));
 
 	/** Sends a request to the agent (a new icon, or a change to one). */
 	function startCreating(msg) {
@@ -812,8 +827,8 @@
 			// (a message that arrives twice asks once)
 			if (m.token === askedStencil) return;
 			askedStencil = m.token;
-			const some = m.titles.join(", ") + (m.count > m.titles.length ? "…" : "");
-			ask("Import " + m.count.toLocaleString() + (m.count === 1 ? " shape" : " shapes"), "From " + m.name + ": " + some + (m.warnings.length ? " (" + m.warnings[0] + ")" : "") + " They become a collection of your own.", m.name, "Import").then((title) => post(title ? { type: "saveStencil", token: m.token, title } : { type: "dropStencil", token: m.token }));
+			const some = m.titles.join(", ") + (m.count > m.titles.length ? "…" : ".");
+			ask("Import " + m.count.toLocaleString() + (m.count === 1 ? " shape" : " shapes"), "From " + m.name + ": " + some + (m.warnings.length ? " (" + m.warnings[0] + ")" : "") + (m.count === 1 ? " It becomes" : " They become") + " a collection of your own.", m.name, "Import").then((title) => post(title ? { type: "saveStencil", token: m.token, title } : { type: "dropStencil", token: m.token }));
 		} else if (m.type === "previews" && m.reqId === reqId) {
 			for (const p of m.previews) {
 				const h = hits.find((x) => x.galleryId === p.galleryId && x.id === p.id);
@@ -834,6 +849,7 @@
 		} else if (m.type === "creatorAgents") {
 			creator.agents = Array.isArray(m.agents) ? m.agents : [];
 			creator.last = m.last || null;
+			creator.settings = !!m.settings;
 			creator.asked = true;
 			renderCreatorForm();
 		} else if (m.type === "creating") {

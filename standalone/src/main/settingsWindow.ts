@@ -3,6 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { adapterPackages, AgentId, agentStatuses } from "./agents";
 import { refreshAdapterVersions } from "./adapterVersions";
+import { apiAccess } from "./api/catalog";
+import { ApiKeysPanel } from "./api/keysPanel";
 import { probeModels, probing } from "./modelProbe";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, settingsPath, ShapeLocation, updateSettings, type Settings } from "./settings";
@@ -20,6 +22,8 @@ export class SettingsWindow {
 	/** Agents asked for their models since the app started, and what went wrong for each. */
 	private static asked = new Set<AgentId>();
 	private static modelErrors = new Map<AgentId, string>();
+	/** The page's other half for API keys (keysPanel.ts). */
+	private static readonly keysPanel = new ApiKeysPanel(apiAccess, () => SettingsWindow.postState());
 
 	public static open(server: StaticServer, section?: string): void {
 		SettingsWindow.install();
@@ -63,6 +67,8 @@ export class SettingsWindow {
 			void SettingsWindow.onMessage(msg);
 		});
 		onSettingsChanged(() => SettingsWindow.postState());
+		// (a kept key that a provider stopped accepting, found out while it was used elsewhere: the page marks it)
+		apiAccess().onRejected(() => SettingsWindow.postState());
 	}
 
 	private static post(msg: unknown): void {
@@ -76,6 +82,8 @@ export class SettingsWindow {
 			type: "state",
 			settings: s,
 			agents: agentStatuses().map((a) => ({ id: a.id, label: a.label, installed: a.installed, signedIn: a.signedIn, launch: a.launch, problem: a.problem, loadingModels: probing().includes(a.id), modelError: SettingsWindow.modelErrors.get(a.id) })),
+			// (whether a key is kept, never the key)
+			apis: SettingsWindow.keysPanel.rows(),
 			file: settingsPath(),
 			version: app.getVersion(),
 		});
@@ -103,6 +111,7 @@ export class SettingsWindow {
 	}
 
 	private static async onMessage(msg: any): Promise<void> {
+		if (SettingsWindow.keysPanel.onMessage(msg)) return;
 		switch (msg?.type) {
 			case "ready":
 				SettingsWindow.postState();

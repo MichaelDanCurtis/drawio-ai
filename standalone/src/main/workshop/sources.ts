@@ -412,7 +412,8 @@ export function parseMxLibrary(xml: string, source: string): GalleryItem[] {
 			if (!img) return;
 			content = { data: img.img };
 		} else return;
-		const title = typeof e.title === "string" && e.title ? e.title : `Shape ${i + 1}`;
+		// (draw.io's stencil converter writes the word "null" for a shape that has no name)
+		const title = typeof e.title === "string" && e.title && !/^\s*(null|undefined)\s*$/i.test(e.title) ? e.title : `Shape ${i + 1}`;
 		// the same shape twice in one library still gets two ids
 		let id = libraryItemId({ title, ...content });
 		const n = seen.get(id) ?? 0;

@@ -29,6 +29,8 @@ export interface KnownModel {
 	value: string;
 	name: string;
 	description?: string;
+	/** false: a model used with an API key that takes no pictures (the provider said so). */
+	images?: false;
 }
 
 /**
@@ -135,7 +137,7 @@ function cleanCatalog(c: Record<string, any>): Settings["modelCatalog"] {
 		if (!Array.isArray(list)) continue;
 		out[agent] = list
 			.filter((m) => m && typeof m.value === "string" && typeof m.name === "string")
-			.map((m) => ({ value: m.value, name: m.name, ...(typeof m.description === "string" ? { description: m.description } : {}) }));
+			.map((m) => ({ value: m.value, name: m.name, ...(typeof m.description === "string" ? { description: m.description } : {}), ...(m.images === false ? { images: false as const } : {}) }));
 	}
 	return out as Settings["modelCatalog"];
 }

@@ -718,9 +718,27 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
 			await pause(400);
 			await save(`settings-${theme}-${section}.png`, sw.webContents);
+			// (Agents & models has a second half: the API keys)
+			if (section === "agents") {
+				await sw.webContents.executeJavaScript(`document.querySelector('#agentTabs [data-tab="api"]').click()`);
+				await pause(300);
+				await save(`settings-${theme}-api-keys.png`, sw.webContents);
+			}
 		}
 	}
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
+	// API keys: the three providers, none with a key in this run's empty data folder. What is not a
+	// key is refused before anything is sent or the keychain is asked (so this run touches neither).
+	await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="agents"]').click(); document.querySelector('#agentTabs [data-tab="api"]').click()`);
+	const apiCards = `Array.from(document.querySelectorAll("#apiList .agent")).map((c) => [c.querySelector("header b").textContent, c.querySelector("header .tag").textContent, !!c.querySelector('.keyrow input[type="password"]'), c.querySelector(".bad") ? c.querySelector(".bad").textContent : null])`;
+	const apis: [string, string, boolean, string | null][] = await sw.webContents.executeJavaScript(apiCards);
+	log("settingsApis", apis);
+	await sw.webContents.executeJavaScript(`(() => { const c = document.querySelector('#apiList .agent[data-api="openai"]'); c.querySelector(".keyrow input").value = "not a key"; c.querySelector(".keyrow button").click(); })()`);
+	await pause(600);
+	const refused: [string, string, boolean, string | null][] = await sw.webContents.executeJavaScript(apiCards);
+	log("settingsApiRefused", refused[1]);
+	if (apis.map((a) => a[0]).join() !== "Anthropic API,OpenAI API,Kimi API" || apis.some((a) => a[1] !== "No key" || !a[2] || a[3]) || !/does not look like an API key/.test(refused[1]?.[3] ?? "") || refused[1][1] !== "No key" || fs.existsSync(path.join(app.getPath("userData"), "api-keys.json")))
+		throw new Error("Settings does not list the API providers as it should (see the settingsApis lines above).");
 	sw.close();
 	process.env.DRAWAI_THEME = "light";
 	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "dots2d" } });
