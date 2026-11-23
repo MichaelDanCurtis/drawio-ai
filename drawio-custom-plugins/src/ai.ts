@@ -1999,6 +1999,10 @@ Draw.loadPlugin((ui: any) => {
 		return captured;
 	}
 
+	/** See searchShapes: the longest style with an inline image a search returns, and how many such shapes at most. */
+	const MAX_INLINE_IMAGE_STYLE = 4000;
+	const MAX_INLINE_IMAGE_SHAPES = 4;
+
 	function searchShapes(action: AiSearchShapesAction): Promise<AiSearchShapesEvent> {
 		return new Promise((resolve) => {
 			const done = (shapes: AiShapeTemplate[], error?: string) =>
@@ -2016,10 +2020,17 @@ Draw.loadPlugin((ui: any) => {
 					0,
 					(results: any[]) => {
 						const shapes: AiShapeTemplate[] = [];
+						let inlineImages = 0;
 						for (const fn of (results || []).slice(0, limit)) {
 							const t = captureTemplate(fn);
 							const first = t?.cells?.[0];
 							if (!t || !first) continue;
+							// A style with the image inside it (a gallery's icon, a shape from an image library)
+							// is the image itself: only small ones, and a few, are worth the model's context.
+							if (/(^|;)image=data:/.test(first.style || "")) {
+								if ((first.style || "").length > MAX_INLINE_IMAGE_STYLE || inlineImages >= MAX_INLINE_IMAGE_SHAPES) continue;
+								inlineImages++;
+							}
 							const shape: AiShapeTemplate = {
 								title: t.title || "",
 								library: fn.parentLibraries?.[0],

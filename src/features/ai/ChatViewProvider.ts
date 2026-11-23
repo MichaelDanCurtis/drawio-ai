@@ -1,3 +1,4 @@
+import { fileNameOf } from "../diskUri";
 import * as vscode from "vscode";
 import { DEFAULT_IMAGE_PROMPT } from "./systemPrompt";
 import type { DrawioEditor } from "../../DrawioEditorService";
@@ -281,7 +282,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 		this.view.webview.postMessage({
 			type: "state",
 			state: {
-				file: editor ? decodeURIComponent(editor.uri.path.split("/").pop() ?? "") : undefined,
+				file: editor ? fileNameOf(editor.uri) : undefined,
 				selectionCount: editor?.drawioClient.currentSelection.length ?? 0,
 				lassoActive: this.lassoActive,
 				busy: !!c.running,
@@ -359,7 +360,7 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
 				client,
 				history: c.messages,
 				userText: text,
-				context: describeContext(decodeURIComponent(editor.uri.path.split("/").pop() ?? ""), selection),
+				context: describeContext(fileNameOf(editor.uri), selection),
 				systemExtra: template?.prompt,
 				images: extras.images,
 				attachments: extras.attachments,

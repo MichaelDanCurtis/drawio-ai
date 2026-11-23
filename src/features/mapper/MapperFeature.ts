@@ -11,6 +11,7 @@ import type { MapFinding, MapInput } from "../../../standalone/src/main/mapper/t
 import { MAPPER_TOOL_NAMES, MAPPER_TOOL_SCHEMAS } from "../ai/allTools";
 import type { ExtraTools, ToolResult } from "../ai/DiagramToolbox";
 import type { SelectionContext } from "../ai/systemPrompt";
+import { fileNameOf, isOnDisk } from "../diskUri";
 import { OMNI_DIR } from "../editorLook";
 import type { EditorLookFeature, PresentationTour } from "../EditorLookFeature";
 import { mapperPageHtml, MAPPER_PAGE, pageNonce } from "./mapperPage";
@@ -140,7 +141,7 @@ export class MapperFeature {
 	 * remote machine (WSL, SSH, a container) when the extension runs there.
 	 */
 	private onDisk(uri: vscode.Uri): boolean {
-		return uri.scheme === "file" || (uri.scheme === "vscode-remote" && this.deps.context.extension.extensionKind === vscode.ExtensionKind.Workspace);
+		return isOnDisk(uri, this.deps.context.extension.extensionKind === vscode.ExtensionKind.Workspace);
 	}
 
 	/** Maps are kept next to the diagram (`.drawai/maps`), so the diagram must be a file on disk. */
@@ -644,5 +645,5 @@ export class MapperFeature {
 }
 
 function fileName(editor: DrawioEditor): string {
-	return decodeURIComponent(editor.uri.path.split("/").pop() ?? "");
+	return fileNameOf(editor.uri);
 }

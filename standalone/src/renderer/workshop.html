@@ -102,7 +102,7 @@
 <body>
 	<div class="head" data-dot-host>
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
-		<div class="label"><span class="brandmark" aria-hidden="true"></span><span class="label">OmniDraw · Shape Workshop</span></div>
+		<div class="label"><span class="brandmark" aria-hidden="true"></span><span class="label" id="headLabel">OmniDraw · Shape Workshop</span></div>
 		<h1>Shape Workshop</h1>
 		<p id="lead">Find, collect and make shapes for your diagrams.</p>
 	</div>
@@ -151,6 +151,8 @@
 <script nonce="$$nonce$$">
 (function () {
 	const bridge = window.omnidrawWorkshop;
+	// (the page is also the Draw.AI extension's, in VS Code: it says whose it is)
+	if (window.omnidrawConfig && window.omnidrawConfig.name) document.getElementById("headLabel").textContent = window.omnidrawConfig.name + " · Shape Workshop";
 	const post = (m) => bridge.post(m);
 	const $ = (id) => document.getElementById(id);
 	const I = window.DrawAIIcons;

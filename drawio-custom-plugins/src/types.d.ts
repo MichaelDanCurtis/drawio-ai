@@ -5,12 +5,13 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
     | AiPagesAction | AiExportPdfAction
-    | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction;
+    | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction
+    | DesktopShapesAction | DesktopInsertShapeAction | DesktopReportShapeSetsAction | DesktopSetShapeSetAction | DesktopGalleryResultsAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
     | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
-    | DesktopCommandEvent | DesktopStateEvent;
+    | DesktopCommandEvent | DesktopStateEvent | DesktopShapeSetsEvent | DesktopGallerySearchEvent;
 
 // The editor tools shared with the desktop app (standalone/src/renderer/desktop-toolbar.js and
 // presentation.js, loaded as plugins): their messages keep the desktop app's names.
@@ -57,6 +58,56 @@ declare interface DesktopStateEvent {
     loaded?: boolean;
 }
 
+// ----- the Shape Workshop's side of the editor (galleries as palettes and in draw.io's search, draw.io's shape sets) -----
+
+/** A shape ready for the editor: a style (an image), or draw.io XML. */
+declare type DesktopShape = { style: string; w: number; h: number; title: string } | { xml: string; w: number; h: number; title: string };
+
+/** The palettes the host adds to the shapes sidebar: the enabled galleries' first pages (and, in the desktop app, the user's shape folders). */
+declare interface DesktopShapesAction {
+    action: "desktopShapes";
+    libraries: unknown[];
+}
+
+/** Puts a shape in the middle of the view, selected. The page can see a message twice: `seq` makes it insert once. */
+declare interface DesktopInsertShapeAction {
+    action: "desktopInsertShape";
+    shape: DesktopShape;
+    seq: number;
+}
+
+declare interface DesktopReportShapeSetsAction {
+    action: "desktopReportShapeSets";
+}
+
+/** Shows or hides one of draw.io's own shape sets (".scratchpad" is the Scratchpad). */
+declare interface DesktopSetShapeSetAction {
+    action: "desktopSetShapeSet";
+    id: string;
+    on: boolean;
+}
+
+/** The host's answer to "desktopGallerySearch". */
+declare interface DesktopGalleryResultsAction {
+    action: "desktopGalleryResults";
+    reqId: number;
+    shapes: DesktopShape[];
+}
+
+/** draw.io's own shape sets and which are shown (what its "More Shapes" dialog chose between). */
+declare interface DesktopShapeSetsEvent {
+    event: "desktopShapeSets";
+    groups: unknown[];
+}
+
+/** draw.io's sidebar search asks the host for gallery shapes that match. */
+declare interface DesktopGallerySearchEvent {
+    event: "desktopGallerySearch";
+    reqId: number;
+    query: string;
+    limit: number;
+}
+
 /** What the editor's toolbar plugin shows now (its answer to "desktopReportState"). */
 declare interface DesktopLookState {
     host: string;
@@ -72,6 +123,8 @@ declare interface DesktopLookState {
     tours: string[];
     /** The tour playing. */
     tour: { title: string; step: number; steps: number; highlighted: number; caption: string } | null;
+    /** Titles of the palettes the host added to the shapes sidebar (galleries). */
+    palettes: string[];
     buttons: { mark: boolean; shapes: boolean; panels: number; ruler: boolean; present: boolean; workshop: boolean; chat: boolean };
 }
 

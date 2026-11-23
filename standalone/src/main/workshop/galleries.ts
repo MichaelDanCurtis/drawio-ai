@@ -1,7 +1,7 @@
 import { createHash } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
-import type { GalleryConfig, GallerySource } from "../settings";
+import type { GalleryConfig, GallerySource } from "./types";
 import { shapeLibraries } from "../shapeLocations";
 import {
 	allowedUrl,

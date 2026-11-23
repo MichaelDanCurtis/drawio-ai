@@ -166,7 +166,7 @@ test("the editor gets the desktop app's toolbar, look, tooltips and matrix", asy
 	// the tools say so themselves once they have loaded
 	const first = (await e.waitFor((m) => m.event === "desktopState")).state;
 	assert.equal(first.host, "vscode");
-	assert.deepEqual(first.buttons, { mark: true, shapes: true, panels: 3, ruler: true, present: true, workshop: false, chat: false });
+	assert.deepEqual(first.buttons, { mark: true, shapes: true, panels: 3, ruler: true, present: true, workshop: true, chat: false });
 	assert.equal(first.icons, "dots2d");
 	assert.equal(first.toolbar, "top");
 	assert.equal(first.themed, true, "the theme plugin loaded");
@@ -195,18 +195,92 @@ test("the editor gets the desktop app's toolbar, look, tooltips and matrix", asy
 	await e.page.close();
 });
 
-test("the mark opens the settings, and draw.io keeps its own More Shapes dialog", async () => {
+test("the mark opens the settings; the Workshop button and + More Shapes open the Shape Workshop", async () => {
 	const e = await open("buttons", { look: {} });
 	await e.waitFor((m) => m.event === "desktopState");
 	await e.page.click(".drawai-mark");
 	assert.equal((await e.waitFor((m) => m.event === "desktopCommand")).command, "settings");
 
-	// (the desktop app sends this button to its Shape Workshop; the extension has none yet)
+	e.inbox.length = 0;
+	await e.page.evaluate(() => editorUi.actions.get("desktop.workshop").funct());
+	assert.equal((await e.waitFor((m) => m.event === "desktopCommand")).command, "workshop");
+	// draw.io's own shape sets are switches in the Workshop: its More Shapes dialog stays closed
 	e.inbox.length = 0;
 	await e.page.evaluate(() => editorUi.actions.get("shapes").funct());
-	await until(() => e.page.evaluate(() => !!document.querySelector(".geDialog")), "draw.io's More Shapes dialog");
-	assert.equal(e.inbox.some((m) => m.event === "desktopCommand" || m.event === "desktopShapeSets"), false);
+	assert.equal((await e.waitFor((m) => m.event === "desktopCommand")).command, "shapeSets");
+	assert.equal(await e.page.evaluate(() => !!document.querySelector(".geDialog")), false);
 	assert.deepEqual(e.errors, []);
+	await e.page.close();
+});
+
+const ICON = (colour) => `shape=image;html=1;verticalLabelPosition=bottom;verticalAlign=top;imageAspect=1;aspect=fixed;image=data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22%3E%3Ccircle cx=%2212%22 cy=%2212%22 r=%2210%22 fill=%22${colour}%22/%3E%3C/svg%3E;`;
+
+test("the Shape Workshop's side of the editor: galleries as palettes and in draw.io's search, a shape put in once, shape sets", async () => {
+	const e = await open("workshop", { look: {} });
+	await e.waitFor((m) => m.event === "desktopState");
+	// the page says what draw.io's shape sets are, the Scratchpad among them
+	const sets = (await e.waitFor((m) => m.event === "desktopShapeSets")).groups;
+	assert.ok(sets.length >= 2, JSON.stringify(sets.map((g) => g.title)));
+	const all = sets.flatMap((g) => g.entries);
+	assert.ok(all.some((x) => x.id === "general" && x.on === true), "General is not reported as shown");
+	assert.ok(all.some((x) => x.id === ".scratchpad"));
+
+	// palettes (a webview hands every message to the page twice: the second changes nothing)
+	const library = { title: "Tech logos", path: "gallery:tech-logos", kind: "gallery", more: 1234, shapes: [{ style: ICON("red"), w: 48, h: 48, title: "Postgres" }, { style: ICON("blue"), w: 48, h: 48, title: "Redis" }] };
+	assert.deepEqual((await e.state()).palettes, []);
+	await e.send({ action: "desktopShapes", libraries: [library] });
+	await e.send({ action: "desktopShapes", libraries: [library] });
+	assert.deepEqual((await e.state()).palettes, ["Tech logos"]);
+	assert.equal(await e.page.evaluate(() => [...document.querySelectorAll(".geSidebarContainer .geTitle")].filter((t) => /^Tech logos · search for 1,234 more/.test(t.textContent.trim())).length), 1);
+
+	// draw.io's own search asks the host for gallery shapes and shows them after its own
+	e.inbox.length = 0;
+	const found = e.page.evaluate(() => window.omnidrawShapes.search("zebra"));
+	const asked = await e.waitFor((m) => m.event === "desktopGallerySearch");
+	assert.equal(asked.query, "zebra");
+	const answer = { action: "desktopGalleryResults", reqId: asked.reqId, shapes: [{ style: ICON("black"), w: 48, h: 48, title: "Zebra" }] };
+	await e.send(answer);
+	await e.send(answer);
+	assert.deepEqual((await found).filter((t) => /Zebra/.test(t)), ["Zebra (gallery)"]);
+
+	// the AI's shape search uses draw.io's search too: of shapes that carry their image, it takes a few small ones
+	e.inbox.length = 0;
+	await e.send({ action: "aiSearchShapes", query: "qqzebraqq", limit: 12 });
+	const aiAsked = await e.waitFor((m) => m.event === "desktopGallerySearch");
+	const big = ICON("purple").replace("%3C/svg%3E", `%3C!--${"x".repeat(5000)}--%3E%3C/svg%3E`);
+	await e.send({
+		action: "desktopGalleryResults",
+		reqId: aiAsked.reqId,
+		shapes: [{ style: big, w: 48, h: 48, title: "Huge" }, ...["A", "B", "C", "D", "E", "F"].map((t) => ({ style: ICON("teal"), w: 48, h: 48, title: `Small ${t}` }))],
+	});
+	const aiFound = (await e.waitFor((m) => m.event === "aiSearchShapes")).shapes.filter((x) => /image=data:/.test(x.style));
+	assert.deepEqual(aiFound.map((x) => x.title), ["Small A", "Small B", "Small C", "Small D"]);
+	assert.ok(aiFound.every((x) => x.style.length < 4000));
+
+	// a shape from the Workshop goes in once, selected
+	const cells = () => e.page.evaluate(() => editorUi.editor.graph.getChildCells(editorUi.editor.graph.getDefaultParent()).length);
+	const before = await cells();
+	const insert = { action: "desktopInsertShape", seq: 1, shape: { style: ICON("green"), w: 48, h: 48, title: "Kafka" } };
+	await e.send(insert);
+	await e.send(insert);
+	await until(async () => (await cells()) === before + 1, "the shape to be put in");
+	await new Promise((r) => setTimeout(r, 300));
+	assert.equal(await cells(), before + 1);
+	assert.equal(await e.page.evaluate(() => editorUi.editor.graph.getSelectionCount()), 1);
+
+	// a shape set is switched from the Workshop, and the page reports the new state
+	const off = all.find((x) => x.id !== "general" && x.id !== ".scratchpad" && !x.on);
+	assert.ok(off, "every shape set is already shown");
+	e.inbox.length = 0;
+	await e.send({ action: "desktopSetShapeSet", id: off.id, on: true });
+	const after = (await e.waitFor((m) => m.event === "desktopShapeSets" && m.groups.some((g) => g.entries.some((x) => x.id === off.id && x.on)))).groups;
+	assert.ok(after.flatMap((g) => g.entries).some((x) => x.id === "general" && x.on), "switching one set on hid General");
+
+	// no galleries on any more: the palettes go
+	await e.send({ action: "desktopShapes", libraries: [] });
+	assert.deepEqual((await e.state()).palettes, []);
+	assert.deepEqual(e.errors, []);
+	await e.shot("vscode-workshop-editor.png");
 	await e.page.close();
 });
 

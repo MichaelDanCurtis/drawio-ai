@@ -254,6 +254,12 @@ rise in. Under *reduce motion* nothing moves.
   the extension a webview panel: `src/features/mapper/`). Keep `mapper/toolSchemas.ts` free
   of imports (the extension's manifest is generated from it), name host-specific wording
   through `setToolSource` and `tourPrompt`'s `play`, and keep the page's files under `/ui/`.
+- The Shape Workshop is shared with the VS Code extension as it is: `src/main/workshop/`
+  without `index.ts` and `workshopWindow.ts` (the gallery service, sources, the guarded fetch,
+  the sanitiser, `types.ts`, `palette.ts`, and the page's other half `core.ts`, `WorkshopCore`),
+  `src/main/shapeSets.ts`, and the page `src/renderer/workshop.html`
+  (the extension: `src/features/workshop/`). Keep those files free of Electron and of
+  `../settings`; what needs a window or the app's settings goes through `WorkshopPorts`.
 - Shared with the VS Code extension: `src/renderer/theme.js`, `desktop-toolbar.js`,
   `presentation.js` and `ui/{icons,brandmark,tips,dots,matrix}.js` are also the extension's
   editor tools (its plugin build copies them: `drawio-custom-plugins/webpack.config.ts`,

@@ -38,6 +38,7 @@ The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the r
 -   **Export to PDF**: **Draw.io: Export to PDF…**, **File → Export as PDF…** in the diagram, `.pdf` in **Draw.io: Export To...**, or **Export PDF** under a `@drawio` answer. Every page becomes one PDF page the size of its content, rendered at print resolution (about 300 dpi) inside VS Code; nothing is uploaded.
 -   **Export from chat**: ask for a PDF, Visio, SVG or PNG file ("export this as Visio to docs/architecture.vsdx") and the AI writes it into the workspace with the `drawio_export` tool. It only writes inside the workspace (never through symbolic links), asks you before replacing an earlier export, and never replaces a diagram.
 -   **Import from chat**: ask the AI to open a Visio, Gliffy, yEd, Lucidchart, Miro or draw.io CSV file ("open docs/network.vsdx") and it converts it into a new `.drawio` file with the `drawio_import` tool, then tells you what did not carry over. It only reads files inside the workspace and never replaces a file.
+-   **Shape Workshop**: galleries of icons and logos as palettes and in draw.io's search, your own collections, and draw.io's shape sets in one place. See [Shape Workshop](#shape-workshop).
 -   **Mapper**: **Draw.AI: Map Something…** draws software, databases, cloud environments and ML systems into the diagram from facts it collects read-only, with health findings and guided tours. See [Mapper](#mapper).
 -   **External agents (MCP)**: turn on the local MCP server and Claude Code, Codex, Cursor and other MCP clients can read and edit your diagrams with the same tools, including review mode and your design template. It listens on `127.0.0.1` only and requires a secret token.
 
@@ -48,6 +49,7 @@ The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the r
 -   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, a session token that only works while that window runs, its folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`). The long-lived token you copy for hand-configured clients never goes there.
 -   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
 -   Exports and imports, including PDF and Visio files, are made inside VS Code. Nothing is uploaded.
+-   The [Shape Workshop](#shape-workshop) downloads nothing until you switch a gallery on. Then it fetches that gallery's index and the shapes you look at from jsDelivr or GitHub; nothing about your diagrams is sent.
 -   The [Mapper](#mapper) only reads the systems it maps. Passwords, connection strings and tokens are used for one run and are never stored, drawn or sent to the agent; the facts it collects go to the agent only when you ask it to review, describe or dig into a map.
 
 ## Main Settings
@@ -198,6 +200,19 @@ The **Maps** view (Draw.AI in the activity bar) lists the maps of the diagram yo
 -   **Ask the Map…** (the view's title bar) has the agent answer a question from the maps and draw the answer as a page. **Draw.AI: Dig Deeper into Selected Map Shapes…** has it investigate the shapes you selected.
 
 The agent works through 13 `mapper_*` tools (`mapper_maps`, `mapper_find`, `mapper_show`, `mapper_path`, `mapper_findings`, `mapper_run` and others), in VS Code's chat with the **Draw.AI** agent (and `@drawio`) and, once connected, in Claude Code and Codex. When the agent starts a map itself, you are asked first, and stopping the chat request stops the map.
+
+## Shape Workshop
+
+**Draw.AI: Shape Workshop…** (also the Workshop button in the diagram's toolbar, **+ More Shapes** under the shapes sidebar, the Start view and the diagram's `…` menu) is the Shape Workshop of the OmniDraw desktop app. Its first part is the **Shape Gallery**:
+
+-   **Galleries** of icons and logos: theSVG (open licences only), Tech logos (devicon and Simple Icons) and UI icons (Lucide and Tabler) are listed and **switched off** to start with. Switch one on to use it. You can also add a public GitHub repository of SVGs, a folder of SVG or PNG files, or a draw.io library file.
+-   **Collections** you fill yourself from any gallery, and export as a draw.io library.
+-   **Search** across the galleries that are on, and click a shape to put it in the diagram you used last.
+-   A gallery that is on is also a **palette in the shapes sidebar** of every diagram (a first page of it), and **draw.io's own search** in that sidebar finds its shapes. The AI's `drawio_search_shapes` tool gets a few of the small ones too (a shape whose image is larger than about 4 KB is left out: it would fill the model's context).
+-   A gallery that is **off stays off**: it cannot be browsed, synced or made available offline until you switch it on, and restored default galleries come back switched off.
+-   **draw.io's own shape sets** (General, UML, AWS, …) and the **Scratchpad** are switches in the Workshop, where draw.io's More Shapes dialog used to be. They are kept for every diagram.
+
+Shapes are downloaded only for galleries you switched on, only from jsDelivr and GitHub (`cdn.jsdelivr.net`, `data.jsdelivr.com`, `raw.githubusercontent.com`), and are kept in the extension's storage for offline use. Every SVG is cleaned of scripts and external links before it is shown or put in a diagram. Shape Shifter and Shape Creator, the Workshop's other two parts, are not there yet.
 
 ## Editor Tools and Look
 
