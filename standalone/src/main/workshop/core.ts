@@ -1,9 +1,26 @@
 import * as fs from "fs";
 import * as path from "path";
-import type { GalleryService, Insertable } from "./galleries";
+import type { GalleryHit, GalleryService, Insertable } from "./galleries";
 import { withDefaultGalleries } from "./palette";
-import { parseGithubUrl } from "./sources";
+import { builtInInsertable, builtInPreview, colourOf, restyleRequest, selectionInfo, styleEdits, type BuiltInShape, type SelectedCell, type SelectionInfo, type ShapeChange, type StyleEdit } from "./shifter";
+import { parseGithubUrl, parseMxLibrary, type GalleryItem } from "./sources";
 import type { GalleryConfig } from "./types";
+
+/**
+ * What the Shape Shifter needs of the diagram used last: its editor searches draw.io's own
+ * shapes and converts Visio stencils, and its selection is what "change a shape" changes.
+ */
+export interface ShifterHost {
+	/** draw.io's own shapes that match, with their thumbnails. */
+	searchBuiltIn(query: string, limit: number): Promise<BuiltInShape[]>;
+	selectedCells(): Promise<SelectedCell[]>;
+	/** Changes the styles in one undo step (the user's own change: not held for review). */
+	applyStyles(edits: StyleEdit[]): Promise<void>;
+	/** Hands a request about the selection to the agent; `shown` is the short line a transcript shows for it. */
+	askAgent(request: string, shown: string): Promise<void>;
+	/** A Visio stencil (.vssx, .vss) as a draw.io library, converted by the editor. */
+	convertStencil(file: string): Promise<{ library: string; warnings: string[] }>;
+}
 
 /** Where the Workshop puts shapes, and whose shape sets it shows: the diagram used last. */
 export interface WorkshopHost {
@@ -14,6 +31,8 @@ export interface WorkshopHost {
 	setShapeSet(id: string, on: boolean): void;
 	/** Asks the editor to report its shape sets again. */
 	refreshShapeSets(): void;
+	/** The Shape Shifter's side (a program that has it: see WorkshopPorts.shifter). */
+	shifter?: ShifterHost;
 }
 
 /**
@@ -38,6 +57,10 @@ export interface WorkshopPorts {
 	/** Shows a saved file where it is. */
 	reveal(file: string): void;
 	openExternal(url: string): void;
+	/** This program has the Shape Shifter: its WorkshopHost gives `shifter`, and `pickStencil` lets the user choose a stencil. */
+	shifter?: boolean;
+	/** Lets the user choose a Visio stencil file. */
+	pickStencil?(): Promise<string | undefined>;
 	/**
 	 * A gallery that is off downloads nothing: until it is switched on it cannot be browsed,
 	 * synced or made offline, and the default galleries come back switched off. (The VS Code
@@ -57,16 +80,80 @@ export function downloads(g: GalleryConfig): boolean {
  * Gallery (galleries on and off, add, sync, offline, collections, search, insert); Shape Shifter
  * and Shape Creator join it later.
  */
+/** How long the Shifter's search waits for draw.io's own shapes before the galleries answer alone. */
+const OWN_SEARCH_MS = 8000;
+
+/** `p`'s value, or `fallback` when it fails or takes longer than `ms`. */
+function withFallback<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+	return new Promise((resolve) => {
+		const timer = setTimeout(() => resolve(fallback), ms);
+		p.then(
+			(value) => {
+				clearTimeout(timer);
+				resolve(value);
+			},
+			() => {
+				clearTimeout(timer);
+				resolve(fallback);
+			}
+		);
+	});
+}
+
 export class WorkshopCore {
 	private searchSeq = 0;
 	private offlineRuns = new Set<string>();
 	private stateTimer: NodeJS.Timeout | undefined;
+	private selectionTimer: NodeJS.Timeout | undefined;
+	/** draw.io's own shapes of the Shifter's last search, by the key the page was given for each. */
+	private found = new Map<string, Insertable>();
+	/** A converted stencil waiting for its name. */
+	private stencil: { token: string; items: GalleryItem[] } | undefined;
+	private stencilSeq = 0;
+	private selectionSeq = 0;
+	/** Counts the pages this has served: what was started for a page that is gone is not kept for the next. */
+	private pageSeq = 0;
 
 	constructor(private readonly ports: WorkshopPorts) {}
 
 	public dispose(): void {
 		clearTimeout(this.stateTimer);
+		this.pageGone();
+	}
+
+	/** The page was closed: what waited for it (a search, a selection, a converted stencil without a name) is dropped. */
+	public pageGone(): void {
+		this.pageSeq++;
+		clearTimeout(this.selectionTimer);
 		this.searchSeq++;
+		this.selectionSeq++;
+		this.stencil = undefined;
+		this.found.clear();
+	}
+
+	/** Tells the page what is selected in the diagram used last (the Shifter's "change a shape"). */
+	public postSelection(): void {
+		clearTimeout(this.selectionTimer);
+		this.selectionTimer = setTimeout(() => {
+			// (an answer that arrives after a later question's is out of date)
+			const seq = ++this.selectionSeq;
+			const post = (info: SelectionInfo) => {
+				if (seq === this.selectionSeq) this.ports.post({ type: "selection", ...info });
+			};
+			const shifter = this.ports.host()?.shifter;
+			if (!shifter) return post({ count: 0, icons: 0 });
+			shifter.selectedCells().then(
+				(cells) => post(selectionInfo(cells)),
+				() => post({ count: 0, icons: 0 })
+			);
+		}, 120);
+	}
+
+	/** The Shifter's host, or an error that says what is missing. */
+	private shifterHost(): ShifterHost {
+		const shifter = this.ports.host()?.shifter;
+		if (!shifter) throw new Error(this.ports.shifter ? "Open a diagram first." : "The Shape Shifter is not available here yet.");
+		return shifter;
 	}
 
 	/** Tells the page what it shows: the galleries, the look, the diagram in front and its shape sets. */
@@ -80,6 +167,7 @@ export class WorkshopCore {
 				diagram: this.ports.host()?.diagramName() ?? null,
 				sets: this.ports.host()?.shapeSets() ?? null,
 				version: this.ports.version(),
+				shifter: !!this.ports.shifter,
 			});
 		}, 30);
 	}
@@ -205,6 +293,73 @@ export class WorkshopCore {
 			case "search":
 				await this.search(msg);
 				break;
+			// ----- the Shape Shifter -----
+			case "find":
+				await this.find(msg);
+				break;
+			case "insertFound": {
+				const shape = this.found.get(String(msg.key));
+				if (!shape) throw new Error("Search again: that result is out of date.");
+				const host = this.ports.host();
+				if (!host) throw new Error("Open a diagram first.");
+				const where = await host.insert(shape);
+				this.ports.post({ type: "notice", message: where ? `Added ${shape.title} to ${where}.` : "Open a diagram first." });
+				break;
+			}
+			case "selection":
+				this.postSelection();
+				break;
+			case "restyle": {
+				const change: ShapeChange = { fill: colourOf(msg.fill), stroke: colourOf(msg.stroke), font: colourOf(msg.font, false), icon: colourOf(msg.icon, false) };
+				if (!Object.values(change).some(Boolean)) throw new Error("Pick a colour first.");
+				const shifter = this.shifterHost();
+				const cells = await shifter.selectedCells();
+				if (!cells.length) throw new Error("Select the shapes to change in the diagram first.");
+				const edits = styleEdits(cells, change);
+				if (!edits.length) throw new Error(change.icon && !change.fill && !change.stroke && !change.font ? "None of the selected shapes is an icon that can be given one colour." : "Nothing to change on what is selected.");
+				await shifter.applyStyles(edits);
+				this.ports.post({ type: "notice", message: `Changed ${edits.length} shape${edits.length === 1 ? "" : "s"}. Undo in the diagram takes it back.` });
+				this.postSelection();
+				break;
+			}
+			case "describeChange": {
+				const text = String(msg.text ?? "").trim().slice(0, 2000);
+				if (!text) throw new Error("Say what to change first.");
+				const shifter = this.shifterHost();
+				const cells = await shifter.selectedCells();
+				if (!cells.length) throw new Error("Select the shapes to change in the diagram first.");
+				await shifter.askAgent(restyleRequest(text, cells.length), `✎ Change ${cells.length} shape${cells.length === 1 ? "" : "s"}: ${text}`);
+				this.ports.post({ type: "notice", message: "Handed to the agent in the chat. Its changes wait there for you to keep or revert." });
+				break;
+			}
+			case "importStencil": {
+				const page = this.pageSeq;
+				const file = await this.ports.pickStencil?.();
+				if (!file) return;
+				const converted = await this.shifterHost().convertStencil(file);
+				if (page !== this.pageSeq) return; // the page was closed meanwhile: nobody is there to name it
+				const name = path.basename(file).replace(/\.(vssx|vss|vssm)$/i, "");
+				const items = parseMxLibrary(converted.library, name).filter((i) => i.xml || i.data);
+				if (!items.length) throw new Error(`${path.basename(file)} has no shapes draw.io could read.`);
+				this.stencil = { token: `s${++this.stencilSeq}`, items };
+				this.ports.post({ type: "stencil", token: this.stencil.token, name, count: items.length, titles: items.slice(0, 12).map((i) => i.title), warnings: converted.warnings.slice(0, 6) });
+				break;
+			}
+			case "saveStencil": {
+				const pending = this.stencil;
+				if (!pending || pending.token !== msg.token) throw new Error("Import the stencil again: it is no longer waiting.");
+				this.stencil = undefined;
+				const title = String(msg.title ?? "").trim().slice(0, 80) || "Stencil";
+				const id = this.newId(title);
+				s.importCollection(id, pending.items);
+				this.add({ id, title, sources: [{ kind: "collection" }], enabled: true });
+				this.ports.post({ type: "notice", message: `${pending.items.length} shapes are in the new collection “${title}”.` });
+				this.ports.post({ type: "selectGallery", id });
+				break;
+			}
+			case "dropStencil":
+				if (this.stencil && this.stencil.token === msg.token) this.stencil = undefined;
+				break;
 			case "insert": {
 				const g = this.allow(this.config(msg.galleryId));
 				const item = (await s.items(g)).find((i) => i.id === msg.itemId);
@@ -264,10 +419,16 @@ export class WorkshopCore {
 			reqId: msg.reqId,
 			hits: hits.map((h) => ({ galleryId: h.galleryId, galleryTitle: h.galleryTitle, id: h.item.id, title: h.item.title, source: h.item.source, licence: h.item.licence ?? "", xml: !!h.item.xml })),
 		});
+		await this.pumpPreviews(seq, msg.reqId, hits, configs);
+	}
+
+	/** The previews of gallery hits, sent to the page as they are read or downloaded (while the search is still the newest). */
+	private async pumpPreviews(seq: number, reqId: unknown, hits: GalleryHit[], configs: GalleryConfig[]): Promise<void> {
+		const s = this.ports.service();
 		let next = 0;
 		const batch: { galleryId: string; id: string; src: string }[] = [];
 		const flush = () => {
-			if (batch.length && seq === this.searchSeq) this.ports.post({ type: "previews", reqId: msg.reqId, previews: batch.splice(0) });
+			if (batch.length && seq === this.searchSeq) this.ports.post({ type: "previews", reqId, previews: batch.splice(0) });
 		};
 		const work = async () => {
 			while (next < hits.length && seq === this.searchSeq) {
@@ -280,5 +441,37 @@ export class WorkshopCore {
 		};
 		await Promise.all(Array.from({ length: 8 }, work));
 		flush();
+	}
+
+	/**
+	 * The Shape Shifter's "find by words": draw.io's own shapes (from the editor of the diagram
+	 * used last) and the shapes of every gallery that is on, in one answer.
+	 */
+	private async find(msg: any): Promise<void> {
+		const s = this.ports.service();
+		const seq = ++this.searchSeq;
+		const configs = this.ports.configs();
+		const query = String(msg.query ?? "").trim().slice(0, 200);
+		const shifter = this.ports.host()?.shifter;
+		const [own, hits] = await Promise.all([
+			// (no diagram open, its editor still loading or not answering: the galleries answer alone)
+			query && shifter ? withFallback(shifter.searchBuiltIn(query, 36), OWN_SEARCH_MS, [] as BuiltInShape[]) : Promise.resolve([] as BuiltInShape[]),
+			query ? s.search(configs, query, { limit: Math.min(240, Number(msg.limit) || 120) }) : Promise.resolve([] as GalleryHit[]),
+		]);
+		if (seq !== this.searchSeq) return;
+		this.found = new Map();
+		const shapes = own.filter((b) => b && typeof b.style === "string" && !b.isEdge).slice(0, 36);
+		this.ports.post({
+			type: "found",
+			reqId: msg.reqId,
+			diagram: !!shifter,
+			own: shapes.map((b, i) => {
+				const key = `own:${seq}:${i}`;
+				this.found.set(key, builtInInsertable(b));
+				return { key, title: String(b.title || "Shape").slice(0, 80), library: typeof b.library === "string" ? b.library.slice(0, 40) : "", src: builtInPreview(b) };
+			}),
+			hits: hits.map((h) => ({ galleryId: h.galleryId, galleryTitle: h.galleryTitle, id: h.item.id, title: h.item.title, source: h.item.source, licence: h.item.licence ?? "", xml: !!h.item.xml })),
+		});
+		await this.pumpPreviews(seq, msg.reqId, hits, configs);
 	}
 }

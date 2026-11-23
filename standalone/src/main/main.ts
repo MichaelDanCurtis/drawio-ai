@@ -253,6 +253,7 @@ function buildMenu(): void {
 			label: "Shapes",
 			submenu: [
 				{ label: "Shape Workshop…", accelerator: "CmdOrCtrl+Alt+K", click: () => WorkshopWindow.open(server, "gallery") },
+				{ label: "Find a Shape…", click: () => WorkshopWindow.open(server, "shifter") },
 				{ label: "Shape Gallery…", click: () => WorkshopWindow.open(server, "gallery") },
 				{ type: "separator" },
 				{ label: "Your Shape Folders…", click: () => openSettings("shapes") },
@@ -366,8 +367,21 @@ app.whenReady().then(async () => {
 		shapeSets: () => (DiagramWindow.all.size ? DiagramWindow.shapeSets : undefined),
 		refreshShapeSets: () => DiagramWindow.requestShapeSets(),
 		setShapeSet: (id, on) => DiagramWindow.setShapeSet(id, on),
+		// the Shape Shifter works on the diagram used last: with none open it has nothing to search, change or convert with
+		get shifter() {
+			const w = DiagramWindow.focused();
+			if (!w) return undefined;
+			return {
+				searchBuiltIn: (query: string, limit: number) => w.searchOwnShapes(query, limit),
+				selectedCells: () => w.selectedCells(),
+				applyStyles: (edits: { id: string; props: Record<string, string> }[]) => w.applyStyles(edits),
+				askAgent: (request: string, shown: string) => w.askAboutSelection(request, shown),
+				convertStencil: (file: string) => w.convertStencil(file),
+			};
+		},
 	};
 	DiagramWindow.onShapeSets = () => WorkshopWindow.refresh();
+	DiagramWindow.onSelection = () => WorkshopWindow.selection();
 	// a collection filled or emptied in the Workshop, a gallery synced: the diagrams' palettes follow
 	galleries().onChange(() => DiagramWindow.refreshShapesSoon());
 	desktopMcp = new DesktopMcp({

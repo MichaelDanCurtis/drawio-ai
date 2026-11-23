@@ -181,10 +181,10 @@ Draw.loadPlugin((ui: any) => {
 			const core = new Set<any>();
 			for (const c of selection) {
 				core.add(c);
-				for (const d of model.getDescendants(c)) core.add(d);
+				if (!action.selectedOnly) for (const d of model.getDescendants(c)) core.add(d);
 			}
 			const context = new Set<any>();
-			for (const c of core) {
+			for (const c of action.selectedOnly ? [] : core) {
 				for (const e of model.getEdges(c) || []) {
 					if (!core.has(e)) context.add(e);
 					for (const t of [model.getTerminal(e, true), model.getTerminal(e, false)]) {
@@ -1980,6 +1980,10 @@ Draw.loadPlugin((ui: any) => {
 	// Shape library search (draw.io's own sidebar index)
 	// ---------------------------------------------------------------------
 
+	/** The largest thumbnail a search returns with a shape (as SVG text), and the side of its square. */
+	const MAX_THUMB = 40_000;
+	const THUMB_SIZE = 64;
+
 	/** Sidebar entries are DOM factories; intercept createItem to get their cells. */
 	function captureTemplate(fn: any): { cells: any[]; title: string } | undefined {
 		const sidebar = ui.sidebar;
@@ -1999,6 +2003,39 @@ Draw.loadPlugin((ui: any) => {
 		return captured;
 	}
 
+	/**
+	 * A sidebar entry's thumbnail as SVG text, drawn as the sidebar would draw it (it draws its
+	 * own only once an entry is on screen), on white, as an image of its own.
+	 */
+	function thumbnailOf(cells: any[]): string | undefined {
+		const sidebar = ui.sidebar;
+		const noForeignObject = W.mxClient?.NO_FO;
+		try {
+			const holder = document.createElement("div");
+			sidebar.createThumb(sidebar.graph.cloneCells(cells), THUMB_SIZE, THUMB_SIZE, holder, null, false, false, undefined, undefined, "#ffffff");
+			const svg = holder.querySelector("svg");
+			if (!svg) return undefined;
+			svg.removeAttribute("style");
+			svg.setAttribute("width", String(THUMB_SIZE));
+			svg.setAttribute("height", String(THUMB_SIZE));
+			svg.setAttribute("viewBox", `0 0 ${THUMB_SIZE} ${THUMB_SIZE}`);
+			const text = new XMLSerializer().serializeToString(svg);
+			return text.length <= MAX_THUMB ? text : undefined;
+		} catch {
+			// No thumbnail for this one. The sidebar's drawing graph is left as createThumb leaves it.
+			try {
+				sidebar.graph.getModel().clear();
+				sidebar.graph.view.scaleAndTranslate(1, 0, 0);
+			} catch {
+				// nothing more to tidy
+			}
+			if (W.mxClient) W.mxClient.NO_FO = noForeignObject;
+			return undefined;
+		}
+	}
+
+	/** See searchShapes: the longest XML of a shape of several cells that is returned whole (with `previews`). */
+	const MAX_SHAPE_XML = 400_000;
 	/** See searchShapes: the longest style with an inline image a search returns, and how many such shapes at most. */
 	const MAX_INLINE_IMAGE_STYLE = 4000;
 	const MAX_INLINE_IMAGE_SHAPES = 4;
@@ -2012,7 +2049,11 @@ Draw.loadPlugin((ui: any) => {
 				done([], "Shape library search is not available in this editor");
 				return;
 			}
-			const limit = Math.min(Math.max(action.limit || 8, 1), 25);
+			const limit = Math.min(Math.max(action.limit || 8, 1), action.ownOnly ? 60 : 25);
+			// (the desktop toolbar plugin adds gallery shapes to this search, deciding as the search starts;
+			// a caller that searches the galleries itself leaves them out)
+			const skipBefore = W.omnidrawSkipGallerySearch;
+			if (action.ownOnly) W.omnidrawSkipGallerySearch = true;
 			try {
 				sidebar.searchEntries(
 					action.query,
@@ -2040,7 +2081,15 @@ Draw.loadPlugin((ui: any) => {
 								isEdge: !!first.edge,
 							};
 							if (t.cells.length > 1 || first.getChildCount?.() > 0) {
-								shape.xml = mx.utils.getXml(graph.encodeCells(t.cells)).slice(0, 6000);
+								const xml = mx.utils.getXml(graph.encodeCells(t.cells));
+								if (!action.previews) shape.xml = xml.slice(0, 6000);
+								// (a shape the Workshop adds to a diagram needs all of its XML: a very large one is left out)
+								else if (xml.length <= MAX_SHAPE_XML) shape.xml = xml;
+								else continue;
+							}
+							if (action.previews) {
+								const thumb = thumbnailOf(t.cells);
+								if (thumb) shape.preview = thumb;
 							}
 							shapes.push(shape);
 						}
@@ -2051,6 +2100,8 @@ Draw.loadPlugin((ui: any) => {
 				);
 			} catch (e: any) {
 				done([], String(e?.message ?? e));
+			} finally {
+				W.omnidrawSkipGallerySearch = skipBefore;
 			}
 		});
 	}

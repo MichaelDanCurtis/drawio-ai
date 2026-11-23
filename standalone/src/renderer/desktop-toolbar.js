@@ -381,13 +381,20 @@
 			setTimeout(postShapeSets, 1500);
 		}
 
-		// ----- a shape from the Workshop: in the middle of the view, selected -----
+		// ----- a shape from the Workshop: beside the selection (in the middle of the view without one), selected -----
 		function insertShape(shape) {
 			var graph = ui.editor.graph;
 			if (!graph.isEnabled()) return;
 			var w = Number(shape.w) || 48, h = Number(shape.h) || 48;
 			var pt = graph.getFreeInsertPoint ? graph.getFreeInsertPoint() : null;
 			var c = graph.getCenterInsertPoint ? graph.getCenterInsertPoint(new mxRectangle(0, 0, w, h)) : pt || new mxPoint(40, 40);
+			// with something selected the shape goes beside it (so several in a row do not pile up in the middle)
+			var selection = graph.getSelectionCells();
+			var box = selection.length ? graph.getBoundingBox(selection) : null;
+			if (box && box.width >= 0) {
+				var scale = graph.view.scale, tr = graph.view.translate;
+				c = new mxPoint(Math.round((box.x + box.width) / scale - tr.x + 40), Math.round(box.y / scale - tr.y + (box.height / scale - h) / 2));
+			}
 			var cells;
 			graph.getModel().beginUpdate();
 			try {
@@ -414,7 +421,8 @@
 		var sidebarSearch = ui.sidebar.searchEntries;
 		ui.sidebar.searchEntries = function (terms, count, page, success, error, closedLibs, imagesOnly) {
 			var self = this;
-			if (!has("workshop") || imagesOnly || page > 0 || !terms || !String(terms).trim()) return sidebarSearch.apply(this, arguments);
+			// (a search that only wants draw.io's own shapes, the Shape Shifter's, sets omnidrawSkipGallerySearch for its call)
+			if (!has("workshop") || window.omnidrawSkipGallerySearch || imagesOnly || page > 0 || !terms || !String(terms).trim()) return sidebarSearch.apply(this, arguments);
 			return sidebarSearch.call(this, terms, count, page, function (results, len, more, words) {
 				var id = ++searchSeq;
 				var done = false;

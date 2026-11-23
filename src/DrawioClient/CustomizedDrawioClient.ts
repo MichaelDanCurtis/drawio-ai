@@ -26,6 +26,8 @@ export interface DiagramImport {
 	xml: string;
 	/** "stencil" when a Visio stencil's shapes were laid out on a page. */
 	kind: "diagram" | "stencil";
+	/** A stencil as a draw.io library (`<mxlibrary>[…]</mxlibrary>`). */
+	library?: string;
 	pages: number;
 	shapes: number;
 	connectors: number;
@@ -235,6 +237,8 @@ export class CustomizedDrawioClient extends DrawioClient<
 		maxCells: number;
 		/** Id or name of another page to read; the editor stays on its page. */
 		page?: string;
+		/** With scope "selection": only the selected cells themselves. */
+		selectedOnly?: boolean;
 	}): Promise<AiDiagramModel> {
 		const response = await this.aiRequest({
 			action: "aiGetModel",
@@ -370,18 +374,22 @@ export class CustomizedDrawioClient extends DrawioClient<
 		if (response.error || !response.xml) {
 			throw new Error(response.error ?? "draw.io returned no diagram.");
 		}
-		const { xml, kind, pages, shapes, connectors, warnings } = response;
-		return { xml, kind, pages, shapes, connectors, warnings };
+		const { xml, kind, library, pages, shapes, connectors, warnings } = response;
+		return { xml, kind, library, pages, shapes, connectors, warnings };
 	}
 
 	public async aiSearchShapes(
 		query: string,
-		limit: number
+		limit: number,
+		/** `previews`: each shape with its thumbnail; `ownOnly`: only draw.io's own shapes (see AiSearchShapesAction). */
+		options: { previews?: boolean; ownOnly?: boolean } = {}
 	): Promise<{ shapes: AiShapeTemplate[]; error?: string }> {
 		const response = await this.aiRequest({
 			action: "aiSearchShapes",
 			query,
 			limit,
+			...(options.previews ? { previews: true } : {}),
+			...(options.ownOnly ? { ownOnly: true } : {}),
 		});
 		if (response.event !== "aiSearchShapes") {
 			throw new Error("Invalid Response");

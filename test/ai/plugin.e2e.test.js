@@ -288,10 +288,55 @@ test("selection scope returns selected cells plus adjacent context", async () =>
 	assert.equal(model.cells.find((c) => c.id === idMap.$pq).context, true);
 });
 
+test("selection scope with selectedOnly returns the selected cells alone, not what is inside or beside them", async () => {
+	const { idMap } = await apply([
+		{ op: "addShape", tempId: "$in1", label: "In 1", x: 40, y: 1000 },
+		{ op: "addShape", tempId: "$in2", label: "In 2", x: 300, y: 1000 },
+		{ op: "addShape", tempId: "$out", label: "Out", x: 600, y: 1000 },
+		{ op: "addEdge", source: "$in1", target: "$out" },
+		{ op: "group", tempId: "$box", ids: ["$in1", "$in2"], label: "Box" },
+	]);
+	await request({ action: "aiSetSelection", cellIds: [idMap.$box], reveal: false });
+	// as the agents read a selection: the group, what is in it, and what it is connected to
+	const wide = await getModel("selection");
+	assert.ok(wide.cells.some((c) => c.id === idMap.$in1) && wide.cells.some((c) => c.id === idMap.$out && c.context));
+	// as the Shape Shifter reads it: the group
+	const narrow = (await request({ action: "aiGetModel", scope: "selection", selectedOnly: true, includeStyles: true, maxCells: 1000 })).model;
+	assert.deepEqual(narrow.cells.map((c) => [c.id, c.selected]), [[idMap.$box, true]]);
+	assert.equal(typeof narrow.cells[0].style, "string");
+	await request({ action: "aiSetSelection", cellIds: [], reveal: false });
+});
+
 test("shape search returns real library styles", async () => {
 	const r = await request({ action: "aiSearchShapes", query: "aws lambda", limit: 5 });
 	assert.ok(r.shapes.length > 0, `no shapes: ${r.error}`);
 	assert.ok(r.shapes.some((s) => /mxgraph\.aws/.test(s.style)), JSON.stringify(r.shapes.map((s) => s.style)));
+	assert.ok(r.shapes.every((s) => !("preview" in s)), "no thumbnails unless asked for");
+});
+
+test("shape search for the Workshop: a thumbnail per shape, and shapes of several cells with all of their XML", async () => {
+	const noFo = await page.evaluate(() => window.mxClient.NO_FO);
+	let big;
+	for (const query of ["table", "swimlane", "class", "list", "pool"]) {
+		const r = await request({ action: "aiSearchShapes", query, limit: 60, previews: true, ownOnly: true });
+		assert.equal(r.error, undefined);
+		assert.ok(r.shapes.length > 8, `more than the agents' few for "${query}": ${r.shapes.length}`);
+		assert.ok(r.shapes.filter((s) => /^<svg[\s>]/.test(s.preview ?? "") && s.preview.length <= 40000).length >= r.shapes.length / 2, `thumbnails for "${query}"`);
+		for (const s of r.shapes) if (s.xml) assert.match(s.xml, /^<mxGraphModel>[\s\S]*<\/mxGraphModel>$/, `${s.title}: whole XML`);
+		big = big ?? r.shapes.find((s) => (s.xml ?? "").length > 6000 && { query, title: s.title, length: s.xml.length });
+		if (big) {
+			// the agents get the same shape cut to what is worth reading
+			const again = (await request({ action: "aiSearchShapes", query: big.title, limit: 25 })).shapes.filter((s) => s.title === big.title && s.xml);
+			assert.ok(again.length > 0, `the agents' search finds "${big.title}" too`);
+			assert.ok(again.some((s) => s.xml.length === 6000), `"${big.title}" is cut at 6,000 characters for the agents: ${again.map((s) => s.xml.length)}`);
+			break;
+		}
+	}
+	assert.ok(big, "a library shape with more than 6,000 characters of XML");
+	// drawing thumbnails leaves the editor as it was
+	assert.equal(await page.evaluate(() => window.mxClient.NO_FO), noFo);
+	assert.equal(await page.evaluate(() => Object.keys(window.editorUi.sidebar.graph.getModel().cells).length), 2);
+	assert.equal(await page.evaluate(() => window.omnidrawSkipGallerySearch), undefined);
 });
 
 test("renders the page to PNG", async () => {

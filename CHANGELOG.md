@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil). In the extension that tab still says "Next".
+
+### Changed
+
+- A shape added from the **Shape Workshop** goes beside what is selected in the diagram (in the middle of the view when nothing is selected).
+- The Workshop's question dialog (a name for a collection, an address): **Enter** is OK (it was Cancel), and **Esc** is always Cancel.
+
+### Security
+
+- Pictures inside the shapes of a draw.io library added to the Shape Workshop (also a collection's) are checked like every other image: SVGs are cleaned of scripts and links, and what only claims to be an image is dropped from the shape. A shape that cannot be checked (an SVG in the HTML of a label, a file's pages instead of a shape) is left out.
+- Cleaning an SVG no longer takes minutes when it holds a very long run of spaces, or throws on a character reference that names no character.
+
 ## [0.4.0]
 
 ### Changed
