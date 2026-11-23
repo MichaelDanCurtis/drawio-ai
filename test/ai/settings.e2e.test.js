@@ -143,11 +143,12 @@ test("Settings → Agents & models: a key is typed once, checked with its provid
 	await page.evaluate(() => window.__fromHost({ type: "section", section: "api" }));
 	assert.deepEqual([await halves(), await page.$eval("section.active", (s) => s.id), await page.$eval("nav .active", (b) => b.dataset.section)], [[false, true], "agents", "agents"]);
 	await page.waitForSelector("#apiList .agent");
-	assert.deepEqual(await page.$$eval("#apiList .agent header b", (els) => els.map((e) => e.textContent)), ["Anthropic API", "OpenAI API", "Kimi API"]);
+	assert.deepEqual(await page.$$eval("#apiList .agent header b", (els) => els.map((e) => e.textContent)), ["Anthropic API", "OpenAI API", "Gemini API", "Grok API", "Kimi API", "OpenRouter"]);
 	assert.match(await page.$eval("#apiTab > p.lead", (p) => p.textContent), /^Use a provider's models with your own API key, without an agent program\. A key is kept encrypted with a secret from this computer's keychain: it is never written to the settings file, never shown again, and sent only to its provider\./);
 	// nothing kept yet: a field for the key, as a password
 	assert.deepEqual(await w.shows("anthropic"), { tag: "No key", input: ["password", "Paste your Anthropic API key (sk-ant-…)", ""], note: null, error: null, models: [], buttons: ["Save key"] });
 	assert.deepEqual((await w.shows("kimi")).input, ["password", "Paste your Kimi API key (sk-…)", ""]);
+	assert.deepEqual([(await w.shows("gemini")).input[1], (await w.shows("grok")).input[1], (await w.shows("openrouter")).input[1]], ["Paste your Gemini API key (AIza… or AQ.…)", "Paste your xAI API key (xai-…)", "Paste your OpenRouter API key (sk-or-v1-…)"]);
 	assert.equal(await page.$eval(`${card("anthropic")} .keyrow input`, (i) => i.autocomplete), "off");
 	if (shots) await page.screenshot({ path: path.join(shots, "settings-api-keys-none.png") });
 
@@ -307,7 +308,7 @@ test("Settings → Agents & models: a press of the mouse on Save, and Tab throug
 		await new Promise((r) => setTimeout(r, 40));
 		stops.push(await page.evaluate(() => (document.activeElement.closest(".agent") ? document.activeElement.closest(".agent").dataset.api + ":" + document.activeElement.tagName.toLowerCase() : "elsewhere")));
 	}
-	assert.deepEqual(stops, ["anthropic:input", "anthropic:button", "openai:input", "openai:button", "kimi:input", "kimi:button"]);
+	assert.deepEqual(stops, ["anthropic:input", "anthropic:button", "openai:input", "openai:button", "gemini:input", "gemini:button"]);
 
 	// a key is typed and Save is pressed with the mouse: saved by that one press
 	await page.click(field("anthropic"));

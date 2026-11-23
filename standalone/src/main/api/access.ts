@@ -116,7 +116,7 @@ export class ApiAccess {
 
 	private remember(id: ApiProviderId, models: ApiModel[]): void {
 		const catalog = { ...this.env.settings().modelCatalog };
-		if (models.length) catalog[apiAgentId(id)] = models.slice(0, 200).map((m) => ({ value: m.value, name: m.name, ...(m.images === false ? { images: false as const } : {}) }));
+		if (models.length) catalog[apiAgentId(id)] = models.slice(0, 500).map((m) => ({ value: m.value, name: m.name, ...(m.images === false ? { images: false as const } : {}) }));
 		else if (apiAgentId(id) in catalog) delete catalog[apiAgentId(id)];
 		else return;
 		this.env.update({ modelCatalog: catalog });

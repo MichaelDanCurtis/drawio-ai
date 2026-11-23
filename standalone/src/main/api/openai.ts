@@ -14,8 +14,8 @@ export const OPENAI_BASE = "https://api.openai.com/v1";
  * A client that uses this key and this address, whatever the environment says (see env.ts).
  * (Also for the providers that speak OpenAI's protocol at an address of their own.)
  */
-export function openAiClient(apiKey: string, baseURL: string): OpenAI {
-	return withoutProviderEnv(() => new OpenAI({ apiKey, baseURL, organization: null, project: null, adminAPIKey: null, webhookSecret: null, maxRetries: 2, logLevel: "warn" }));
+export function openAiClient(apiKey: string, baseURL: string, fetch?: typeof globalThis.fetch): OpenAI {
+	return withoutProviderEnv(() => new OpenAI({ apiKey, baseURL, organization: null, project: null, adminAPIKey: null, webhookSecret: null, maxRetries: 2, logLevel: "warn", ...(fetch ? { fetch } : {}) }));
 }
 
 /** What went wrong, in words for the user (`who` is the provider's name). */

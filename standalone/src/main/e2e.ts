@@ -727,7 +727,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		}
 	}
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
-	// API keys: the three providers, none with a key in this run's empty data folder. What is not a
+	// API keys: the providers, none with a key in this run's empty data folder. What is not a
 	// key is refused before anything is sent or the keychain is asked (so this run touches neither).
 	await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="agents"]').click(); document.querySelector('#agentTabs [data-tab="api"]').click()`);
 	const apiCards = `Array.from(document.querySelectorAll("#apiList .agent")).map((c) => [c.querySelector("header b").textContent, c.querySelector("header .tag").textContent, !!c.querySelector('.keyrow input[type="password"]'), c.querySelector(".bad") ? c.querySelector(".bad").textContent : null])`;
@@ -737,7 +737,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 	await pause(600);
 	const refused: [string, string, boolean, string | null][] = await sw.webContents.executeJavaScript(apiCards);
 	log("settingsApiRefused", refused[1]);
-	if (apis.map((a) => a[0]).join() !== "Anthropic API,OpenAI API,Kimi API" || apis.some((a) => a[1] !== "No key" || !a[2] || a[3]) || !/does not look like an API key/.test(refused[1]?.[3] ?? "") || refused[1][1] !== "No key" || fs.existsSync(path.join(app.getPath("userData"), "api-keys.json")))
+	if (apis.map((a) => a[0]).join() !== "Anthropic API,OpenAI API,Gemini API,Grok API,Kimi API,OpenRouter" || apis.some((a) => a[1] !== "No key" || !a[2] || a[3]) || !/does not look like an API key/.test(refused[1]?.[3] ?? "") || refused[1][1] !== "No key" || fs.existsSync(path.join(app.getPath("userData"), "api-keys.json")))
 		throw new Error("Settings does not list the API providers as it should (see the settingsApis lines above).");
 	sw.close();
 	process.env.DRAWAI_THEME = "light";

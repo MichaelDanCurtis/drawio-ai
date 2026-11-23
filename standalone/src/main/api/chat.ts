@@ -1,11 +1,11 @@
 /**
- * Models reached through a provider's API (Anthropic, OpenAI, Kimi) with the user's own key,
+ * Models reached through a provider's API (Anthropic, OpenAI, Gemini, Grok, Kimi, OpenRouter) with the user's own key,
  * as an alternative to an agent program. This file is what the app sees of them: a provider
  * lists its models and opens a chat; a chat keeps its conversation and runs the tools the app
  * gives it until the model is done. (No Electron here, and no key storage: see keys.ts.)
  */
 
-export type ApiProviderId = "anthropic" | "openai" | "kimi";
+export type ApiProviderId = "anthropic" | "openai" | "gemini" | "grok" | "kimi" | "openrouter";
 
 /** A tool the app offers the model (JSON Schema for its arguments). */
 export interface ApiTool {
@@ -90,8 +90,9 @@ export function quoted(message: unknown, apiKey: string): string {
 
 /** What the provider itself said went wrong (an SDK's error puts the status and the whole answer in front of it). */
 export function providerSaid(e: unknown): string {
-	const body = (e as { error?: { message?: unknown; error?: { message?: unknown } } })?.error;
-	const own = typeof body?.error?.message === "string" ? body.error.message : typeof body?.message === "string" ? body.message : undefined;
+	const body = (e as { error?: unknown })?.error as { message?: unknown; error?: { message?: unknown } } | string | undefined;
+	// (most name it `error.message`; some put a sentence where others put that object)
+	const own = typeof body === "string" ? body : typeof body?.error?.message === "string" ? body.error.message : typeof body?.message === "string" ? body.message : undefined;
 	return own ?? String((e as { message?: unknown })?.message ?? e).replace(/^\d{3}\s+/, "");
 }
 
