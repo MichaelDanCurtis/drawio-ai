@@ -22,7 +22,8 @@ import { WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings, type Settings } from "./settings";
 import { shapeLibraries } from "./shapeLocations";
-import { galleries, galleryConfigs, paletteItems, searchForEditor } from "./workshop";
+import { galleries, galleryConfigs, searchForEditor } from "./workshop";
+import { galleryPalette } from "./workshop/palette";
 import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
 
@@ -336,6 +337,8 @@ export class DiagramWindow {
 	}
 
 	private shapesSeq = 0;
+	/** The palettes this window's page was given last (the same ones are not sent again: that would rebuild its sidebar). */
+	private shapesSent: string | undefined;
 	/** The user's shape folders and libraries as palettes (only the newest read is shown). */
 	private sendShapes(): void {
 		const seq = ++this.shapesSeq;
@@ -344,15 +347,30 @@ export class DiagramWindow {
 			// each enabled gallery: a first page as a palette (the rest is found by search)
 			for (const g of galleryConfigs().filter((x) => x.enabled)) {
 				try {
-					const items = await paletteItems(g);
-					const shapes = (await Promise.all(items.map((i) => galleries().insertable(g, i).catch(() => undefined)))).filter((x): x is Insertable => !!x);
-					if (shapes.length) libraries.push({ title: g.title, path: `gallery:${g.id}`, kind: "gallery", shapes, more: (await galleries().items(g)).length - shapes.length });
+					const palette = await galleryPalette(galleries(), g);
+					if (palette) libraries.push(palette);
 				} catch {
 					// a gallery that cannot be read now is left out; the Workshop says why
 				}
 			}
-			if (seq === this.shapesSeq) this.sendToEditor({ action: "desktopShapes", libraries });
+			if (seq !== this.shapesSeq) return;
+			const next = JSON.stringify(libraries);
+			if (next === this.shapesSent) return;
+			this.shapesSent = next;
+			this.sendToEditor({ action: "desktopShapes", libraries });
 		})();
+	}
+
+	private static shapesTimer: NodeJS.Timeout | undefined;
+	/**
+	 * What a gallery holds changed (a collection filled or emptied, a gallery synced): every
+	 * window's palettes follow, once the galleries have settled (a sync reports often).
+	 */
+	public static refreshShapesSoon(): void {
+		clearTimeout(DiagramWindow.shapesTimer);
+		DiagramWindow.shapesTimer = setTimeout(() => {
+			for (const w of DiagramWindow.all) if (w.loaded) w.sendShapes();
+		}, 500);
 	}
 
 	/** What this window's editor page knows of draw.io's storage (given at load, or posted since). */
@@ -456,6 +474,8 @@ export class DiagramWindow {
 			await c.whenLoaded(30_000);
 			this.loaded = true;
 			this.sendEditorPrefs();
+			// (a page that has just loaded has no palettes)
+			this.shapesSent = undefined;
 			this.sendShapes();
 			this.setDirty(!!this.initial && !this.file);
 			this.loadedWaiters.splice(0).forEach((r) => r());

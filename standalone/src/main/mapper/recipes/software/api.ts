@@ -5,8 +5,7 @@
  * they take and return.
  */
 import * as path from "path";
-import * as yaml from "js-yaml";
-import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug, type FoundFile } from "../common";
+import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug, type FoundFile, loadYaml } from "../common";
 import type { CheckCoverage, CollectResult, MapEdge, MapFinding, MapGraph, MapNode, MapRow, Recipe } from "../../types";
 import { keepOnMap } from "./health";
 import { isLocalHost, scrub, STYLE } from "./shared";
@@ -431,7 +430,7 @@ export function findApiFiles(root: string): { specs: ApiSpec[]; graphql: FoundFi
 	for (const f of files.filter((x) => /\.(ya?ml|json)$/i.test(x.rel))) {
 		if (!SPEC_HINT.test(f.text.slice(0, 4000))) continue;
 		try {
-			const doc: any = f.rel.toLowerCase().endsWith(".json") ? JSON.parse(f.text) : yaml.load(f.text);
+			const doc: any = f.rel.toLowerCase().endsWith(".json") ? JSON.parse(f.text) : loadYaml(f.text);
 			if (doc && typeof doc === "object" && (doc.openapi || doc.swagger) && doc.paths) specs.push({ file: f.rel, doc });
 		} catch (e: any) {
 			warnings.push(`${f.rel}: ${String(e?.message ?? e).split("\n")[0]}`);

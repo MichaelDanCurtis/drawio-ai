@@ -124,6 +124,8 @@ test("the Workshop's other half: state, search with previews, a shape put in, co
 	const w = core([gallery], service);
 	await w.core.onMessage({ type: "ready" });
 	await service.items(gallery);
+	// (the gallery service tells its host when an index has been read, and the host posts the state again)
+	w.core.postState();
 	await w.settle();
 	const state = w.posted.filter((m) => m.type === "state").pop();
 	assert.deepEqual([state.diagram, state.iconStyle, state.matrix, state.version], ["shop.drawio", "dots", "green", "0.4.0"]);

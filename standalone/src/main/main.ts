@@ -12,6 +12,7 @@ import { connectAgents, DesktopMcp } from "./desktopMcp";
 import { paths } from "./paths";
 import { onSettingsChanged, settings } from "./settings";
 import { SettingsWindow } from "./settingsWindow";
+import { galleries } from "./workshop";
 import { WorkshopWindow } from "./workshop/workshopWindow";
 import { StaticServer } from "./staticServer";
 
@@ -367,6 +368,8 @@ app.whenReady().then(async () => {
 		setShapeSet: (id, on) => DiagramWindow.setShapeSet(id, on),
 	};
 	DiagramWindow.onShapeSets = () => WorkshopWindow.refresh();
+	// a collection filled or emptied in the Workshop, a gallery synced: the diagrams' palettes follow
+	galleries().onChange(() => DiagramWindow.refreshShapesSoon());
 	desktopMcp = new DesktopMcp({
 		windows: () => [...DiagramWindow.all],
 		focused: () => DiagramWindow.focused(),

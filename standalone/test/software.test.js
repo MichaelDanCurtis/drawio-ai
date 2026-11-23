@@ -93,6 +93,28 @@ test("comments are blanked before reading code (examples in comments are not con
 	assert.ok(!stripComments('x = 1  # redis://cache\n"""docstring pg"""\ny = "#not"', "py").includes("redis"));
 });
 
+test("connectivity: a compose service built on an anchor (<<: *app) keeps what it inherits", async () => {
+	const os = require("os");
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-compose-"));
+	fs.writeFileSync(
+		path.join(dir, "docker-compose.yml"),
+		["x-app: &app", "  image: shop/app:1", "  depends_on: [db]", "  environment:", "    DATABASE_URL: postgres://db:5432/shop", "services:", "  web:", "    <<: *app", '    ports: ["8080:80"]', "  worker:", "    <<: *app", "  db:", "    image: postgres:16", ""].join("\n")
+	);
+	const r = await recipe("software.connectivity").collect({ folder: dir }, ctxFor(dir));
+	assert.deepEqual(r.warnings, []);
+	const g = r.graph;
+	// both services reach the database they inherit from the anchor; without merge keys neither did
+	assert.ok(edge(g, "svc:web", "res:compose:db") && edge(g, "svc:worker", "res:compose:db"), JSON.stringify(g.edges));
+	assert.match(node(g, "res:compose:db").label, /PostgreSQL/);
+	assert.ok(!JSON.stringify(g).includes("<<"), "a merge key was read as a setting of its own");
+	// plain words stay words (only YAML 1.1 reads on / yes / no as booleans)
+	const { loadYaml, loadYamlAll } = require("../src/main/mapper/recipes/common");
+	assert.deepEqual(loadYaml("on: push\nname: yes\nbase: &b {a: 1}\njob: {<<: *b, c: 2}\n"), { on: "push", name: "yes", base: { a: 1 }, job: { a: 1, c: 2 } });
+	assert.deepEqual(loadYamlAll("a: 1\n---\nb: 2\n"), [{ a: 1 }, { b: 2 }]);
+	// and nothing but plain data is ever built
+	assert.throws(() => loadYaml('x: !!js/function "function () {}"'), /unknown scalar tag/);
+});
+
 test("connectivity: services, stores, queues and APIs from compose, Kubernetes, .env and code — no secrets", async () => {
 	const r = await recipe("software.connectivity").collect({ folder: SHOP }, ctxFor(SHOP));
 	const g = r.graph;

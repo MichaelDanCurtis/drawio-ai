@@ -6,8 +6,7 @@
  */
 import * as fs from "fs";
 import * as path from "path";
-import * as yaml from "js-yaml";
-import { slug } from "../common";
+import { slug, loadYaml, loadYamlAll } from "../common";
 import type { MapEdge, MapNode, MapRow } from "../../types";
 import { artifactType, ArtifactType, firstLine, kwargs, logicalLines, matchBracket, ML_STYLES, pyString, splitTopLevel, stripPyComments, styleFor } from "./shared";
 
@@ -356,7 +355,7 @@ export function parseAzureMl(doc: any, file: string, root?: string): ParsedPipel
 		// A local component file adds the command, environment and declared outputs.
 		if (typeof job.component === "string" && /^\.{0,2}\/|\.ya?ml$/.test(job.component) && !job.component.startsWith("azureml:") && dir) {
 			try {
-				component = yaml.load(fs.readFileSync(path.resolve(dir, job.component), "utf8"));
+				component = loadYaml(fs.readFileSync(path.resolve(dir, job.component), "utf8"));
 			} catch {
 				// not readable: just the reference
 			}
@@ -779,7 +778,7 @@ export function parsePipelineFile(rel: string, text: string, root?: string): { p
 	if (!maybe) return { pipelines: [] };
 	let docs: any[];
 	try {
-		docs = /\.json$/i.test(rel) ? [JSON.parse(text)] : (yaml.loadAll(text) as any[]);
+		docs = /\.json$/i.test(rel) ? [JSON.parse(text)] : loadYamlAll(text);
 	} catch (e: any) {
 		return isDvc || /root:\s*\n\s+dag:|pipelineJob/.test(text) ? { pipelines: [], error: `${rel}: ${String(e?.message ?? e).split("\n")[0]}` } : { pipelines: [] };
 	}

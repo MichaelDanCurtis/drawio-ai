@@ -802,6 +802,9 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 		return n > 0 ? n : undefined;
 	});
 	log("collection", { title: col.title, count: colCount, file: fs.existsSync(galleries().collectionFile(col.id)) });
+	// with its first shape the collection becomes a palette in the diagram (palettes follow what a gallery holds)
+	const colPalette = await until("the collection's palette in the diagram", async () => ((await ed.executeJavaScript("window.omnidrawShapes.palettes()")) as string[]).find((p) => /^Network kit/.test(p)));
+	log("collectionPalette", colPalette);
 	await pause(600);
 	await shot("workshop-galleries-light.png", wc);
 

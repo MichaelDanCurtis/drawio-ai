@@ -1,5 +1,5 @@
 import * as yaml from "js-yaml";
-import { digDeeperRequest, FOLDER_FIELD, folderInput, readFiles } from "../common";
+import { digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, loadYaml } from "../common";
 import type { CheckCoverage, MapEdge, MapFinding, MapGraph, MapNode, Recipe } from "../../types";
 import { keepOnMap, lineMatching } from "./health";
 
@@ -275,7 +275,7 @@ export const githubActionsRecipe: Recipe = {
 		const workflows: Workflow[] = [];
 		for (const f of files) {
 			try {
-				const doc: any = yaml.load(f.text);
+				const doc: any = loadYaml(f.text);
 				workflows.push({ file: f.rel, name: String(doc?.name ?? f.rel.split("/").pop()!.replace(/\.ya?ml$/i, "")), doc, text: f.text });
 			} catch (e: any) {
 				warnings.push(`${f.rel}: ${String(e?.message ?? e).split("\n")[0]}`);
