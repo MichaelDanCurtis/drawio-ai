@@ -59,6 +59,12 @@ const cipher = (state = { available: true }) => ({
 	},
 	encrypt: async (text) => {
 		state.asked = (state.asked ?? 0) + 1;
+		// (`encryptGate`: the keychain takes its time over this one)
+		if (state.encryptGate) {
+			const gate = state.encryptGate;
+			delete state.encryptGate;
+			await gate;
+		}
 		if (state.cannotEncrypt) throw new Error("the keychain is locked");
 		return flip(Buffer.from(text, "utf8"), state.secret ?? 0x5a);
 	},
@@ -174,6 +180,30 @@ test("the key store: a key is kept encrypted in a file of the user's own, and ne
 	assert.deepEqual([await removedMeanwhile, await replacedMeanwhile], [undefined, KEY]);
 	await keys.set("anthropic", KEY);
 	await keys.set("openai", OTHER_KEY);
+	// ... also while a key is being encrypted again with the system's new secret: removed meanwhile, it is not handed out
+	// (whether that encryption works out or not); replaced meanwhile, the new one is
+	for (const cannotEncrypt of [false, true]) {
+		Object.assign(state, { rotated: 0x5a, secret: 0x33, encryptGate: new Promise((r) => (open = r)) });
+		const renewing = keys.get("anthropic");
+		await wait(10);
+		keys.remove("anthropic");
+		if (cannotEncrypt) state.cannotEncrypt = true;
+		open();
+		assert.deepEqual([await renewing, keys.has("anthropic")], [undefined, false], `removed while it was encrypted again (${cannotEncrypt})`);
+		delete state.rotated;
+		delete state.secret;
+		delete state.cannotEncrypt;
+		await keys.set("anthropic", KEY);
+	}
+	Object.assign(state, { rotated: 0x5a, secret: 0x33, encryptGate: new Promise((r) => (open = r)) });
+	const renewing = keys.get("anthropic");
+	await wait(10);
+	delete state.rotated;
+	delete state.secret;
+	await keys.set("anthropic", OTHER_KEY);
+	open();
+	assert.equal(await renewing, OTHER_KEY);
+	await keys.set("anthropic", KEY);
 
 	// a listener that fails does not make a kept key look unkept
 	const failing = keys.onChange(() => assert.fail("a listener of the store's"));

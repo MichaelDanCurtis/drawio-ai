@@ -111,13 +111,22 @@ export class KeyStore {
 			const key = cleanKey(opened.text);
 			if (key && opened.stale) {
 				// (encrypted again with the system's new secret, in place: nothing changed for anyone. If that
-				// cannot be done now, the key is still the key.)
+				// cannot be done now, the key is still the key, and it is tried again the next time it is read.)
+				let again: string | undefined;
 				try {
-					const again = (await this.cipher.encrypt(key)).toString("base64");
-					const then = this.read();
-					if (then.keys[id] === stored) this.write({ ...then.keys, [id]: again }, then.state);
+					again = (await this.cipher.encrypt(key)).toString("base64");
 				} catch {
-					// tried again the next time it is read
+					// not this time
+				}
+				// (that took time too: a key removed or replaced meanwhile is not the one to hand out)
+				const then = this.read();
+				if (then.keys[id] !== stored) continue;
+				if (again) {
+					try {
+						this.write({ ...then.keys, [id]: again }, then.state);
+					} catch {
+						// not this time
+					}
 				}
 			}
 			return key;
