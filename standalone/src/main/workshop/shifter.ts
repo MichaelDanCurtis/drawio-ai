@@ -134,8 +134,9 @@ export function recolourSvg(svg: string, colour: string): string | undefined {
 			}
 			const root = rootFill === undefined;
 			if (root) rootFill = false;
+			// (a mask, clip path or pattern keeps its own fill and stroke too: what is inside inherits them)
 			const next =
-				unpainted > 0
+				unpainted > 0 || NOT_PAINT.has(local)
 					? tag
 					: mapAttributes(tag, (name, raw) => {
 							if (root && name === "fill") rootFill = true;

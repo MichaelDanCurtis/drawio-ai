@@ -73,6 +73,11 @@ test("an icon in one colour: only what paints is rewritten; text, titles, other 
 			'<path class="a" mask="url(#m)" fill="#0055ff" data-note="stroke=\'x\' > fill: y" d="M0 0h24v24H0z"/>' +
 			"<text fill='#0055ff' x=\"1\" style='stroke:#0055ff;stroke-width:1'>stroke: 2px</text></svg>"
 	);
+	// a mask, clip path or pattern keeps the paint set on the element itself (what is inside inherits it)
+	assert.equal(
+		shifter.recolourSvg('<svg xmlns="http://www.w3.org/2000/svg"><mask id="m" fill="white" style="stroke:black"><rect width="4" height="4"/></mask><pattern id="p" fill="#f00" stroke="#00f"><path d="M0 0"/></pattern><clipPath id="c" fill="#000"/><path fill="#333" mask="url(#m)" d="M0 0"/></svg>', "#000000"),
+		'<svg fill="#000000" xmlns="http://www.w3.org/2000/svg"><mask id="m" fill="white" style="stroke:black"><rect width="4" height="4"/></mask><pattern id="p" fill="#f00" stroke="#00f"><path d="M0 0"/></pattern><clipPath id="c" fill="#000"/><path fill="#000000" mask="url(#m)" d="M0 0"/></svg>'
+	);
 	// names are as XML reads them: FILL is not fill, <MASK> is not a mask
 	assert.equal(
 		shifter.recolourSvg('<svg xmlns="http://www.w3.org/2000/svg" FILL="#222"><MASK><path fill="#fff" d="M0 0"/></MASK></svg>', "#00aa00"),
