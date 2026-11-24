@@ -278,10 +278,16 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 	};
 	const waiting = (): Promise<string[]> => page.executeJavaScript(`Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto) .options button")).map((b) => b.textContent)`);
 	/** Presses a button of the permission card that is waiting, as the user would. */
-	const answer = (name: string) =>
-		until(`the "${name}" button of a permission card`, () =>
-			page.executeJavaScript(`(() => { const b = Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto) .options button")).find((b) => b.textContent === ${JSON.stringify(name)}); if (b) b.click(); return !!b; })()`)
+	const answer = async (name: string) => {
+		await until(`the "${name}" button of a permission card`, () =>
+			page.executeJavaScript(
+				`(() => { const b = Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto):not([data-answered]) .options button")).find((b) => b.textContent === ${JSON.stringify(name)}); if (b) { b.closest(".permission").dataset.answered = "1"; b.click(); } return !!b; })()`
+			)
 		);
+		// (the page marks a card as answered when the app says so, a moment after the click: until then
+		// it would be taken for the next request's card, and pressed again or waited on in its place)
+		await until("the card to be marked as answered", () => page.executeJavaScript(`!document.querySelector(".permission[data-answered]:not(.resolved)")`));
+	};
 	const last = <K extends string>(kind: K) => [...w.chat.items].reverse().find((i) => i.kind === kind) as any;
 	const has = async (label: string) => (await w.client.getXml()).includes(label);
 	const save = async (name: string) => fs.writeFileSync(path.join(config.out, name), (await page.capturePage()).toPNG());
