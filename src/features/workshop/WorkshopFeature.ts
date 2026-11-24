@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as nodePath from "path";
+import { promises as fsp } from "fs";
 import * as os from "os";
 import { randomBytes } from "crypto";
 import { Disposable } from "@hediet/std/disposable";
@@ -20,6 +21,8 @@ type Runtime = typeof import("./runtime");
 export interface WorkshopDeps {
 	context: vscode.ExtensionContext;
 	editorService: DrawioEditorService;
+	/** Hands a request about a diagram's selection to the Draw.AI agent in VS Code's chat (the Shape Shifter's "Ask the agent"). */
+	askAgent?(text: string, editor: DrawioEditor): Promise<unknown>;
 }
 
 /**
@@ -50,6 +53,9 @@ export class WorkshopFeature {
 	/** What the page's other half posted last (tests read it; the panel gets it when it is open), and how many messages there were in all. */
 	private posted: unknown[] = [];
 	private postedTotal = 0;
+	/** What the page was last told of the diagram's selection, and how often it was told (tests). */
+	private selectionPosts = 0;
+	private lastSelection: unknown;
 
 	constructor(private readonly deps: WorkshopDeps) {
 		const track = (d: vscode.Disposable | vscode.Disposable[]) => (Array.isArray(d) ? d : [d]).forEach((x) => this.dispose.track(x));
@@ -60,6 +66,8 @@ export class WorkshopFeature {
 			dispose: autorun(() => {
 				void this.deps.editorService.targetDrawioEditor;
 				this.core?.postState();
+				// (another diagram is the one used last: the Shape Shifter shows its selection)
+				this.core?.postSelection();
 			}),
 		});
 		this.dispose.track({
@@ -186,6 +194,20 @@ export class WorkshopFeature {
 				},
 				reveal: (file) => void vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(file)),
 				openExternal: (url) => void vscode.env.openExternal(vscode.Uri.parse(url)),
+				// The Shape Shifter: find a shape by words (draw.io's own, and the galleries that are on), change the
+				// selected shapes, import a Visio stencil. All of it works on the diagram used last, in its editor.
+				shifter: true,
+				pickStencil: async () => {
+					const picked = await vscode.window.showOpenDialog({
+						title: "Import a Visio stencil",
+						canSelectFiles: true,
+						canSelectFolders: false,
+						canSelectMany: false,
+						filters: { "Visio stencil": ["vssx", "vss", "vstx", "vsx"] },
+						openLabel: "Import",
+					});
+					return picked?.[0] ? this.onDisk(picked[0], "That stencil") : undefined;
+				},
 				// Draw.AI sends nothing anywhere unasked: a gallery downloads only once the user has switched it on
 				offStaysOff: true,
 			});
@@ -223,6 +245,58 @@ export class WorkshopFeature {
 				for (const e of this.deps.editorService.openedEditors) e.drawioClient.setShapeSet(id, on);
 			},
 			refreshShapeSets: () => editor.drawioClient.reportShapeSets(),
+			shifter: this.shifter(editor),
+		};
+	}
+
+	/** The Shape Shifter's side (see ShifterHost in the Workshop's core): what it does in this diagram's editor. */
+	private shifter(editor: DrawioEditor): NonNullable<WorkshopHost["shifter"]> {
+		const client = editor.drawioClient;
+		const tools = () => {
+			if (!client.editorToolsLoaded) throw new Error(`${fileName(editor)} cannot be used by the Shape Shifter: it only shows the diagram, or the editor tools are off (setting Draw.AI › Look: Editor Tools).`);
+		};
+		return {
+			searchBuiltIn: async (query, limit) => {
+				tools();
+				const rt = await this.runtime();
+				const shapes = (await client.aiSearchShapes(query, limit, { previews: true, ownOnly: true })).shapes;
+				// (a shape that is a picture names a file of draw.io's: the picture itself is its preview, read from the extension's own files)
+				const webapp = vscode.Uri.joinPath(this.deps.context.extensionUri, "drawio/src/main/webapp").fsPath;
+				for (const shape of shapes) {
+					const picture = rt.webappPicture(rt.styleValue(shape.style, "image"), webapp);
+					if (picture) shape.preview = picture;
+				}
+				return shapes;
+			},
+			// (the selected cells themselves, not what is inside a selected container or group)
+			selectedCells: async () => {
+				if (!client.editorToolsLoaded || client.currentSelection.length === 0) return [];
+				const model = await client.aiGetModel({ scope: "selection", selectedOnly: true, includeStyles: true, maxCells: 2000 });
+				return model.cells.filter((c) => c.selected === true).map((c) => ({ id: c.id, style: c.style ?? "", edge: c.kind === "edge" }));
+			},
+			// (one undo step, the user's own change: a pending AI review takes it as an edit made in the editor)
+			applyStyles: async (edits) => {
+				tools();
+				const r = await client.aiApplyOps(
+					edits.map((e) => ({ op: "update", id: e.id, styleProps: e.props })),
+					{ selectResult: false, flash: false, atomic: true, review: false, user: true }
+				);
+				const failed = r.results.find((x) => !x.ok);
+				if (failed || r.rolledBack) throw new Error(`The shapes could not be changed: ${failed?.error ?? "the change was rolled back"}`);
+			},
+			askAgent: async (request) => {
+				if (!this.deps.askAgent) throw new Error("The Draw.AI agent is not available here.");
+				await this.deps.askAgent(request, editor);
+			},
+			// (converted by the diagram's editor; the open diagram is not touched)
+			convertStencil: async (file) => {
+				tools();
+				const stat = await fsp.stat(file);
+				if (!stat.isFile() || stat.size > 64 * 1024 * 1024) throw new Error(`${nodePath.basename(file)} is not a file, or is larger than 64 MB.`);
+				const result = await client.importDiagram("visio", nodePath.basename(file), await fsp.readFile(file));
+				if (!result.library) throw new Error(`${nodePath.basename(file)} is a Visio drawing, not a stencil. Open it with "Draw.io: Open Visio File as Draw.io…" to get its pages.`);
+				return { library: result.library, warnings: result.warnings };
+			},
 		};
 	}
 
@@ -231,6 +305,10 @@ export class WorkshopFeature {
 	private hookEditor(editor: DrawioEditor): void {
 		const client = editor.drawioClient;
 		const subs = [
+			// the Shape Shifter shows what is selected in the diagram used last, as it changes
+			client.onSelectedCellsChanged.sub(() => {
+				if (this.panel && this.deps.editorService.targetDrawioEditor === editor) this.core?.postSelection();
+			}),
 			// the Workshop button in the toolbar, and "+ More Shapes" under the shapes sidebar
 			client.onEditorCommand.sub(({ command }) => {
 				if (command === "workshop") void vscode.commands.executeCommand("drawio-ai.shapeWorkshop");
@@ -294,6 +372,10 @@ export class WorkshopFeature {
 	private post(msg: unknown): void {
 		this.posted.push(msg);
 		this.postedTotal++;
+		if ((msg as { type?: unknown })?.type === "selection") {
+			this.selectionPosts++;
+			this.lastSelection = msg;
+		}
 		if (this.posted.length > 60) this.posted.splice(0, this.posted.length - 60);
 		// (a closed panel has no webview to post to)
 		if (this.panel) void this.panel.webview.postMessage(msg);
@@ -332,7 +414,11 @@ export class WorkshopFeature {
 				);
 			});
 			// the sidebar can change in the editor itself (the Scratchpad's ✕, a set enabled from a search): ask again
-			const focused = panel.onDidChangeViewState(() => panel.active && this.host()?.refreshShapeSets());
+			const focused = panel.onDidChangeViewState(() => {
+				if (!panel.active) return;
+				this.host()?.refreshShapeSets();
+				this.core?.postSelection();
+			});
 			panel.onDidDispose(() => {
 				received.dispose();
 				focused.dispose();
@@ -374,6 +460,9 @@ export class WorkshopFeature {
 			sets: editor ? this.sets.get(editor) : undefined,
 			panelOpen: !!this.panel,
 			panelPage: this.panel ? this.page : undefined,
+			shifter: !!this.host()?.shifter,
+			selectionPosts: this.selectionPosts,
+			lastSelection: this.lastSelection,
 		};
 	}
 }

@@ -1,5 +1,6 @@
 import { app } from "electron";
 import * as fs from "fs";
+import { paths } from "./paths";
 import * as path from "path";
 import { AgentId } from "./agents";
 import { DiagramWindow } from "./diagramWindow";
@@ -40,6 +41,8 @@ export interface E2eConfig {
 	polish?: boolean;
 	/** Check the Shape Workshop: gallery palettes, draw.io's search, Workshop search and insert, GitHub galleries, collections. */
 	workshop?: boolean;
+	/** Check the chat answered through an API key, with a stand-in provider (api/standIn.ts): nothing is sent anywhere, and the keychain is not asked. */
+	apiChat?: boolean;
 }
 
 /**
@@ -67,6 +70,11 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		fs.mkdirSync(config.out, { recursive: true });
 		// Pick the agent before the window opens: the chat starts it as soon as it is ready.
 		if (config.agent) settings().agent = config.agent; // this run only; not written to settings.json
+		if (config.apiChat) {
+			// (before anything asks for the app's API access: this run's is the stand-in's)
+			process.env.DRAWAI_E2E_API = "1";
+			settings().agent = "api:stand-in";
+		}
 		const t0 = Date.now();
 		const w = await DiagramWindow.open(server, config.file);
 		await w.whenLoaded();
@@ -109,6 +117,8 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		const before = await w.client.getXml();
 		if (config.workshop) {
 			await runWorkshop(w, server, config, log);
+		} else if (config.apiChat) {
+			await runApiChat(w, server, config, log);
 		} else if (config.polish) {
 			await runPolish(w, server, config, log);
 		} else if (config.insights) {
@@ -180,6 +190,12 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("pdf", pdf);
 		const svg = await exportDiagram(w.client, "svg", path.join(config.out, "diagram.drawio.svg"));
 		log("svgBytes", svg.bytes);
+		// a test run is built into, and started from, a folder of its own (a copy of the app that is running keeps its
+		// files), and every run leaves word of its start in the data folder's log
+		const started = fs.readFileSync(path.join(app.getPath("userData"), "logs", "app.log"), "utf8").split("\n")[0];
+		log("runLog", { built: path.basename(paths.out), started: started.replace(/^\S+ /, "").replace(/pid=\d+/, "pid=…") });
+		if (!app.isPackaged && path.basename(paths.out) !== "out-e2e") throw new Error("The test run was not started from its own build folder.");
+		if (!/^started version=\S+ pid=… built=\S+ test=yes$/.test(started.replace(/^\S+ /, "").replace(/pid=\d+/, "pid=…"))) throw new Error(`The run log does not start with this run: ${started}`);
 		fs.writeFileSync(path.join(config.out, "edited.drawio"), await w.client.getXml());
 		w.chat.dispose();
 		finish(0);
@@ -207,8 +223,29 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 	const r = await w.mapper.run(recipe.id, { ...(map.input ?? {}) }, !!map.askAgent);
 	log("mapMs", Date.now() - t0);
 	log("mapSummary", r.result?.summary ?? null);
+	log("mapRouting", (await import("./mapper/draw")).lastRouting ?? null);
 	log("mapWarnings", r.result?.warnings ?? []);
 	if (r.error) throw new Error(`Mapper: ${r.error}`);
+	if (map.dialog && r.result?.elsewhere?.length) {
+		// the folder held next to nothing and its working copies were not read: the dialog offers them, and a click maps one
+		const dlg = w.mapper.window!.webContents;
+		const offered: string[] = await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).map((b) => b.textContent)`);
+		await new Promise((r) => setTimeout(r, 700));
+		fs.writeFileSync(path.join(config.out, "mapper-elsewhere.png"), (await dlg.capturePage()).toPNG());
+		// (more than six: the rest are behind a button, and all of them are there once it is pressed)
+		await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).find((b) => / more…$/.test(b.textContent))?.click()`);
+		const all: string[] = await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).map((b) => b.textContent)`);
+		if (all.join() !== r.result.elsewhere.map((e) => e.label).join()) throw new Error(`The Mapper dialog does not offer every working copy: ${all.join(", ")}`);
+		await dlg.executeJavaScript(`document.querySelector("#result .elsewhere button").click()`);
+		const end = Date.now() + 30_000;
+		let after = "";
+		while (Date.now() < end && !/^✓/.test(after)) {
+			await new Promise((r) => setTimeout(r, 200));
+			after = await dlg.executeJavaScript(`document.getElementById("result").className === "ok" ? document.querySelector("#result div").textContent : ""`);
+		}
+		log("mapElsewhere", { offered, expected: r.result.elsewhere.map((e) => e.label), folder: await dlg.executeJavaScript(`Array.from(document.querySelectorAll("input[type=text]")).map((i) => i.value).find((v) => v.includes("worktrees")) || ""`), after });
+		if (offered.filter((o) => !/ more…$/.test(o)).join() !== r.result.elsewhere.slice(0, 6).map((e) => e.label).join() || (r.result.elsewhere.length > 6) !== offered.some((o) => / more…$/.test(o)) || !/^✓/.test(after)) throw new Error("The Mapper dialog did not offer the working copies, or a click on one did not map it.");
+	}
 	const pages = await w.client.aiPages({ op: "list" });
 	log("pages", pages.pages.map((p) => `${p.name}${p.current ? " (shown)" : ""}: ${p.cells}`));
 	const model = await w.client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 5000 });
@@ -237,6 +274,282 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 		fs.writeFileSync(path.join(config.out, "after-dig.png"), (await w.editorView.webContents.capturePage()).toPNG());
 		fs.writeFileSync(path.join(config.out, "chat.png"), (await w.chatView.webContents.capturePage()).toPNG());
 	}
+}
+
+/**
+ * The chat answered through an API key instead of an agent program. The provider is a
+ * stand-in (api/standIn.ts): the window, the chat page, the key store's file, the tools and
+ * the permission cards are the real ones; nothing is sent anywhere and the keychain is not asked.
+ */
+async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const { apiAccess } = await import("./api/catalog");
+	const { STAND_IN_ID, STAND_IN_KEY } = await import("./api/standIn");
+	const page = w.chatView.webContents;
+	const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+	const until = async <T>(what: string, fn: () => T | Promise<T>, ms = 15_000): Promise<T> => {
+		for (const end = Date.now() + ms; ; await pause(100)) {
+			const v = await fn();
+			if (v) return v;
+			if (Date.now() > end) throw new Error(`Waited too long for ${what}.`);
+		}
+	};
+	const expect = (ok: unknown, what: string) => {
+		if (!ok) throw new Error(`The chat with an API key: ${what}`);
+	};
+	const shown = (): Promise<{ provider: string; model: string; dot: string }> =>
+		page.executeJavaScript(`({ provider: document.getElementById("providerLabel").textContent, model: document.getElementById("modelLabel").textContent, dot: document.getElementById("status").dataset.state })`);
+	const turn = (text: string) => {
+		const done = waitForTurn(w);
+		void w.chat.send(text);
+		return done;
+	};
+	const waiting = (): Promise<string[]> => page.executeJavaScript(`Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto) .options button")).map((b) => b.textContent)`);
+	/** Presses a button of the permission card that is waiting, as the user would. */
+	const answer = async (name: string) => {
+		await until(`the "${name}" button of a permission card`, () =>
+			page.executeJavaScript(
+				`(() => { const b = Array.from(document.querySelectorAll(".permission:not(.resolved):not(.auto):not([data-answered]) .options button")).find((b) => b.textContent === ${JSON.stringify(name)}); if (b) { b.closest(".permission").dataset.answered = "1"; b.click(); } return !!b; })()`
+			)
+		);
+		// (the page marks a card as answered when the app says so, a moment after the click: until then
+		// it would be taken for the next request's card, and pressed again or waited on in its place)
+		await until("the card to be marked as answered", () => page.executeJavaScript(`!document.querySelector(".permission[data-answered]:not(.resolved)")`));
+	};
+	const last = <K extends string>(kind: K) => [...w.chat.items].reverse().find((i) => i.kind === kind) as any;
+	const has = async (label: string) => (await w.client.getXml()).includes(label);
+	const save = async (name: string) => fs.writeFileSync(path.join(config.out, name), (await page.capturePage()).toPNG());
+
+	// no key yet: the provider is listed, and a request says where a key goes
+	await until("the chat page", async () => (await shown()).provider === "Stand-in API");
+	log("apiChatNoKey", await shown());
+	expect((await shown()).dot === "problem", "a provider without a key is not shown as ready.");
+	const refused = await turn("Add a shape labelled 'No key'.");
+	const said = last("error");
+	log("apiChatNoKeyTurn", { ...refused, action: said?.action });
+	expect(/There is no Stand-in API key/.test(said?.text ?? "") && said?.action?.command === "drawai.openApiKeys", "a request without a key does not point to Settings.");
+
+	// the picker: the agents, then the providers used with an API key
+	await page.executeJavaScript(`document.getElementById("providerBtn").click()`);
+	await pause(300);
+	const menu: string[] = await page.executeJavaScript(
+		`Array.from(document.querySelectorAll("#pickMenu > *")).map((e) => e.classList.contains("group") ? "# " + e.textContent : e.getAttribute("role") === "menuitemradio" ? e.children[1].textContent + (e.querySelector("small") ? " (" + e.querySelector("small").textContent + ")" : "") : "").filter(Boolean)`
+	);
+	log("apiChatPicker", menu);
+	await save("chat-api-picker.png");
+	await page.executeJavaScript(`document.getElementById("providerBtn").click()`);
+	expect(menu[0] === "# Agents" && menu.indexOf("# With an API key") > 1 && menu.includes("Stand-in API (no key)") && menu.includes("Anthropic API (no key)"), "the picker does not list the agents and then the providers.");
+
+	// a key is kept: the chat is ready without a request, a program or the keychain
+	expect((await apiAccess().saveKey(STAND_IN_ID, STAND_IN_KEY)) === undefined, "the stand-in's key was not kept.");
+
+	// Settings → Test: one request the way the chat makes them, on a click. It runs no tool: the diagram is as it was.
+	const xmlBefore = await w.client.getXml();
+	const itemsBefore = w.chat.items.length;
+	SettingsWindow.open(server, "apiKeys");
+	for (let i = 0; i < 50 && !SettingsWindow.window?.isVisible(); i++) await pause(100);
+	const sp = SettingsWindow.window!.webContents;
+	const card = `document.querySelector('#apiList [data-api="stand-in"]')`;
+	await until("the stand-in's card in Settings", () => sp.executeJavaScript(`!!${card}`));
+	const testButton: string = await sp.executeJavaScript(`(() => { const b = Array.from(${card}.querySelectorAll("button")).find((b) => b.textContent === "Test"); if (b) b.click(); return b ? b.title : ""; })()`);
+	const found: string = await until("what the test found", () => sp.executeJavaScript(`${card}.querySelector(".good")?.textContent || ${card}.querySelector(".bad")?.textContent || ""`));
+	fs.writeFileSync(path.join(config.out, "settings-key-test.png"), (await sp.capturePage()).toPNG());
+	log("apiKeyTest", { found, title: testButton });
+	expect(/^Works: Stand-in Large took the chat's \d+ tools, called drawio_lint, and answered "OK"\.$/.test(found) && /uses a little of your credit/.test(testButton), "the Test button in Settings did not report a working request.");
+	expect((await w.client.getXml()) === xmlBefore && w.chat.items.length === itemsBefore, "testing a key changed the diagram or the chat.");
+	SettingsWindow.window?.close();
+	await until("the chat to be ready", async () => (await shown()).dot === "ready");
+	log("apiChatReady", await shown());
+	expect((await shown()).model === "Stand-in Large", "the model picked for a new chat is not the first one listed.");
+
+	// a tool that changes the diagram asks first; one that reads does not
+	const before = await w.client.getXml();
+	let done = turn("Add a shape labelled 'Denied shape'.");
+	await until("a permission card", async () => (await waiting()).length);
+	log("apiChatAsks", { title: last("permission")?.title, buttons: await waiting() });
+	await answer("Deny");
+	log("apiChatDenied", { ...(await done), reply: last("assistant")?.text, outcome: last("permission")?.outcome });
+	expect((await w.client.getXml()) === before && /did not allow/.test(last("assistant")?.text ?? ""), "a call that was not allowed changed the diagram, or the model was not told.");
+	expect(w.chat.items.filter((i) => i.kind === "permission").length === 1, "reading the diagram asked for permission.");
+
+	done = turn("Add a shape labelled 'Hello from the API'.");
+	await answer("Allow");
+	log("apiChatAllowed", { ...(await done), reply: last("assistant")?.text, tools: w.chat.items.filter((i) => i.kind === "tool").slice(-2).map((i: any) => `${i.status}: ${i.summary}`) });
+	expect(await has("Hello from the API"), "the shape was not added.");
+
+	// while it works the box stays open. What is sent then waits in a strip above it...
+	const type = (text: string) => page.executeJavaScript(`(() => { const i = document.getElementById("input"); i.value = ${JSON.stringify(text)}; document.getElementById("send").click(); return document.getElementById("send").textContent; })()`);
+	const strip = (): Promise<string[]> => page.executeJavaScript(`Array.from(document.querySelectorAll("#queued .queued .what")).map((e) => e.textContent)`);
+	const users = () => w.chat.items.filter((i) => i.kind === "user").map((i: any) => `${i.scope ?? ""}|${i.text}`);
+	done = turn("Add a shape labelled 'While working'.");
+	await until("a permission card", async () => (await waiting()).length);
+	const button = await type("Also add a shape labelled 'Steered in'.");
+	await type("And one labelled 'Taken back'.");
+	await until("the waiting strip", async () => (await strip()).length === 2);
+	await pause(500);
+	await save("chat-api-waiting.png");
+	log("apiChatWaiting", { button, strip: await strip(), hint: await page.executeJavaScript(`document.getElementById("hint").textContent`) });
+	// ...can be taken back...
+	await page.executeJavaScript(`document.querySelectorAll("#queued .queued .drop")[1].click()`);
+	await until("one to be taken back", async () => (await strip()).length === 1);
+	// ...and reaches the model with the next tool's answer: it reads it as it works
+	await answer("Allow");
+	await answer("Allow");
+	const steered = await done;
+	log("apiChatSteered", { ...steered, reply: last("assistant")?.text, users: users().slice(-2), strip: await strip() });
+	expect(button === "Add" && steered.stop === "end_turn" && (await has("While working")) && (await has("Steered in")) && !(await has("Taken back")) && users().pop() === "↪ added while it works|Also add a shape labelled 'Steered in'." && !(await strip()).length, "what was added while it worked did not reach the model with a tool's answer.");
+
+	// what could not be handed over (no tool answered after it) is sent as the next request when this one ends
+	let ended = 0;
+	const twice = new Promise<{ stop?: string; error?: string }>((resolve) => (w.chat.onTurnEnd = (stop, error) => ++ended === 2 && resolve({ stop, error })));
+	void w.chat.send("Add a shape labelled 'Not this one'.");
+	await until("a permission card", async () => (await waiting()).length);
+	// (what is selected as it is sent is what it is about, whatever is selected when its turn comes)
+	const pick = (how: string) => w.editorView.webContents.executeJavaScript(`(() => { const g = editorUi.editor.graph; ${how}; return g.getSelectionCount(); })()`);
+	const picked: number = await pick(`g.setSelectionCell(Object.values(g.getModel().cells).find((c) => c.vertex))`);
+	await until("the selection to reach the app", () => w.client.currentSelection.length === 1);
+	const pickedId = w.client.currentSelection[0];
+	await type("Add a shape labelled 'Sent after'.");
+	await until("the waiting strip", async () => (await strip()).length === 1);
+	await pick(`g.clearSelection()`);
+	await until("the selection to be gone", () => w.client.currentSelection.length === 0);
+	await answer("Deny");
+	await answer("Allow");
+	const followed = await twice;
+	log("apiChatFollowed", { ...followed, users: users().slice(-2) });
+	expect(followed.stop === "end_turn" && (await has("Sent after")) && !(await has("Not this one")) && picked === 1 && !!pickedId && users().pop() === "◉ 1 selected|Add a shape labelled 'Sent after'.", "what was still waiting when the request ended was not sent as the next one, or not with what was selected as it was sent.");
+
+	// asked for elsewhere in the app while it works (the Shifter's "Ask the agent", the Mapper): it is not refused, and
+	// not handed over in the middle of the other request. It waits under its own name and follows as the next request.
+	ended = 0;
+	const both = new Promise<{ stop?: string; error?: string }>((resolve) => (w.chat.onTurnEnd = (stop, error) => ++ended === 2 && resolve({ stop, error })));
+	void w.chat.send("Add a shape labelled 'Busy with this'.");
+	await until("a permission card", async () => (await waiting()).length);
+	void w.askAboutSelection("Add a shape labelled 'Asked meanwhile'.", "🎨 Asked meanwhile");
+	await until("the request to wait", async () => (await strip()).join() === "🎨 Asked meanwhile");
+	const refusedBefore = w.chat.items.filter((i) => i.kind === "error").length;
+	await answer("Allow");
+	await answer("Allow");
+	const after = await both;
+	log("apiChatAskedMeanwhile", { ...after, users: users().slice(-2), strip: await strip() });
+	expect(after.stop === "end_turn" && (await has("Busy with this")) && (await has("Asked meanwhile")) && users().slice(-2).join() === "|Add a shape labelled 'Busy with this'.,|🎨 Asked meanwhile" && w.chat.items.filter((i) => i.kind === "error").length === refusedBefore && !(await strip()).length, "a request made elsewhere in the app while it worked was refused, or did not follow as the next one.");
+	// ...and after Stop it is not put into the box as if the user had typed it: the chat says it was not sent
+	done = turn("Add a shape labelled 'Stopped with one waiting'.");
+	await until("a permission card", async () => (await waiting()).length);
+	void w.askAboutSelection("Add a shape labelled 'Dropped request'.", "🎨 Dropped request");
+	await until("the request to wait", async () => (await strip()).length === 1);
+	w.chat.stop();
+	await done;
+	await pause(300);
+	const boxAfter: string = await page.executeJavaScript(`document.getElementById("input").value`);
+	log("apiChatAskedThenStopped", { note: last("note")?.text, box: boxAfter, strip: await strip() });
+	expect(boxAfter === "" && !(await strip()).length && last("note")?.text === "Not sent: 🎨 Dropped request. Ask again where you asked." && !(await has("Dropped request")), "a request of the app that waited when Stop was pressed was sent, or put into the box.");
+
+	// Stop while a card waits: the request ends as stopped, and nothing is changed; what was waiting goes back into the box, unsent
+	done = turn("Add a shape labelled 'Stopped shape'.");
+	await until("a permission card", async () => (await waiting()).length);
+	await type("And a shape labelled 'Never sent'.");
+	await until("the waiting strip", async () => (await strip()).length === 1);
+	// (only so many wait: one more is not taken, and is back in the box it was sent from)
+	for (let n = 2; n <= 8; n++) await type(`Extra ${n}.`);
+	await until("a full strip", async () => (await strip()).length === 8);
+	await type("One too many.");
+	await until("the one too many, back in the box", () => page.executeJavaScript(`document.getElementById("input").value === "One too many."`));
+	const full = { strip: (await strip()).length, said: last("error")?.text };
+	await page.executeJavaScript(`document.getElementById("input").value = ""`);
+	// (taken back from the end, each by what it is and not by its place: the first stays)
+	for (let left = 7; left >= 1; left--) {
+		await page.executeJavaScript(`Array.from(document.querySelectorAll("#queued .queued .drop")).pop().click()`);
+		await until("one fewer waiting", async () => (await strip()).length === left);
+	}
+	log("apiChatFull", { ...full, left: await strip() });
+	expect(full.strip === 8 && /a lot to add/.test(full.said ?? "") && (await strip()).join() === "And a shape labelled 'Never sent'.", "one more than can wait was lost, or the wrong ones were taken back.");
+	w.chat.stop();
+	const stopped = await done;
+	await pause(300);
+	const box: string = await page.executeJavaScript(`(() => { const i = document.getElementById("input"); const v = i.value; i.value = ""; return v; })()`);
+	log("apiChatStopped", { ...stopped, outcome: last("permission")?.outcome, box, strip: await strip() });
+	expect(stopped.stop === "cancelled" && !(await has("Stopped shape")), "Stop did not end the request, or the shape was added all the same.");
+	expect(box === "And a shape labelled 'Never sent'." && !(await strip()).length && !(await has("Never sent")) && !w.chat.items.some((i: any) => i.kind === "user" && /Never sent/.test(i.text)), "what was waiting when Stop was pressed was sent, or lost.");
+
+
+	// another model, picked in the page: a new conversation, and the one a new chat starts with
+	await page.executeJavaScript(`document.getElementById("modelBtn").click()`);
+	await pause(300);
+	await page.executeJavaScript(`Array.from(document.querySelectorAll("#pickMenu [role=menuitemradio]")).find((b) => b.children[1].textContent === "Stand-in Small").click()`);
+	await until("the other model", async () => (await shown()).model === "Stand-in Small");
+	log("apiChatModel", { ...(await shown()), note: last("note")?.text, preferred: settings().models["api:stand-in"]?.preferred });
+	expect(/Switched to Stand-in Small/.test(last("note")?.text ?? "") && settings().models["api:stand-in"]?.preferred === "stand-in-small", "picking a model did not start a new conversation with it.");
+
+	// "Always allow in this chat": asked once, then not again for that tool
+	done = turn("Add a shape labelled 'Second shape'.");
+	await answer("Always allow in this chat");
+	await done;
+	const cards = w.chat.items.filter((i) => i.kind === "permission").length;
+	const third = await turn("Add a shape labelled 'Third shape'.");
+	log("apiChatAlways", { ...third, reply: last("assistant")?.text, cards: [cards, w.chat.items.filter((i) => i.kind === "permission").length] });
+	expect(third.stop === "end_turn" && (await has("Third shape")) && w.chat.items.filter((i) => i.kind === "permission").length === cards && /stand-in-small \(request 2 of this conversation\)/.test(last("assistant")?.text ?? ""), "a tool allowed for the chat asked again, or the model picked was not the one used in a conversation of its own.");
+
+	// a request from elsewhere in the app (the Shifter's "Ask the agent", the Mapper) goes the same way
+	const asked = waitForTurn(w);
+	void w.askAboutSelection("Add a shape labelled 'Asked from the Workshop'.", "🎨 Asked from the Workshop");
+	log("apiChatAskedElsewhere", await asked);
+	expect(await has("Asked from the Workshop"), "a request handed to the chat from elsewhere was not answered.");
+	await pause(600);
+	await save("chat-api.png");
+
+	// a new diagram that is not saved yet is a diagram to draw on: the model is not told that none is open,
+	// and reading its empty page says that it is the place to draw
+	settings().agent = "api:stand-in"; // (this run only, as above: what was saved since has put the default back)
+	const blank = await DiagramWindow.open(server);
+	await blank.whenLoaded();
+	expect(blank.chat.agentId === "api:stand-in", "the new window does not use the stand-in.");
+	await until("the new window's chat", () => (blank.chat as any).session?.info);
+	const seen = waitForTurn(blank);
+	void blank.chat.send("Say which diagram you see.");
+	await seen;
+	const told = ([...blank.chat.items].reverse().find((i) => i.kind === "assistant") as any)?.text ?? "";
+	log("apiChatNewDiagram", told || blank.chat.items.map((i: any) => `${i.kind}: ${i.text ?? i.summary ?? i.title ?? ""}`));
+	expect(/I was told: Open diagram: Untitled \(a new diagram, not saved to a file yet\)/.test(told) && /This page is empty: nothing is drawn on it yet\. It is the diagram to draw on\./.test(told) && !/No draw\.io diagram is open/.test(told), "a new, unsaved diagram is not presented to the model as a diagram to draw on.");
+	blank.chat.dispose();
+	blank.win.destroy();
+
+	// the key is nowhere it should not be
+	const data = app.getPath("userData");
+	const keyFile = fs.readFileSync(path.join(data, "api-keys.json"), "utf8");
+	const leaks = [fs.readFileSync(path.join(data, "settings.json"), "utf8"), keyFile, JSON.stringify(w.chat.items), await page.executeJavaScript("document.documentElement.outerHTML")].map((text) => text.includes(STAND_IN_KEY));
+	log("apiChatKeySeen", { settings: leaks[0], keyFile: leaks[1], transcript: leaks[2], page: leaks[3], keyFileHasEntry: keyFile.includes('"stand-in"') });
+	expect(!leaks.some(Boolean) && keyFile.includes('"stand-in"'), "the key is readable somewhere.");
+
+	// the key is removed: the conversation ends there
+	apiAccess().removeKey(STAND_IN_ID);
+	await until("the chat to notice", async () => (await shown()).dot === "problem");
+	log("apiChatKeyRemoved", { ...(await shown()), note: last("note")?.text });
+	expect(/key changed/.test(last("note")?.text ?? ""), "removing the key did not end the conversation.");
+
+	// a key is kept again: a new conversation, whose tool calls are new lines under the old ones
+	const lines = w.chat.items.filter((i) => i.kind === "tool").length;
+	await apiAccess().saveKey(STAND_IN_ID, STAND_IN_KEY);
+	await until("the chat to be ready again", async () => (await shown()).dot === "ready");
+	done = turn("Add a shape labelled 'After the new key'.");
+	await answer("Allow");
+	const again = await done;
+	const added = w.chat.items.filter((i) => i.kind === "tool").slice(lines).map((i: any) => `${i.status}: ${i.summary}`);
+	log("apiChatNewKey", { ...again, reply: last("assistant")?.text, lines: added });
+	expect(again.stop === "end_turn" && /request 1 of this conversation/.test(last("assistant")?.text ?? "") && added.length === 2 && added.every((l) => l.startsWith("ok: ")), "a request after the key was replaced went on with the old conversation, or its tool calls were taken for earlier ones.");
+	fs.writeFileSync(path.join(config.out, "transcript.json"), JSON.stringify(w.chat.items, null, 2));
+
+	// New Chat while something waits: the chat is emptied, and what was not sent stays with the user
+	done = turn("Add a shape labelled 'Before a new chat'.");
+	await until("a permission card", async () => (await waiting()).length);
+	await type("Keep this for later.");
+	await until("the waiting strip", async () => (await strip()).length === 1);
+	w.chat.newChat();
+	const emptied = await done;
+	await pause(300);
+	const kept: string = await page.executeJavaScript(`(() => { const i = document.getElementById("input"); const v = i.value; i.value = ""; return v; })()`);
+	log("apiChatNewChat", { ...emptied, kept, strip: await strip(), items: w.chat.items.length });
+	expect(kept === "Keep this for later." && !(await strip()).length && !(await has("Before a new chat")) && !w.chat.items.some((i: any) => /Keep this/.test(i.text ?? "")), "what was waiting when New Chat was pressed was sent, or lost.");
+	expect(w.chat.items.length === 0, "the new chat starts with what the request it ended said of its end.");
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {
@@ -718,9 +1031,27 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
 			await pause(400);
 			await save(`settings-${theme}-${section}.png`, sw.webContents);
+			// (Agents & models has a second half: the API keys)
+			if (section === "agents") {
+				await sw.webContents.executeJavaScript(`document.querySelector('#agentTabs [data-tab="api"]').click()`);
+				await pause(300);
+				await save(`settings-${theme}-api-keys.png`, sw.webContents);
+			}
 		}
 	}
 	log("settingsSections", await sw.webContents.executeJavaScript(`Array.from(document.querySelectorAll("nav [data-section]")).map((b) => b.textContent.trim())`));
+	// API keys: the providers, none with a key in this run's empty data folder. What is not a
+	// key is refused before anything is sent or the keychain is asked (so this run touches neither).
+	await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="agents"]').click(); document.querySelector('#agentTabs [data-tab="api"]').click()`);
+	const apiCards = `Array.from(document.querySelectorAll("#apiList .agent")).map((c) => [c.querySelector("header b").textContent, c.querySelector("header .tag").textContent, !!c.querySelector('.keyrow input[type="password"]'), c.querySelector(".bad") ? c.querySelector(".bad").textContent : null])`;
+	const apis: [string, string, boolean, string | null][] = await sw.webContents.executeJavaScript(apiCards);
+	log("settingsApis", apis);
+	await sw.webContents.executeJavaScript(`(() => { const c = document.querySelector('#apiList .agent[data-api="openai"]'); c.querySelector(".keyrow input").value = "not a key"; c.querySelector(".keyrow button").click(); })()`);
+	await pause(600);
+	const refused: [string, string, boolean, string | null][] = await sw.webContents.executeJavaScript(apiCards);
+	log("settingsApiRefused", refused[1]);
+	if (apis.map((a) => a[0]).join() !== "Anthropic API,OpenAI API,Gemini API,Grok API,Kimi API,OpenRouter" || apis.some((a) => a[1] !== "No key" || !a[2] || a[3]) || !/does not look like an API key/.test(refused[1]?.[3] ?? "") || refused[1][1] !== "No key" || fs.existsSync(path.join(app.getPath("userData"), "api-keys.json")))
+		throw new Error("Settings does not list the API providers as it should (see the settingsApis lines above).");
 	sw.close();
 	process.env.DRAWAI_THEME = "light";
 	updateSettings({ appearance: { ...settings().appearance, theme: "light", iconStyle: "dots2d" } });
@@ -919,10 +1250,53 @@ async function runWorkshop(w: DiagramWindow, server: StaticServer, config: E2eCo
 	log("shifterStencil", { asked, ...stencil, backInGallery });
 	if (!filled || !recoloured || group.children !== 2 || !groupSelected || !groupAlone || textLabel !== "Text" || !stencil.shapes) throw new Error("The Shape Shifter does not work as it should (see the shifter lines above).");
 
+	// ----- the Shape Creator: an agent draws an icon (here a stand-in: no agent is started, nothing is sent anywhere) -----
+	process.env.DRAWAI_E2E_CREATOR = "1";
+	const made = () => wc.executeJavaScript(`[...document.querySelectorAll("#creatorOut .made .row1 b")].map((b) => b.textContent)`) as Promise<string[]>;
+	await wc.executeJavaScript(`document.querySelector('nav button[data-mode="creator"]').click(); true`);
+	const agents: string[] = await until("the Creator's agents", async () => {
+		const list: string[] = await wc.executeJavaScript(`[...document.querySelectorAll("#crAgent option")].map((o) => o.textContent)`);
+		return list.length ? list : undefined;
+	});
+	await wc.executeJavaScript(`(() => { document.getElementById("crPrompt").value = "a load balancer"; document.getElementById("crCount").value = "3"; document.getElementById("crGo").click(); return true; })()`);
+	const drawn = await until("three icons from the stand-in", async () => ((await made()).length === 3 ? made() : undefined));
+	const saidWhile: string = await until("the request to end", async () => ((await wc.executeJavaScript(`!document.getElementById("crGo").classList.contains("hidden")`)) ? wc.executeJavaScript(`document.getElementById("crSaid").textContent`) : undefined));
+	// one goes into the diagram as an image shape
+	const cellsBeforeIcon = await cellCount();
+	await wc.executeJavaScript(`document.querySelector('#creatorOut .made button[data-do="insert"]').click(); true`);
+	const insertedIcon = await until("the created icon in the diagram", async () => {
+		if ((await cellCount()) <= cellsBeforeIcon) return undefined;
+		const style = (await w.selectedCells())[0]?.style ?? "";
+		return /^shape=image;.*image=data:image\/svg\+xml,/.test(style) ? true : undefined;
+	});
+	// ... and is kept in My shapes, which is a collection like any other: a gallery, and a palette in the editor
+	await wc.executeJavaScript(`document.querySelector('#creatorOut .made button[data-do="save"]').click(); true`);
+	await wc.executeJavaScript(`[...document.querySelectorAll("#menu button")].find((b) => b.textContent === "My shapes").click(); true`);
+	const kept = await until("the icon in My shapes", async () => {
+		const g = galleryConfigs().find((x) => x.id === "my-shapes");
+		const items = g ? await galleries().items(g) : [];
+		return g && items.length === 1 ? { title: g.title, shapes: items.map((i) => i.title) } : undefined;
+	});
+	const myPalette = await until("the My shapes palette in the editor", async () => (((await ed.executeJavaScript("window.omnidrawShapes.palettes()")) as string[]).some((t) => /^My shapes/.test(t)) ? true : undefined)).catch(() => false);
+	// a change is asked of the same stand-in
+	await wc.executeJavaScript(`(() => { const i = document.querySelector("#creatorOut .made .revise input"); i.value = "thicker lines"; i.dispatchEvent(new Event("input")); i.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return true; })()`);
+	const revised = await until("the revised icon", async () => ((await made()).length === 4 ? (await made())[0] : undefined));
+	await until("the revision to end", async () => ((await wc.executeJavaScript(`!document.getElementById("crGo").classList.contains("hidden")`)) ? true : undefined));
+	// (a window behind another one is not drawn again: bring it forward for its picture)
+	ww.show();
+	ww.moveTop();
+	await pause(900);
+	await shot("workshop-creator-light.png", wc);
+	log("creator", { agents, drawn, saidWhile, insertedIcon, kept, myPalette, revised });
+	if (drawn.length !== 3 || !/looked at it/.test(saidWhile) || !insertedIcon || kept.shapes.length !== 1 || !myPalette || revised !== "Revised 1") throw new Error("The Shape Creator does not work as it should (see the creator line above).");
+
 	// dark
 	process.env.DRAWAI_THEME = "dark";
 	updateSettings({ appearance: { ...settings().appearance, theme: "dark" } });
 	await pause(800);
+	await shot("workshop-creator-dark.png", wc);
+	await wc.executeJavaScript(`document.querySelector('nav button[data-mode="gallery"]').click(); true`);
+	await pause(300);
 	await shot("workshop-search-dark.png", wc);
 	process.env.DRAWAI_THEME = "light";
 	updateSettings({ appearance: { ...settings().appearance, theme: "light" } });

@@ -24,24 +24,9 @@ import { onSettingsChanged, settings, updateSettings, type Settings } from "./se
 import { shapeLibraries } from "./shapeLocations";
 import { galleries, galleryConfigs, searchForEditor } from "./workshop";
 import { galleryPalette } from "./workshop/palette";
-import { styleValue } from "./workshop/shifter";
+import { styleValue, webappPicture } from "./workshop/shifter";
 import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
-
-/** One of draw.io's own picture files (a style's `image=img/lib/…`) as SVG text for a preview, or undefined. */
-function webappPicture(image: string | undefined): string | undefined {
-	const m = image ? /^(?:https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/webapp\/)?((?:img|images|stencils)\/[\w./ -]+\.(svg|png|jpe?g|gif))$/i.exec(image) : undefined;
-	if (!m || m[1].includes("..")) return undefined;
-	const file = path.join(paths.webapp, m[1]);
-	try {
-		if (!file.startsWith(paths.webapp + path.sep) || fs.statSync(file).size > 512 * 1024) return undefined;
-		if (m[2].toLowerCase() === "svg") return fs.readFileSync(file, "utf8");
-		const mime = m[2].toLowerCase() === "png" ? "image/png" : m[2].toLowerCase() === "gif" ? "image/gif" : "image/jpeg";
-		return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><image width="64" height="64" preserveAspectRatio="xMidYMid meet" href="data:${mime};base64,${fs.readFileSync(file).toString("base64")}"/></svg>`;
-	} catch {
-		return undefined;
-	}
-}
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
 let nextId = 1;
@@ -265,6 +250,7 @@ export class DiagramWindow {
 			cwd: () => this.cwd(),
 			diagram: () => this.file,
 			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress }),
+			animate: () => settings().editor["drawio-ai.animateChanges"] !== false,
 		});
 		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName(), () => this.maps);
 		this.chat = new ChatController(
@@ -282,7 +268,7 @@ export class DiagramWindow {
 					void this.mapActions.run(action, text);
 				},
 				reportAction: (action) => void this.mapActions.action(action),
-				openSettings: () => DiagramWindow.appCommands.settings(),
+				openSettings: (section) => DiagramWindow.appCommands.settings(section),
 				collapseChat: () => this.setChatVisible(false),
 				resizeChatTo: (screenX, done) => this.resizeChatTo(screenX, done),
 			},
@@ -340,8 +326,10 @@ export class DiagramWindow {
 		if ("chat" in patch || "chatWidth" in patch) this.layout();
 		if ("appearance" in patch || "chat" in patch) this.sendEditorPrefs();
 		if ("shapes" in patch || "workshop" in patch) this.sendShapes();
-		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw)
+		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw, unless
+		// this chat is answered through an API key, whose models are the ones the provider listed)
 		if ("models" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.settingsChanged("agents" in patch);
+		else if ("modelCatalog" in patch) this.chat.catalogChanged();
 	}
 
 	private sendToEditor(msg: unknown): void {
@@ -459,7 +447,7 @@ export class DiagramWindow {
 		// A shape that is a picture names a file of draw.io's (img/lib/…): its thumbnail links to it, and
 		// links do not survive the Workshop's cleaning. The picture itself is the preview then.
 		for (const shape of shapes) {
-			const picture = webappPicture(styleValue(shape.style, "image"));
+			const picture = webappPicture(styleValue(shape.style, "image"), paths.webapp);
 			if (picture) shape.preview = picture;
 		}
 		return shapes;

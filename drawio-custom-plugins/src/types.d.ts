@@ -190,7 +190,7 @@ declare type AiOp =
     | { op: "distribute"; ids: string[]; direction: "horizontal" | "vertical" }
     | { op: "zOrder"; ids: string[]; position: "front" | "back" }
     | { op: "layout"; ids?: string[]; parent?: string;
-        type: "hierarchical" | "horizontalHierarchical" | "tree" | "horizontalTree" | "radialTree" | "organic" | "circle" | "grid";
+        type: "hierarchical" | "horizontalHierarchical" | "tree" | "horizontalTree" | "radialTree" | "organic" | "circle" | "grid" | "route";
         spacing?: number }
     | { op: "insertXml"; xml: string; dx?: number; dy?: number; parent?: string }
     | { op: "replaceAll"; xml: string }
@@ -224,6 +224,12 @@ declare interface AiApplyOpsAction {
     ops: AiOp[];
     selectResult: boolean;
     flash: boolean;
+    /**
+     * Show the batch being built: new shapes appear one after another, connectors draw in
+     * along their path, moved shapes glide to their place. Only what is seen: the edit is
+     * applied at once, as without it.
+     */
+    animate?: boolean;
     /** Stop at the first failing operation and roll the whole batch back. */
     atomic: boolean;
     /** Keep the result as a pending AI change the user accepts or rejects. */
@@ -235,6 +241,12 @@ declare interface AiApplyOpsAction {
      * touches a cell the AI changed).
      */
     user?: boolean;
+    /**
+     * Apply only while this page (its id) is the one shown. On any other page nothing is done and
+     * every operation fails: for a step that follows another batch and must land where that did
+     * (cell ids alone do not say which page, two pages can hold the same ones).
+     */
+    page?: string;
 }
 
 declare interface AiSetSelectionAction {
@@ -322,6 +334,8 @@ declare interface AiApplyOpsResultEvent {
     results: AiOpResult[];
     idMap: Record<string, string>;
     rolledBack: boolean;
+    /** The id of the page the batch was applied on (the one shown as it began). */
+    page?: string;
 }
 
 declare interface AiAckEvent {

@@ -2,13 +2,16 @@
 
 *Formerly the Draw.AI desktop app. The VS Code extension keeps the name Draw.AI.*
 
-A desktop app for draw.io diagrams with an AI chat beside the editor. It does not
-use its own model API keys: the chat drives a coding agent you already have
-installed and signed in to — **Claude Code**, **Gemini** (Google's Antigravity CLI, or
-Gemini CLI), **Codex**, **GitHub Copilot** or **Kimi** — over the
-[Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
+A desktop app for draw.io diagrams with an AI chat beside the editor. The chat drives a
+coding agent you already have installed and signed in to — **Claude Code**, **Gemini**
+(Google's Antigravity CLI, or Gemini CLI), **Codex**, **GitHub Copilot** or **Kimi** — over
+the [Agent Client Protocol](https://agentclientprotocol.com) (ACP). The agent edits the
 open diagram live through OmniDraw's diagram tools, and you keep or revert its
 changes.
+
+The app has no model API keys of its own. You can add yours (Anthropic, OpenAI, Gemini, Grok,
+Kimi, OpenRouter) to use a provider's models without an agent program, in the chat and
+everywhere else an agent is used: see [API keys](#api-keys).
 
 ## Run it
 
@@ -59,7 +62,20 @@ installed and look signed in; when one is not, the chat says what to run (and of
   (allow once / always / reject) and waits for you. **Allow all** on a request approves it and everything
   else the agent asks for in that chat (shown as one-line ⚡ entries) until New Chat,
   switching agents, or a click on the ⚡ Allow all chip at the top; also under the
-  **Agent** menu.
+  **Agent** menu. Under **With an API key** the same picker lists the providers whose models
+  answer without an agent program: see [the chat with an API key](#the-chat-with-an-api-key).
+- **While it works** the box stays open. What you send then waits in a strip above the box
+  (✕ takes it back) and reaches the model with the next answer of one of the diagram's tools,
+  so it reads it as it works; the chat shows it there as "added while it works". What could
+  not be handed over (no tool answered after it, or it has images) is sent as the next request
+  when this one ends, one at a time. Each keeps what was selected in the diagram as you sent it. After Stop, an error or New Chat nothing is sent by itself: what was
+  waiting goes back into the box. Up to eight things wait, with four pictures between them;
+  one more stays in the box. A request made elsewhere in the app meanwhile (the Mapper's, the
+  Shape Workshop's "Ask the agent") waits there too, under its own name: it is a task of its
+  own, so it is never handed over mid-request and follows as the next one. After Stop it is
+  not sent; the chat says so. Works with agents and with API models alike (`mcpServer.ts`,
+  `userUpdate`). The tags that mark an addition as yours are taken out of what a tool itself
+  answers (`withoutUpdateTags`), so text in a diagram or a mapped folder cannot pass for you.
 - **Review**: the agent's edits appear as pending changes; **Accept** keeps them,
   **Reject** reverts them (also under the **Agent** menu).
 - **File menu** (both the app menu and draw.io's own File menu in the editor): New,
@@ -76,6 +92,11 @@ installed and look signed in; when one is not, the chat says what to run (and of
 system into the diagram. Every map is collected **read-only**, drawn as one pending
 change on its own page (keep or revert it like any AI change), and can then be handed
 to your agent to review, complete or dig into.
+
+The Mapper places the shapes itself (`mapper/layout.ts`); the connectors are then routed
+by draw.io's obstacle-avoiding router (the plugin's `layout` operation, type `route`): each
+goes around the shapes in its way and apart from the ones beside it, and no shape moves.
+Maps with more than 600 connectors are left unrouted, as routing them takes too long.
 
 | Category | Maps |
 | --- | --- |
@@ -161,9 +182,9 @@ claude mcp add --scope user draw-ai-desktop -- ~/.drawio-ai/bin/draw-ai-desktop-
 ## Shape Workshop
 
 **Shapes → Shape Workshop…** (Cmd/Ctrl+Alt+K, or the shapes button in the toolbar) opens one
-window for finding, collecting and changing shapes. It has the **Shape Gallery** and the
-**Shape Shifter**; finding a shape from an image, the cloud vendors' own sets and the Shape
-Creator (an agent draws an icon) come next.
+window for finding, collecting, changing and making shapes. It has the **Shape Gallery**, the
+**Shape Shifter** and the **Shape Creator**; finding a shape from an image and the cloud
+vendors' own sets come next.
 
 - **Galleries** start with three you can turn off, remove and restore:
   - theSVG, open licences only (CC0, MIT, Apache-2.0); not its AWS, Azure or Google Cloud sets, whose labels there don't match the vendors' terms
@@ -230,15 +251,172 @@ used last:
   nothing is uploaded. You name the collection before it is saved, and the pictures its
   shapes keep are checked like every other image.
 
+The **Shape Creator** (the third tab, or **Shapes → Create a Shape…**) has an agent, or a
+model you have an API key for, draw an icon:
+
+- **Describe it.** Pick who draws: one of the agents the chat uses (and a model, when the
+  agent has told the app which it offers), or a provider you have given an
+  [API key](#api-keys) for and one of its models. Then a look (line, solid, isometric, dot
+  matrix) and one icon or three variations; attach, paste or drop up to four images that show
+  what you mean. Only your description and those images go to whoever draws.
+- **With an API key** there is no program, folder or tool endpoint: the app talks to the
+  provider itself, the model gets the same two tools and nothing else, and the tools run in
+  the app. What goes to the provider is the request, the images you attached, and what the
+  tools answer (the picture of its own drawing). The rest of this list is about agents; what
+  is accepted, Stop and the time limit are the same for both.
+- **The agent runs apart from any diagram:** in an empty folder of its own, and the Workshop
+  gives it a tool endpoint with two tools: `workshop_render_preview` returns a picture of its
+  SVG (drawn by the Workshop page) so it can check its work, and `workshop_submit_svg` hands
+  an icon in. When it asks the app for permission, one use of one of those two tools is
+  allowed and everything else is refused (what was refused shows in the status line);
+  nothing is ever allowed "always", which would be written into the agent's own
+  configuration. The app does not take the agent's own tools away: what the agent's own
+  settings already allow without asking (rules you set up in the agent itself, servers it is
+  connected to) stays as it is there.
+- **What it hands in is cleaned** like every SVG before it is shown, and has to be one
+  well-formed `<svg>` element (an SVG shown as an image is read as XML: a tag left open or a
+  second document after the first would draw nothing) with a `viewBox` that draws something;
+  otherwise the agent is told what to fix. Six icons at most per request.
+- **Look at it** at 16, 24 and 64 pixels on white and on black. **Ask for a change** ("thicker
+  lines"): the same agent, still running, gets the request and the icon as it is now.
+  **Source** shows the SVG; what you edit there is cleaned again when you apply it.
+- **Keep it:** Insert puts it into the diagram used last as an image shape; Save keeps it in
+  **My shapes** (a collection like any other: a palette in the shapes sidebar, found by
+  search, exportable) or another of your collections; Copy SVG puts the source on the
+  clipboard. Icons are drawn with `var(--fill, #141414)` and `var(--stroke, #141414)`, so
+  the Shifter's Icon colour recolours them.
+- **Stop** asks the agent to stop; an agent that has not stopped five seconds later is
+  closed. The same happens to a request that runs for eight minutes. The agent is closed, its
+  folder removed and its endpoint shut when the Workshop window closes, when you choose
+  another agent or model, and when it ends by itself.
+
 Code: `src/main/workshop/` (`sources.ts` parses each source, `galleries.ts` caches and
 searches, `shifter.ts` is the Shape Shifter's own logic: selections, style edits, one-colour
 icons; `workshopWindow.ts`), `src/renderer/workshop.html`, and the palettes, search and
 insertion in `src/renderer/desktop-toolbar.js`. What the Shifter needs from a diagram
 (`ShifterHost` in `core.ts`: search draw.io's shapes, read the selection, apply style edits,
-ask the agent, convert a stencil) is `DiagramWindow`'s. Tests: `test/workshop.test.js`,
-`test/shifter.test.js` and `scripts/e2e.mjs --workshop`, all on fixtures
-(`test/fixtures/galleries/mirror`, served by the e2e script as a stand-in for jsDelivr: test
-runs never download anything).
+ask the agent, convert a stencil) is `DiagramWindow`'s. The Creator: `workshop/creator.ts`
+(what the agent is asked, what is accepted, and `CreatorCore`, the page's other half for it),
+`src/main/creatorSession.ts` (the agent's session: folder, tool endpoint, permissions) and
+`creatorRunner.ts` (which agents there are; `api/creator.ts` for the models used with an API
+key). Tests: `test/workshop.test.js`,
+`test/shifter.test.js`, `test/creator.test.js` and `scripts/e2e.mjs --workshop`, all on
+fixtures (`test/fixtures/galleries/mirror`, served by the e2e script as a stand-in for
+jsDelivr: test runs never download anything). No test starts a real agent: the unit tests use
+`test/helpers/fake-acp-agent.js`, which speaks the agent protocol on stdio and reaches only
+the tool endpoint it is given, and the end-to-end run uses a stand-in inside the app
+(`DRAWAI_E2E_CREATOR`).
+
+## API keys
+
+**Settings → Agents & models → API keys** (the second half of that section). Paste a key to
+use that provider's models without an agent program. Usage is billed by the provider to that
+key.
+
+| Provider | Key from | Notes |
+| --- | --- | --- |
+| Anthropic | the Claude Console | |
+| OpenAI | platform.openai.com | Needs OpenAI to keep responses for a while (an organisation can switch that off). |
+| Gemini | Google AI Studio | Reached at Google's address for OpenAI's protocol. |
+| Grok | console.x.ai | Over the API xAI calls deprecated (no end date given); attached images as JPEG or PNG. |
+| Kimi | Moonshot AI's international platform (`api.moonshot.ai`) | A key from the China platform is refused. |
+| OpenRouter | openrouter.ai | One key for many providers' models. Only models that can call tools are listed (the newest 500). Nothing that names this app is sent. Which providers a request may go to, and what they may keep, is set in your OpenRouter account. |
+
+- **Where a key is kept.** Encrypted with a secret the operating system holds for the app
+  (Electron's `safeStorage`: the macOS Keychain), in `api-keys.json` in the app's data folder,
+  readable by your user only. A file there that the app cannot read, or that is not one it
+  wrote, is never written over (the second is set aside as `api-keys.json.unreadable`). It is never written to `settings.json`, a diagram or a log,
+  never shown again after you paste it, never sent to an agent, and sent only to its own
+  provider's address. What a provider says when something goes wrong is shown, but never the
+  key, should it quote the key back. macOS may ask for your login keychain the first time a
+  key is saved or used. The keychain is not asked when Settings or the Shape Creator merely
+  opens.
+- **Nothing comes from the environment.** `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `*_CUSTOM_HEADERS` and the like are not read: the
+  key is the one you saved, and it goes to the provider's own address. (What Node itself takes
+  from the environment for every connection, a proxy or extra certificates, applies here as
+  it does to everything else the app fetches.)
+- **A key is checked before it is kept.** The provider is asked which models the key can use.
+  A key it does not accept is not kept. If the provider cannot be reached, the key is kept and
+  **Refresh** asks again. A kept key the provider later stops accepting is marked
+  **Not accepted**. A restricted key that may not list models is kept, and what it may not do
+  is said.
+- **Models.** What the provider lists for the key, newest first; untick one to leave it out of
+  the pickers. The model you picked last is offered first next time. Only the names of models
+  are stored in `settings.json` (under `api:<provider>`). A model that takes no pictures
+  (Kimi says which of its models; of OpenAI's, the older ones known for it) is marked: it is
+  given words only, also where a tool would show it a picture.
+- **A conversation that broke is forgotten.** A request that is stopped, declined or fails is
+  not kept in the conversation with the model, so the next one starts from something the
+  provider accepts; the Shape Creator then says its rules again.
+- **Where they can be used:** wherever an agent is: the diagram chat (and with it the
+  Shifter's "Ask the agent" and the Mapper's requests, which go through the chat), and the
+  Shape Creator.
+
+### The chat with an API key
+
+The chat's picker lists your agents and, under **With an API key**, the providers (the ones
+you have a key for first). Pick one, then one of its models; the model picked last is the one
+a new chat starts with.
+
+- **No program, no endpoint.** An agent program is started in the diagram's folder and reaches
+  the diagram's tools over MCP. A model used through its API has neither: the app offers it
+  this window's tools (the `drawio_*` ones and the Mapper's) and runs them itself. What goes
+  to the provider is your request with what you selected, the images you attached, and what
+  the tools answer (what they read of the diagram, a picture of it, a map's facts).
+- **What is asked first.** A tool that only reads runs as the model calls it. One that changes
+  the diagram, writes a file or collects a map shows the same card an agent's request does:
+  **Allow**, **Always allow in this chat** (that tool, until New Chat) or **Deny**, with
+  **Allow all** beside them. A call you do not allow is not run; the model is told, and goes
+  on without it. Edits arrive as pending changes to keep or revert, as with an agent.
+- **A conversation is held with one model.** Picking another model starts a new conversation
+  with it (the chat says so): what one model wrote and thought is not something another can
+  go on from. So does a key that is replaced or removed; a request under way then ends as
+  stopped.
+- **Nothing happens until you send a request.** A window that opens with a provider picked
+  sends nothing and does not ask the keychain; the key is read when a request goes out.
+- **When something is wrong with the key or the models** (no key, one the provider stopped
+  accepting, every model switched off), the request's error has an **Open Settings** button
+  that lands on the API keys.
+- **Long chats.** The whole conversation goes to the provider with every request (OpenAI
+  keeps it on its side). With Anthropic, what was sent before is read from its cache at a
+  fraction of the price. When it has grown long (about 60,000 tokens of what was said,
+  called and answered: `SUMMARISE_AT` in `api/chatSession.ts`), the next request first has
+  the model sum the conversation up for itself, and then goes to a new conversation that
+  starts with that summary. The chat says so; the summary is not shown, and no tool runs
+  for it. If no summary can be had, the conversation goes on as it is and it is tried again
+  later. A conversation the provider refuses as too long still starts over, and the app
+  says so. **New Chat** does the same on purpose.
+
+Code: `src/main/api/`: `keyStore.ts` (the file and its encryption; `keys.ts` gives it
+`safeStorage`), `access.ts` (keeping, checking and removing a key, and the models it can
+use), `keysPanel.ts` (the Settings page's other half), `chat.ts` (what a provider is to the
+app: it lists models and holds a conversation that runs the app's tools), `anthropic.ts`
+(the Messages API through `@anthropic-ai/sdk`), `openai.ts` (the Responses API through
+`openai`), `completions.ts` (OpenAI's chat-completions protocol, which the other four speak
+at an address of their own, through `openai`; what differs between them is named there) with
+`gemini.ts`, `grok.ts`, `kimi.ts` and `openrouter.ts`, `env.ts` (why nothing is taken from
+the environment), `creator.ts` (the Shape Creator drawing this way), `chatSession.ts` (the
+chat answered this way: to `chatController.ts` it is a session like an agent's, see
+`ChatSession` in `acpSession.ts`). Tests: `test/api.test.js`, `test/api-chat.test.js` and
+`test/ai/settings.e2e.test.js` (in the repository root),
+against local stand-ins for the three APIs (`test/helpers/fake-providers.js`, which refuse a
+conversation that is not whole, as the real ones do) and a test cipher instead of the
+keychain: no test reaches a provider, uses a real key or touches the keychain. In the real
+app, `node scripts/e2e.mjs --api-chat` runs the chat with a provider that is none
+(`api/standIn.ts`): the window, the chat page, the tools, the permission cards and the key
+file are the real ones.
+
+The tests never reach a real provider: the request shapes follow each provider's
+documentation and SDK (as of November 2026), and the tests check what is sent and what is
+made of the answers. A provider's first real request is where a wrong assumption would show.
+What each of the four on `completions.ts` does differently, as its documentation has it:
+Gemini wants the signature of its thinking back on each tool call, sends tool calls whole
+and without a position, says what went wrong as a list, and refuses a tool argument that is
+an object of any shape (it is asked for as JSON text and read back) or a tool without
+arguments (it is given one to leave out); Grok sends tool calls whole too
+and can say what went wrong as a plain sentence; Kimi wants its reasoning text back;
+OpenRouter wants the reasoning back as the list of parts it came as.
 
 ## Presentation mode
 
@@ -292,8 +470,9 @@ rise in. Under *reduce motion* nothing moves.
   (the extension: `src/features/workshop/`). Keep those files free of Electron and of
   `../settings`; what needs a window or the app's settings goes through `WorkshopPorts`.
   The Shape Shifter is on where a program says so (`WorkshopPorts.shifter`, with
-  `pickStencil`) and gives the Workshop a `ShifterHost`; the extension does neither yet, so
-  its Shifter tab stays "Next".
+  `pickStencil`) and gives the Workshop a `ShifterHost`; the Shape Creator is on where a
+  program gives `WorkshopPorts.creator` (`CreatorPorts`: its agents, and a way to start one).
+  The extension does neither yet, so both tabs stay "Next" there.
 - Shared with the VS Code extension: `src/renderer/theme.js`, `desktop-toolbar.js`,
   `presentation.js` and `ui/{icons,brandmark,tips,dots,matrix}.js` are also the extension's
   editor tools (its plugin build copies them: `drawio-custom-plugins/webpack.config.ts`,

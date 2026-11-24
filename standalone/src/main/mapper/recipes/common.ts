@@ -53,6 +53,8 @@ export interface WalkOptions {
 	maxDepth?: number;
 	/** Also enter folders that start with a dot (e.g. .github). Default: only .github. */
 	dotDirs?: (name: string) => boolean;
+	/** A folder that is read although its name is one of build output (`rel`: its path below the root). */
+	keepDir?: (rel: string) => boolean;
 }
 
 export interface FoundFile {
@@ -82,7 +84,8 @@ export function readFiles(root: string, opts: WalkOptions): FoundFile[] {
 			const abs = path.join(dir, e.name);
 			if (e.isSymbolicLink()) continue;
 			if (e.isDirectory()) {
-				if (SKIP_DIRS.has(e.name) || (e.name.startsWith(".") && !dotDirs(e.name))) continue;
+				const kept = opts.keepDir && SKIP_DIRS.has(e.name) && opts.keepDir(path.relative(root, abs).split(path.sep).join("/"));
+				if ((SKIP_DIRS.has(e.name) && !kept) || (e.name.startsWith(".") && !dotDirs(e.name))) continue;
 				walk(abs, depth + 1);
 			} else if (e.isFile()) {
 				const rel = path.relative(root, abs).split(path.sep).join("/");

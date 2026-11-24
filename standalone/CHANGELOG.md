@@ -2,6 +2,95 @@
 
 ## [Unreleased]
 
+- Polish:
+  - A map drawn by the Mapper is shown being built, like any other edit (Settings → Editor →
+    **Show edits being built**).
+  - The outlines around new and changed shapes (the review's, and the flash) come in with
+    their shapes; they used to stand around shapes that were not there yet.
+  - **New Chat** during a request no longer leaves "Stopped." as the new chat's first line.
+  - A map with more than 600 connectors got no routing at all. The connectors inside each
+    top-level box are now routed, box by box, for up to six seconds; what runs between the
+    boxes is left as drawn.
+- **Long chats with an API model.** The whole conversation goes to the provider with every
+  request, so a long chat cost more each time and in the end the provider refused it. When a
+  conversation has grown long (about 60,000 tokens), the model is asked to sum it up for
+  itself, and the chat goes on in a new conversation that starts with that summary. The chat
+  says so; the summary itself is not shown. The diagram is read again as needed.
+- **Test an API key** (Settings → Agents & models → API keys → **Test**): sends one short
+  request to the provider the way the chat does (the chat's tools as they are, one tool call
+  and its answer) and says whether it worked, or what the provider answered. Keeping a key
+  only lists its models; this is the check that the provider takes the chat's requests. It
+  runs on your click only and uses a little of your credit. No tool is run and the diagram
+  is not touched.
+- **A run log.** The app notes when it started and how it ended in `logs/app.log` in its data
+  folder (on macOS `~/Library/Application Support/OmniDraw`): a quit, a window's page or a
+  helper process that ended and why, an error in the main process. A run that ended without a
+  word (a crash, a kill) is named by the next start. It holds times and reasons only, never a
+  diagram, a request or a key.
+- Development: the end-to-end run builds into `out-e2e` and starts the app from there, so a
+  test no longer replaces the files of a copy of the app that is running from `out`.
+- **Mapper: map a working copy with one click.** When a folder's code is in working copies the
+  scan does not read (git worktrees in `.claude/worktrees`, `.worktrees`, `.git-worktrees`),
+  the result now offers them, the six worked in last first and the rest behind a button: a click maps one. The
+  result also scrolls into view; it could end up below the form, unseen.
+- A request made elsewhere in the app while the chat works (the Mapper's, the Shape Workshop's
+  "Ask the agent") is no longer refused with "press Stop first". It waits in the strip above
+  the box under its own name and follows as the next request.
+- **Maps: connectors are routed.** After the Mapper has placed the shapes, each connector is
+  taken around the shapes in its way and apart from the ones beside it (draw.io's own
+  obstacle-avoiding router; no shape moves), and where two still cross, one hops over the
+  other. Before, every connector ran straight between its ends, through whatever lay there,
+  and the ones leaving a shape on the same side lay on top of each other. Maps with more than
+  600 connectors are drawn as before (routing them takes too long).
+- **Software maps of a repository without services.** A Rust binary (`src/main.rs`,
+  `src/bin/`), axum, actix-web and Rocket routes, and a Python `__main__.py` count as entry
+  points, so such a package is drawn. When nothing is a service, the message says how much was
+  read and which packages are there; and when the repository's working copies are kept in a
+  hidden folder (`.claude/worktrees`), that they were not read and how to map one.
+- The Mapper's dialog wrote "null" under a result without warnings, and ticked off a run that
+  found nothing. A run that found nothing now says so plainly and keeps the dialog open.
+- **Watch it build.** An edit by the AI is shown being made: new shapes appear one after
+  another in the order they were added, connectors draw in from start to end, and shapes that
+  were moved (also by a layout) glide to their place. It takes about a second at most. The
+  edit itself is applied at once, as before (one undo step, pending changes to keep or
+  revert); only how it is shown changes. Off when the system asks for reduced motion, and
+  under Settings → Editor → **Show edits being built**.
+- **Send while it works.** The chat's box stays open during a request. What you send waits in
+  a strip above it and is handed to the model with its next step (it reads it as it works), or
+  sent as the next request when this one ends; ✕ takes it back. After Stop, an error or New Chat it goes
+  back into the box instead of being sent. The line under the box says so, where it used to
+  repeat "Working… watch the diagram".
+- A new diagram that is not saved yet was described to the model as "no diagram is open", so
+  it would not draw on it, or added a page of its own. It is told the diagram is "Untitled",
+  that an empty page is the place to draw, and not to add a page because the one shown is
+  empty.
+
+- **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's, Gemini's, Grok's or
+  Kimi's models, or the many behind OpenRouter, with your own API key, without an agent
+  program. A key is checked with its provider, then kept
+  encrypted with a secret from the macOS Keychain; it is never written to `settings.json`,
+  never shown again, and nothing about it is taken from environment variables. These models
+  are listed beside the agents wherever an agent is used:
+  - the **chat** (and with it the Shifter's "Ask the agent" and the Mapper's requests): pick
+    a provider under "With an API key", then a model. The app runs the diagram's tools
+    itself; a tool that changes something asks first (Allow, Always allow in this chat,
+    Deny), and edits are yours to keep or revert as with an agent;
+  - the **Shape Creator**.
+- The chat's tool lines and permission cards name the Mapper's tools in words ("Mapping…")
+  as they do the diagram's.
+- Requests to Anthropic's API read what was sent before from its cache (cheaper rounds of
+  tool calls).
+- Shape Creator: an agent that is not ready says why in full (the note was cut off at the
+  first line), with a link to where it is set up in Settings.
+- A shape of a Visio stencil that has no name is called "Shape 3" (by its place) and no
+  longer "null".
+- **Shape Creator** in the Shape Workshop (its third tab, or Shapes → Create a Shape…):
+  describe an icon and one of your agents draws it as SVG. See it at the sizes a diagram uses,
+  ask for changes, edit the source, then insert it, keep it in **My shapes** or another
+  collection, or copy the SVG. The agent runs in a folder of its own with two tools (look at
+  the icon, hand it in); everything else it asks for is refused, and what it hands in is
+  cleaned like every SVG.
+- A collection shows a shape added to it at once, also when it was being read at that moment.
 - **Shape Shifter** in the Shape Workshop (its second tab, or Shapes → Find a Shape…):
   - **Find a shape by words** across draw.io's own shapes and your galleries at once, each
     result with a picture; click to add it.

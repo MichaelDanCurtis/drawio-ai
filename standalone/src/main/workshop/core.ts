@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { CreatorCore, type CreatorPorts } from "./creator";
 import type { GalleryHit, GalleryService, Insertable } from "./galleries";
 import { withDefaultGalleries } from "./palette";
 import { builtInInsertable, builtInPreview, colourOf, restyleRequest, selectionInfo, styleEdits, type BuiltInShape, type SelectedCell, type SelectionInfo, type ShapeChange, type StyleEdit } from "./shifter";
@@ -61,6 +62,8 @@ export interface WorkshopPorts {
 	shifter?: boolean;
 	/** Lets the user choose a Visio stencil file. */
 	pickStencil?(): Promise<string | undefined>;
+	/** This program has the Shape Creator: it can start an agent that draws (see creator.ts). */
+	creator?: CreatorPorts;
 	/**
 	 * A gallery that is off downloads nothing: until it is switched on it cannot be browsed,
 	 * synced or made offline, and the default galleries come back switched off. (The VS Code
@@ -76,9 +79,9 @@ export function downloads(g: GalleryConfig): boolean {
 }
 
 /**
- * The Shape Workshop page's other half: answers its messages. This first version is the Shape
- * Gallery (galleries on and off, add, sync, offline, collections, search, insert); Shape Shifter
- * and Shape Creator join it later.
+ * The Shape Workshop page's other half: answers its messages. The Shape Gallery (galleries on
+ * and off, add, sync, offline, collections, search, insert) and the Shape Shifter are here; the
+ * Shape Creator's messages go to CreatorCore (creator.ts).
  */
 /** How long the Shifter's search waits for draw.io's own shapes before the galleries answer alone. */
 const OWN_SEARCH_MS = 8000;
@@ -114,16 +117,38 @@ export class WorkshopCore {
 	/** Counts the pages this has served: what was started for a page that is gone is not kept for the next. */
 	private pageSeq = 0;
 
-	constructor(private readonly ports: WorkshopPorts) {}
+	/** The Shape Creator's half (creator.ts). */
+	private readonly creator: CreatorCore;
+
+	constructor(private readonly ports: WorkshopPorts) {
+		this.creator = new CreatorCore({
+			post: (msg) => ports.post(msg),
+			creator: () => ports.creator,
+			service: () => ports.service(),
+			configs: () => ports.configs(),
+			save: (list) => ports.save(list),
+			insert: async (shape) => {
+				const host = ports.host();
+				return host ? host.insert(shape) : undefined;
+			},
+		});
+	}
 
 	public dispose(): void {
 		clearTimeout(this.stateTimer);
 		this.pageGone();
 	}
 
+	/** Who can draw for the Shape Creator changed (a key was added or removed, a model hidden): the page is told. */
+	public creatorChanged(restart?: (agent: string) => boolean): void {
+		if (restart) this.creator.restart(restart);
+		this.creator.postAgents();
+	}
+
 	/** The page was closed: what waited for it (a search, a selection, a converted stencil without a name) is dropped. */
 	public pageGone(): void {
 		this.pageSeq++;
+		this.creator.close();
 		clearTimeout(this.selectionTimer);
 		this.searchSeq++;
 		this.selectionSeq++;
@@ -168,6 +193,7 @@ export class WorkshopCore {
 				sets: this.ports.host()?.shapeSets() ?? null,
 				version: this.ports.version(),
 				shifter: !!this.ports.shifter,
+				creator: !!this.ports.creator,
 			});
 		}, 30);
 	}
@@ -203,6 +229,7 @@ export class WorkshopCore {
 	}
 
 	public async onMessage(msg: any): Promise<void> {
+		if (CreatorCore.handles(msg?.type)) return this.creator.onMessage(msg);
 		const s = this.ports.service();
 		switch (msg?.type) {
 			case "ready":

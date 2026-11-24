@@ -3,20 +3,27 @@ import * as path from "path";
 import { paths } from "../paths";
 import { onSettingsChanged, settings } from "../settings";
 import type { StaticServer } from "../staticServer";
+import { apiAccess } from "../api/catalog";
+import { desktopCreator, standInCreator } from "../creatorRunner";
 import { WorkshopCore, type WorkshopHost } from "./core";
+import type { CreatorPorts } from "./creator";
 import { galleries, galleryConfigs, saveGalleries } from "./index";
 
 export type { WorkshopHost };
 
+let creator: CreatorPorts | undefined;
+let standIn: CreatorPorts | undefined;
+
 /**
- * The Shape Workshop: one window for the whole app. This first version is the Shape Gallery
- * (galleries on and off, add, sync, offline, collections, search, insert); Shape Shifter and
- * Shape Creator join it later.
+ * The Shape Workshop: one window for the whole app, with the Shape Gallery, the Shape Shifter
+ * and the Shape Creator.
  */
 export class WorkshopWindow {
 	private static win: BrowserWindow | undefined;
 	private static installed = false;
 	public static host: WorkshopHost | undefined;
+	/** Opens the app's Settings (main.ts sets it). */
+	public static openSettings: ((section?: string) => void) | undefined;
 	/** The page's other half (shared with the VS Code extension's panel). */
 	private static readonly core = new WorkshopCore({
 		post: (msg) => WorkshopWindow.post(msg),
@@ -42,6 +49,10 @@ export class WorkshopWindow {
 		},
 		reveal: (file) => shell.showItemInFolder(file),
 		openExternal: (url) => void shell.openExternal(url),
+		// (the end-to-end run draws with a stand-in: no agent is started and nothing is sent anywhere)
+		get creator() {
+			return process.env.DRAWAI_E2E && process.env.DRAWAI_E2E_CREATOR ? (standIn ??= standInCreator()) : (creator ??= desktopCreator((agent) => WorkshopWindow.openSettings?.(agent.startsWith("api:") ? "api" : "agents")));
+		},
 		shifter: true,
 		pickStencil: async () => {
 			// (the end-to-end run has nobody to answer a file dialog)
@@ -102,7 +113,11 @@ export class WorkshopWindow {
 		});
 		onSettingsChanged((_s, patch) => {
 			if ("workshop" in patch || "appearance" in patch) WorkshopWindow.core.postState();
+			// (the models an agent or an API key offers, and which of them are hidden in Settings)
+			if (("models" in patch || "modelCatalog" in patch) && WorkshopWindow.window) WorkshopWindow.core.creatorChanged();
 		});
+		// an API key was added, replaced or removed: a model of that provider that is drawing with the old one is closed
+		apiAccess().onKeyChange((id) => WorkshopWindow.core.creatorChanged((agent) => agent === `api:${id}`));
 		galleries().onChange(() => WorkshopWindow.core.postState());
 	}
 

@@ -147,6 +147,15 @@ test("the editor reads style names with digits, and a remembered mode is never a
 	assert.match(chat, /kind === "opt" \? this\.modelList/, "only model picks are remembered");
 });
 
+test("the Mapper's result box: a child that is not there is not written out as \"null\", and a run that found nothing is not ticked off", () => {
+	const page = fs.readFileSync(path.join(__dirname, "../src/renderer/mapper.html"), "utf8");
+	const setResult = page.slice(page.indexOf("function setResult("), page.indexOf("host.onMessage("));
+	assert.match(setResult, /replaceChildren\(\.\.\.\[[^\n]*\]\.filter\(Boolean\)\)/, "replaceChildren turns a null argument into the text \"null\"");
+	assert.match(page, /setResult\(msg\.nothing \? "none" : "ok", \(msg\.nothing \? "" : "✓ "\) \+ msg\.summary/);
+	const dialog = fs.readFileSync(path.join(__dirname, "../src/main/mapper/dialog.ts"), "utf8");
+	assert.match(dialog, /nothing, close: !nothing && /, "a run that found nothing keeps the dialog open");
+});
+
 test("draw.io's shape sets from the editor are passed on as plain short values only", () => {
 	const { cleanShapeSets } = require("../src/main/shapeSets");
 	const out = cleanShapeSets([

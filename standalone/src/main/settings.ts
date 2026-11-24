@@ -23,12 +23,17 @@ export const MATRIX_STYLES: MatrixStyle[] = ["grey", "green", "off"];
 /** Where draw.io's toolbar sits in the editor. */
 export type ToolbarSide = "top" | "left" | "right" | "bottom";
 
+/** Who answers a chat: an agent program, or a provider's models used with an API key ("api:anthropic"). */
+export type ChatAgent = AgentId | `api:${string}`;
+
 /** A model or mode an agent offered, remembered so Settings can list it while the agent is not running. */
 export interface KnownModel {
 	/** The value the agent uses for it (an ACP config option value, or `mode:<id>`). */
 	value: string;
 	name: string;
 	description?: string;
+	/** false: a model used with an API key that takes no pictures (the provider said so). */
+	images?: false;
 }
 
 /**
@@ -36,8 +41,8 @@ export interface KnownModel {
  * Everything has a default; the file only holds what the user changed.
  */
 export interface Settings {
-	/** The agent picked last. */
-	agent: AgentId;
+	/** Who answered the chat last: an agent, or a provider used with an API key. */
+	agent: ChatAgent;
 	/** Override how an agent is launched, e.g. { "codex": { "command": "/opt/bin/codex-acp", "args": [] } }. */
 	agents: Partial<Record<AgentId, { command: string; args?: string[]; env?: Record<string, string> }>>;
 	/** Width of the chat panel in pixels. */
@@ -53,10 +58,10 @@ export interface Settings {
 		/** New chats start with "Allow all" on (every agent request approved without asking). */
 		allowAllByDefault: boolean;
 	};
-	/** Per agent: models hidden from the chat's picker, and the model a new session switches to. */
-	models: Partial<Record<AgentId, { hidden?: string[]; preferred?: string }>>;
-	/** The models each agent offered when it last ran (filled in automatically). */
-	modelCatalog: Partial<Record<AgentId, KnownModel[]>>;
+	/** Per agent (and per provider used with an API key): models hidden from the chat's picker, and the model a new session switches to. */
+	models: Partial<Record<ChatAgent, { hidden?: string[]; preferred?: string }>>;
+	/** The models each agent offered when it last ran, and each provider listed for its key (filled in automatically). */
+	modelCatalog: Partial<Record<ChatAgent, KnownModel[]>>;
 	shapes: { locations: ShapeLocation[] };
 	workshop: { galleries: GalleryConfig[] };
 }
@@ -68,6 +73,7 @@ const DEFAULTS: Settings = {
 	editor: {
 		"drawio-ai.reviewChanges": true,
 		"drawio-ai.flashChanges": true,
+		"drawio-ai.animateChanges": true,
 		"drawio-ai.selectChangedCells": false,
 		"drawio-ai.maxCellsInContext": 400,
 	},
@@ -106,6 +112,7 @@ function merge(user: any): Settings {
 	return {
 		...DEFAULTS,
 		...obj(user),
+		agent: typeof user.agent === "string" && user.agent ? user.agent : DEFAULTS.agent,
 		chatWidth: typeof user.chatWidth === "number" && isFinite(user.chatWidth) ? user.chatWidth : DEFAULTS.chatWidth,
 		editor: { ...DEFAULTS.editor, ...obj(user.editor) },
 		agents: { ...obj(user.agents) },
@@ -135,7 +142,7 @@ function cleanCatalog(c: Record<string, any>): Settings["modelCatalog"] {
 		if (!Array.isArray(list)) continue;
 		out[agent] = list
 			.filter((m) => m && typeof m.value === "string" && typeof m.name === "string")
-			.map((m) => ({ value: m.value, name: m.name, ...(typeof m.description === "string" ? { description: m.description } : {}) }));
+			.map((m) => ({ value: m.value, name: m.name, ...(typeof m.description === "string" ? { description: m.description } : {}), ...(m.images === false ? { images: false as const } : {}) }));
 	}
 	return out as Settings["modelCatalog"];
 }

@@ -10,7 +10,7 @@ const { renderGraph } = require("../src/main/mapper/render");
 const { MapperError } = require("../src/main/mapper/types");
 const { softwareRecipes } = require("../src/main/mapper/recipes/software");
 const { parseAddress, isSecretKey, scrub, techOf, libraryTech } = require("../src/main/mapper/recipes/software/shared");
-const { scanSystem, stripComments } = require("../src/main/mapper/recipes/software/systemScan");
+const { scanSystem, stripComments, entryPoints, hiddenCheckouts, withoutTestItems } = require("../src/main/mapper/recipes/software/systemScan");
 const { modulesToGraph, classesToGraph, cycleMembers, moduleFindings } = require("../src/main/mapper/recipes/software/codeStructure");
 const { openApiToGraph, parseGraphQL, graphqlToGraph } = require("../src/main/mapper/recipes/software/api");
 const { hardcodedSecret, maskHint } = require("../src/main/mapper/recipes/software/health");
@@ -345,6 +345,136 @@ test("connectivity: tests / fixtures are skipped unless asked for, and an empty 
 	assert.equal(r.graph, undefined);
 	assert.match(r.summary, /No services/);
 	await assert.rejects(recipe("software.connectivity").collect({ folder: path.join(empty, "nope") }, ctxFor(empty)), /not a folder/);
+});
+
+test("a repository of packages that nothing deploys: a Rust binary and a Python program count as entry points; what is left says what was there, and what was not read", async () => {
+	const os = require("os");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-map-"));
+	const put = (rel, text) => {
+		fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+		fs.writeFileSync(path.join(root, rel), text);
+	};
+	// (the shape of a real repository this failed on: a Cargo workspace with one binary, a Python package, no Dockerfile)
+	put("edge/Cargo.toml", '[workspace]\nmembers = ["crates/*"]\n');
+	put("edge/crates/gateway-edge/Cargo.toml", '[package]\nname = "gateway-edge"\nversion = "0.1.0"\n');
+	put("edge/crates/gateway-edge/src/main.rs", 'use axum::{routing::{get, post}, Router};\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route("/health", get(health)).route("/files/:id", get(read).put(write));\n}\n');
+	put("service/pyproject.toml", '[project]\nname = "gateway-service"\n');
+	put("service/src/gateway_service/__init__.py", '"""The service."""\n');
+
+	// (a crate whose programs are all in src/bin: `bin` is build output anywhere else, and skipped there)
+	put("tools/Cargo.toml", '[package]\nname = "tools"\nversion = "0.1.0"\n');
+	put("tools/src/lib.rs", "pub fn shared() {}\n");
+	put("tools/src/bin/migrate.rs", "// Moves the data.\n\nfn main() {\n}\n");
+	put("tools/src/bin/seed/main.rs", "fn main() {}\n");
+	put("tools/bin/built.rs", 'fn main() { router.route("/never", get(x)); }\n');
+
+	const scan = scanSystem(root);
+	const tools = scan.services.find((s) => s.dir === "tools");
+	assert.deepEqual(tools?.entries.map((e) => [e.label, e.file, e.line]), [["binary migrate", "tools/src/bin/migrate.rs", 3], ["binary seed", "tools/src/bin/seed/main.rs", 1]]);
+	for (const rel of ["tools/src/bin/migrate.rs", "tools/src/bin/seed/main.rs", "tools/bin/built.rs"]) fs.rmSync(path.join(root, rel));
+	for (const rel of ["tools/src/lib.rs", "tools/Cargo.toml"]) fs.rmSync(path.join(root, rel));
+	const edge = scanSystem(root).services.find((s) => s.dir === "edge/crates/gateway-edge");
+	assert.ok(edge, "a package with a binary is a service");
+	assert.deepEqual(edge.entries.map((e) => [e.kind, e.label, e.framework]), [["cli", "binary gateway-edge", "Rust"], ["http", "GET /health", "axum"], ["http", "GET /files/:id", "axum"], ["http", "PUT /files/:id", "axum"]]);
+	assert.deepEqual(scan.libraries.sort(), ["edge", "service"]);
+	const flow = await recipe("software.dataflow").collect({ folder: root }, ctxFor(root));
+	assert.ok(flow.graph, "there is something to draw now");
+	assert.match(flow.summary, /4 entry point\(s\)/);
+
+	// the entry points of other kinds of program
+	const kinds = (text, rel, lang) => entryPoints(text, rel, lang).map((e) => `${e.kind} ${e.label}`);
+	assert.deepEqual(kinds("fn main() {\n}\n", "tools/src/bin/migrate.rs", "rs"), ["cli binary migrate"]);
+	assert.deepEqual(kinds("fn main() {\n}\n", "tools/src/lib.rs", "rs"), [], "a function called main elsewhere is not a binary");
+	assert.deepEqual(kinds('#[get("/users/{id}")]\nasync fn user() {}\n#[post("/users")]\nasync fn add() {}\n', "api/src/routes.rs", "rs"), ["http GET /users/{id}", "http POST /users"]);
+	assert.deepEqual(kinds("print('hi')\n", "service/src/gateway_service/__main__.py", "py"), ["cli python -m gateway_service"]);
+	assert.deepEqual(kinds("fn main() {}\n", "src/main.rs", "rs"), ["cli binary"], "a crate at the root has no folder to be named after");
+	// every method of a route, also behind a handler written in place; a handler's own calls are not methods
+	assert.deepEqual(kinds('let app = Router::new()\n    .route("/x", get(|| async { get(1); f() }).post(h))\n    .route(\n        "/y",\n        delete(remove),\n    )\n    .route("relative", get(h));\n', "api/src/app.rs", "rs"), ["http GET /x", "http POST /x", "http DELETE /y"]);
+	// routes a crate builds in its own tests are not what it serves
+	assert.deepEqual(kinds('pub fn app() -> Router { Router::new().route("/live", get(live)) }\n\n#[cfg(test)]\nmod tests {\n    fn fake() -> Router { Router::new().route("/fake", get(f)) }\n    #[get("/also-fake")]\n    fn g() {}\n}\n', "api/src/lib.rs", "rs"), ["http GET /live"]);
+	// ...and only those: a test-only import or helper above the real routes does not hide them
+	const mixed = '#[cfg(test)]\nuse axum::http::StatusCode;\n\n#[cfg(test)]\nfn fake() -> Router {\n    Router::new().route("/fake", get(f))\n}\n\npub fn app() -> Router {\n    Router::new().route("/real", get(real).post(make))\n}\n\n#[cfg(test)]\nmod tests {\n    mod deeper { fn r() { Router::new().route("/deep", get(f)); } }\n}\n\n#[get("/after")]\nasync fn after() {}\n';
+	assert.deepEqual(entryPoints(mixed, "api/src/lib.rs", "rs").map((e) => `${e.label} @${e.line}`), ["GET /real @10", "POST /real @10", "GET /after @18"]);
+	assert.equal(withoutTestItems(mixed).split("\n").length, mixed.split("\n").length, "the lines stay where they are");
+	assert.ok(!/fake|deep|StatusCode/.test(withoutTestItems(mixed)) && /pub fn app\(\)/.test(withoutTestItems(mixed)));
+	assert.equal(withoutTestItems("fn a() {}\n#[cfg(test)]\nmod t {"), "fn a() {}\n            \n       ", "an item that never closes ends with the file");
+	// a brace or a semicolon in a string or a character of a test item is text: the item still ends where it ends
+	const texts = [
+		'#[cfg(test)]\nfn fixture() { assert_eq!(body(), "{"); }\n',
+		'#[cfg(test)]\nfn fixture() { let a = "say \\"{\\" twice {{"; let b = \'{\'; let c = \'\\\'\'; let d = \'\\u{7b}\'; }\n',
+		'#[cfg(test)]\nfn fixture<\'a>(x: &\'a str) -> &\'a str { let raw = r#"{ "quoted" {"#; let plain = r"{\\"; x }\n',
+		'#[cfg(test)]\nconst OPEN: &str = "a;{";\n',
+	];
+	for (const item of texts) {
+		const source = `${item}pub fn app() -> Router { Router::new().route("/kept", get(kept)) }\n`;
+		assert.deepEqual(entryPoints(source, "api/src/lib.rs", "rs").map((e) => e.label), ["GET /kept"], item);
+		assert.ok(!/fixture|OPEN/.test(withoutTestItems(source)), item);
+	}
+	// a large file of nothing but blank lines, comments blanked out or an unclosed call is read at once
+	// (each of these took many seconds: the patterns looked again from every line, or to the end of the file)
+	for (const [what, text] of [["blank lines", "\n".repeat(300_000)], ["blanked comments", "          \n".repeat(30_000)], ["unclosed routes", '.route("/a",get('.repeat(20_000)], ["unclosed attributes", '#[get(   '.repeat(30_000)], ["test guards without end", "#[cfg(test)] mod t { ".repeat(20_000)], ["test guards, one after another", "#[cfg(test)]\n".repeat(40_000)], ["test guards and open strings", '#[cfg(test)] const A: &str = r#"x'.repeat(20_000)], ["test guards and quotes", "#[cfg(test)] fn f() { 'a 'b \" ".repeat(20_000)]]) {
+		const started = Date.now();
+		entryPoints(text, "big/src/main.rs", "rs");
+		assert.ok(Date.now() - started < 1500, `${what}: ${Date.now() - started} ms`);
+	}
+
+	// with the binary gone, nothing is a service: the message says what was read and which packages are there
+	fs.rmSync(path.join(root, "edge/crates/gateway-edge/src/main.rs"));
+	for (const id of ["software.dataflow", "software.connectivity"]) {
+		const r = await recipe(id).collect({ folder: root }, ctxFor(root));
+		assert.equal(r.graph, undefined);
+		assert.match(r.summary, /^No services/);
+		assert.match(r.summary, /1 code file\(s\) were read\. 3 package\(s\) are there \(edge, edge\/crates\/gateway-edge, service\), but none is deployed .*or has an entry point the Mapper recognises/);
+	}
+
+	// working copies kept in a hidden folder are not read, and the scan says so
+	assert.equal(hiddenCheckouts(root), undefined);
+	put(".claude/worktrees/real-run/.git", "gitdir: /elsewhere\n");
+	put(".claude/worktrees/real-run/portal/package.json", '{"name":"portal"}');
+	put(".claude/worktrees/real-run/portal/Dockerfile", "FROM node:22\n");
+	put(".claude/worktrees/second/.git", "gitdir: /elsewhere\n");
+	put(".claude/worktrees/not-a-copy/readme.md", "x");
+	assert.deepEqual(hiddenCheckouts(root), { folder: ".claude/worktrees", names: ["real-run", "second"] });
+	// a link to somewhere else is not followed, as in the scan itself: nothing outside the folder is listed
+	const linked = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-map-"));
+	const outside = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-elsewhere-"));
+	fs.mkdirSync(path.join(outside, "private-project"));
+	fs.writeFileSync(path.join(outside, "private-project", ".git"), "gitdir: /elsewhere\n");
+	fs.symlinkSync(outside, path.join(linked, ".worktrees"));
+	fs.mkdirSync(path.join(linked, ".claude"));
+	fs.symlinkSync(outside, path.join(linked, ".claude", "worktrees"));
+	assert.equal(hiddenCheckouts(linked), undefined);
+	fs.rmSync(path.join(linked, ".claude"), { recursive: true });
+	fs.symlinkSync(path.dirname(outside), path.join(linked, ".claude"));
+	assert.equal(hiddenCheckouts(linked), undefined);
+	const again = await recipe("software.dataflow").collect({ folder: root }, ctxFor(root));
+	assert.equal(again.graph, undefined, "they are still not read");
+	assert.deepEqual(again.warnings.filter((w) => /working cop/.test(w)), ["2 working copies of this repository in .claude/worktrees were not read, as hidden folders are skipped (real-run, second). To map one, choose it as the folder."]);
+	// ...and offers them as folders to map, the one worked in last first
+	fs.utimesSync(path.join(root, ".claude/worktrees/real-run"), new Date(2026, 0, 1), new Date(2026, 0, 1));
+	fs.utimesSync(path.join(root, ".claude/worktrees/second"), new Date(2026, 5, 1), new Date(2026, 5, 1));
+	const offered = (await recipe("software.dataflow").collect({ folder: root }, ctxFor(root))).elsewhere;
+	assert.deepEqual(offered, [{ label: "second", folder: path.join(root, ".claude/worktrees/second") }, { label: "real-run", folder: path.join(root, ".claude/worktrees/real-run") }]);
+	assert.deepEqual((await recipe("software.connectivity").collect({ folder: offered[1].folder }, ctxFor(root))).elsewhere, [], "a working copy has none of its own to offer");
+	// worked in is what git recorded, not the folder's own date (editing a file in it does not change that):
+	// the copy with the older folder but the later commit comes first. A record outside the mapped folder is not looked at.
+	put(".git/worktrees/real-run/HEAD", "ref: refs/heads/real-run\n");
+	put(".git/worktrees/real-run/index", "x");
+	put(".claude/worktrees/real-run/.git", "gitdir: ../../../.git/worktrees/real-run\n");
+	fs.utimesSync(path.join(root, ".git/worktrees/real-run/index"), new Date(2026, 8, 1), new Date(2026, 8, 1));
+	fs.utimesSync(path.join(root, ".claude/worktrees/real-run"), new Date(2026, 0, 1), new Date(2026, 0, 1));
+	const outsideRecord = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-gitdir-"));
+	fs.writeFileSync(path.join(outsideRecord, "index"), "x");
+	fs.utimesSync(path.join(outsideRecord, "index"), new Date(2027, 0, 1), new Date(2027, 0, 1));
+	put(".claude/worktrees/second/.git", `gitdir: ${outsideRecord}\n`);
+	fs.utimesSync(path.join(root, ".claude/worktrees/second"), new Date(2026, 5, 1), new Date(2026, 5, 1));
+	assert.deepEqual((await recipe("software.dataflow").collect({ folder: root }, ctxFor(root))).elsewhere.map((e) => e.label), ["real-run", "second"]);
+	// every one of them is offered (the dialog shows six and the rest behind a button), up to sixty
+	for (let i = 0; i < 9; i++) put(`.claude/worktrees/more-${i}/.git`, "gitdir: /elsewhere\n");
+	assert.equal((await recipe("software.dataflow").collect({ folder: root }, ctxFor(root))).elsewhere.length, 11);
+	// chosen as the folder, one is mapped
+	const one = await recipe("software.connectivity").collect({ folder: path.join(root, ".claude/worktrees/real-run") }, ctxFor(root));
+	assert.ok(one.graph && one.graph.nodes.some((n) => /portal/.test(n.label ?? n.id)));
 });
 
 test("data flow: entry points inside the services, focus marked, agent asked to trace", async () => {

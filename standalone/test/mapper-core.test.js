@@ -122,6 +122,100 @@ test("layout: a chain of connected nodes goes in layers along the flow; cycles d
 	assert.ok(right.get("a").x < right.get("b").x && right.get("c").x < right.get("d").x);
 });
 
+test("drawing a map: its connectors hop over each other where they cross, and are then routed around the shapes; a map too large for that, or a router that fails, is still drawn", async () => {
+	const { drawMap, MAX_ROUTED_EDGES } = require("../src/main/mapper/draw");
+	const graphOf = (edges, style) => ({ title: "Shop", nodes: [{ id: "a", label: "A", kind: "test:box", data: {} }, { id: "b", label: "B", kind: "test:box", data: {} }], edges: Array.from({ length: edges }, () => ({ from: "a", to: "b", ...(style ? { style } : {}) })) });
+	const client = (route = () => ({ results: [{ ok: true, ids: ["e1", "e2"] }], idMap: {} }), drawn = ["map1", "map2", "mapE1", "mapE2"], drawnOn = "page-7") => {
+		const calls = [];
+		return {
+			calls,
+			aiGetModel: async () => ({ page: { name: "Page-1" }, totalCells: 0 }),
+			aiApplyOps: async (ops, options) => {
+				calls.push([ops, options]);
+				return ops[0].op === "layout" ? route() : { results: [{ ok: true, ids: drawn }], idMap: {}, ...(drawnOn ? { page: drawnOn } : {}) };
+			},
+		};
+	};
+	const c = client();
+	assert.deepEqual(await drawMap(c, graphOf(2), "test.recipe"), { page: "Page-1", newPage: false, cells: 4 });
+	assert.equal(c.calls.length, 2);
+	assert.equal(c.calls[0][0][0].op, "insertXml");
+	// every connector: the Mapper's own style, and a recipe's
+	assert.equal((c.calls[0][0][0].xml.match(/jumpStyle=arc;jumpSize=6;/g) || []).length, 2);
+	const styled = renderGraph(graphOf(1, "edgeStyle=entityRelationEdgeStyle;endArrow=ERmany"), { recipe: "test.recipe" }).xml;
+	assert.match(styled, /style="edgeStyle=entityRelationEdgeStyle;endArrow=ERmany;jumpStyle=arc;jumpSize=6;"/);
+	assert.match(renderGraph(graphOf(1, "jumpStyle=gap;"), { recipe: "test.recipe" }).xml, /style="jumpStyle=gap;jumpSize=6;"/, "a recipe's own choice is kept");
+	// then the router, as a step of its own that moves no shape
+	// (of what was just drawn, by its ids and on the page it was drawn on: never of whatever page is shown by then,
+	// which can be another map with the very same ids)
+	assert.deepEqual(c.calls[1], [[{ op: "layout", type: "route", ids: ["map1", "map2", "mapE1", "mapE2"] }], { selectResult: false, flash: false, atomic: true, review: true, page: "page-7" }]);
+	for (const unknown of [client(undefined, []), client(undefined, undefined, "")]) {
+		await drawMap(unknown, graphOf(2), "test.recipe");
+		assert.equal(unknown.calls.length, 1, "nothing to name, or no page to name: nothing is routed");
+	}
+	// a very large map's lines do not hop either: draw.io compares each with every other on every redraw
+	assert.ok(!/jumpStyle/.test(renderGraph(graphOf(MAX_ROUTED_EDGES + 1), { recipe: "test.recipe" }).xml));
+	assert.equal((renderGraph(graphOf(MAX_ROUTED_EDGES), { recipe: "test.recipe" }).xml.match(/jumpStyle=arc/g) || []).length, MAX_ROUTED_EDGES);
+
+	// no connectors, or more than routing is worth waiting for: drawn as it is
+	for (const edges of [0, MAX_ROUTED_EDGES + 1]) {
+		const plain = client();
+		await drawMap(plain, graphOf(edges), "test.recipe");
+		assert.equal(plain.calls.length, 1, `${edges} connectors`);
+	}
+	// shown being built when the setting says so, as any other edit. Drawn and routed as one edit then (a second
+	// one would end the showing of the first), which is not all or nothing: a router that fails leaves the map
+	const built = (routed) => {
+		const calls = [];
+		return { calls, aiGetModel: async () => ({ page: { name: "Page-1" }, totalCells: 0 }), aiApplyOps: async (ops, options) => (calls.push([ops, options]), { results: [{ ok: true, ids: ["map1", "map2", "mapE1", "mapE2"] }, routed].slice(0, ops.length), idMap: {}, rolledBack: false, page: "page-7" }) };
+	};
+	const shownBuilt = built({ ok: true, ids: ["mapE1", "mapE2"] });
+	assert.equal((await drawMap(shownBuilt, graphOf(2), "test.recipe", { animate: true })).cells, 4);
+	assert.equal(shownBuilt.calls.length, 1);
+	assert.deepEqual([shownBuilt.calls[0][0].map((o) => [o.op, o.type, o.ids]), shownBuilt.calls[0][1]], [[["insertXml", undefined, undefined], ["layout", "route", undefined]], { selectResult: false, flash: true, atomic: false, review: true, animate: true }]);
+	assert.equal(require("../src/main/mapper/draw").lastRouting.edges, 2);
+	const unrouted = built({ ok: false, error: "The connector router is not available" });
+	assert.equal((await drawMap(unrouted, graphOf(2), "test.recipe", { animate: true })).cells, 4, "drawn all the same");
+	assert.deepEqual([unrouted.calls.length, require("../src/main/mapper/draw").lastRouting.error], [1, "The connector router is not available"]);
+	const undrawn = { ...built({ ok: true, ids: [] }), aiApplyOps: async () => ({ results: [{ ok: false, error: "bad xml" }, { ok: true, ids: [] }], idMap: {}, rolledBack: false }) };
+	await assert.rejects(drawMap(undrawn, graphOf(2), "test.recipe", { animate: true }), /Drawing the map failed: bad xml/);
+	// a map without connectors has nothing to route: drawn alone, shown being built
+	const alone = built(undefined);
+	await drawMap(alone, graphOf(0), "test.recipe", { animate: true });
+	assert.deepEqual([alone.calls[0][0].length, alone.calls[0][1].atomic, alone.calls[0][1].animate], [1, true, true]);
+	assert.equal(c.calls[0][1].animate, undefined);
+
+	// a map too large to route as one: the connectors inside each top-level box are routed, box by box, the smallest
+	// first; a box with too many of its own and what runs between boxes are left as drawn
+	const { routeGroups } = require("../src/main/mapper/draw");
+	const box = (id, parent) => ({ id, label: id, kind: "test:box", data: {}, ...(parent ? { parent } : { container: true }) });
+	const many = (from, to, n) => Array.from({ length: n }, () => ({ from, to }));
+	const large = {
+		title: "Large",
+		nodes: [box("vpc-a"), box("a1", "vpc-a"), box("a2", "vpc-a"), box("vpc-b"), box("sub-b", "vpc-b"), box("b1", "sub-b"), box("b2", "sub-b"), box("vpc-c"), box("c1", "vpc-c"), box("c2", "vpc-c"), box("lone")],
+		edges: [...many("a1", "a2", 40), ...many("b1", "b2", 10), ...many("c1", "c2", MAX_ROUTED_EDGES + 1), ...many("a1", "b1", 30), ...many("lone", "a1", 5), ...many("vpc-a", "a1", 3)],
+	};
+	// (a connector from a box to what is inside it counts for that box: the router takes it with the rest)
+	assert.deepEqual(routeGroups(large), [{ id: "vpc-b", edges: 10 }, { id: "vpc-a", edges: 43 }]);
+	const overByItsOwn = { title: "Over", nodes: [box("hub"), box("h1", "hub"), box("h2", "hub")], edges: [...many("hub", "h1", MAX_ROUTED_EDGES), ...many("h1", "h2", 1)] };
+	assert.deepEqual(routeGroups(overByItsOwn), [], "600 to its own shapes and one between them is 601: not routed as one");
+	const ids = large.nodes.map((_, i) => `map${i + 1}`);
+	const grouped = client(() => ({ results: [{ ok: true, ids: ["e1", "e2", "e3"] }], idMap: {} }), ids);
+	await drawMap(grouped, large, "test.recipe");
+	assert.deepEqual(grouped.calls.slice(1).map(([ops, o]) => [ops[0].type, ops[0].ids, o.page]), [["route", ["map4"], "page-7"], ["route", ["map1"], "page-7"]]);
+	assert.deepEqual([require("../src/main/mapper/draw").lastRouting.edges, require("../src/main/mapper/draw").lastRouting.groups], [6, 2]);
+	// the page was left meanwhile: the first refusal ends it
+	const left = client(() => ({ results: [{ ok: false, error: "not applied: the page shown changed" }], idMap: {} }), ids);
+	await drawMap(left, large, "test.recipe");
+	assert.equal(left.calls.length, 2);
+
+	// a router that fails, either way it can: the map is drawn all the same
+	for (const route of [() => ({ results: [{ ok: false, error: "The connector router is not available" }], idMap: {}, rolledBack: true }), () => { throw new Error("the editor went away"); }]) {
+		const failing = client(route);
+		assert.equal((await drawMap(failing, graphOf(2), "test.recipe")).cells, 4);
+	}
+});
+
 test("render: a well-formed draw.io fragment with data on every shape and edges only between drawn shapes", () => {
 	const { xml, cells } = renderGraph(cloudish, { recipe: "test.recipe" });
 	checkModelXml(xml);

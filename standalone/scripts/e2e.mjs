@@ -1,10 +1,11 @@
 // End-to-end check of the real app (see src/main/e2e.ts).
 //   yarn e2e                                   editor + MCP endpoint + exports, no agent
 //   yarn e2e --agent claude|gemini|codex|copilot|kimi  also one prompt through that agent over ACP
+//   yarn e2e --api-chat                        the chat answered through an API key, with a stand-in provider (nothing is sent, no keychain)
 //   yarn e2e --agent codex --prompt "…" --file ../examples/use-cases/cloud-architecture.drawio
 //   node scripts/e2e.mjs --app dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI   the packaged app
 // The diagram is copied to a temp folder first; results land in <temp>/out.
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, statSync } from "fs";
 import { createServer } from "http";
 import { createRequire } from "module";
@@ -32,6 +33,7 @@ const config = {
 	insights: process.argv.includes("--insights"),
 	workshop: process.argv.includes("--workshop"),
 	polish: process.argv.includes("--polish"),
+	apiChat: process.argv.includes("--api-chat"),
 	clickAllowAll: process.argv.includes("--click-allow-all"),
 	// yarn e2e --map software.github-actions --map-input '{"folder":"…"}' [--map-dialog] [--agent claude --ask-agent] [--dig "question"]
 	map: arg("map")
@@ -46,6 +48,13 @@ const config = {
 };
 const packaged = arg("app");
 const electron = packaged ? resolve(packaged) : createRequire(import.meta.url)("electron");
+// The run builds the app into a folder of its own and starts it from there: a copy of the app that
+// is running from `out` (yours, while you work) keeps its files. `--no-build` runs what was built last.
+const appDir = join(here, "../out-e2e");
+if (!packaged && !process.argv.includes("--no-build")) {
+	const built = spawnSync(process.execPath, [join(here, "../build.mjs"), "--out", "out-e2e"], { stdio: ["ignore", "ignore", "inherit"] });
+	if (built.status !== 0) process.exit(built.status ?? 1);
+}
 // The Shape Gallery's sources, served from fixtures: test runs never download from the internet.
 const mirrorRoot = join(here, "../test/fixtures/galleries/mirror");
 const mirror = createServer((req, res) => {
@@ -56,7 +65,7 @@ const mirror = createServer((req, res) => {
 await new Promise((r) => mirror.listen(0, "127.0.0.1", r));
 const mirrorUrl = `http://127.0.0.1:${mirror.address().port}`;
 const r = await new Promise((done) => {
-	const child = spawn(electron, packaged ? [] : [join(here, "..")], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config), OMNIDRAW_GALLERY_MIRROR: mirrorUrl } });
+	const child = spawn(electron, packaged ? [] : [appDir], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config), OMNIDRAW_GALLERY_MIRROR: mirrorUrl } });
 	child.on("exit", (status) => done({ status }));
 });
 mirror.close();

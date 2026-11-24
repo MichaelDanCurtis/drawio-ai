@@ -452,6 +452,9 @@ test("library ids come from the shape, so a stale list never names a different o
 	assert.equal(after.find((i) => i.title === "c").id, before.find((i) => i.title === "c").id);
 	const twice = src.parseMxLibrary(lib(["a", "a"]), "x");
 	assert.notEqual(twice[0].id, twice[1].id, "the same shape twice still has two ids");
+	// a shape without a name gets one by its place: also where a converter wrote the word "null" for it (Visio stencils)
+	const unnamed = `<mxlibrary>${JSON.stringify([{ title: "null", xml: '<mxGraphModel id="a"/>' }, { title: "Router", xml: '<mxGraphModel id="b"/>' }, { title: " Undefined ", xml: '<mxGraphModel id="c"/>' }, { xml: '<mxGraphModel id="d"/>' }, { title: "Null modem", xml: '<mxGraphModel id="e"/>' }])}</mxlibrary>`;
+	assert.deepEqual(src.parseMxLibrary(unnamed, "x").map((i) => i.title), ["Shape 1", "Router", "Shape 3", "Shape 4", "Null modem"]);
 
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-galleries-"));
 	const s = new GalleryService(root, fakeFetcher().fetcher);

@@ -14,6 +14,18 @@ function summaryOf(scan: SystemScan): string {
 	return `${scan.services.length} service(s)${parts.length ? `, ${parts.join(", ")}` : ""}, ${scan.links.length} connection(s) (${scan.stats.files} files read in ${scan.stats.ms} ms)`;
 }
 
+/**
+ * What a scan that found nothing to draw did see, for its message: how much it read, and the
+ * packages it found that are not services (nothing deploys them, they connect to nothing, and
+ * no entry point was recognised in them).
+ */
+function whatWasThere(scan: SystemScan): string {
+	const read = ` ${scan.stats.codeFiles} code file(s) were read.`;
+	if (!scan.libraries.length) return read;
+	const names = scan.libraries.slice(0, 4).map((l) => l || ".").join(", ");
+	return `${read} ${scan.libraries.length} package(s) are there (${names}${scan.libraries.length > 4 ? ", …" : ""}), but none is deployed (Dockerfile, compose, Kubernetes), connects to a data store or an API, or has an entry point the Mapper recognises (an HTTP route, a job, a command).`;
+}
+
 export const connectivityRecipe: Recipe = {
 	id: "software.connectivity",
 	category: "software",
@@ -26,7 +38,7 @@ export const connectivityRecipe: Recipe = {
 		const root = folderInput(input, ctx.cwd);
 		const scan = scanSystem(root, { includeTests: isOn(input.includeTests), progress: (t) => ctx.progress(t) });
 		if (!scan.services.length && !scan.resources.length) {
-			return { summary: `No services, data stores or connections found in ${root}.`, warnings: scan.warnings, facts: scanFacts(scan) };
+			return { summary: `No services, data stores or connections found in ${root}.${whatWasThere(scan)}`, warnings: scan.warnings, elsewhere: scan.elsewhere, facts: scanFacts(scan) };
 		}
 		const graph = systemGraph(scan, { title: `Connectivity · ${scan.name}` });
 		graph.legend = [
@@ -36,7 +48,7 @@ export const connectivityRecipe: Recipe = {
 			"Read-only from config and code: hosts and ports only, credentials are never read into the map.",
 		];
 		const { findings, checked } = systemFindings(scan, graph);
-		return { graph, summary: summaryOf(scan), warnings: scan.warnings, facts: scanFacts(scan), findings, checked };
+		return { graph, summary: summaryOf(scan), warnings: scan.warnings, elsewhere: scan.elsewhere, facts: scanFacts(scan), findings, checked };
 	},
 	agentPrompt: (_input, result) =>
 		agentRequest(
@@ -90,7 +102,7 @@ export const dataflowRecipe: Recipe = {
 				: undefined,
 		});
 		const entryCount = scan.services.reduce((a, s) => a + s.entries.length, 0);
-		if (!scan.services.length) return { summary: `No services or entry points found in ${root}.`, warnings: scan.warnings, facts: scanFacts(scan, { entries: true }) };
+		if (!scan.services.length) return { summary: `No services or entry points found in ${root}.${whatWasThere(scan)}`, warnings: scan.warnings, elsewhere: scan.elsewhere, facts: scanFacts(scan, { entries: true }) };
 		const graph = systemGraph(scan, { title: `Data flow${focus ? ` (${focus})` : ""} · ${scan.name}`, entries: true, focus, direction: "right" });
 		const focused = terms.length ? scan.services.flatMap((s) => s.entries).filter((e) => matchesFocus(`${e.label} ${e.file}`, terms)).length : 0;
 		graph.legend = [
@@ -108,7 +120,7 @@ export const dataflowRecipe: Recipe = {
 			findings,
 			checked,
 			summary: `${scan.services.length} service(s), ${entryCount} entry point(s)${terms.length ? ` (${focused} matching “${focus}”, ${hits.size} file(s) mention it)` : ""}, ${scan.resources.length} store(s)/queue(s)/API(s)`,
-			warnings: scan.warnings,
+			warnings: scan.warnings, elsewhere: scan.elsewhere,
 			facts,
 		};
 	},

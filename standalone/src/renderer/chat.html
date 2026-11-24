@@ -6,8 +6,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!--
 	OmniDraw chat panel. Adapted from src/features/ai/chatView.html (the VS Code
-	panel): the provider/model pickers pick an ACP agent and its model or mode, and
-	agents' permission requests and thoughts get their own transcript items.
+	panel): the provider/model pickers pick an ACP agent and its model or mode, or a
+	provider whose models are used with an API key; permission requests and thoughts
+	get their own transcript items.
 	Look: the omni-design language (ui/*.css): paper and ink, mono caps labels, one
 	signal red, a live dot field behind the head, a 3D dot object when empty.
 -->
@@ -50,6 +51,8 @@
 	#pickMenu [role="menuitemradio"] small { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
 	#pickMenu [role="menuitemradio"][aria-disabled="true"] { color: var(--faint); }
 	#pickMenu .more { color: var(--muted); }
+	#pickMenu .group { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 8px 10px 4px; }
+	#pickMenu .group:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 10px; }
 
 	/* The chat closes from the edge it shares with the diagram: an arrow pointing the way it goes. */
 	/* The AI symbol: the chat's mark, in the corner the chat shares with the diagram. Clicking it
@@ -156,6 +159,12 @@
 
 	/* ---------- composer ---------- */
 	footer { flex: none; border-top: 1px solid var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+	#queued { display: flex; flex-direction: column; gap: 4px; }
+	#queued .queued { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface-2); font-size: 12.5px; color: var(--ink-2); animation: fade-in var(--dur) var(--ease-out); }
+	#queued .queued::before { content: "WAITING"; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--faint); flex: none; }
+	#queued .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	#queued .drop { flex: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: var(--radius-sm, 6px); }
+	#queued .drop:hover, #queued .drop:focus-visible { background: var(--surface-3); color: var(--ink); outline: none; }
 	#working { display: flex; align-items: center; gap: 10px; padding: 0 2px; animation: fade-in var(--dur) var(--ease-out); }
 	textarea#input { width: 100%; resize: none; min-height: 58px; max-height: 200px; padding: 10px 12px; border-radius: var(--radius-lg); line-height: 1.5; }
 	.row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
@@ -182,7 +191,7 @@
 		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
 		<header>
 			<button id="collapse" class="icon-btn" title="Close the AI chat (⌘J opens it again)" aria-label="Close the AI chat"><span data-icon="sparkle"></span></button>
-			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Coding agent"><span id="providerLabel">Agent</span></button>
+			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Who answers: one of your agents, or a model used with an API key"><span id="providerLabel">Agent</span></button>
 			<button id="modelBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Model or mode"><span id="modelLabel">Model</span></button>
 			<span class="spacer"></span>
 			<button id="allowAllChip" class="tag hidden" data-tone="warn" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">Allow all ✕</button>
@@ -219,7 +228,7 @@
 		<div id="empty">
 			<figure class="dotobject-stage" id="emptyStage"></figure>
 			<h2>What should we draw?</h2>
-			<p>Pick one of your coding agents above and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
+			<p>Pick one of your coding agents above, or a model you have an API key for, and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
 			<div class="suggestions">
 				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
 				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
@@ -238,6 +247,7 @@
 			</span>
 		</div>
 		<div id="working" class="hidden" role="status"><span class="dot-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="label">Working · watch the diagram</span></div>
+		<div id="queued" class="hidden" aria-label="Waiting to be sent"></div>
 		<div id="attachments"></div>
 		<textarea id="input" rows="2" placeholder="Describe a change, or paste a sketch…"></textarea>
 		<div class="row">
@@ -603,7 +613,7 @@
 		$("mapActions").title = (state.pageFindings ? state.pageFindings + " finding(s) on this page's maps. " : "") + "Map actions: findings, plain-English descriptions, recent changes, refresh, tour, ask";
 		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
 		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
-		$("providerBtn").title = state.providerTitle || "Coding agent";
+		$("providerBtn").title = state.providerTitle || "Who answers: one of your agents, or a model used with an API key";
 		const status = $("status");
 		if (status.dataset.state !== (state.agentState || "off") && state.agentState === "ready") window.drawaiUI?.pulse();
 		status.dataset.state = state.agentState || "off";
@@ -611,7 +621,31 @@
 		status.setAttribute("aria-label", "Agent " + (state.agentState || "off") + (status.title ? ": " + status.title : ""));
 		renderReview(state.review);
 		$("allowAllChip").classList.toggle("hidden", !state.allowAll);
+		renderQueued(state.queued || []);
 		setBusy(state.busy);
+	}
+
+	// What was sent while it works and has not reached the model yet: each can still be taken back.
+	function renderQueued(list) {
+		const box = $("queued");
+		box.classList.toggle("hidden", !list.length);
+		box.textContent = "";
+		list.forEach((q) => {
+			const chip = document.createElement("span");
+			chip.className = "queued";
+			const text = document.createElement("span");
+			text.className = "what";
+			text.textContent = (q.images ? "🖼 " : "") + q.text;
+			text.title = q.text;
+			const drop = document.createElement("button");
+			drop.className = "drop";
+			drop.textContent = "✕";
+			drop.title = "Do not send this";
+			drop.setAttribute("aria-label", "Do not send: " + q.text);
+			drop.addEventListener("click", () => vscode.postMessage({ type: "unqueue", id: q.id }));
+			chip.append(text, drop);
+			box.appendChild(chip);
+		});
 	}
 
 	function renderReview(summary) {
@@ -636,10 +670,14 @@
 
 	function setBusy(busy) {
 		state.busy = busy;
-		$("send").classList.toggle("hidden", busy);
+		// (while it works the box stays open: what is sent joins the request, or follows it)
+		$("send").textContent = busy ? "Add" : "Send";
+		$("send").title = busy ? "Add this to what it is working on: it reads it with its next step, or gets it as the next request" : "";
+		$("send").classList.toggle("btn-primary", !busy);
 		$("stop").classList.toggle("hidden", !busy);
 		$("working").classList.toggle("hidden", !busy);
-		$("hint").textContent = busy ? "Working… watch the diagram." : "↵ send · ⇧↵ new line · ⌘Z undoes edits";
+		$("input").placeholder = busy ? "Add to the request while it works…" : "Describe a change, or paste a sketch…";
+		$("hint").textContent = busy ? "↵ adds this to the request · Stop ends it" : "↵ send · ⇧↵ new line · ⌘Z undoes edits";
 	}
 
 	// Providers accept at most 5 MB of base64 per image; larger or huge images are re-encoded smaller.
@@ -709,7 +747,7 @@
 
 	function send(text) {
 		text = (text ?? input.value).trim();
-		if ((!text && images.length === 0) || state.busy) return;
+		if (!text && images.length === 0) return;
 		const msg = { type: "send", text };
 		if (images.length) msg.images = images;
 		vscode.postMessage(msg);
@@ -796,7 +834,17 @@
 		if (pickOwner === button) return closePick(false);
 		closePick(false);
 		pickMenu.textContent = "";
+		let group;
 		for (const it of items) {
+			// (a heading where a group begins: the agents, then the providers used with an API key)
+			if (it.group && it.group !== group) {
+				const h = document.createElement("div");
+				h.className = "group";
+				h.setAttribute("role", "presentation");
+				h.textContent = it.group;
+				pickMenu.appendChild(h);
+			}
+			group = it.group;
 			const b = document.createElement("button");
 			b.setAttribute("role", "menuitemradio");
 			b.setAttribute("aria-checked", String(!!it.checked));
@@ -846,12 +894,14 @@
 	document.addEventListener("click", (e) => { if (pickOwner && !pickMenu.contains(e.target)) closePick(false); });
 	window.addEventListener("blur", () => closePick(false));
 	window.addEventListener("resize", () => closePick(false));
+	// (where in Settings the one who answers is set up: the agents, or the API keys)
+	const settingsPart = () => (String(state.providerId || "").startsWith("api:") ? "api" : "agents");
 	$("providerBtn").addEventListener("click", (e) => {
 		e.stopPropagation();
 		openPick($("providerBtn"), (state.providers || []).map((p) => {
 			const m = / — (.*)$/.exec(p.label);
-			return { label: p.label.replace(/ — .*$/, ""), detail: m ? m[1] : "", checked: p.id === state.providerId, pick: () => { if (p.id !== state.providerId) { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: p.id }); } } };
-		}), { label: "Agents & models…", pick: () => vscode.postMessage({ type: "openSettings" }) });
+			return { label: p.label.replace(/ — .*$/, ""), detail: m ? m[1] : "", group: p.group, checked: p.id === state.providerId, pick: () => { if (p.id !== state.providerId) { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: p.id }); } } };
+		}), { label: "Agents, API keys & models…", pick: () => vscode.postMessage({ type: "openSettings", section: settingsPart() }) });
 	});
 	$("modelBtn").addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -859,7 +909,7 @@
 		const items = models.length
 			? models.map((m) => ({ label: m.name, detail: m.description || "", checked: m.id === state.modelId, pick: () => { if (m.id !== state.modelId) vscode.postMessage({ type: "pickModel", modelId: m.id }); } }))
 			: [{ label: state.modelsError ? "⚠ " + state.modelsError : state.modelsLoading ? "Loading models…" : "No models", disabled: true, pick: () => undefined }];
-		openPick($("modelBtn"), items, { label: "Choose which models show…", pick: () => vscode.postMessage({ type: "openSettings" }) });
+		openPick($("modelBtn"), items, { label: "Choose which models show…", pick: () => vscode.postMessage({ type: "openSettings", section: settingsPart() }) });
 	});
 	$("settingsBtn").addEventListener("click", () => vscode.postMessage({ type: "openSettings" }));
 	$("collapse").addEventListener("click", () => vscode.postMessage({ type: "collapseChat" }));
@@ -916,6 +966,19 @@
 			case "append": state.transcript.push(m.item); addItem(m.item); break;
 			case "appendText": appendText(m.text); break;
 			case "appendThought": appendThought(m.text); break;
+			case "restoreInput": {
+				// (what was waiting when a request was stopped or failed: back in the box, not sent by itself)
+				if (m.text) input.value = m.text + (input.value.trim() ? "\n" + input.value : "");
+				const back = m.images || [];
+				const room = Math.max(0, MAX_IMAGES - images.length);
+				back.slice(0, room).forEach((img) => addImageDataUrl("data:" + img.mimeType + ";base64," + img.base64));
+				// (the box holds four: say so when pictures attached meanwhile leave no room for these)
+				if (back.length > room) flashHint((back.length - room) + " picture" + (back.length - room === 1 ? "" : "s") + " did not fit back in: attach again.");
+				window.drawaiUI?.syncEmpty();
+				autosize();
+				input.focus();
+				break;
+			}
 			case "permissionResolved": {
 				const item = state.transcript.find((t) => t.kind === "permission" && t.id === m.id);
 				if (item) item.outcome = m.outcome;

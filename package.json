@@ -485,9 +485,10 @@
 											"radialTree",
 											"organic",
 											"circle",
-											"grid"
+											"grid",
+											"route"
 										],
-										"description": "[layout] Automatic layout (draw.io's ELK engine). hierarchical = top-down flow; horizontalHierarchical = left-to-right. Lays out the children of `parent` (default: the page, or the common parent of `ids`); with `ids`, only those cells and the edges between them move."
+										"description": "[layout] Automatic layout (draw.io's ELK engine). hierarchical = top-down flow; horizontalHierarchical = left-to-right. Lays out the children of `parent` (default: the page, or the common parent of `ids`); with `ids`, only those cells and the edges between them move. route = move no shape: only re-route the right-angled connectors around the shapes in their way and apart from each other (use it after placing shapes by hand, when connectors overlap or cross shapes); with `ids`, the connectors listed or between those cells."
 									},
 									"spacing": {
 										"type": "number",
@@ -1918,6 +1919,11 @@
 						"default": true,
 						"description": "Briefly highlight cells changed by the AI."
 					},
+					"drawio-ai.animateChanges": {
+						"type": "boolean",
+						"default": true,
+						"description": "Show an AI edit being built: new shapes appear one after another, connectors draw in, moved shapes glide to their place. Off when the system asks for reduced motion."
+					},
 					"drawio-ai.selectChangedCells": {
 						"type": "boolean",
 						"default": false,
@@ -2653,7 +2659,7 @@
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
 		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js test/ai/look.test.js test/ai/mapper.test.js test/ai/workshop.test.js",
-		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js test/ai/look.e2e.test.js test/ai/mapper.e2e.test.js test/ai/workshop.e2e.test.js",
+		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js test/ai/look.e2e.test.js test/ai/mapper.e2e.test.js test/ai/workshop.e2e.test.js test/ai/settings.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"
 	},
