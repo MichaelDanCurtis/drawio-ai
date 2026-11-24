@@ -125,14 +125,14 @@ test("layout: a chain of connected nodes goes in layers along the flow; cycles d
 test("drawing a map: its connectors hop over each other where they cross, and are then routed around the shapes; a map too large for that, or a router that fails, is still drawn", async () => {
 	const { drawMap, MAX_ROUTED_EDGES } = require("../src/main/mapper/draw");
 	const graphOf = (edges, style) => ({ title: "Shop", nodes: [{ id: "a", label: "A", kind: "test:box", data: {} }, { id: "b", label: "B", kind: "test:box", data: {} }], edges: Array.from({ length: edges }, () => ({ from: "a", to: "b", ...(style ? { style } : {}) })) });
-	const client = (route = () => ({ results: [{ ok: true, ids: ["e1", "e2"] }], idMap: {} })) => {
+	const client = (route = () => ({ results: [{ ok: true, ids: ["e1", "e2"] }], idMap: {} }), drawn = ["map1", "map2", "mapE1", "mapE2"]) => {
 		const calls = [];
 		return {
 			calls,
 			aiGetModel: async () => ({ page: { name: "Page-1" }, totalCells: 0 }),
 			aiApplyOps: async (ops, options) => {
 				calls.push([ops, options]);
-				return ops[0].op === "layout" ? route() : { results: [{ ok: true, ids: [] }], idMap: {} };
+				return ops[0].op === "layout" ? route() : { results: [{ ok: true, ids: drawn }], idMap: {} };
 			},
 		};
 	};
@@ -146,7 +146,14 @@ test("drawing a map: its connectors hop over each other where they cross, and ar
 	assert.match(styled, /style="edgeStyle=entityRelationEdgeStyle;endArrow=ERmany;jumpStyle=arc;jumpSize=6;"/);
 	assert.match(renderGraph(graphOf(1, "jumpStyle=gap;"), { recipe: "test.recipe" }).xml, /style="jumpStyle=gap;jumpSize=6;"/, "a recipe's own choice is kept");
 	// then the router, as a step of its own that moves no shape
-	assert.deepEqual(c.calls[1], [[{ op: "layout", type: "route" }], { selectResult: false, flash: false, atomic: true, review: true }]);
+	// (of what was just drawn, by its ids: never of whatever page is shown by then)
+	assert.deepEqual(c.calls[1], [[{ op: "layout", type: "route", ids: ["map1", "map2", "mapE1", "mapE2"] }], { selectResult: false, flash: false, atomic: true, review: true }]);
+	const unknown = client(undefined, []);
+	await drawMap(unknown, graphOf(2), "test.recipe");
+	assert.equal(unknown.calls.length, 1, "nothing to name: nothing is routed");
+	// a very large map's lines do not hop either: draw.io compares each with every other on every redraw
+	assert.ok(!/jumpStyle/.test(renderGraph(graphOf(MAX_ROUTED_EDGES + 1), { recipe: "test.recipe" }).xml));
+	assert.equal((renderGraph(graphOf(MAX_ROUTED_EDGES), { recipe: "test.recipe" }).xml.match(/jumpStyle=arc/g) || []).length, MAX_ROUTED_EDGES);
 
 	// no connectors, or more than routing is worth waiting for: drawn as it is
 	for (const edges of [0, MAX_ROUTED_EDGES + 1]) {

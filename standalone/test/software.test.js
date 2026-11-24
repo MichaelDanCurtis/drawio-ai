@@ -361,8 +361,19 @@ test("a repository of packages that nothing deploys: a Rust binary and a Python 
 	put("service/pyproject.toml", '[project]\nname = "gateway-service"\n');
 	put("service/src/gateway_service/__init__.py", '"""The service."""\n');
 
+	// (a crate whose programs are all in src/bin: `bin` is build output anywhere else, and skipped there)
+	put("tools/Cargo.toml", '[package]\nname = "tools"\nversion = "0.1.0"\n');
+	put("tools/src/lib.rs", "pub fn shared() {}\n");
+	put("tools/src/bin/migrate.rs", "// Moves the data.\n\nfn main() {\n}\n");
+	put("tools/src/bin/seed/main.rs", "fn main() {}\n");
+	put("tools/bin/built.rs", 'fn main() { router.route("/never", get(x)); }\n');
+
 	const scan = scanSystem(root);
-	const edge = scan.services.find((s) => s.dir === "edge/crates/gateway-edge");
+	const tools = scan.services.find((s) => s.dir === "tools");
+	assert.deepEqual(tools?.entries.map((e) => [e.label, e.file, e.line]), [["binary migrate", "tools/src/bin/migrate.rs", 3], ["binary seed", "tools/src/bin/seed/main.rs", 1]]);
+	for (const rel of ["tools/src/bin/migrate.rs", "tools/src/bin/seed/main.rs", "tools/bin/built.rs"]) fs.rmSync(path.join(root, rel));
+	for (const rel of ["tools/src/lib.rs", "tools/Cargo.toml"]) fs.rmSync(path.join(root, rel));
+	const edge = scanSystem(root).services.find((s) => s.dir === "edge/crates/gateway-edge");
 	assert.ok(edge, "a package with a binary is a service");
 	assert.deepEqual(edge.entries.map((e) => [e.kind, e.label, e.framework]), [["cli", "binary gateway-edge", "Rust"], ["http", "GET /health", "axum"], ["http", "GET /files/:id", "axum"], ["http", "PUT /files/:id", "axum"]]);
 	assert.deepEqual(scan.libraries.sort(), ["edge", "service"]);
@@ -376,6 +387,18 @@ test("a repository of packages that nothing deploys: a Rust binary and a Python 
 	assert.deepEqual(kinds("fn main() {\n}\n", "tools/src/lib.rs", "rs"), [], "a function called main elsewhere is not a binary");
 	assert.deepEqual(kinds('#[get("/users/{id}")]\nasync fn user() {}\n#[post("/users")]\nasync fn add() {}\n', "api/src/routes.rs", "rs"), ["http GET /users/{id}", "http POST /users"]);
 	assert.deepEqual(kinds("print('hi')\n", "service/src/gateway_service/__main__.py", "py"), ["cli python -m gateway_service"]);
+	assert.deepEqual(kinds("fn main() {}\n", "src/main.rs", "rs"), ["cli binary"], "a crate at the root has no folder to be named after");
+	// every method of a route, also behind a handler written in place; a handler's own calls are not methods
+	assert.deepEqual(kinds('let app = Router::new()\n    .route("/x", get(|| async { get(1); f() }).post(h))\n    .route(\n        "/y",\n        delete(remove),\n    )\n    .route("relative", get(h));\n', "api/src/app.rs", "rs"), ["http GET /x", "http POST /x", "http DELETE /y"]);
+	// routes a crate builds in its own tests are not what it serves
+	assert.deepEqual(kinds('pub fn app() -> Router { Router::new().route("/live", get(live)) }\n\n#[cfg(test)]\nmod tests {\n    fn fake() -> Router { Router::new().route("/fake", get(f)) }\n    #[get("/also-fake")]\n    fn g() {}\n}\n', "api/src/lib.rs", "rs"), ["http GET /live"]);
+	// a large file of nothing but blank lines, comments blanked out or an unclosed call is read at once
+	// (each of these took many seconds: the patterns looked again from every line, or to the end of the file)
+	for (const [what, text] of [["blank lines", "\n".repeat(300_000)], ["blanked comments", "          \n".repeat(30_000)], ["unclosed routes", '.route("/a",get('.repeat(20_000)], ["unclosed attributes", '#[get(   '.repeat(30_000)]]) {
+		const started = Date.now();
+		entryPoints(text, "big/src/main.rs", "rs");
+		assert.ok(Date.now() - started < 1500, `${what}: ${Date.now() - started} ms`);
+	}
 
 	// with the binary gone, nothing is a service: the message says what was read and which packages are there
 	fs.rmSync(path.join(root, "edge/crates/gateway-edge/src/main.rs"));
@@ -394,6 +417,18 @@ test("a repository of packages that nothing deploys: a Rust binary and a Python 
 	put(".claude/worktrees/second/.git", "gitdir: /elsewhere\n");
 	put(".claude/worktrees/not-a-copy/readme.md", "x");
 	assert.deepEqual(hiddenCheckouts(root), { folder: ".claude/worktrees", names: ["real-run", "second"] });
+	// a link to somewhere else is not followed, as in the scan itself: nothing outside the folder is listed
+	const linked = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-map-"));
+	const outside = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-elsewhere-"));
+	fs.mkdirSync(path.join(outside, "private-project"));
+	fs.writeFileSync(path.join(outside, "private-project", ".git"), "gitdir: /elsewhere\n");
+	fs.symlinkSync(outside, path.join(linked, ".worktrees"));
+	fs.mkdirSync(path.join(linked, ".claude"));
+	fs.symlinkSync(outside, path.join(linked, ".claude", "worktrees"));
+	assert.equal(hiddenCheckouts(linked), undefined);
+	fs.rmSync(path.join(linked, ".claude"), { recursive: true });
+	fs.symlinkSync(path.dirname(outside), path.join(linked, ".claude"));
+	assert.equal(hiddenCheckouts(linked), undefined);
 	const again = await recipe("software.dataflow").collect({ folder: root }, ctxFor(root));
 	assert.equal(again.graph, undefined, "they are still not read");
 	assert.deepEqual(again.warnings.filter((w) => /working cop/.test(w)), ["2 working copies of this repository in .claude/worktrees were not read, as hidden folders are skipped (real-run, second). To map one, choose it as the folder."]);

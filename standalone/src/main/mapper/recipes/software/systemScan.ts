@@ -201,6 +201,8 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	const files = readFiles(root, {
 		maxFiles: 12000,
 		maxBytes: 600_000,
+		// (`bin` is build output nearly everywhere; below a Rust crate's `src` it is its other programs)
+		keepDir: (rel) => /(^|\/)src\/bin$/.test(rel),
 		match: (rel) => {
 			if (VENDOR_RE.test(rel) || (!options.includeTests && TEST_RE.test(rel))) return false;
 			if (/(^|\/)\.git$/.test(rel)) return rel !== ".git"; // a submodule: its own package
@@ -1127,7 +1129,7 @@ export function importsOf(text: string, lang: Lang): { name: string; index: numb
 			add(/^\s*require\s+["']([^"']+)["']/gm);
 			break;
 		case "rs":
-			add(/^\s*(?:use|extern crate)\s+([a-z_][\w]*)/gm);
+			add(/^[ \t]*(?:use|extern crate)\s+([a-z_][\w]*)/gm);
 			break;
 	}
 	return out;
@@ -1226,11 +1228,18 @@ export function hiddenCheckouts(root: string): { folder: string; names: string[]
 	for (const folder of [".claude/worktrees", ".worktrees", ".git-worktrees"]) {
 		let entries: fs.Dirent[];
 		try {
+			// (a link is not followed, as in the scan itself: what it points to is not below this folder)
+			const parts = folder.split("/");
+			if (parts.some((_, i) => fs.lstatSync(path.join(root, ...parts.slice(0, i + 1))).isSymbolicLink())) continue;
 			entries = fs.readdirSync(path.join(root, folder), { withFileTypes: true });
 		} catch {
 			continue;
 		}
-		const names = entries.filter((e) => e.isDirectory() && fs.existsSync(path.join(root, folder, e.name, ".git"))).map((e) => e.name).sort();
+		const names = entries
+			.slice(0, 2000)
+			.filter((e) => e.isDirectory() && fs.existsSync(path.join(root, folder, e.name, ".git")))
+			.map((e) => e.name)
+			.sort();
 		if (names.length) return { folder, names };
 	}
 	return undefined;
@@ -1300,19 +1309,40 @@ export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[]
 		}
 	} else if (lang === "rs") {
 		// a binary: src/main.rs, or one of src/bin/
-		const main = /(?:^|\n)\s*(?:pub\s+)?(?:async\s+)?fn\s+main\s*\(/.exec(text);
-		if (main && /(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/.test(rel)) {
-			const parts = rel.split("/");
-			const at = parts.lastIndexOf("src");
-			const name = parts[at + 1] === "bin" ? parts[at + 2].replace(/\.rs$/, "") : parts[at - 1] ?? "main";
-			add("cli", `binary ${name}`, main.index ?? 0, "Rust");
+		// (each of these looks at one line or a bounded stretch: a file of 600 KB is read in a few ms, whatever is in it)
+		if (/(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/.test(rel)) {
+			const main = /^[ \t]*(?:pub[ \t]+)?(?:async[ \t]+)?fn[ \t]+main[ \t]*\(/m.exec(text);
+			if (main) {
+				const parts = rel.split("/");
+				const at = parts.lastIndexOf("src");
+				// (a crate at the root of what is mapped has no folder to be named after: its package's entry says whose it is)
+				const name = parts[at + 1] === "bin" ? parts[at + 2].replace(/\.rs$/, "") : parts[at - 1];
+				add("cli", name ? `binary ${name}` : "binary", main.index + main[0].search(/\S/), "Rust");
+			}
 		}
-		// axum / warp-style routers, actix-web and Rocket attributes
-		for (const m of text.matchAll(/\.route\(\s*"([^"]+)"\s*,\s*((?:(?:get|post|put|patch|delete|head|options|any)\s*\([^)]*\)\s*\.?\s*)+)/g)) {
-			if (!m[1].startsWith("/")) continue;
-			for (const method of m[2].matchAll(/\b(get|post|put|patch|delete|head|options|any)\s*\(/g)) add("http", `${method[1] === "any" ? "*" : method[1].toUpperCase()} ${m[1]}`, m.index ?? 0, "axum");
+		// (routes a crate's own tests build are not what it serves)
+		const served = text.slice(0, /#\[cfg\(test\)\]/.exec(text)?.index ?? text.length);
+		// axum / warp-style routers: `.route("/path", get(a).post(b))`, the handlers read up to the call's own end
+		for (const m of served.matchAll(/\.route\(\s{0,200}"(\/[^"\n]{0,300})"\s{0,200},/g)) {
+			if (out.length >= 400) break;
+			const from = m.index + m[0].length;
+			let depth = 1;
+			let end = from;
+			for (; end < served.length && end - from < 2000 && depth > 0; end++) depth += served[end] === "(" ? 1 : served[end] === ")" ? -1 : 0;
+			const handlers = served.slice(from, end);
+			// (a method is a call at the handlers' own level: `get(...)` or `.post(...)`, not one inside a closure's body)
+			let level = 0;
+			const seen = new Set<string>();
+			for (const part of handlers.matchAll(/[()]|\b(get|post|put|patch|delete|head|options|any)\s{0,20}(?=\()/g)) {
+				if (part[0] === "(") level++;
+				else if (part[0] === ")") level--;
+				else if (level === 0 && !seen.has(part[1])) {
+					seen.add(part[1]);
+					add("http", `${part[1] === "any" ? "*" : part[1].toUpperCase()} ${m[1]}`, m.index, "axum");
+				}
+			}
 		}
-		for (const m of text.matchAll(/#\[\s*(get|post|put|patch|delete|head|options)\s*\(\s*"([^"]+)"/g)) if (m[2].startsWith("/")) add("http", `${m[1].toUpperCase()} ${m[2]}`, m.index ?? 0, "actix-web/Rocket");
+		for (const m of served.matchAll(/#\[[ \t]{0,20}(get|post|put|patch|delete|head|options)[ \t]{0,20}\([ \t]{0,20}"([^"\n]{1,300})"/g)) if (m[2].startsWith("/")) add("http", `${m[1].toUpperCase()} ${m[2]}`, m.index, "actix-web/Rocket");
 	} else if (lang === "rb") {
 		if (/(^|\/)routes\.rb$/.test(rel)) for (const m of text.matchAll(/^\s*(get|post|put|patch|delete|resources?)\s+["':]([^"',\s]+)/gm)) add("http", `${m[1].toUpperCase()} /${m[2]}`, m.index ?? 0, "Rails");
 	}

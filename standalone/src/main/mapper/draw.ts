@@ -1,9 +1,8 @@
 import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/CustomizedDrawioClient";
-import { escapeXml, renderGraph } from "./render";
+import { escapeXml, MAX_ROUTED_EDGES, renderGraph } from "./render";
 import type { MapGraph } from "./types";
 
-/** Above this many connectors a map is not routed (see drawMap). */
-export const MAX_ROUTED_EDGES = 600;
+export { MAX_ROUTED_EDGES };
 
 /** How the last map's connectors were routed (the end-to-end run reads it). */
 export let lastRouting: { edges: number; ms: number; error?: string } | undefined;
@@ -46,11 +45,14 @@ export async function drawMap(
 	// whatever lies between its ends, and stack the ones that leave a shape on the same side. Its
 	// router takes them around the shapes and apart. (A step of its own, and one that may fail: a
 	// map with plain connectors is still a map. Very large maps are left as they are: routing every
-	// connector around every shape takes too long there.)
-	if (graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES) {
+	// connector around every shape takes too long there.) Only what was just drawn is routed, by
+	// its ids: should the user have turned to another page meanwhile, the step fails there and
+	// that page's connectors stay as they are.
+	const drawn = r.results.flatMap((x) => x.ids ?? []);
+	if (drawn.length > 0 && graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES) {
 		try {
 			const started = Date.now();
-			const routed = await client.aiApplyOps([{ op: "layout", type: "route" }], { selectResult: false, flash: false, atomic: true, review: true });
+			const routed = await client.aiApplyOps([{ op: "layout", type: "route", ids: drawn }], { selectResult: false, flash: false, atomic: true, review: true });
 			lastRouting = { edges: routed.results[0]?.ids?.length ?? 0, ms: Date.now() - started, error: routed.results.find((x) => !x.ok)?.error };
 		} catch (e: any) {
 			// as drawn

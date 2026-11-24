@@ -238,7 +238,14 @@ test("route: a connector is taken around the shape in its way; no shape moves, o
 		{ op: "addShape", tempId: "$rc", label: "To", x: 5400, y: 5000, width: 120, height: 60 },
 		{ op: "addEdge", tempId: "$re", source: "$ra", target: "$rc" },
 		{ op: "addEdge", tempId: "$rs", source: "$ra", target: "$rc", styleProps: { edgeStyle: "none", curved: 1 } },
+		// draw.io's "Curved" connector is a right-angled one drawn round; a locked one, and one that is hidden, are not to be touched
+		{ op: "addEdge", tempId: "$rv", source: "$ra", target: "$rc", styleProps: { curved: 1 } },
+		{ op: "addEdge", tempId: "$rl", source: "$ra", target: "$rc", styleProps: { locked: 1 } },
+		{ op: "addEdge", tempId: "$rh", source: "$ra", target: "$rc" },
 	]);
+	await page.evaluate((id) => editorUi.editor.graph.model.setVisible(editorUi.editor.graph.model.getCell(id), false), idMap.$rh);
+	const asSaved = (ids) => page.evaluate((ids) => ids.map((id) => { const m = editorUi.editor.graph.model, c = m.getCell(id); return [m.getStyle(c), (m.getGeometry(c).points || []).length]; }), ids);
+	const untouched = await asSaved([idMap.$rv, idMap.$rl, idMap.$rh]);
 	const state = (id) =>
 		page.evaluate((id) => {
 			const g = editorUi.editor.graph;
@@ -263,6 +270,8 @@ test("route: a connector is taken around the shape in its way; no shape moves, o
 	assert.ok(!through(after.points, blocker), JSON.stringify(after.points));
 	assert.deepEqual(await boxes(), placed, "no shape moved");
 	assert.deepEqual(await state(idMap.$rs), straight, "a connector of another kind is left as it was");
+	assert.deepEqual(await asSaved([idMap.$rv, idMap.$rl, idMap.$rh]), untouched, "so are a curved, a locked and a hidden one");
+	assert.match(untouched[0][0], /edgeStyle=orthogonalEdgeStyle.*curved=1/);
 
 	await page.evaluate(() => editorUi.editor.undoManager.undo());
 	assert.deepEqual(await state(idMap.$re), before);

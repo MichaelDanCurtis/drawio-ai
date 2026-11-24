@@ -573,7 +573,8 @@ Draw.loadPlugin((ui: any) => {
 			// waypoints that take it around the shapes in its way, and connectors that would run
 			// along the same stretch are set apart. Only right-angled connectors are routed (the
 			// router makes every connector it touches one): crow's-foot, curved and straight
-			// ones keep their look.
+			// ones keep their look. So does draw.io's "Curved" connector, which is a right-angled
+			// one drawn round (`curved=1`). Connectors of a locked or hidden layer are left alone.
 			if (typeof W.LibavoidRouting === "undefined" || typeof ui.resolveLayoutList !== "function") {
 				throw new Error("The connector router is not available in this version of draw.io");
 			}
@@ -583,7 +584,11 @@ Draw.loadPlugin((ui: any) => {
 			};
 			const routed = new Set<string>();
 			const wanted = (c: any): boolean => {
-				if (!model.isEdge(c) || graph.getCellStyle(c)?.edgeStyle !== "orthogonalEdgeStyle") return false;
+				if (!model.isEdge(c)) return false;
+				const style = graph.getCellStyle(c) || {};
+				if (style.edgeStyle !== "orthogonalEdgeStyle" || String(style.curved ?? "0") === "1") return false;
+				if (graph.isCellLocked(c)) return false;
+				for (let p = c; p != null; p = model.getParent(p)) if (!model.isVisible(p)) return false;
 				const source = model.getTerminal(c, true);
 				const target = model.getTerminal(c, false);
 				if (!source || !target) return false;
