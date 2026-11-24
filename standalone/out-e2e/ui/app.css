@@ -1,0 +1,203 @@
+/*
+ * OmniDraw: shared base for the app's own pages (chat, Mapper), in the
+ * omni-design language (tokens.css, motion.css, depth.css from the skill).
+ * Load order: fonts.css → tokens.css → motion.css → depth.css → app.css.
+ * Only tokens here; no colours of its own except the status mapping below.
+ */
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; height: 100%; }
+
+body {
+	background: var(--bg);
+	color: var(--ink);
+	font-family: var(--font-ui);
+	font-size: var(--text-sm);
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+}
+
+::selection { background: var(--ink); color: var(--bg); }
+
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.hidden { display: none !important; }
+.spacer { flex: 1 1 auto; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--font-mono); font-size: 0.88em; letter-spacing: 0; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The instrument label: Space Mono, caps, tracked. */
+.label {
+	font-family: var(--font-mono);
+	font-size: var(--text-label);
+	font-weight: 400;
+	letter-spacing: var(--track-label);
+	text-transform: uppercase;
+	color: var(--muted);
+}
+
+kbd {
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	padding: 1px 5px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	color: var(--muted);
+	background: var(--surface-2);
+}
+
+/* Thin, quiet scrollbars that follow the theme. */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+/* ---------- buttons: pills; the primary action is ink ---------- */
+
+.btn {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	min-height: 30px;
+	padding: 4px 14px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-pill);
+	background: var(--surface);
+	color: var(--ink);
+	font: inherit;
+	font-size: var(--text-sm);
+	font-weight: 500;
+	cursor: pointer;
+	white-space: nowrap;
+	transition:
+		background var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out),
+		color var(--dur-fast) var(--ease-out),
+		transform var(--dur-instant) var(--ease-out);
+}
+.btn:hover { border-color: var(--control-line); background: var(--surface-2); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--surface-3); border-color: transparent; }
+.btn-sm { min-height: 26px; padding: 2px 11px; font-size: 12px; }
+
+.icon-btn {
+	appearance: none;
+	display: inline-grid;
+	place-items: center;
+	width: 30px;
+	height: 30px;
+	flex: none;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--muted);
+	font: inherit;
+	cursor: pointer;
+	transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-instant) var(--ease-out);
+}
+.icon-btn:hover { background: var(--surface-3); color: var(--ink); }
+.icon-btn:active { transform: translateY(1px); }
+.icon-btn svg { width: 15px; height: 15px; }
+
+/* ---------- tags, badges, state dots ---------- */
+
+.tag {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 9px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-pill);
+	font-family: var(--font-mono);
+	font-size: 10.5px;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--ink-2);
+	white-space: nowrap;
+	background: transparent;
+}
+.tag::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.tag[data-tone="signal"] { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 45%, transparent); }
+.tag[data-tone="warn"] { color: var(--warn); border-color: var(--warn-line); }
+.tag[data-tone="ok"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
+.tag[data-tone="plain"]::before { display: none; }
+button.tag { cursor: pointer; font-family: var(--font-mono); transition: background var(--dur-fast) var(--ease-out); }
+button.tag:hover { background: var(--surface-3); }
+
+.state { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); box-shadow: inset 0 0 0 1.5px var(--faint); background-clip: padding-box; flex: none; }
+.state[data-state="ready"] { background: var(--ok); box-shadow: none; }
+.state[data-state="starting"] { background: var(--ink); box-shadow: none; animation: pulse 1.1s var(--ease-out) infinite; }
+.state[data-state="problem"] { background: var(--warn); box-shadow: none; }
+.state[data-state="off"] { background: transparent; }
+
+/* ---------- dot-matrix micro elements ---------- */
+
+.brandmark { display: inline-grid; grid-template-columns: repeat(4, 3px); gap: 2px; flex: none; }
+.brandmark i { display: block; width: 3px; height: 3px; border-radius: 50%; background: var(--border-strong); }
+.brandmark i[data-on] { background: var(--ink); }
+.brandmark i[data-signal] { background: var(--signal); }
+
+.dot-loader { display: inline-flex; gap: 5px; align-items: center; }
+.dot-loader i { display: block; width: 5px; height: 5px; border-radius: 50%; background: var(--ink); opacity: 0.18; animation: dot-step 0.55s steps(1, end) infinite; }
+.dot-loader i:nth-child(2) { animation-delay: 110ms; }
+.dot-loader i:nth-child(3) { animation-delay: 220ms; }
+.dot-loader i:nth-child(4) { animation-delay: 330ms; }
+.dot-loader i:nth-child(5) { animation-delay: 440ms; }
+
+/* ---------- the one live dot field, behind the head ---------- */
+
+.backdrop {
+	position: absolute;
+	inset: 0 0 auto 0;
+	height: 150px;
+	z-index: 0;
+	pointer-events: none;
+	-webkit-mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%);
+	-webkit-mask-composite: source-in;
+	mask-image: linear-gradient(to left, #000 0%, rgb(0 0 0 / 55%) 45%, transparent 85%), linear-gradient(to bottom, #000 30%, transparent 100%);
+	mask-composite: intersect;
+}
+.dotfield { display: block; width: 100%; height: 100%; pointer-events: none; }
+
+/* ---------- cards and callouts: flat, hairlines do the work ---------- */
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.callout { border: 1px solid var(--info-line); background: var(--info-soft); border-radius: 12px; padding: 10px 12px; }
+.callout-ok { border-color: color-mix(in srgb, var(--ok) 35%, transparent); background: var(--ok-soft); }
+.callout-danger { border-color: var(--danger-line); background: var(--danger-soft); color: var(--danger); }
+.callout-warn { border-color: var(--warn-line); background: var(--warn-soft); }
+
+/* ---------- inputs ---------- */
+
+input[type="text"], input[type="password"], input[type="number"], select, textarea {
+	font: inherit;
+	color: var(--ink);
+	background: var(--surface);
+	border: 1px solid var(--control-line);
+	border-radius: var(--radius);
+	transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+input[type="text"]:hover, input[type="password"]:hover, select:hover, textarea:hover { border-color: var(--ink-2); }
+input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 18%, transparent); }
+textarea::placeholder, input::placeholder { color: var(--faint); }
+input[type="checkbox"], input[type="radio"] { accent-color: var(--ink); }
+
+/* ---------- the matrix: the head's dot field, over every surface (ui/matrix.js) ----------
+   The same dots, grid and grey as the live field behind the head, laid over the whole
+   window. Settings → Appearance can tint it green or turn it off. */
+
+:root { --matrix-dot: var(--dot); }
+:root[data-matrix="green"] { --matrix-dot: #2f8f5b; }
+@media (prefers-color-scheme: dark) {
+	:root[data-matrix="green"]:not([data-theme="light"]) { --matrix-dot: #6fd69b; }
+}
+:root[data-matrix="green"][data-theme="dark"] { --matrix-dot: #6fd69b; }

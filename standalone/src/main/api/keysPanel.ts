@@ -1,5 +1,6 @@
 import { apiAgentId, type ApiAccess } from "./access";
-import type { ApiProviderId } from "./chat";
+import type { ApiProviderId, ApiTool } from "./chat";
+import { testKey } from "./keyTest";
 
 /** What the Settings page shows of one provider: whether a key is kept, never the key. */
 export interface ApiKeyRow {
@@ -15,6 +16,9 @@ export interface ApiKeyRow {
 	/** The provider did not accept the kept key when it was last used. */
 	rejected: boolean;
 	error?: string;
+	/** A test request is under way; what the last one found (gone when the key changes). */
+	testing: boolean;
+	tested?: string;
 }
 
 /**
@@ -25,8 +29,11 @@ export interface ApiKeyRow {
 export class ApiKeysPanel {
 	private busy = new Set<ApiProviderId>();
 	private errors = new Map<ApiProviderId, string>();
+	private testing = new Set<ApiProviderId>();
+	private tested = new Map<ApiProviderId, string>();
 
-	constructor(private readonly access: () => ApiAccess, private readonly changed: () => void) {}
+	/** `tools`: what the chat offers a model, for a test request to be shaped as the chat's are. */
+	constructor(private readonly access: () => ApiAccess, private readonly changed: () => void, private readonly tools: () => ApiTool[] = () => []) {}
 
 	public rows(): ApiKeyRow[] {
 		const access = this.access();
@@ -40,6 +47,8 @@ export class ApiKeysPanel {
 			loadingModels: this.busy.has(p.id),
 			rejected: access.wasRejected(p.id),
 			...(this.errors.has(p.id) ? { error: this.errors.get(p.id) } : {}),
+			testing: this.testing.has(p.id),
+			...(this.tested.has(p.id) && access.hasKey(p.id) ? { tested: this.tested.get(p.id) } : {}),
 		}));
 	}
 
@@ -49,6 +58,7 @@ export class ApiKeysPanel {
 		if (this.busy.has(id)) return;
 		this.busy.add(id);
 		this.errors.delete(id);
+		this.tested.delete(id);
 		this.changed();
 		let problem: string | undefined;
 		try {
@@ -66,7 +76,7 @@ export class ApiKeysPanel {
 	 * promise that ends when the work has.
 	 */
 	public onMessage(msg: any): Promise<void> | undefined {
-		if (!["setApiKey", "removeApiKey", "refreshApiModels"].includes(msg?.type)) return undefined;
+		if (!["setApiKey", "removeApiKey", "refreshApiModels", "testApiKey"].includes(msg?.type)) return undefined;
 		const access = this.access();
 		const provider = access.provider(msg.provider);
 		if (!provider) return Promise.resolve();
@@ -75,11 +85,26 @@ export class ApiKeysPanel {
 				return this.asking(provider.id, () => access.saveKey(provider.id, msg.key));
 			case "refreshApiModels":
 				return access.hasKey(provider.id) ? this.asking(provider.id, async () => (await access.load(provider.id))?.problem) : Promise.resolve();
+			case "testApiKey":
+				// (only ever on the user's click: it spends a little of their credit)
+				if (!access.hasKey(provider.id)) return Promise.resolve();
+				return this.asking(provider.id, async () => {
+					this.testing.add(provider.id);
+					this.changed();
+					try {
+						const r = await testKey(access, provider.id, this.tools());
+						if (r.ok) this.tested.set(provider.id, r.said);
+						return r.ok ? undefined : r.problem;
+					} finally {
+						this.testing.delete(provider.id);
+					}
+				});
 			default:
 				// (a key that is being checked is not kept yet: there is nothing to remove until it is)
 				if (this.busy.has(provider.id)) return Promise.resolve();
 				access.removeKey(provider.id);
 				this.errors.delete(provider.id);
+				this.tested.delete(provider.id);
 				this.changed();
 				return Promise.resolve();
 		}

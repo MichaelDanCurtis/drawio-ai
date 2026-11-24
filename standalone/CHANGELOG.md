@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Test an API key** (Settings → Agents & models → API keys → **Test**): sends one short
+  request to the provider the way the chat does (the chat's tools as they are, one tool call
+  and its answer) and says whether it worked, or what the provider answered. Keeping a key
+  only lists its models; this is the check that the provider takes the chat's requests. It
+  runs on your click only and uses a little of your credit. No tool is run and the diagram
+  is not touched.
 - A request made elsewhere in the app while the chat works (the Mapper's, the Shape Workshop's
   "Ask the agent") is no longer refused with "press Stop first". It waits in the strip above
   the box under its own name and follows as the next request.

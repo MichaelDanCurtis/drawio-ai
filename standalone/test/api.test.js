@@ -1501,6 +1501,62 @@ test("keeping a key: a provider that is slow, a key replaced while its provider 
 	assert.deepEqual(w.a.models("kimi")[1], { value: "moonshot-v1-8k", name: "moonshot-v1-8k", images: false });
 });
 
+test("Test in Settings: one request shaped as the chat's (its tools, one tool call and its answer), on a click only, with no tool run", { timeout: 30000 }, async () => {
+	const { testKey, TEST_REQUEST, TEST_TOOL } = require("../src/main/api/keyTest");
+	const { chatToolList } = require("../src/main/mcpServer");
+	const tools = chatToolList(true);
+	assert.ok(tools.length >= 20 && tools.some((t) => t.name === TEST_TOOL) && tools.some((t) => t.name.startsWith("mapper_")));
+	const sent = [];
+	const answers = [];
+	const s = await api((r) => (r.method === "POST" && r.path.startsWith("/v1/messages") ? (sent.push(r.body), answers.shift()) : r.method === "GET" && r.path.startsWith("/v1/models") ? fake.anthropicModels([{ id: "claude-new", display_name: "Claude New", created_at: "2026-05-01T00:00:00Z" }]) : undefined));
+	const w = access({ anthropic: s.url, openai: `${s.url}/v1`, kimi: `${s.url}/v1` });
+	const shown = [];
+	const panel = new ApiKeysPanel(() => w.a, () => shown.push(panel.rows().find((r) => r.id === "anthropic")), () => tools);
+	const row = () => panel.rows().find((r) => r.id === "anthropic");
+	await panel.onMessage({ type: "setApiKey", provider: "anthropic", key: KEY });
+	assert.equal(sent.length, 0, "keeping a key lists the models: no request is sent with it");
+
+	answers.push(fake.anthropicAnswer([{ tool: TEST_TOOL, id: "toolu_t", input: {} }]), fake.anthropicAnswer([{ text: "OK" }]));
+	const before = s.requests.length;
+	shown.length = 0;
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.equal(row().tested, `Works: Claude New took the chat's ${tools.length} tools, called ${TEST_TOOL}, and answered "OK".`);
+	assert.deepEqual([row().testing, row().loadingModels, row().error], [false, false, undefined]);
+	assert.ok(shown.some((r) => r.testing && r.loadingModels), "the page is told while it is under way");
+	assert.equal(sent.length, 2, "the request, and the tool's answer going back");
+	assert.equal(sent[0].model, "claude-new");
+	assert.equal(sent[0].tools.length, tools.length);
+	assert.ok(JSON.stringify(sent[0].messages[0]).includes(TEST_REQUEST));
+	assert.ok(JSON.stringify(sent[1].messages.at(-1)).includes("No problems found."), "the call was answered with a fixed line: no tool ran");
+	assert.deepEqual(s.requests.slice(before).map((r) => `${r.method} ${r.path.split("?")[0]}`), ["GET /v1/models/claude-new", "POST /v1/messages", "POST /v1/messages"], "what a chat with this model asks, and nothing else");
+	assert.doesNotMatch(JSON.stringify(panel.rows()) + JSON.stringify(shown), new RegExp(KEY));
+
+	// a model that answers without calling the tool, and a provider that refuses the request: said, and not "Works"
+	answers.push(fake.anthropicAnswer([{ text: "I cannot use tools." }]));
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.deepEqual([row().tested, row().error], [undefined, 'Claude New answered "I cannot use tools." but did not call the tool it was asked to (it may not use tools well).']);
+	answers.push({ status: 400, json: { type: "error", error: { type: "invalid_request_error", message: "tools.3.input_schema: unexpected shape" } } });
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.match(row().error, /tools\.3\.input_schema: unexpected shape/);
+	assert.equal(row().tested, undefined);
+	// what a test found is gone with the key it was found with
+	answers.push(fake.anthropicAnswer([{ tool: TEST_TOOL, id: "toolu_u", input: {} }]), fake.anthropicAnswer([{ text: "OK" }]));
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.match(row().tested, /^Works/);
+	// a key the provider no longer accepts is marked as such
+	answers.push({ status: 401, json: { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } } });
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.deepEqual([row().rejected, row().tested], [true, undefined]);
+	await panel.onMessage({ type: "removeApiKey", provider: "anthropic" });
+	assert.deepEqual([row().hasKey, row().tested], [false, undefined]);
+	// a provider without a key is asked nothing
+	const untilNow = s.requests.length;
+	await panel.onMessage({ type: "testApiKey", provider: "kimi" });
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.equal(s.requests.length, untilNow);
+	assert.deepEqual(await testKey(w.a, "kimi", tools), { ok: false, problem: "There is no Kimi key to test." });
+});
+
 test("the Settings page's other half for API keys: what it shows, one request at a time for a provider, and the keychain left alone until a key is saved or used", { timeout: 30000 }, async () => {
 	let reply = () => fake.anthropicModels([{ id: "claude-new", display_name: "Claude New", created_at: "2026-05-01T00:00:00Z" }]);
 	const s = await api((r) => (r.method === "GET" && r.path.startsWith("/v1/models") ? reply(r) : undefined));
@@ -1511,12 +1567,12 @@ test("the Settings page's other half for API keys: what it shows, one request at
 
 	// what the page gets of a provider: no key, and nothing a key could be made from
 	assert.deepEqual(panel.rows(), [
-		{ id: "anthropic", agent: "api:anthropic", label: "Anthropic API", company: "Anthropic", keyHint: "sk-ant-…", hasKey: false, loadingModels: false, rejected: false },
-		{ id: "openai", agent: "api:openai", label: "OpenAI API", company: "OpenAI", keyHint: "sk-…", hasKey: false, loadingModels: false, rejected: false },
-		{ id: "gemini", agent: "api:gemini", label: "Gemini API", company: "Gemini", keyHint: "AIza… or AQ.…", hasKey: false, loadingModels: false, rejected: false },
-		{ id: "grok", agent: "api:grok", label: "Grok API", company: "xAI", keyHint: "xai-…", hasKey: false, loadingModels: false, rejected: false },
-		{ id: "kimi", agent: "api:kimi", label: "Kimi API", company: "Kimi", keyHint: "sk-…", hasKey: false, loadingModels: false, rejected: false },
-		{ id: "openrouter", agent: "api:openrouter", label: "OpenRouter", company: "OpenRouter", keyHint: "sk-or-v1-…", hasKey: false, loadingModels: false, rejected: false },
+		{ id: "anthropic", agent: "api:anthropic", label: "Anthropic API", company: "Anthropic", keyHint: "sk-ant-…", hasKey: false, loadingModels: false, rejected: false, testing: false },
+		{ id: "openai", agent: "api:openai", label: "OpenAI API", company: "OpenAI", keyHint: "sk-…", hasKey: false, loadingModels: false, rejected: false, testing: false },
+		{ id: "gemini", agent: "api:gemini", label: "Gemini API", company: "Gemini", keyHint: "AIza… or AQ.…", hasKey: false, loadingModels: false, rejected: false, testing: false },
+		{ id: "grok", agent: "api:grok", label: "Grok API", company: "xAI", keyHint: "xai-…", hasKey: false, loadingModels: false, rejected: false, testing: false },
+		{ id: "kimi", agent: "api:kimi", label: "Kimi API", company: "Kimi", keyHint: "sk-…", hasKey: false, loadingModels: false, rejected: false, testing: false },
+		{ id: "openrouter", agent: "api:openrouter", label: "OpenRouter", company: "OpenRouter", keyHint: "sk-or-v1-…", hasKey: false, loadingModels: false, rejected: false, testing: false },
 	]);
 	// messages that are not about API keys are someone else's; one for a provider that does not exist does nothing
 	assert.equal(panel.onMessage({ type: "ready" }), undefined);
@@ -1574,7 +1630,7 @@ test("the Settings page's other half for API keys: what it shows, one request at
 	await panel.onMessage({ type: "refreshApiModels", provider: "anthropic" });
 	assert.match(row().error, /^Anthropic answered with an error \(500\)/);
 	await panel.onMessage({ type: "removeApiKey", provider: "anthropic" });
-	assert.deepEqual(row(), { id: "anthropic", agent: "api:anthropic", label: "Anthropic API", company: "Anthropic", keyHint: "sk-ant-…", hasKey: false, loadingModels: false, rejected: false });
+	assert.deepEqual(row(), { id: "anthropic", agent: "api:anthropic", label: "Anthropic API", company: "Anthropic", keyHint: "sk-ant-…", hasKey: false, loadingModels: false, rejected: false, testing: false });
 });
 
 // ----- the Shape Creator, drawing through an API -----

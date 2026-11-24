@@ -314,6 +314,22 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 
 	// a key is kept: the chat is ready without a request, a program or the keychain
 	expect((await apiAccess().saveKey(STAND_IN_ID, STAND_IN_KEY)) === undefined, "the stand-in's key was not kept.");
+
+	// Settings → Test: one request the way the chat makes them, on a click. It runs no tool: the diagram is as it was.
+	const xmlBefore = await w.client.getXml();
+	const itemsBefore = w.chat.items.length;
+	SettingsWindow.open(server, "apiKeys");
+	for (let i = 0; i < 50 && !SettingsWindow.window?.isVisible(); i++) await pause(100);
+	const sp = SettingsWindow.window!.webContents;
+	const card = `document.querySelector('#apiList [data-api="stand-in"]')`;
+	await until("the stand-in's card in Settings", () => sp.executeJavaScript(`!!${card}`));
+	const testButton: string = await sp.executeJavaScript(`(() => { const b = Array.from(${card}.querySelectorAll("button")).find((b) => b.textContent === "Test"); if (b) b.click(); return b ? b.title : ""; })()`);
+	const found: string = await until("what the test found", () => sp.executeJavaScript(`${card}.querySelector(".good")?.textContent || ${card}.querySelector(".bad")?.textContent || ""`));
+	fs.writeFileSync(path.join(config.out, "settings-key-test.png"), (await sp.capturePage()).toPNG());
+	log("apiKeyTest", { found, title: testButton });
+	expect(/^Works: Stand-in Large took the chat's \d+ tools, called drawio_lint, and answered "OK"\.$/.test(found) && /uses a little of your credit/.test(testButton), "the Test button in Settings did not report a working request.");
+	expect((await w.client.getXml()) === xmlBefore && w.chat.items.length === itemsBefore, "testing a key changed the diagram or the chat.");
+	SettingsWindow.window?.close();
 	await until("the chat to be ready", async () => (await shown()).dot === "ready");
 	log("apiChatReady", await shown());
 	expect((await shown()).model === "Stand-in Large", "the model picked for a new chat is not the first one listed.");
