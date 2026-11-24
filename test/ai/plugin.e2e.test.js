@@ -334,6 +334,13 @@ test("watching a batch being built: what is new appears in order and what moved 
 	const first = { shape: await hold(r.idMap.$wb), line: await hold(r.idMap.$we) };
 	await resume();
 
+	// an edit that follows and is not shown being built (a map's badges, a re-routed connector) does not cut it short:
+	// what that one adds is simply there
+	const follow = await apply([{ op: "addShape", tempId: "$wf", label: "Follows", x: 7600, y: 7200, width: 120, height: 60 }]);
+	assert.deepEqual(follow.results.filter((x) => !x.ok), []);
+	assert.ok((await build()).playing, "the first batch is still being shown");
+	assert.equal(await page.evaluate((id) => Number(getComputedStyle(editorUi.editor.graph.view.getState(editorUi.editor.graph.model.getCell(id)).shape.node).opacity), follow.idMap.$wf), 1);
+
 	// the answer is there while it is still being shown, and so is the diagram: what reads it next sees the result
 	const during = await build();
 	assert.equal(during.shown, shown + 1);
@@ -411,6 +418,15 @@ test("watching a batch being built: what is new appears in order and what moved 
 	assert.equal((await build()).running, 0);
 	assert.deepEqual(await leftovers([laid.idMap.$la, laid.idMap.$lb]), []);
 	assert.ok((await page.evaluate((id) => Number(getComputedStyle(editorUi.editor.graph.view.getState(editorUi.editor.graph.model.getCell(id)).shape.node).opacity), laid.idMap.$la)) === 1);
+
+	// what is drawn around the new shapes (the flash, the review's outlines) comes in with them, not ahead of them
+	const aroundBefore = (await build()).around;
+	const outlined = await request({ action: "aiApplyOps", ops: [{ op: "addShape", tempId: "$oa", label: "Outlined A", x: 7000, y: 8600 }, { op: "addShape", tempId: "$ob", label: "Outlined B", x: 7300, y: 8600 }], atomic: true, flash: true, selectResult: false, animate: true, review: true });
+	assert.deepEqual(outlined.results.filter((x) => !x.ok), []);
+	assert.equal((await build()).around - aroundBefore, 4, "two for the flash, two for the review's outlines");
+	await waitUntil(async () => !(await build()).playing, 5000);
+	assert.equal((await build()).running, 0);
+	await resolve("accept");
 
 	// a batch that is rolled back shows nothing; neither does one made when the system asks for reduced motion
 	const sofar = (await build()).shown;

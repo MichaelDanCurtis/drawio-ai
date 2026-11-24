@@ -523,7 +523,7 @@
 			refresh.title = "Ask " + a.company + " which models this key can use now";
 			refresh.onclick = () => post({ type: "refreshApiModels", provider: a.id });
 			const test = document.createElement("button");
-			test.className = "refresh-btn";
+			test.className = "refresh-btn test-btn";
 			test.disabled = !!a.loadingModels;
 			test.textContent = a.testing ? "Testing…" : "Test";
 			test.title = "Send one short request to " + a.company + " the way the chat does (its tools, one tool call) to see that it works. It uses a little of your credit: about as much as a short chat message.";

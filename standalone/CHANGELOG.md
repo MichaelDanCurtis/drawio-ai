@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Polish:
+  - A map drawn by the Mapper is shown being built, like any other edit (Settings → Editor →
+    **Show edits being built**).
+  - The outlines around new and changed shapes (the review's, and the flash) come in with
+    their shapes; they used to stand around shapes that were not there yet.
+  - **New Chat** during a request no longer leaves "Stopped." as the new chat's first line.
+  - A map with more than 600 connectors got no routing at all. The connectors inside each
+    top-level box are now routed, box by box, for up to six seconds; what runs between the
+    boxes is left as drawn.
 - **Long chats with an API model.** The whole conversation goes to the provider with every
   request, so a long chat cost more each time and in the end the provider refused it. When a
   conversation has grown long (about 60,000 tokens), the model is asked to sum it up for

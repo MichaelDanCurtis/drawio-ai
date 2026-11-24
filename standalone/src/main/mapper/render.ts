@@ -21,6 +21,11 @@ export const STYLES = {
  * which a very large map pays for on every redraw.
  */
 export const MAX_ROUTED_EDGES = 600;
+/** The id a node's shape is drawn with (`at`: the node's place in the graph, when it is known). */
+export function mapCellId(graph: MapGraph, nodeId: string, at = graph.nodes.findIndex((n) => n.id === nodeId)): string | undefined {
+	return at >= 0 ? `map${at + 1}` : undefined;
+}
+
 /** Where two connectors cross, one hops over the other: a crossing is not read as a junction. */
 const EDGE_CROSSINGS = "jumpStyle=arc;jumpSize=6;";
 const ICON_LABEL = "verticalLabelPosition=bottom;verticalAlign=top;labelPosition=center;align=center;";
@@ -75,7 +80,7 @@ export function renderGraph(graph: MapGraph, options: RenderOptions): { xml: str
 	const origin = options.origin ?? { x: 40, y: 40 };
 	const byId = new Map(graph.nodes.map((n) => [n.id, n]));
 	const cellId = new Map<string, string>();
-	graph.nodes.forEach((n, i) => cellId.set(n.id, `map${i + 1}`));
+	graph.nodes.forEach((n, i) => cellId.set(n.id, mapCellId(graph, n.id, i)!));
 	const hasChildren = new Set(graph.nodes.filter((n) => n.parent && byId.has(n.parent)).map((n) => n.parent!));
 	const out: string[] = ['<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>'];
 	let cells = 0;

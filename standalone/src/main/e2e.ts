@@ -549,6 +549,7 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 	const kept: string = await page.executeJavaScript(`(() => { const i = document.getElementById("input"); const v = i.value; i.value = ""; return v; })()`);
 	log("apiChatNewChat", { ...emptied, kept, strip: await strip(), items: w.chat.items.length });
 	expect(kept === "Keep this for later." && !(await strip()).length && !(await has("Before a new chat")) && !w.chat.items.some((i: any) => /Keep this/.test(i.text ?? "")), "what was waiting when New Chat was pressed was sent, or lost.");
+	expect(w.chat.items.length === 0, "the new chat starts with what the request it ended said of its end.");
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {

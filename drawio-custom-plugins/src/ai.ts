@@ -979,8 +979,13 @@ Draw.loadPlugin((ui: any) => {
 		let switched = false;
 		const ops: AiOp[] = action.ops || [];
 		// (what is where before the batch, to show afterwards what it added and moved)
-		stopBuild();
 		const placedBefore = action.animate && canShowBuild() ? placesNow() : undefined;
+		// A batch that is shown being built takes over from one that still is. A batch that is not (a
+		// step that follows an edit: a map's health badges, a connector being re-routed) leaves it
+		// running: what it adds is simply there, and what it changes is drawn anew as it is. Nothing
+		// of a showing is kept on the elements either way, see showBuild.
+		if (placedBefore) stopBuild();
+		else releaseHeld();
 		let failed = false;
 		const fail = (index: number, op: any, e: any) => {
 			failed = true;
@@ -1077,11 +1082,11 @@ Draw.loadPlugin((ui: any) => {
 	interface Place { x: number; y: number; width: number; height: number }
 	const BUILD = { item: 240, glide: 320, total: 1400, together: 120, none: 600 };
 	const BUILD_EASE = "cubic-bezier(0.16, 0.84, 0.3, 1)";
-	let building: { animations: Animation[]; restore: (() => void)[]; timer: any } | undefined;
+	let building: { animations: Animation[]; restore: (() => void)[]; timer: any; began: number; times: Map<any, { delay: number; duration: number }> } | undefined;
 	/** What is kept out of sight while a layout of the batch is computed (see holdNew). */
 	let held: { animations: Animation[]; timer: any } | undefined;
 	/** For tests: how many batches were shown being built, and how many elements the last one animated. */
-	const buildStats = (W.drawioAiBuild = { shown: 0, elements: 0, held: 0, playing: () => !!building });
+	const buildStats = (W.drawioAiBuild = { shown: 0, elements: 0, held: 0, around: 0, playing: () => !!building });
 
 	function canShowBuild(): boolean {
 		try {
@@ -1232,7 +1237,7 @@ Draw.loadPlugin((ui: any) => {
 		if (!added.length && !moved.length) return;
 		if (count > BUILD.none) return;
 
-		const b = { animations: [] as Animation[], restore: [] as (() => void)[], timer: undefined as any };
+		const b = { animations: [] as Animation[], restore: [] as (() => void)[], timer: undefined as any, began: performance.now(), times: new Map<any, { delay: number; duration: number }>() };
 		const play = (el: Element | null | undefined, frames: Keyframe[], duration: number, delay: number) => {
 			if (!el) return;
 			try {
@@ -1247,6 +1252,8 @@ Draw.loadPlugin((ui: any) => {
 		const glide = moved.length ? BUILD.glide : 0;
 		const { scale } = graph.view;
 		for (const m of moved) {
+			// (what is drawn around it, an outline of the review or the flash, comes as it arrives)
+			b.times.set(m.cell, { delay: glide * 0.6, duration: glide * 0.4 });
 			const n = nodes(m.cell);
 			for (const el of [n.shape, n.text, n.control]) {
 				if (!el) continue;
@@ -1266,6 +1273,7 @@ Draw.loadPlugin((ui: any) => {
 		const step = together || added.length < 2 ? 0 : Math.min(90, (BUILD.total - glide - item) / (added.length - 1));
 		added.forEach((cell, i) => {
 			const delay = glide * 0.5 + i * step;
+			b.times.set(cell, { delay, duration: item });
 			const n = nodes(cell);
 			if (model.isEdge(cell) && n.shape) {
 				// (its line, and what its ends are drawn with: an arrowhead is a path, a dot an ellipse)
@@ -1310,10 +1318,30 @@ Draw.loadPlugin((ui: any) => {
 		Promise.all(b.animations.map((a) => a.finished.catch(() => undefined))).then(end);
 	}
 
+	/**
+	 * Something drawn around a cell (the flash, an outline of the review) appears with the cell
+	 * while a batch is shown being built, not ahead of it: an outline around a shape that is not
+	 * there yet reads as a mistake. Asked again later in the build, it comes in at what is left.
+	 */
+	function alongBuild(cell: any, node: Element | null | undefined): void {
+		const b = building;
+		const t = b?.times.get(cell);
+		if (!b || !t || !node) return;
+		const passed = performance.now() - b.began;
+		if (passed >= t.delay + t.duration) return;
+		try {
+			b.animations.push(node.animate([{ opacity: 0 }, { opacity: 1 }], { duration: t.duration, delay: Math.max(0, t.delay - passed), easing: BUILD_EASE, fill: "backwards" }));
+			buildStats.around++;
+		} catch {
+			// shown at once
+		}
+	}
+
 	function flash(cells: any[]) {
 		const highlights = cells.slice(0, 60).map((c) => {
 			const h = new mxCellHighlight(graph, ACCENT, 3);
 			h.highlight(graph.view.getState(c as DrawioCell));
+			alongBuild(c, (h as any).shape?.node);
 			return h;
 		});
 		setTimeout(() => highlights.forEach((h) => h.destroy()), 1400);
@@ -1934,6 +1962,7 @@ Draw.loadPlugin((ui: any) => {
 				if (!state) continue;
 				const h = new W.mxCellHighlight(graph, ch.change === "added" ? ADDED : CHANGED, 2, true);
 				h.highlight(state);
+				alongBuild(state.cell, h.shape?.node);
 				highlights.push(h);
 			}
 		}

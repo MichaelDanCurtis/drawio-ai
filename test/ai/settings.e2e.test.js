@@ -178,7 +178,7 @@ test("Settings → Agents & models: a key is typed once, checked with its provid
 		note: "A key from Anthropic is kept in the keychain.",
 		error: null,
 		models: [["Claude New", true], ["Claude Old", true]],
-		buttons: ["Refresh", "Remove key"],
+		buttons: ["Test", "Refresh", "Remove key"],
 	});
 	assert.equal(await w.keys.get("anthropic"), KEY);
 	const everywhere = (await page.evaluate(() => document.documentElement.outerHTML + [...document.querySelectorAll("input")].map((i) => i.value).join("\n"))) + JSON.stringify(w.settings) + fs.readFileSync(w.file, "utf8");
@@ -195,8 +195,8 @@ test("Settings → Agents & models: a key is typed once, checked with its provid
 
 	// Refresh asks the provider again, with the kept key
 	const asked = provider.requests.length;
-	await page.click(`${card("anthropic")} header .refresh-btn`);
-	await page.waitForFunction((sel) => document.querySelector(sel + " header .refresh-btn").textContent === "Refresh", card("anthropic"));
+	await page.click(`${card("anthropic")} header .refresh-btn:not(.test-btn)`);
+	await page.waitForFunction((sel) => document.querySelector(sel + " header .refresh-btn:not(.test-btn)").textContent === "Refresh", card("anthropic"));
 	for (let i = 0; i < 100 && provider.requests.length === asked; i++) await new Promise((r) => setTimeout(r, 20));
 	assert.equal(provider.requests.length, asked + 1);
 	assert.equal(provider.requests.pop().headers.authorization, `Bearer ${KEY}`);
@@ -204,13 +204,13 @@ test("Settings → Agents & models: a key is typed once, checked with its provid
 	// while the provider is asked with it the key cannot be removed; one the provider no longer accepts is marked
 	const answers = listing;
 	listing = (r, as) => ({ ...as.rejected, delay: 400 });
-	await page.click(`${card("anthropic")} header .refresh-btn`);
-	await page.waitForFunction((sel) => document.querySelector(sel + " header .refresh-btn").textContent === "Asking…", card("anthropic"));
-	assert.deepEqual(await page.$eval(card("anthropic"), (c) => [c.querySelector(".keyrow button").textContent, c.querySelector(".keyrow button").disabled, c.querySelector("header .refresh-btn").disabled]), ["Remove key", true, true]);
+	await page.click(`${card("anthropic")} header .refresh-btn:not(.test-btn)`);
+	await page.waitForFunction((sel) => document.querySelector(sel + " header .refresh-btn:not(.test-btn)").textContent === "Asking…", card("anthropic"));
+	assert.deepEqual(await page.$eval(card("anthropic"), (c) => [c.querySelector(".keyrow button").textContent, c.querySelector(".keyrow button").disabled, c.querySelector("header .refresh-btn:not(.test-btn)").disabled]), ["Remove key", true, true]);
 	await page.waitForFunction((sel) => document.querySelector(sel + " header .tag").textContent === "Not accepted", card("anthropic"));
 	assert.deepEqual([(await w.shows("anthropic")).error, w.keys.has("anthropic"), await page.$eval(`${card("anthropic")} .keyrow button`, (b) => b.disabled)], ["Anthropic did not accept the API key. Check it in Settings → Agents & models → API keys.", true, false]);
 	listing = answers;
-	await page.click(`${card("anthropic")} header .refresh-btn`);
+	await page.click(`${card("anthropic")} header .refresh-btn:not(.test-btn)`);
 	await page.waitForFunction((sel) => document.querySelector(sel + " header .tag").textContent === "Key saved" && !document.querySelector(sel + " .bad"), card("anthropic"));
 
 	// removed: the key and its models are gone, and the field is back
