@@ -382,6 +382,32 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 	log("apiChatFollowed", { ...followed, users: users().slice(-2) });
 	expect(followed.stop === "end_turn" && (await has("Sent after")) && !(await has("Not this one")) && picked === 1 && !!pickedId && users().pop() === "◉ 1 selected|Add a shape labelled 'Sent after'.", "what was still waiting when the request ended was not sent as the next one, or not with what was selected as it was sent.");
 
+	// asked for elsewhere in the app while it works (the Shifter's "Ask the agent", the Mapper): it is not refused, and
+	// not handed over in the middle of the other request. It waits under its own name and follows as the next request.
+	ended = 0;
+	const both = new Promise<{ stop?: string; error?: string }>((resolve) => (w.chat.onTurnEnd = (stop, error) => ++ended === 2 && resolve({ stop, error })));
+	void w.chat.send("Add a shape labelled 'Busy with this'.");
+	await until("a permission card", async () => (await waiting()).length);
+	void w.askAboutSelection("Add a shape labelled 'Asked meanwhile'.", "🎨 Asked meanwhile");
+	await until("the request to wait", async () => (await strip()).join() === "🎨 Asked meanwhile");
+	const refusedBefore = w.chat.items.filter((i) => i.kind === "error").length;
+	await answer("Allow");
+	await answer("Allow");
+	const after = await both;
+	log("apiChatAskedMeanwhile", { ...after, users: users().slice(-2), strip: await strip() });
+	expect(after.stop === "end_turn" && (await has("Busy with this")) && (await has("Asked meanwhile")) && users().slice(-2).join() === "|Add a shape labelled 'Busy with this'.,|🎨 Asked meanwhile" && w.chat.items.filter((i) => i.kind === "error").length === refusedBefore && !(await strip()).length, "a request made elsewhere in the app while it worked was refused, or did not follow as the next one.");
+	// ...and after Stop it is not put into the box as if the user had typed it: the chat says it was not sent
+	done = turn("Add a shape labelled 'Stopped with one waiting'.");
+	await until("a permission card", async () => (await waiting()).length);
+	void w.askAboutSelection("Add a shape labelled 'Dropped request'.", "🎨 Dropped request");
+	await until("the request to wait", async () => (await strip()).length === 1);
+	w.chat.stop();
+	await done;
+	await pause(300);
+	const boxAfter: string = await page.executeJavaScript(`document.getElementById("input").value`);
+	log("apiChatAskedThenStopped", { note: last("note")?.text, box: boxAfter, strip: await strip() });
+	expect(boxAfter === "" && !(await strip()).length && last("note")?.text === "Not sent: 🎨 Dropped request. Ask again where you asked." && !(await has("Dropped request")), "a request of the app that waited when Stop was pressed was sent, or put into the box.");
+
 	// Stop while a card waits: the request ends as stopped, and nothing is changed; what was waiting goes back into the box, unsent
 	done = turn("Add a shape labelled 'Stopped shape'.");
 	await until("a permission card", async () => (await waiting()).length);

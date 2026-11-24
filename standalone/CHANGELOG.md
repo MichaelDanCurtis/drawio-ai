@@ -9,6 +9,9 @@
   diagram, a request or a key.
 - Development: the end-to-end run builds into `out-e2e` and starts the app from there, so a
   test no longer replaces the files of a copy of the app that is running from `out`.
+- A request made elsewhere in the app while the chat works (the Mapper's, the Shape Workshop's
+  "Ask the agent") is no longer refused with "press Stop first". It waits in the strip above
+  the box under its own name and follows as the next request.
 - **Maps: connectors are routed.** After the Mapper has placed the shapes, each connector is
   taken around the shapes in its way and apart from the ones beside it (draw.io's own
   obstacle-avoiding router; no shape moves), and where two still cross, one hops over the
