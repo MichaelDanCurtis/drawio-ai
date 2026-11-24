@@ -35,6 +35,10 @@ export async function testKey(access: ApiAccess, id: ApiProviderId, tools: ApiTo
 	const called: string[] = [];
 	let said = "";
 	const late = AbortSignal.timeout(ms);
+	// (one tool call and its answer, no more: a model that goes on calling tools is stopped at its
+	// second call, before the provider's own loop makes a paid request of each)
+	const enough = new AbortController();
+	const signal = AbortSignal.any([late, enough.signal]);
 	try {
 		const chat = provider.chat({
 			apiKey: kept.key,
@@ -43,14 +47,19 @@ export async function testKey(access: ApiAccess, id: ApiProviderId, tools: ApiTo
 			tools: offered,
 			callTool: async (name) => {
 				called.push(name);
+				if (called.length > 1) {
+					enough.abort();
+					return { text: "The check is over: no further tool is answered.", isError: true };
+				}
 				return { text: "No problems found." };
 			},
 			onText: (text) => void (said += text),
 			images: model.images !== false,
 			baseURL: access.baseURL(id),
 		});
-		const stop = await chat.send(TEST_REQUEST, [], late);
+		const stop = await chat.send(TEST_REQUEST, [], signal);
 		access.noteRejected(id, false);
+		if (enough.signal.aborted) return { ok: false, problem: `${model.name} took the request and called ${called[0]}, but then went on calling tools (${called[1]}) where it was asked to answer. The test was stopped there.` };
 		if (stop === "cancelled") return { ok: false, problem: `${provider.company} did not answer in time. Try again.` };
 		if (stop === "refusal") return { ok: false, problem: `${model.name} declined the test request.` };
 		const tool = called.length ? `called ${called[0]}` : "did not call the tool it was asked to (it may not use tools well)";
@@ -59,6 +68,7 @@ export async function testKey(access: ApiAccess, id: ApiProviderId, tools: ApiTo
 			? { ok: true, said: `Works: ${model.name} took the chat's ${offered.length} tools, ${tool}${answer ? `, and answered "${answer}"` : ""}.` }
 			: { ok: false, problem: `${model.name} answered${answer ? ` "${answer}"` : ""} but ${tool}.` };
 	} catch (e: any) {
+		if (enough.signal.aborted) return { ok: false, problem: `${model.name} went on calling tools (${called.slice(0, 2).join(", ")}) where it was asked to answer. The test was stopped there.` };
 		if (late.aborted) return { ok: false, problem: `${provider.company} did not answer in time. Try again.` };
 		if (e instanceof ApiError && e.badKey) access.noteRejected(id);
 		return { ok: false, problem: String(e?.message ?? e).split("\n")[0].slice(0, 400) };

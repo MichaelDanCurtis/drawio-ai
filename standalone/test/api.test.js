@@ -1539,6 +1539,13 @@ test("Test in Settings: one request shaped as the chat's (its tools, one tool ca
 	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
 	assert.match(row().error, /tools\.3\.input_schema: unexpected shape/);
 	assert.equal(row().tested, undefined);
+	// a model that goes on calling tools is stopped at its second call: one more request is made, not one per round
+	answers.push(fake.anthropicAnswer([{ tool: TEST_TOOL, id: "toolu_a", input: {} }]), fake.anthropicAnswer([{ tool: "drawio_get_diagram", id: "toolu_b", input: {} }]), fake.anthropicAnswer([{ tool: "drawio_get_diagram", id: "toolu_c", input: {} }]), fake.anthropicAnswer([{ text: "OK" }]));
+	const posts = sent.length;
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.equal(sent.length - posts, 2, "the request and the first tool's answer: nothing after the second call");
+	assert.deepEqual([row().tested, row().error], [undefined, `Claude New took the request and called ${TEST_TOOL}, but then went on calling tools (drawio_get_diagram) where it was asked to answer. The test was stopped there.`]);
+	answers.length = 0;
 	// what a test found is gone with the key it was found with
 	answers.push(fake.anthropicAnswer([{ tool: TEST_TOOL, id: "toolu_u", input: {} }]), fake.anthropicAnswer([{ text: "OK" }]));
 	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
