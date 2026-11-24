@@ -148,6 +148,9 @@ export function openLmSession(api: Api, model: vscode.LanguageModelChat, offered
 					}
 					const answers: vscode.LanguageModelToolResultPart[] = [];
 					for (const call of calls) {
+						// (stopped while an earlier call of this answer was at work: the ones after it are not run,
+						// so that nothing is handed in after Stop)
+						if (mine.token.isCancellationRequested || closed) return "cancelled";
 						const known = offered.some((t) => t.name === call.name);
 						const result = known ? await tools.call(call.name, call.input).catch((e: any) => ({ text: String(e?.message ?? e), isError: true as const })) : { text: `There is no tool called ${call.name}.`, isError: true as const };
 						const content: unknown[] = [new api.LanguageModelTextPart(result.text)];

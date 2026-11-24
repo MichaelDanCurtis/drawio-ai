@@ -450,6 +450,17 @@ test("the Shape Creator in VS Code: one entry with VS Code's models, the Creator
 	assert.equal(await session.prompt("Once more.", []), "end_turn");
 	assert.equal(lm.sent.at(-1).messages.length, before, "neither the stopped nor the failed request is in it");
 
+	// Stop while the first of two calls is at work: the second (a hand-in) is not run
+	let stopIt = () => undefined;
+	const slowTools = { call: async (name) => (called.push([name]), name === "workshop_render_preview" ? (stopIt(), { text: "Here it is." }) : { text: "Handed in." }) };
+	const stopping = await creator.ports.open({ agent: LM_AGENT, tools: slowTools, onText() {}, onExit() {} });
+	stopIt = () => stopping.cancel();
+	script.push([lm.call("s1", "workshop_render_preview", { svg: "<svg/>" }), lm.call("s2", "workshop_submit_svg", { svg: "<svg/>" })]);
+	const ran = called.length;
+	assert.equal(await stopping.prompt("Draw two.", []), "cancelled");
+	assert.deepEqual(called.slice(ran), [["workshop_render_preview"]], "nothing is handed in after Stop");
+	assert.equal(stopping.fresh(), true);
+
 	// a model that only ever calls tools is stopped after a bounded number of rounds
 	for (let i = 0; i < MAX_ROUNDS + 3; i++) script.push([lm.call(`r${i}`, "workshop_render_preview", { svg: "<svg/>" })]);
 	const rounds = lm.sent.length;
