@@ -2,12 +2,21 @@
 // MCP stdio proxy with esbuild. Shared code is imported straight from ../src
 // (read-only); `vscode` resolves to a small shim (src/main/vscode-shim.ts).
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync, readdirSync, readFileSync } from "fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const out = join(here, "out");
+// `--out <folder>`: build somewhere else than `out` (the end-to-end run builds into `out-e2e`,
+// so that a test never replaces the files of a copy of the app that is running from `out`).
+const outArg = process.argv.indexOf("--out");
+const outName = outArg >= 0 ? process.argv[outArg + 1] : "out";
+// (a folder directly in this one, by its name: the app finds its sources from where its build is, one level up)
+if (!outName || !/^[\w.-]+$/.test(outName) || outName.startsWith(".") || ["src", "test", "scripts", "node_modules", "build", "dist"].includes(outName)) {
+	console.error(`--out takes the name of a folder in ${here} to build into (letters, digits, - and _), such as out-e2e; not a path, and not one of the app's own folders.`);
+	process.exit(2);
+}
+const out = join(here, outName);
 const repo = resolve(here, "..");
 const watch = process.argv.includes("--watch");
 mkdirSync(out, { recursive: true });
@@ -108,4 +117,9 @@ for (const [pkg, files] of Object.entries({
 	doto: ["latin-700-normal"],
 }))
 	for (const f of files) copyFileSync(join(here, "node_modules/@fontsource", pkg, "files", `${pkg}-${f}.woff2`), join(out, "ui/fonts", `${pkg}-${f}.woff2`));
+// (a build elsewhere is an app folder of its own for Electron to start: same name and version, its main beside it)
+if (out !== join(here, "out")) {
+	const pkg = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
+	writeFileSync(join(out, "package.json"), JSON.stringify({ name: pkg.name, productName: pkg.productName, version: pkg.version, main: "main.js" }, null, "\t"));
+}
 console.log(`Built to ${out}${watch ? " (watch not supported; rerun)" : ""}`);

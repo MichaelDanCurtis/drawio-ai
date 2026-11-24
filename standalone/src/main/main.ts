@@ -15,6 +15,7 @@ import { SettingsWindow } from "./settingsWindow";
 import { galleries } from "./workshop";
 import { WorkshopWindow } from "./workshop/workshopWindow";
 import { StaticServer } from "./staticServer";
+import { errorDetails, RunLog } from "./runLog";
 
 app.setName("OmniDraw");
 /**
@@ -54,6 +55,8 @@ if (process.env.DRAWAI_E2E) {
 	// Nor the user's ~/.drawio-ai (the desktop MCP endpoint's address file and launcher).
 	process.env.DRAWIO_AI_HOME ||= fs.mkdtempSync(path.join(require("os").tmpdir(), "drawai-e2e-home-"));
 }
+/** When this run started and how it ends: `logs/app.log` in the app's data folder. */
+const runLog = new RunLog(path.join(app.getPath("userData"), "logs", "app.log"));
 const server = new StaticServer();
 const pendingFiles: string[] = [];
 let ready = false;
@@ -76,6 +79,10 @@ async function connectExternalAgents(connect: boolean): Promise<void> {
 
 if (!app.requestSingleInstanceLock() && !process.env.DRAWAI_E2E) {
 	app.quit();
+} else {
+	// (only the copy that runs: one started beside it hands its files over and goes, which is neither
+	// a run of its own nor a sign that the running one ended)
+	runLog.started({ version: app.getVersion(), pid: process.pid, built: path.basename(paths.out), ...(process.env.DRAWAI_E2E ? { test: "yes" } : {}) });
 }
 
 function diagramArgs(argv: string[]): string[] {
@@ -424,3 +431,20 @@ app.on("will-quit", () => {
 	desktopMcp?.dispose();
 	server.dispose();
 });
+
+// How this run ends, for the next person who wonders where the app went (see runLog.ts).
+// None of these changes what happens: they only write a line.
+app.on("quit", (_e, code) => runLog.end("quit", { code, pid: process.pid }));
+process.on("uncaughtExceptionMonitor", (e, origin) => runLog.write("error in the app's main process", { ...errorDetails(e), origin, pid: process.pid }));
+process.on("unhandledRejection", (e) => runLog.write("a failure nothing handled", { ...errorDetails(e), pid: process.pid }));
+app.on("render-process-gone", (_e, contents, details) => runLog.write("a window's page ended", { reason: details.reason, code: details.exitCode, page: pageName(contents.getURL()), pid: process.pid }));
+app.on("child-process-gone", (_e, details) => runLog.write("a helper process ended", { type: details.type, reason: details.reason, code: details.exitCode, name: details.name, pid: process.pid }));
+
+/** Which of the app's pages a window shows: its file's name, never the address with what it carries. */
+function pageName(url: string): string {
+	try {
+		return path.basename(new URL(url).pathname) || "editor";
+	} catch {
+		return "?";
+	}
+}
