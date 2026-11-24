@@ -57,7 +57,6 @@ if (process.env.DRAWAI_E2E) {
 }
 /** When this run started and how it ends: `logs/app.log` in the app's data folder. */
 const runLog = new RunLog(path.join(app.getPath("userData"), "logs", "app.log"));
-runLog.started({ version: app.getVersion(), pid: process.pid, built: path.basename(paths.out), ...(process.env.DRAWAI_E2E ? { test: "yes" } : {}) });
 const server = new StaticServer();
 const pendingFiles: string[] = [];
 let ready = false;
@@ -80,6 +79,10 @@ async function connectExternalAgents(connect: boolean): Promise<void> {
 
 if (!app.requestSingleInstanceLock() && !process.env.DRAWAI_E2E) {
 	app.quit();
+} else {
+	// (only the copy that runs: one started beside it hands its files over and goes, which is neither
+	// a run of its own nor a sign that the running one ended)
+	runLog.started({ version: app.getVersion(), pid: process.pid, built: path.basename(paths.out), ...(process.env.DRAWAI_E2E ? { test: "yes" } : {}) });
 }
 
 function diagramArgs(argv: string[]): string[] {

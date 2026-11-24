@@ -29,6 +29,12 @@ test("the run log: a line per start and end, and a run that ended without a word
 	third.end("quit", { code: 0, pid: 33 });
 	new RunLog(file).started({ version: "1.0.0", pid: 44 });
 	assert.deepEqual(lines().slice(5), ["a window's page ended reason=crashed code=5 page=chat.html", "ended why=quit code=0 pid=33", "started version=1.0.0 pid=44"]);
+	// a copy started beside the running one hands over and goes: it is not a run, and writes nothing
+	const beside = new RunLog(file);
+	const count = lines().length;
+	beside.write("a window's page ended", { reason: "crashed" });
+	beside.end("quit", { code: 0, pid: 55 });
+	assert.equal(lines().length, count);
 	assert.match(fs.readFileSync(file, "utf8").split("\n")[0], /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z started /);
 });
 
@@ -44,6 +50,7 @@ test("the run log: one line whatever is in it, an error by its name and first li
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-run-log-"));
 	const file = path.join(dir, "app.log");
 	const log = new RunLog(file);
+	log.started({ pid: 1 });
 	for (let i = 0; i < 4000; i++) log.write("filler", { n: i, pad: "p".repeat(200) });
 	assert.ok(fs.statSync(file).size < 300 * 1024, `${fs.statSync(file).size} bytes`);
 	const kept = fs.readFileSync(file, "utf8").trim().split("\n");

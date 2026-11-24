@@ -29,11 +29,14 @@ export function errorDetails(e: unknown): { error: string; at?: string } {
 
 export class RunLog {
 	private ended = false;
+	private running = false;
 
 	constructor(private readonly file: string) {}
 
 	/** Appends a line. A log that cannot be written is never a reason for the app to fail. */
 	public write(what: string, details: Record<string, unknown> = {}): void {
+		// (a process that never became the running copy has nothing to say in the running one's log)
+		if (!this.running && what !== "started" && !what.startsWith("the run before")) return;
 		try {
 			fs.mkdirSync(path.dirname(this.file), { recursive: true });
 			// (kept small: when it has grown, the older half goes)
@@ -60,11 +63,12 @@ export class RunLog {
 		const last = this.lastRun();
 		if (last && !last.ended) this.write("the run before this one ended without a word (crashed or was killed)", { started: last.started, pid: last.pid });
 		this.write("started", details);
+		this.running = true;
 	}
 
 	/** The app is ending by its own doing (a quit); written once. */
 	public end(why: string, details: Record<string, unknown> = {}): void {
-		if (this.ended) return;
+		if (this.ended || !this.running) return;
 		this.ended = true;
 		this.write("ended", { why, ...details });
 	}
