@@ -74,8 +74,27 @@ type Answerer = Omit<AgentStatus, "id"> & { id: ChatAgent; api?: boolean; detail
 const MAX_IMAGES = 4;
 /** How many messages may wait while a request is under way. */
 const MAX_WAITING = 8;
+/** How something that waits is named in the chat: a request of the app by what the chat shows for it. */
+function labelOf(w: { text: string; own?: { shown?: string } }): string {
+	if (!w.own) return w.text;
+	const label = (w.own.shown ?? w.text).replace(/\s+/g, " ").trim();
+	return label.length > 120 ? `${label.slice(0, 117)}…` : label;
+}
+
 /** Something the user sent while a request was under way. */
-type Waiting = { id: number; text: string; images: ImageData[]; /** What was selected in the diagram as it was sent. */ selected: string[] };
+type Waiting = {
+	id: number;
+	text: string;
+	images: ImageData[];
+	/** What was selected in the diagram as it was sent. */
+	selected: string[];
+	/**
+	 * A request the app made (the Mapper, the Shape Workshop, markup), not words typed into the box:
+	 * it is a task of its own, so it is never handed to the model in the middle of another. It
+	 * follows as the next request, with what it is about and how the chat shows it.
+	 */
+	own?: { origin?: SelectionContext; shown?: string };
+};
 /** What a diagram that has no file yet is called for the model. */
 const UNSAVED = "Untitled (a new diagram, not saved to a file yet)";
 let versionCounter = 0;
@@ -579,7 +598,8 @@ export class ChatController {
 	public async send(text: string, origin?: SelectionContext, images: ImageData[] = [], shown?: string): Promise<void> {
 		const client = this.host.client();
 		if (this.busy) {
-			this.push({ kind: "error", text: "Still working on the previous request — press Stop first." });
+			// (asked for elsewhere in the app while it works: it waits its turn with what was typed meanwhile)
+			this.addWhileWorking(text, images, { origin: origin ?? { cellIds: [...(client?.currentSelection ?? [])] }, shown });
 			return;
 		}
 		const selection: SelectionContext = origin ?? { cellIds: client?.currentSelection ?? [] };
@@ -659,15 +679,20 @@ export class ChatController {
 	}
 
 	/** Something sent while a request is under way: kept until the model can be handed it, or the request ends. */
-	private addWhileWorking(text: string, images: ImageData[]): boolean {
+	private addWhileWorking(text: string, images: ImageData[], own?: Waiting["own"]): boolean {
 		if (this.waiting.length >= MAX_WAITING) {
-			this.push({ kind: "error", text: "That is a lot to add while it works. Wait for it to finish, or press Stop." });
+			this.push({ kind: "error", text: own ? `${labelOf({ text, own })} was not taken: a lot is waiting already. Ask again when it has finished.` : "That is a lot to add while it works. Wait for it to finish, or press Stop." });
 			return false;
 		}
 		// (what is left at the end goes as one request, which takes this many pictures)
 		if (images.length && this.waiting.reduce((n, w) => n + w.images.length, images.length) > MAX_IMAGES) {
-			this.push({ kind: "error", text: `Only ${MAX_IMAGES} pictures can wait at a time. Send this one when it has finished.` });
+			this.push({ kind: "error", text: `Only ${MAX_IMAGES} pictures can wait at a time. ${own ? "Ask again" : "Send this one"} when it has finished.` });
 			return false;
+		}
+		if (own) {
+			this.waiting.push({ id: ++this.waitingIds, text, images, selected: [], own });
+			this.postState();
+			return true;
 		}
 		// (what "the selected one" means is settled as it is sent, as for a request: not when it is its turn)
 		this.waiting.push({ id: ++this.waitingIds, text, images, selected: [...(this.host.client()?.currentSelection ?? [])] });
@@ -684,7 +709,7 @@ export class ChatController {
 		// (`turn`: the request the tool call began in. One that ends during a later request is not read by anyone.)
 		if (!this.busy || this.turnCancelled || turn !== this.turn) return undefined;
 		const taken: Waiting[] = [];
-		while (this.waiting.length && !this.waiting[0].images.length) taken.push(this.waiting.shift()!);
+		while (this.waiting.length && !this.waiting[0].images.length && !this.waiting[0].own) taken.push(this.waiting.shift()!);
 		if (!taken.length) return undefined;
 		for (const w of taken) this.push({ kind: "user", text: w.text, scope: `↪ added while it works${w.selected.length ? ` · ◉ ${w.selected.length} selected` : ""}` });
 		this.postState();
@@ -701,15 +726,20 @@ export class ChatController {
 		if (!finished) return this.giveBack(left);
 		const [first, ...rest] = left;
 		this.waiting = [...rest, ...this.waiting];
-		void this.send(first.text, { cellIds: first.selected }, first.images);
+		void this.send(first.text, first.own ? first.own.origin : { cellIds: first.selected }, first.images, first.own?.shown);
 		// (it did not start, e.g. the diagram is loading: nothing would ever come for what still waits)
 		if (!this.busy) this.giveBack(this.waiting.splice(0));
 		else if (rest.length) this.postState();
 	}
 
 	/** Puts what was not sent back into the box: the user sends it again, or drops it. */
-	private giveBack(left: { text: string; images: ImageData[] }[]): void {
-		if (this.closed || !left.length) return;
+	private giveBack(all: { text: string; images: ImageData[]; own?: Waiting["own"] }[]): void {
+		if (this.closed || !all.length) return;
+		// (a request the app made is not the user's words: it is not put into the box, the chat says it was not sent)
+		const dropped = all.filter((w) => w.own);
+		if (dropped.length) this.push({ kind: "note", text: `Not sent: ${dropped.map(labelOf).join("; ")}. Ask again where you asked.` });
+		const left = all.filter((w) => !w.own);
+		if (!left.length) return;
 		this.post({ type: "restoreInput", text: left.map((w) => w.text).filter(Boolean).join("\n\n"), images: left.flatMap((w) => w.images) });
 	}
 
@@ -948,7 +978,7 @@ export class ChatController {
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
-				queued: this.waiting.map((w) => ({ id: w.id, text: w.text, images: w.images.length })),
+				queued: this.waiting.map((w) => ({ id: w.id, text: labelOf(w), images: w.images.length })),
 				iconStyle: settings().appearance.iconStyle,
 				matrix: settings().appearance.matrix,
 				chatSide: settings().chat.side,

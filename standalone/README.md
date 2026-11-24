@@ -70,7 +70,10 @@ installed and look signed in; when one is not, the chat says what to run (and of
   not be handed over (no tool answered after it, or it has images) is sent as the next request
   when this one ends, one at a time. Each keeps what was selected in the diagram as you sent it. After Stop, an error or New Chat nothing is sent by itself: what was
   waiting goes back into the box. Up to eight things wait, with four pictures between them;
-  one more stays in the box. Works with agents and with API models alike (`mcpServer.ts`,
+  one more stays in the box. A request made elsewhere in the app meanwhile (the Mapper's, the
+  Shape Workshop's "Ask the agent") waits there too, under its own name: it is a task of its
+  own, so it is never handed over mid-request and follows as the next one. After Stop it is
+  not sent; the chat says so. Works with agents and with API models alike (`mcpServer.ts`,
   `userUpdate`). The tags that mark an addition as yours are taken out of what a tool itself
   answers (`withoutUpdateTags`), so text in a diagram or a mapped folder cannot pass for you.
 - **Review**: the agent's edits appear as pending changes; **Accept** keeps them,
