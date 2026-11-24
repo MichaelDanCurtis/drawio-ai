@@ -413,6 +413,14 @@ export class ApiChatSession implements ChatSession {
 		}
 		const summary = (this.summarising ?? "").trim().slice(0, SUMMARY_MAX);
 		this.summarising = undefined;
+		// (a request the provider calls malformed, as one that has outgrown the model is, makes the conversation
+		// start over, see chat.ts: it holds nothing now, and the chat says so as it does when a request does that)
+		if (chat.blank()) {
+			this.size = 0;
+			this.summariseAt = this.o.summariseAt ?? SUMMARISE_AT;
+			this.o.handlers.onNote?.(`${this.label} no longer knows the earlier requests of this chat: the conversation with it started over.`);
+			return signal.aborted ? "cancelled" : undefined;
+		}
 		if (stopped === "cancelled" || signal.aborted) return "cancelled";
 		if (stopped !== "end_turn" || summary.length < 80) {
 			// (what the model did answer stays in the conversation, as any finished exchange does)

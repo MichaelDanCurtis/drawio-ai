@@ -795,6 +795,17 @@ test("a summary that cannot be had leaves the conversation as it is; Stop while 
 	w.script.anthropic.push(fake.anthropicAnswer([{ text: "Six." }]));
 	await ask(session, `More ${"and longer still ".repeat(200)}`);
 
+	// the provider refuses the summary request as malformed (a conversation that outgrew the model): the provider's
+	// conversation starts over, and the chat says so before the request goes to it
+	const refusing = open(w, "anthropic", { summariseAt: 200 });
+	await refusing.session.start();
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "One." }]));
+	await ask(refusing.session, `First ${"and long ".repeat(40)}`);
+	w.script.anthropic.push({ status: 400, json: { type: "error", error: { type: "invalid_request_error", message: "prompt is too long" } } }, fake.anthropicAnswer([{ text: "Two." }]));
+	assert.equal(await ask(refusing.session, "Second."), "end_turn");
+	assert.deepEqual(refusing.seen.notes, ["Claude New no longer knows the earlier requests of this chat: the conversation with it started over."]);
+	assert.equal(count(sentTo(w, "/v1/messages").at(-1)), 1, "the request went to a conversation that holds nothing else");
+
 	// Stop while the summary is written: the request ends as stopped, and nothing was sent of it
 	sent = sentTo(w, "/v1/messages");
 	w.script.anthropic.length = 0;
