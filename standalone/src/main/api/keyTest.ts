@@ -62,6 +62,8 @@ export async function testKey(access: ApiAccess, id: ApiProviderId, tools: ApiTo
 		if (enough.signal.aborted) return { ok: false, problem: `${model.name} took the request and called ${called[0]}, but then went on calling tools (${called[1]}) where it was asked to answer. The test was stopped there.` };
 		if (stop === "cancelled") return { ok: false, problem: `${provider.company} did not answer in time. Try again.` };
 		if (stop === "refusal") return { ok: false, problem: `${model.name} declined the test request.` };
+		// (it called the tool, perhaps, but never got to its answer: not an exchange that worked)
+		if (stop === "max_tokens") return { ok: false, problem: `${model.name} ran out of room before it finished this short exchange${called.length ? ` (it did call ${called[0]})` : ""}. It may not be usable in the chat.` };
 		const tool = called.length ? `called ${called[0]}` : "did not call the tool it was asked to (it may not use tools well)";
 		const answer = said.replace(/\s+/g, " ").trim().slice(0, 60);
 		return called.length

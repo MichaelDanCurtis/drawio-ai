@@ -1546,6 +1546,10 @@ test("Test in Settings: one request shaped as the chat's (its tools, one tool ca
 	assert.equal(sent.length - posts, 2, "the request and the first tool's answer: nothing after the second call");
 	assert.deepEqual([row().tested, row().error], [undefined, `Claude New took the request and called ${TEST_TOOL}, but then went on calling tools (drawio_get_diagram) where it was asked to answer. The test was stopped there.`]);
 	answers.length = 0;
+	// it called the tool but ran out of room before its answer: not reported as working
+	answers.push(fake.anthropicAnswer([{ tool: TEST_TOOL, id: "toolu_m", input: {} }]), fake.anthropicAnswer([{ text: "O" }], "max_tokens"));
+	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
+	assert.deepEqual([row().tested, row().error], [undefined, `Claude New ran out of room before it finished this short exchange (it did call ${TEST_TOOL}). It may not be usable in the chat.`]);
 	// what a test found is gone with the key it was found with
 	answers.push(fake.anthropicAnswer([{ tool: TEST_TOOL, id: "toolu_u", input: {} }]), fake.anthropicAnswer([{ text: "OK" }]));
 	await panel.onMessage({ type: "testApiKey", provider: "anthropic" });
