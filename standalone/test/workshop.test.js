@@ -256,6 +256,8 @@ test("the sanitizer: size costs no more than size, also when one opener fills th
 		"<?x?>": [filled("<?x?>"), /^<svg xmlns="[^"]+"><\/svg>$/],
 		"<set><set/></set>": [filled("<set><set/></set>"), /^<svg xmlns="[^"]+"><\/svg>$/],
 		"url(x) ": [filled("url(x) ", '<svg><rect style="fill:', '"/></svg>'), /^<svg xmlns="[^"]+"><rect style="fill:(none )+"\/><\/svg>$/],
+		"<![CDATA[x]]>": [filled("<![CDATA[x]]>"), /^<svg xmlns="[^"]+">x+<\/svg>$/],
+		' a="1"': [filled(' a="1"', '<svg xmlns="http://www.w3.org/2000/svg"><rect', "/></svg>"), /^<svg xmlns="[^"]+"><rect( a="1")+\/><\/svg>$/],
 		"an ordinary drawing": [filled('<path d="M0 0h1v1z" fill="url(#g)"/>', '<svg xmlns="http://www.w3.org/2000/svg">'), /^<svg xmlns="[^"]+">(<path d="M0 0h1v1z" fill="url\(#g\)"\/>)+<\/svg>$/],
 	};
 	for (const [name, [svg, expected]] of Object.entries(closed)) {
@@ -308,12 +310,13 @@ test("the sanitizer: what it took out or refused, it still does, read tag by tag
 	assert.equal(sanitizeSvg('<svg><a data-x="java&Tab;script&colon;alert(1)"><rect/></a></svg>'), undefined);
 	assert.equal(sanitizeSvg('<svg><rect style="background:url(&#106;avascript:alert(1))"/></svg>'), `${SVG}<rect style="background:none)"/></svg>`);
 
-	// the prolog, the DOCTYPE with what it declares, comments, processing instructions and CDATA go with all they hold
+	// the prolog, the DOCTYPE with what it declares, comments and processing instructions go with all they hold;
+	// what a CDATA section holds is text, cleaned like the rest
 	const dressed =
 		'\uFEFF<?xml version="1.0" encoding="UTF-8"?>\n<!-- Generator: x > y <script>z()</script> -->\n' +
 		'<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [\n\t<!ENTITY ns_svg "http://www.w3.org/2000/svg">\n] >\n' +
 		'<svg viewBox="0 0 1 1"><style><![CDATA[.a{fill:url(https://evil.example/f)}]]></style><?php x ?><rect/></svg>\n';
-	assert.equal(sanitizeSvg(dressed), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><style></style><rect/></svg>');
+	assert.equal(sanitizeSvg(dressed), '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><style>.a{fill:none}</style><rect/></svg>');
 	assert.equal(sanitizeSvg("<!doctype svg><svg><rect/></svg>"), rect);
 	// one that never ends (it used to stay in what came back), a DOCTYPE whose "[" never gets its "]>" (it used
 	// to end at the first ">"), a declaration on its own, a comment that taking another out puts together, a tag
@@ -362,6 +365,63 @@ test("the sanitizer: taking one thing out never puts another together", () => {
 	const full = paths(11);
 	assert.ok(full.length <= MAX_SVG_BYTES && full.length + 35 > MAX_SVG_BYTES);
 	assert.equal(sanitizeSvg(full), undefined);
+});
+
+test("the sanitizer: tags as an XML parser reads them, the root's own attributes, CSS kept in CDATA", () => {
+	const SVG = '<svg xmlns="http://www.w3.org/2000/svg">';
+	// the root tag ends at its ">" outside quotes, and xmlns and fill are looked for among its attributes
+	const labelled = '<svg aria-label="a > b" xmlns="http://www.w3.org/2000/svg" fill="#222"><rect/></svg>';
+	assert.equal(sanitizeSvg(labelled), labelled, "no second xmlns");
+	assert.equal(sanitizeSvg(labelled, { fill: "#61DAFB" }), labelled, "no second fill");
+	assert.equal(
+		sanitizeSvg('<svg aria-label="its xmlns = x, its fill = y" xmlns:xlink="http://www.w3.org/1999/xlink"><rect/></svg>', { fill: "#61DAFB" }),
+		'<svg fill="#61DAFB" xmlns="http://www.w3.org/2000/svg" aria-label="its xmlns = x, its fill = y" xmlns:xlink="http://www.w3.org/1999/xlink"><rect/></svg>',
+		"a value that talks about them is not them"
+	);
+
+	// CSS that an SVG keeps in a CDATA section (Illustrator writes it so) stays, as text, and is cleaned like any other
+	assert.equal(
+		sanitizeSvg('<svg><style type="text/css"><![CDATA[.st0{fill:#f00} a > b{stroke:url(#g)} @import "x.css"; .c{fill:url(https://evil.example/f)}]]></style><path class="st0"/></svg>'),
+		`${SVG}<style type="text/css">.st0{fill:#f00} a &gt; b{stroke:url(#g)}  .c{fill:none}</style><path class="st0"/></svg>`
+	);
+	// ... and so does any other CDATA section: it is text wherever it stands, with "<", ">" and "&" as references
+	assert.equal(sanitizeSvg("<svg><text><![CDATA[a < b & c]]></text><desc><![CDATA[x]]]]><![CDATA[>y]]></desc></svg>"), `${SVG}<text>a &lt; b &amp; c</text><desc>x]]&gt;y</desc></svg>`);
+	assert.equal(sanitizeSvg("<svg><desc><![CDATA[<script>alert(1)</script> &#106;avascript:]]></desc></svg>"), `${SVG}<desc>&lt;script&gt;alert(1)&lt;/script&gt; &amp;#106;avascript:</desc></svg>`);
+	// in a dropped element it goes with the element
+	assert.equal(sanitizeSvg("<svg><script><![CDATA[alert(1)]]></script><rect/></svg>"), `${SVG}<rect/></svg>`);
+	// what a CDATA section helps to spell is cleaned like what is written out
+	assert.equal(sanitizeSvg("<svg><<![CDATA[script]]>>alert(1)</script><rect/></svg>"), `${SVG}<rect/></svg>`);
+	assert.equal(sanitizeSvg('<svg><rect a="<![CDATA[" onload="alert(1)]]>"/></svg>'), `${SVG}<rect a=""/></svg>`);
+	assert.equal(sanitizeSvg("<svg><style><![CDATA[a{b:url(javascript:alert(1))}]]></style></svg>"), `${SVG}<style>a{b:none)}</style></svg>`);
+	assert.equal(sanitizeSvg("<svg><style><![CDATA[c{d:u\\72l(https://evil.example/f)}]]></style></svg>"), undefined);
+
+	// a tag an XML parser would not take as it is written (an HTML parser would, and find the handler): no usable SVG
+	const loose = [
+		'<svg><rect width="9"onclick="a()"/></svg>', // nothing between two attributes
+		'<svg><rect/onclick="a()"></rect></svg>', // "/" for a space
+		'<svg><rect width="9" /onclick="a()"></rect></svg>',
+		"<svg><rect width=9 height=9/></svg>", // no quotes
+		'<svg><rect hidden width="9"/></svg>', // no value
+		'<svg><rect title="a <b> c"/></svg>', // "<" in a value, in either kind of quote
+		"<svg><rect title='a <b> c'/></svg>",
+		"<svg><text>a < b</text></svg>", // "<" in text that begins no tag
+		'<svg><g></g x="1"></svg>', // more than a name in a closing tag
+		'<svg><rect width="9"\u00A0height="9"/></svg>', // a space that is none of XML's
+	];
+	for (const svg of loose) assert.equal(sanitizeSvg(svg), undefined, svg);
+	// a link is a link under any prefix (the link step knows prefixes of letters, digits, "_" and "-"), in any
+	// case, in either kind of quote
+	const dotted = (href, name = "a.b:href") => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:a.b="http://www.w3.org/1999/xlink"><use ${name}=${href}/></svg>`;
+	for (const name of ["a.b:href", "a.b:HREF", "a:b.c:href", "é:href"]) {
+		assert.equal(sanitizeSvg(dotted('"https://evil.example/x.svg#a"', name)), undefined, name);
+		assert.equal(sanitizeSvg(dotted("'https://evil.example/x.svg#a'", name)), undefined, name);
+		assert.equal(sanitizeSvg(dotted("'#a'", name)), dotted("'#a'", name), name);
+	}
+	// ... and what XML allows stays as it is: either quote, ">" in a value, line breaks, spaces around "=", any name
+	const fine = `${SVG}<rect\n\tdata-a='x "y" > z'  title = "it's"\n/><a:b-c.d xmlns:a="urn:x" a:é="&lt;&amp;"></a:b-c.d\r\n><use href='#a'/><text>a > "b" 'c'</text></svg\n>`;
+	assert.equal(sanitizeSvg(fine), fine);
+	// the size is read from the same root tag
+	assert.deepEqual(svgSize('<svg aria-label="a > b" width="128" height="64"><rect/></svg>'), { w: 64, h: 32 });
 });
 
 test("images from libraries, folders and collections: plain images only, SVGs cleaned", () => {

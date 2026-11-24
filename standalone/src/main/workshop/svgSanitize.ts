@@ -26,6 +26,23 @@ const DOCTYPE = /<!DOCTYPE/iy;
 const SUBSET_END = /\]\s*>/g;
 const URL_OPENER = /url\(/gi;
 
+/**
+ * A tag as XML writes one, as far as its attributes go: a name, then attributes, each after
+ * white space (XML's: space, tab, line break) and with its value in quotes (no "<" in it).
+ * What else XML asks of a tag (which characters a name may hold, no attribute twice, no "&"
+ * on its own) is not looked at.
+ */
+const TAG_NAME = /^<[^\s=<>"'/]+/;
+const ATTRIBUTE = /[ \t\r\n]+([^\s=<>"'/]+)[ \t\r\n]*=[ \t\r\n]*(?:"([^"<]*)"|'([^'<]*)')/y;
+const TAG_END = /[ \t\r\n]*\/?>$/y;
+const CLOSING_TAG = /^<\/[^\s=<>"'/]+[ \t\r\n]*>$/;
+
+/** A link that stays: a place in this document (#id) or an embedded raster image. */
+function linkStays(value: string): boolean {
+	const v = value.trim();
+	return /^#[\w.:-]*$/.test(v) || /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(v);
+}
+
 /** Numeric and a few named character references, and CSS escapes, decoded: what a browser would see. */
 export function decodeForCheck(s: string): string {
 	return s
@@ -62,9 +79,11 @@ function markupEnd(xml: string, lt: number): number {
 }
 
 /**
- * `xml` without its processing instructions (the prolog is one), comments, CDATA sections
- * and DOCTYPE, each with all it holds. Each closer is looked for once and the reader goes on
- * behind it. Returns undefined when one of them never ends.
+ * `xml` without its processing instructions (the prolog is one), comments and DOCTYPE, each
+ * with all it holds, and with what its CDATA sections hold as the text it is ("<", ">" and
+ * "&" as references, so it stays text): Illustrator keeps an SVG's CSS in one. Each closer is
+ * looked for once and the reader goes on behind it. Returns undefined when one of them never
+ * ends.
  */
 function withoutMarkup(xml: string): string | undefined {
 	let out = "";
@@ -75,6 +94,7 @@ function withoutMarkup(xml: string): string | undefined {
 		if (end < 0) return undefined;
 		if (end > lt) {
 			out += xml.slice(kept, lt);
+			if (xml.startsWith("<![CDATA[", lt)) out += xml.slice(lt + 9, end - 3).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 			kept = end;
 		}
 		lt = xml.indexOf("<", end > lt ? end : lt + 1);
@@ -145,12 +165,58 @@ function clean(svg: string): string | undefined {
 	// start in a long run of spaces again and again)
 	s = s.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
 	// links (quoted or not): keep same-document (#id) and embedded raster images only
-	s = s.replace(/\s((?:[\w-]+:)?href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>"']+))/gi, (m, _attr, _q, a, b, c) => {
-		const v = String(a ?? b ?? c ?? "").trim();
-		return /^#[\w.:-]*$/.test(v) || /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(v) ? m : "";
-	});
+	s = s.replace(/\s((?:[\w-]+:)?href)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>"']+))/gi, (m, _attr, _q, a, b, c) => (linkStays(String(a ?? b ?? c ?? "")) ? m : ""));
 	// external resources in styles; same-document url(#id) / url('#id') stay
 	return withoutExternalUrls(s.replace(/@import[^;]*;?/gi, "")).replace(/expression\s*\(/gi, "(");
+}
+
+/**
+ * The attributes of a start tag, each name with its value as written, or undefined when the
+ * tag is not written the way XML has it (see ATTRIBUTE).
+ */
+function attributesOf(tag: string): [name: string, value: string][] | undefined {
+	const name = TAG_NAME.exec(tag);
+	if (!name) return undefined;
+	const attributes: [string, string][] = [];
+	let at = name[0].length;
+	for (;;) {
+		ATTRIBUTE.lastIndex = at;
+		const m = ATTRIBUTE.exec(tag);
+		if (!m) break;
+		attributes.push([m[1], m[2] ?? m[3]]);
+		at = ATTRIBUTE.lastIndex;
+	}
+	TAG_END.lastIndex = at;
+	return TAG_END.test(tag) ? attributes : undefined;
+}
+
+/**
+ * The root tag of a cleaned `svg` and the names of its attributes, or undefined when one of
+ * its tags is not written the way XML writes one (see ATTRIBUTE). The handler and link steps
+ * find an attribute by the white space before it; a browser that reads the SVG as HTML also
+ * finds one straight after a quote or a "/" (<rect width="9"onclick="…"/>). A browser that
+ * reads it as XML, as for an <img>, shows nothing of such an SVG, so nothing that was shown
+ * is lost. With every attribute in its place, a link under a prefix the link step does not
+ * know (a.b:href) is seen here. Tags are looked at one by one, not how they nest.
+ */
+function soundRoot(svg: string): { tag: string; names: Set<string> } | undefined {
+	let root: { tag: string; names: Set<string> } | undefined;
+	let sound = true;
+	const read = mapXml(svg, {
+		tag: (tag) => {
+			if (!sound) return "";
+			if (tagInfo(tag).closing) {
+				sound = CLOSING_TAG.test(tag);
+				return "";
+			}
+			const attributes = attributesOf(tag);
+			if (!attributes || attributes.some(([name, value]) => name.slice(name.lastIndexOf(":") + 1).toLowerCase() === "href" && !linkStays(value))) sound = false;
+			else root ??= { tag, names: new Set(attributes.map(([name]) => name)) };
+			return "";
+		},
+		text: () => "",
+	});
+	return read !== undefined && sound ? root : undefined;
 }
 
 export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string | undefined {
@@ -158,28 +224,30 @@ export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string
 	const once = cleanedOnce(input, opts);
 	// Taking one thing out can put another together (` o href="x"nload="…"`, <foreign@import;Object>): what
 	// is clean stays as it is when it is cleaned again, and anything else is refused. So is an SVG that its
-	// xmlns or its colour takes over the size limit: it could not be cleaned again later.
+	// xmlns, its colour or the references in its CDATA text take over the size limit: it could not be cleaned
+	// again later.
 	return once !== undefined && once.length <= MAX_SVG_BYTES && cleanedOnce(once) === once ? once : undefined;
 }
 
 /** `input` as sanitizeSvg returns it, before it is known that nothing more would be taken out of that. */
 function cleanedOnce(input: string, opts: { fill?: string } = {}): string | undefined {
-	// prolog, doctype (no entities), comments, processing instructions, CDATA
+	// prolog, doctype (no entities), comments, processing instructions; what CDATA sections hold, as text
 	const bare = withoutMarkup(input.replace(/^\uFEFF/, ""))?.trim();
 	// one that never ends, or that taking the others out put together, is nothing a browser would show
 	if (bare === undefined || MARKUP.test(bare)) return undefined;
-	if (!/^<svg[\s>]/i.test(bare) || !/<\/svg>\s*$/i.test(bare)) return undefined;
+	if (!/^<svg[\s>]/i.test(bare) || !/<\/svg\s*>\s*$/i.test(bare)) return undefined;
 	const s = clean(bare);
 	if (s === undefined) return undefined;
 	// what is left, read the way a browser would: anything that could run or fetch rejects the SVG
 	const seen = decodeForCheck(s);
 	if (/<\s*(?:[\w-]+:)?script|javascript:|vbscript:|data:text\/html|url\(\s*(?!['"]?#)|@import/i.test(seen)) return undefined;
-	const root = /^<svg\b[^>]*>/i.exec(s)?.[0];
-	if (!root) return undefined;
-	let head = root;
-	if (!/\sxmlns\s*=/.test(head)) head = head.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
-	if (opts.fill && /^#[0-9a-f]{3,8}$/i.test(opts.fill) && !/\sfill\s*=/.test(head)) head = head.replace(/^<svg\b/i, `<svg fill="${opts.fill}"`);
-	return head + s.slice(root.length);
+	// tags as XML has them, and the root (up to its ">" outside quotes) with the attributes it has itself
+	const root = soundRoot(s);
+	if (!root || !s.startsWith(root.tag) || !/^<svg[\s/>]/i.test(root.tag)) return undefined;
+	let head = root.tag;
+	if (!root.names.has("xmlns")) head = head.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+	if (opts.fill && /^#[0-9a-f]{3,8}$/i.test(opts.fill) && !root.names.has("fill")) head = head.replace(/^<svg\b/i, `<svg fill="${opts.fill}"`);
+	return head + s.slice(root.tag.length);
 }
 
 /**
@@ -219,9 +287,22 @@ export function svgImgUri(svg: string): string {
 	return `data:image/svg+xml;base64,${Buffer.from(svg, "utf8").toString("base64")}`;
 }
 
+/** The first tag of `svg`, up to its ">" outside quotes; "" when it never ends. */
+function firstTag(svg: string): string {
+	let quote = "";
+	for (let i = 0; i < svg.length; i++) {
+		const ch = svg[i];
+		if (quote) {
+			if (ch === quote) quote = "";
+		} else if (ch === '"' || ch === "'") quote = ch;
+		else if (ch === ">") return svg.slice(0, i + 1);
+	}
+	return "";
+}
+
 /** Width and height from an SVG's width/height or viewBox; 48×48 when unknown, scaled to at most 64. */
 export function svgSize(svg: string): { w: number; h: number } {
-	const tag = /^<svg\b[^>]*>/i.exec(svg)?.[0] ?? "";
+	const tag = /^<svg\b/i.test(svg) ? firstTag(svg) : "";
 	const num = (name: string) => {
 		const m = new RegExp(`\\s${name}\\s*=\\s*["']\\s*([\\d.]+)(px)?\\s*["']`, "i").exec(tag);
 		return m ? Number(m[1]) : NaN;

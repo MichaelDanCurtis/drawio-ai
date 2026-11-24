@@ -24,6 +24,7 @@ The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by w
 - A shape added from the **Shape Workshop** goes beside what is selected in the diagram (in the middle of the view when nothing is selected).
 - The Workshop's question dialog (a name for a collection, an address): **Enter** is OK (it was Cancel), and **Esc** is always Cancel.
 - A collection in the Shape Workshop shows a shape added to it at once, also when it was being read at that moment.
+- An SVG in the **Shape Workshop** that keeps its CSS in a CDATA section (Illustrator writes it so) keeps it, so the icon has its colours; one whose root tag has a `>` inside an attribute's value no longer gets a second `xmlns` (it did not show after that), and its size is read right.
 
 ### Security
 
@@ -31,6 +32,7 @@ The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by w
 - Cleaning an SVG no longer takes minutes when it holds a very long run of spaces, or throws on a character reference that names no character.
 - Cleaning an SVG takes time in step with its size, whatever it is made of. A crafted SVG from a gallery or a library (`<!--`, `<script ` or `url(` thousands of times, never closed) could hold the extension host for half a minute. An SVG in which a comment, a processing instruction, a CDATA section, a DOCTYPE, a tag or a dropped element (a script, an animation) never ends is now left out, where part of it used to stay; a script is dropped whatever its prefix (`a.b:script` used to pass).
 - A cleaned SVG has to stay as it is when it is cleaned again. One in which taking a link or an `@import` out put an event handler, a link or a `foreignObject` together from its two halves (`o href="x"nload="…"`) came back with it; it is now left out.
+- An SVG with a tag that is not written the way XML writes one (attributes with nothing between them, without quotes or without a value, a `<` in a value, a `<` in text that begins no tag) is left out: a browser shows nothing of it as an image, and read as HTML it could keep an event handler (`<rect width="9"onclick="…"/>`). A link under an unusual prefix (`a.b:href`) is no longer kept.
 
 ## [0.4.0]
 
