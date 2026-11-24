@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Long chats with an API model.** The whole conversation goes to the provider with every
+  request, so a long chat cost more each time and in the end the provider refused it. When a
+  conversation has grown long (about 60,000 tokens), the model is asked to sum it up for
+  itself, and the chat goes on in a new conversation that starts with that summary. The chat
+  says so; the summary itself is not shown. The diagram is read again as needed.
 - A request made elsewhere in the app while the chat works (the Mapper's, the Shape Workshop's
   "Ask the agent") is no longer refused with "press Stop first". It waits in the strip above
   the box under its own name and follows as the next request.

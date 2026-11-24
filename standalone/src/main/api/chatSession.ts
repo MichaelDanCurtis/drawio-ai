@@ -128,6 +128,27 @@ export function toolArguments(schema: Record<string, unknown>, args: unknown): R
 	return asDescribed({ ...schema, type: "object" }, args) as Record<string, unknown>;
 }
 
+/**
+ * How long a conversation may grow, in characters of what was said, called and answered (about
+ * a quarter as many tokens), before it is continued from a summary. The whole conversation goes
+ * to the provider with every request: one that only grows costs more each time, and ends with
+ * the provider refusing it. Well below what the models take, so that the summary can be asked for.
+ */
+export const SUMMARISE_AT = 240_000;
+/** What a picture counts for in that measure. */
+const PICTURE_SIZE = 6_000;
+/** The longest summary that is carried over. */
+const SUMMARY_MAX = 12_000;
+
+/** What the model is asked when the conversation has grown long. Its answer is for itself: the user does not see it. */
+export const SUMMARY_REQUEST =
+	"This is not a request from the user. This conversation has grown long, and it will go on from a summary in place of its full text. Write that summary now, for yourself, as plain text of at most 400 words: what the user asked for and decided, what you did to the diagram and why, what is still open, and the names and ids you will need. The diagram itself can be read again with the tools, so do not copy it. Do not call any tool, and do not address the user.";
+
+/** How a summary is handed to the conversation that goes on from it. */
+export function withSummary(summary: string, request: string): string {
+	return `<earlier_in_this_chat>\nThe conversation so far, in your own summary (its full text is not kept). Read the diagram again before you change it.\n\n${summary}\n</earlier_in_this_chat>\n\n${request}`;
+}
+
 export class ApiChatSession implements ChatSession {
 	private started = false;
 	private closed = false;
@@ -140,6 +161,14 @@ export class ApiChatSession implements ChatSession {
 	private allowed = new Set<string>();
 	/** The conversation being opened (a provider asked for its models, the keychain for the key). */
 	private opening: Promise<ApiChat> | undefined;
+	/** How much the conversation holds (see SUMMARISE_AT), and what the request under way adds to it. */
+	private size = 0;
+	private adding = 0;
+	/** The size at which a summary is asked for next (moved on when one could not be had). */
+	private summariseAt: number;
+	/** What the model summed up of the conversation before this one; and its words while it writes one. */
+	private summary: string | undefined;
+	private summarising: string | undefined;
 
 	constructor(
 		private readonly o: {
@@ -149,8 +178,12 @@ export class ApiChatSession implements ChatSession {
 			system(): string;
 			tools: ChatTools;
 			handlers: SessionHandlers;
+			/** Tests: another size at which the conversation is summed up (SUMMARISE_AT). */
+			summariseAt?: number;
 		}
-	) {}
+	) {
+		this.summariseAt = o.summariseAt ?? SUMMARISE_AT;
+	}
 
 	/** The model a request goes to: the one picked or in use, else the one picked last, else the first the provider listed. */
 	private current(): ApiModel | undefined {
@@ -224,6 +257,10 @@ export class ApiChatSession implements ChatSession {
 		const held = !!this.chat && !this.chat.blank();
 		this.chat = undefined;
 		this.model = next;
+		// (a summary is one model's own: the next one starts without it)
+		this.summary = undefined;
+		this.size = 0;
+		this.summariseAt = this.o.summariseAt ?? SUMMARISE_AT;
 		if (held) this.o.handlers.onNote?.(`Switched to ${next.name}: it starts a new conversation and does not know the earlier one.`);
 		return this.info?.configOptions ?? undefined;
 	}
@@ -264,7 +301,12 @@ export class ApiChatSession implements ChatSession {
 					.filter((t) => sees || !t.picture)
 					.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
 				callTool: (name, args) => this.callTool(name, args),
-				onText: (text) => this.tell({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } }),
+				onText: (text) => {
+					// (a summary is written for the model itself: it is kept, not shown)
+					if (this.summarising !== undefined) return void (this.summarising += text);
+					this.adding += text.length;
+					this.tell({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+				},
 				images: sees,
 				baseURL: access.baseURL(provider.id),
 			});
@@ -281,6 +323,7 @@ export class ApiChatSession implements ChatSession {
 		const signal = this.stop?.signal ?? AbortSignal.abort();
 		// (a request that is over calls nothing more: nothing is shown, asked or run for it)
 		if (signal.aborted || this.closed) return { text: "The user stopped the request.", isError: true };
+		if (this.summarising !== undefined) return { text: "No tool is to be called for the summary: write it from what you know.", isError: true };
 		const tool = this.o.tools.list().find((t) => t.name === name);
 		if (!tool) return { text: `There is no tool called ${name}.`, isError: true };
 		const input = toolArguments(tool.inputSchema, args);
@@ -307,6 +350,7 @@ export class ApiChatSession implements ChatSession {
 			result = { text: String(e?.message ?? e), isError: true };
 		}
 		ended(!result.isError);
+		this.adding += JSON.stringify(input).length + result.text.length + (result.image ? PICTURE_SIZE : 0);
 		return { text: result.text, ...(result.image ? { image: result.image } : {}), ...(result.isError ? { isError: true } : {}) };
 	}
 
@@ -317,15 +361,27 @@ export class ApiChatSession implements ChatSession {
 		const { access, provider } = this.o;
 		try {
 			// (opening can take a while, a provider asked for its models or a keychain prompt: Stop does not wait for it)
-			const chat = await unlessStopped((this.opening ??= this.open().finally(() => (this.opening = undefined))), mine.signal);
+			let chat = await unlessStopped((this.opening ??= this.open().finally(() => (this.opening = undefined))), mine.signal);
 			if (!chat || mine.signal.aborted) return "cancelled";
-			const text = blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n\n");
+			// (grown long: it goes on from the model's own summary, in a conversation that starts with it)
+			if (!chat.blank() && this.size >= this.summariseAt) {
+				if ((await this.summarise(chat, mine.signal)) === "cancelled") return "cancelled";
+				chat = await unlessStopped((this.opening ??= this.open().finally(() => (this.opening = undefined))), mine.signal);
+				if (!chat || mine.signal.aborted) return "cancelled";
+			}
+			const request = blocks.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("\n\n");
 			const images = blocks.flatMap((b): ApiImage[] => (b.type === "image" ? [{ mimeType: b.mimeType, base64: b.data }] : []));
 			const held = !chat.blank();
+			// (a conversation that starts, or was made to start over, holds nothing: what there is of the one before goes with the request)
+			if (!held) this.size = 0;
+			const text = !held && this.summary ? withSummary(this.summary, request) : request;
+			this.adding = text.length + images.length * PICTURE_SIZE;
 			try {
 				const stopped = await chat.send(text, images, mine.signal);
 				// (the provider answered: it accepts the key. A request that was stopped says nothing about that.)
 				if (stopped !== "cancelled") access.noteRejected(provider.id, false);
+				// (a request that was stopped or declined is forgotten whole by the conversation: it adds nothing)
+				if (!chat.blank() && (stopped === "end_turn" || stopped === "max_tokens")) this.size += this.adding;
 				return stopped;
 			} catch (e) {
 				if (e instanceof ApiError && e.badKey) {
@@ -339,6 +395,37 @@ export class ApiChatSession implements ChatSession {
 		} finally {
 			if (this.stop === mine) this.stop = undefined;
 		}
+	}
+
+	/**
+	 * Has the model sum the conversation up, and drops the conversation for one that starts with
+	 * that summary. When no summary can be had (the model declines, writes next to nothing, the
+	 * provider fails) the conversation goes on as it is, and a summary is tried again when it
+	 * has grown by a quarter.
+	 */
+	private async summarise(chat: ApiChat, signal: AbortSignal): Promise<"cancelled" | undefined> {
+		this.summarising = "";
+		let stopped: string | undefined;
+		try {
+			stopped = await chat.send(SUMMARY_REQUEST, [], signal);
+		} catch {
+			// as it is
+		}
+		const summary = (this.summarising ?? "").trim().slice(0, SUMMARY_MAX);
+		this.summarising = undefined;
+		if (stopped === "cancelled" || signal.aborted) return "cancelled";
+		if (stopped !== "end_turn" || summary.length < 80) {
+			// (what the model did answer stays in the conversation, as any finished exchange does)
+			if (stopped === "end_turn" || stopped === "max_tokens") this.size += SUMMARY_REQUEST.length + summary.length;
+			// (a conversation the provider made start over while asked is short again: the next request sees that)
+			this.summariseAt = Math.round(this.size * 1.25);
+			return undefined;
+		}
+		this.summary = summary;
+		this.chat = undefined;
+		this.summariseAt = this.o.summariseAt ?? SUMMARISE_AT;
+		this.o.handlers.onNote?.(`This chat had grown long: ${this.label} summed it up for itself and goes on from that summary, so each request costs less. It reads the diagram again as it needs to.`);
+		return undefined;
 	}
 
 	public cancel(): void {

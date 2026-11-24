@@ -109,12 +109,13 @@ const offered = (tools = TOOLS) => tools.map((t) => ({ name: t.name, description
  * answers (or a function of its arguments and the stop signal). `decide`: what the user
  * answers a permission card (default: Allow).
  */
-function open(w, id, { answers = {}, decide } = {}) {
+function open(w, id, { answers = {}, decide, summariseAt } = {}) {
 	const seen = { updates: [], asked: [], notes: [], calls: [], order: [] };
 	const session = new ApiChatSession({
 		access: w.access,
 		provider: w.access.provider(id),
 		system: () => "You edit a diagram.",
+		...(summariseAt ? { summariseAt } : {}),
 		tools: {
 			list: () => TOOLS,
 			call: async (name, args, signal) => {
@@ -701,6 +702,109 @@ test("the window's tools as a model is offered them: whole, the ones that ask fi
 	assert.ok(!/VS Code/.test(told));
 	for (const part of ["drawio_get_diagram", "Answering:", "mapper_maps", "Never repeat passwords, tokens or connection strings", "ask the user first"]) assert.ok(told.includes(part), part);
 	assert.ok(!chatSystemPrompt(false).includes("mapper_"));
+});
+
+test("a conversation that has grown long goes on from the model's own summary: asked for unseen, with no tool run, and handed to a conversation that starts over", async () => {
+	const { SUMMARY_REQUEST, SUMMARISE_AT, withSummary } = require("../src/main/api/chatSession");
+	assert.ok(SUMMARISE_AT >= 100_000, "far from where a short chat is");
+	const w = await world();
+	await w.access.saveKey("anthropic", KEY);
+	const { session, seen } = open(w, "anthropic", { summariseAt: 600 });
+	await session.start();
+	const texts = (body) => body.messages.map((m) => (typeof m.content === "string" ? m.content : m.content.map((c) => c.text ?? `[${c.type}]`).join("")));
+	const summary = "The user wants a login flow: a box for the form, one for the check, an arrow between them. I added both boxes (ids a1, a2) and the arrow. Still open: the error path.";
+
+	// short: nothing is summed up
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "One." }]));
+	assert.equal(await ask(session, "Add a box."), "end_turn");
+	// it grows past the mark (what was asked, written, called and answered all count)...
+	w.script.anthropic.push(fake.anthropicAnswer([{ tool: "drawio_get_diagram", id: "toolu_1", input: {} }]), fake.anthropicAnswer([{ text: "Two." }]));
+	const big = open(w, "anthropic", { summariseAt: 600, answers: { drawio_get_diagram: { text: "x".repeat(700), summary: "Read" } } });
+	void big;
+	assert.equal(await ask(session, `Now ${"a longer request ".repeat(40)}`), "end_turn");
+	assert.deepEqual(seen.notes, []);
+	const before = sentTo(w, "/v1/messages").length;
+
+	// ...so the next request first has the model sum it up. It tries a tool: none is run, and nothing of it is shown.
+	w.script.anthropic.push(
+		fake.anthropicAnswer([{ tool: "drawio_get_diagram", id: "toolu_s", input: {} }]),
+		fake.anthropicAnswer([{ text: summary }]),
+		fake.anthropicAnswer([{ text: "Three." }])
+	);
+	const shownBefore = seen.updates.length;
+	const callsBefore = seen.calls.length;
+	assert.equal(await ask(session, "And an arrow."), "end_turn");
+	const sent = sentTo(w, "/v1/messages").slice(before);
+	assert.equal(sent.length, 3, "the summary (its refused tool call makes it two requests), then the request");
+	assert.equal(texts(sent[0]).at(-1), SUMMARY_REQUEST);
+	assert.ok(sent[0].messages.length >= 5, "asked of the whole conversation");
+	assert.match(JSON.stringify(sent[1].messages.at(-1)), /No tool is to be called for the summary/);
+	assert.deepEqual(texts(sent[2]), [withSummary(summary, "And an arrow.")], "a conversation that starts over, with the summary and the request");
+	assert.match(texts(sent[2])[0], /^<earlier_in_this_chat>\n[\s\S]*error path\.\n<\/earlier_in_this_chat>\n\nAnd an arrow\.$/);
+	assert.equal(seen.calls.length, callsBefore, "no tool ran for the summary");
+	assert.deepEqual(seen.updates.slice(shownBefore).map((u) => u.sessionUpdate === "agent_message_chunk" ? u.content.text : u.sessionUpdate).join(""), "Three.", "the summary and its tool call are not shown");
+	assert.deepEqual(seen.notes, ["This chat had grown long: Claude New summed it up for itself and goes on from that summary, so each request costs less. It reads the diagram again as it needs to."]);
+
+	// the next one goes on in the new conversation, without the summary again
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "Four." }]));
+	assert.equal(await ask(session, "Thanks."), "end_turn");
+	const next = sentTo(w, "/v1/messages").at(-1);
+	assert.deepEqual(texts(next), [withSummary(summary, "And an arrow."), "Three.", "Thanks."]);
+	assert.equal(seen.notes.length, 1);
+
+	// a summary is one model's own: another model starts without it
+	await session.setConfigOption("model", "claude-old");
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "Five." }]));
+	assert.equal(await ask(session, "Hello again."), "end_turn");
+	assert.deepEqual(texts(sentTo(w, "/v1/messages").at(-1)), ["Hello again."]);
+});
+
+test("a summary that cannot be had leaves the conversation as it is; Stop while it is written stops the request", async () => {
+	const { SUMMARY_REQUEST } = require("../src/main/api/chatSession");
+	const w = await world();
+	await w.access.saveKey("anthropic", KEY);
+	const { session, seen } = open(w, "anthropic", { summariseAt: 200 });
+	await session.start();
+	const count = (body) => body.messages.length;
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "One." }]));
+	await ask(session, `First ${"and long ".repeat(40)}`);
+
+	// next to nothing for a summary: the request goes to the conversation as it is, and nothing is said
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "ok" }]), fake.anthropicAnswer([{ text: "Two." }]));
+	assert.equal(await ask(session, "Second."), "end_turn");
+	let sent = sentTo(w, "/v1/messages");
+	assert.deepEqual([count(sent.at(-2)), count(sent.at(-1))], [3, 5], "the same conversation, longer by what was asked and answered: it did not start over");
+	assert.ok(JSON.stringify(sent.at(-2)).includes(SUMMARY_REQUEST.slice(0, 40)) && !JSON.stringify(sent.at(-1)).includes("earlier_in_this_chat"));
+	assert.deepEqual(seen.notes, []);
+	assert.equal(said(seen), "One.Two.");
+	// not asked again at once: only when it has grown by a quarter
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "Three." }]));
+	await ask(session, "Third.");
+	assert.equal(sentTo(w, "/v1/messages").length, sent.length + 1);
+
+	// the provider fails while it is asked: the same
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "Four." }]));
+	assert.equal(await ask(session, `Fourth ${"and much longer ".repeat(60)}`), "end_turn");
+	const untilHere = sentTo(w, "/v1/messages").length;
+	w.script.anthropic.push({ status: 500, json: { type: "error", error: { type: "api_error", message: "Internal server error" } } }, fake.anthropicAnswer([{ text: "Five." }]));
+	assert.equal(await ask(session, "Fifth."), "end_turn");
+	assert.equal(sentTo(w, "/v1/messages").length, untilHere + 2, "asked for a summary, which failed, then the request itself");
+	assert.ok(!JSON.stringify(sentTo(w, "/v1/messages").at(-1)).includes("earlier_in_this_chat"));
+	assert.deepEqual(seen.notes, []);
+	// (make it long enough again for the mark that has moved on)
+	w.script.anthropic.push(fake.anthropicAnswer([{ text: "Six." }]));
+	await ask(session, `More ${"and longer still ".repeat(200)}`);
+
+	// Stop while the summary is written: the request ends as stopped, and nothing was sent of it
+	sent = sentTo(w, "/v1/messages");
+	w.script.anthropic.length = 0;
+	w.script.anthropic.push(fake.anthropicUnfinished("The user"));
+	const asking = ask(session, "Seventh.");
+	await until(() => sentTo(w, "/v1/messages").length === sent.length + 1);
+	session.cancel();
+	assert.equal(await asking, "cancelled");
+	assert.equal(sentTo(w, "/v1/messages").length, sent.length + 1);
+	assert.ok(!said(seen).includes("The user"));
 });
 
 test("the stand-in the app's end-to-end run uses: a provider that is none, a key behind a cipher of its own, a request answered through the tools", async () => {
