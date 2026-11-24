@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+- **Maps: connectors are routed.** After the Mapper has placed the shapes, each connector is
+  taken around the shapes in its way and apart from the ones beside it (draw.io's own
+  obstacle-avoiding router; no shape moves), and where two still cross, one hops over the
+  other. Before, every connector ran straight between its ends, through whatever lay there,
+  and the ones leaving a shape on the same side lay on top of each other. Maps with more than
+  600 connectors are drawn as before (routing them takes too long).
+- **Software maps of a repository without services.** A Rust binary (`src/main.rs`,
+  `src/bin/`), axum, actix-web and Rocket routes, and a Python `__main__.py` count as entry
+  points, so such a package is drawn. When nothing is a service, the message says how much was
+  read and which packages are there; and when the repository's working copies are kept in a
+  hidden folder (`.claude/worktrees`), that they were not read and how to map one.
+- The Mapper's dialog wrote "null" under a result without warnings, and ticked off a run that
+  found nothing. A run that found nothing now says so plainly and keeps the dialog open.
 - **Watch it build.** An edit by the AI is shown being made: new shapes appear one after
   another in the order they were added, connectors draw in from start to end, and shapes that
   were moved (also by a layout) glide to their place. It takes about a second at most. The

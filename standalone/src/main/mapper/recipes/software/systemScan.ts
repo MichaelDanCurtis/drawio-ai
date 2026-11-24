@@ -201,6 +201,8 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 	const files = readFiles(root, {
 		maxFiles: 12000,
 		maxBytes: 600_000,
+		// (`bin` is build output nearly everywhere; below a Rust crate's `src` it is its other programs)
+		keepDir: (rel) => /(^|\/)src\/bin$/.test(rel),
 		match: (rel) => {
 			if (VENDOR_RE.test(rel) || (!options.includeTests && TEST_RE.test(rel))) return false;
 			if (/(^|\/)\.git$/.test(rel)) return rel !== ".git"; // a submodule: its own package
@@ -218,6 +220,9 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		},
 	});
 	if (codeSkipped) warnings.push(`Only the first ${maxCode} code files were read (${codeSkipped} more skipped); map a sub-folder for full detail.`);
+	// (hidden folders are skipped, rightly: but where a repository's work goes on in working copies kept in one, say that they are there)
+	const copies = hiddenCheckouts(root);
+	if (copies) warnings.push(`${copies.names.length} working cop${copies.names.length === 1 ? "y" : "ies"} of this repository in ${copies.folder} ${copies.names.length === 1 ? "was" : "were"} not read, as hidden folders are skipped (${copies.names.slice(0, 3).join(", ")}${copies.names.length > 3 ? ", …" : ""}). To map one, choose it as the folder.`);
 
 	const services = new Map<string, ScanService>();
 	const resources = new Map<string, ScanResource>();
@@ -1124,7 +1129,7 @@ export function importsOf(text: string, lang: Lang): { name: string; index: numb
 			add(/^\s*require\s+["']([^"']+)["']/gm);
 			break;
 		case "rs":
-			add(/^\s*(?:use|extern crate)\s+([a-z_][\w]*)/gm);
+			add(/^[ \t]*(?:use|extern crate)\s+([a-z_][\w]*)/gm);
 			break;
 	}
 	return out;
@@ -1214,7 +1219,78 @@ function messagingUses(text: string): { name: string; dir: "publishes" | "consum
 	return out;
 }
 
+/**
+ * Working copies of the repository kept in a hidden folder below it (git worktrees, as coding
+ * agents make them), which a scan does not read. The main checkout of such a repository can
+ * hold next to nothing while the work is all in there.
+ */
+export function hiddenCheckouts(root: string): { folder: string; names: string[] } | undefined {
+	for (const folder of [".claude/worktrees", ".worktrees", ".git-worktrees"]) {
+		let entries: fs.Dirent[];
+		try {
+			// (a link is not followed, as in the scan itself: what it points to is not below this folder)
+			const parts = folder.split("/");
+			if (parts.some((_, i) => fs.lstatSync(path.join(root, ...parts.slice(0, i + 1))).isSymbolicLink())) continue;
+			entries = fs.readdirSync(path.join(root, folder), { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		const names = entries
+			.slice(0, 2000)
+			.filter((e) => e.isDirectory() && fs.existsSync(path.join(root, folder, e.name, ".git")))
+			.map((e) => e.name)
+			.sort();
+		if (names.length) return { folder, names };
+	}
+	return undefined;
+}
+
 const HTTP_METHODS = "get|post|put|patch|delete|head|options|all";
+
+/**
+ * Rust source with every item behind `#[cfg(test)]` blanked out (a `use …;`, or a module or
+ * function with its whole body), the rest as it is and on the same lines. Read once from start
+ * to end, whatever is in it.
+ */
+export function withoutTestItems(text: string): string {
+	const guard = /#\[cfg\(test\)\]/g;
+	let out = "";
+	let from = 0;
+	for (let m = guard.exec(text); m; m = guard.exec(text)) {
+		if (m.index < from) continue;
+		// the item ends at its `;`, or at the brace that closes the one it opens; a brace or a
+		// semicolon inside a string or a character is text, not the item's
+		let end = m.index + m[0].length;
+		let depth = 0;
+		for (; end < text.length; end++) {
+			const ch = text[end];
+			if (ch === '"') {
+				// r"…", r#"…"#: ends at the quote with as many #, and knows no escapes
+				let hashes = 0;
+				while (text[end - 1 - hashes] === "#") hashes++;
+				if (text[end - 1 - hashes] === "r") {
+					const close = text.indexOf(`"${"#".repeat(hashes)}`, end + 1);
+					end = close < 0 ? text.length : close + hashes;
+				} else {
+					for (end++; end < text.length && text[end] !== '"'; end++) if (text[end] === "\\") end++;
+				}
+			} else if (ch === "'") {
+				// a character ('{', '\n', '\u{7b}'), not a lifetime ('a)
+				if (text[end + 1] === "\\") {
+					const close = text.indexOf("'", end + 3);
+					if (close > 0 && close - end <= 12) end = close;
+				} else if (text[end + 2] === "'") end += 2;
+			} else if (ch === "{") depth++;
+			else if (ch === "}" && --depth <= 0) break;
+			else if (ch === ";" && depth === 0) break;
+		}
+		end = Math.min(text.length, end + 1);
+		out += text.slice(from, m.index) + text.slice(m.index, end).replace(/[^\n]/g, " ");
+		from = end;
+		guard.lastIndex = end;
+	}
+	return out + text.slice(from);
+}
 
 /** HTTP routes, scheduled jobs and other entry points declared in code. */
 export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[] {
@@ -1250,6 +1326,8 @@ export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[]
 		}
 		if (/(^|\/)urls\.py$/.test(rel)) for (const m of text.matchAll(/\b(?:re_)?path\(\s*r?["']([^"']*)["']/g)) add("http", `* /${m[1]}`, m.index ?? 0, "Django");
 		for (const m of text.matchAll(/@(?:click|\w+)\.command\([^)]*\)\s*(?:@[^\n]*\n\s*)*def\s+(\w+)/g)) add("cli", `CLI ${m[1]}`, m.index ?? 0, "click/typer");
+		// (a module that runs as a program: `python -m package`)
+		if (/(^|\/)__main__\.py$/.test(rel)) add("cli", `python -m ${rel.split("/").slice(-2, -1)[0] ?? "package"}`, 0, "Python");
 		for (const m of text.matchAll(/@(?:\w+\.)?(?:task|shared_task)\b/g)) add("consumer", `Celery task (${text.slice((m.index ?? 0) + m[0].length).match(/def\s+(\w+)/)?.[1] ?? "?"})`, m.index ?? 0, "Celery");
 		for (const m of text.matchAll(/(?:scheduled_job|add_job)\([^)]*?["']cron["'][^)]*/g)) add("schedule", m[0].slice(0, 60), m.index ?? 0, "APScheduler");
 		for (const m of text.matchAll(/schedule\.every\([^)]*\)\.[\w.]+/g)) add("schedule", m[0], m.index ?? 0, "schedule");
@@ -1274,6 +1352,42 @@ export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[]
 			const method = /^Handle/.test(m[1]) ? (/^"?(GET|POST|PUT|PATCH|DELETE)\s/.exec(m[2])?.[1] ?? "*") : m[1].toUpperCase();
 			add("http", `${method} ${m[2].replace(/^(GET|POST|PUT|PATCH|DELETE)\s+/, "")}`, m.index ?? 0, "Go net/http");
 		}
+	} else if (lang === "rs") {
+		// a binary: src/main.rs, or one of src/bin/
+		// (each of these looks at one line or a bounded stretch: a file of 600 KB is read in a few ms, whatever is in it)
+		if (/(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/.test(rel)) {
+			const main = /^[ \t]*(?:pub[ \t]+)?(?:async[ \t]+)?fn[ \t]+main[ \t]*\(/m.exec(text);
+			if (main) {
+				const parts = rel.split("/");
+				const at = parts.lastIndexOf("src");
+				// (a crate at the root of what is mapped has no folder to be named after: its package's entry says whose it is)
+				const name = parts[at + 1] === "bin" ? parts[at + 2].replace(/\.rs$/, "") : parts[at - 1];
+				add("cli", name ? `binary ${name}` : "binary", main.index + main[0].search(/\S/), "Rust");
+			}
+		}
+		// (routes a crate's own tests build are not what it serves)
+		const served = withoutTestItems(text);
+		// axum / warp-style routers: `.route("/path", get(a).post(b))`, the handlers read up to the call's own end
+		for (const m of served.matchAll(/\.route\(\s{0,200}"(\/[^"\n]{0,300})"\s{0,200},/g)) {
+			if (out.length >= 400) break;
+			const from = m.index + m[0].length;
+			let depth = 1;
+			let end = from;
+			for (; end < served.length && end - from < 2000 && depth > 0; end++) depth += served[end] === "(" ? 1 : served[end] === ")" ? -1 : 0;
+			const handlers = served.slice(from, end);
+			// (a method is a call at the handlers' own level: `get(...)` or `.post(...)`, not one inside a closure's body)
+			let level = 0;
+			const seen = new Set<string>();
+			for (const part of handlers.matchAll(/[()]|\b(get|post|put|patch|delete|head|options|any)\s{0,20}(?=\()/g)) {
+				if (part[0] === "(") level++;
+				else if (part[0] === ")") level--;
+				else if (level === 0 && !seen.has(part[1])) {
+					seen.add(part[1]);
+					add("http", `${part[1] === "any" ? "*" : part[1].toUpperCase()} ${m[1]}`, m.index, "axum");
+				}
+			}
+		}
+		for (const m of served.matchAll(/#\[[ \t]{0,20}(get|post|put|patch|delete|head|options)[ \t]{0,20}\([ \t]{0,20}"([^"\n]{1,300})"/g)) if (m[2].startsWith("/")) add("http", `${m[1].toUpperCase()} ${m[2]}`, m.index, "actix-web/Rocket");
 	} else if (lang === "rb") {
 		if (/(^|\/)routes\.rb$/.test(rel)) for (const m of text.matchAll(/^\s*(get|post|put|patch|delete|resources?)\s+["':]([^"',\s]+)/gm)) add("http", `${m[1].toUpperCase()} /${m[2]}`, m.index ?? 0, "Rails");
 	}

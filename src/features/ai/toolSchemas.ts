@@ -153,9 +153,10 @@ const operation = {
 				"organic",
 				"circle",
 				"grid",
+				"route",
 			],
 			description:
-				"[layout] Automatic layout (draw.io's ELK engine). hierarchical = top-down flow; horizontalHierarchical = left-to-right. Lays out the children of `parent` (default: the page, or the common parent of `ids`); with `ids`, only those cells and the edges between them move.",
+				"[layout] Automatic layout (draw.io's ELK engine). hierarchical = top-down flow; horizontalHierarchical = left-to-right. Lays out the children of `parent` (default: the page, or the common parent of `ids`); with `ids`, only those cells and the edges between them move. route = move no shape: only re-route the right-angled connectors around the shapes in their way and apart from each other (use it after placing shapes by hand, when connectors overlap or cross shapes); with `ids`, the connectors listed or between those cells.",
 		},
 		spacing: { type: "number", description: "[layout] Default 50." },
 		xml: {

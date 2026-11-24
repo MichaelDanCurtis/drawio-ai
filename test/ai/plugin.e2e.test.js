@@ -231,6 +231,59 @@ test("group with label, align, distribute, layout and zOrder all apply", async (
 	}
 });
 
+test("route: a connector is taken around the shape in its way; no shape moves, other kinds of connector keep their look, and it is one undo step", async () => {
+	const { idMap } = await apply([
+		{ op: "addShape", tempId: "$ra", label: "From", x: 5000, y: 5000, width: 120, height: 60 },
+		{ op: "addShape", tempId: "$rb", label: "In the way", x: 5200, y: 4960, width: 120, height: 140 },
+		{ op: "addShape", tempId: "$rc", label: "To", x: 5400, y: 5000, width: 120, height: 60 },
+		{ op: "addEdge", tempId: "$re", source: "$ra", target: "$rc" },
+		{ op: "addEdge", tempId: "$rs", source: "$ra", target: "$rc", styleProps: { edgeStyle: "none", curved: 1 } },
+		// draw.io's "Curved" connector is a right-angled one drawn round; a locked one, and one that is hidden, are not to be touched
+		{ op: "addEdge", tempId: "$rv", source: "$ra", target: "$rc", styleProps: { curved: 1 } },
+		{ op: "addEdge", tempId: "$rl", source: "$ra", target: "$rc", styleProps: { locked: 1 } },
+		{ op: "addEdge", tempId: "$rh", source: "$ra", target: "$rc" },
+	]);
+	await page.evaluate((id) => editorUi.editor.graph.model.setVisible(editorUi.editor.graph.model.getCell(id), false), idMap.$rh);
+	const asSaved = (ids) => page.evaluate((ids) => ids.map((id) => { const m = editorUi.editor.graph.model, c = m.getCell(id); return [m.getStyle(c), (m.getGeometry(c).points || []).length]; }), ids);
+	const untouched = await asSaved([idMap.$rv, idMap.$rl, idMap.$rh]);
+	const state = (id) =>
+		page.evaluate((id) => {
+			const g = editorUi.editor.graph;
+			const s = g.view.getState(g.model.getCell(id));
+			return { box: [s.x, s.y, s.width, s.height], points: (s.absolutePoints || []).filter(Boolean).map((p) => [p.x, p.y]), style: g.model.getStyle(g.model.getCell(id)), waypoints: (g.model.getGeometry(g.model.getCell(id)).points || []).length };
+		}, id);
+	// (a stretch of the line and the shape's inside share some area)
+	const through = (points, [x, y, w, h]) =>
+		points.some((p, i) => i > 0 && Math.max(Math.min(points[i - 1][0], p[0]), x + 2) <= Math.min(Math.max(points[i - 1][0], p[0]), x + w - 2) && Math.max(Math.min(points[i - 1][1], p[1]), y + 2) <= Math.min(Math.max(points[i - 1][1], p[1]), y + h - 2));
+	const blocker = (await state(idMap.$rb)).box;
+	const boxes = async () => Promise.all([idMap.$ra, idMap.$rb, idMap.$rc].map(async (id) => (await state(id)).box));
+	const placed = await boxes();
+	const before = await state(idMap.$re);
+	assert.ok(through(before.points, blocker), "drawn as it is, the connector runs through the shape between its ends");
+	const straight = await state(idMap.$rs);
+
+	// meant for one page while another is shown: nothing is done (two pages can hold the same ids, a map's are the same in every map)
+	const routeOn = (pageId) => request({ action: "aiApplyOps", ops: [{ op: "layout", type: "route", ids: [idMap.$ra, idMap.$rb, idMap.$rc] }], atomic: true, flash: false, selectResult: false, page: pageId });
+	const elsewhere = await routeOn("some-other-page");
+	assert.deepEqual(elsewhere.results.map((x) => [x.ok, /the page shown changed/.test(x.error)]), [[false, true]]);
+	assert.deepEqual(await state(idMap.$re), before, "nothing was routed");
+	assert.equal(elsewhere.page, await page.evaluate(() => editorUi.currentPage.getId()), "the answer says which page is shown");
+
+	const r = await routeOn(elsewhere.page);
+	assert.deepEqual(r.results.filter((x) => !x.ok), []);
+	assert.deepEqual(r.results[0].ids, [idMap.$re], "only the right-angled connector is routed");
+	const after = await state(idMap.$re);
+	assert.ok(after.waypoints > 0, "it got waypoints");
+	assert.ok(!through(after.points, blocker), JSON.stringify(after.points));
+	assert.deepEqual(await boxes(), placed, "no shape moved");
+	assert.deepEqual(await state(idMap.$rs), straight, "a connector of another kind is left as it was");
+	assert.deepEqual(await asSaved([idMap.$rv, idMap.$rl, idMap.$rh]), untouched, "so are a curved, a locked and a hidden one");
+	assert.match(untouched[0][0], /edgeStyle=orthogonalEdgeStyle.*curved=1/);
+
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+	assert.deepEqual(await state(idMap.$re), before);
+});
+
 test("watching a batch being built: what is new appears in order and what moved glides, only as shown; the edit itself is there at once, and nothing is left behind", async () => {
 	// (`running`: the animations a script started, which is how a batch is shown; the page's own styles may be in the middle of a transition of theirs)
 	const build = () => page.evaluate(() => ({ ...window.drawioAiBuild, playing: window.drawioAiBuild.playing(), running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation) && (a.playState === "running" || a.playState === "pending")).length }));

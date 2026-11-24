@@ -15,6 +15,7 @@ The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by w
 
 ### Changed
 
+- `drawio_apply_operations`: the `layout` operation has a new type, `route`. It moves no shape: it re-routes the right-angled connectors around the shapes in their way and apart from each other (draw.io's obstacle-avoiding router), for the page, or for the cells or connectors in `ids`. Curved connectors (draw.io's "Curved" is a right-angled one drawn round) and those of a locked or hidden layer are left as they are.
 - Reading an empty page tells the model it is the diagram to draw on (it could take "no cells" for "no diagram" and start a page of its own), and a render that gives no picture says that an empty page gives none and how to check, instead of "could not render".
 - A shape added from the **Shape Workshop** goes beside what is selected in the diagram (in the middle of the view when nothing is selected).
 - The Workshop's question dialog (a name for a collection, an address): **Enter** is OK (it was Cancel), and **Esc** is always Cancel.

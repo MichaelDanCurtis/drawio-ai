@@ -90,6 +90,11 @@ system into the diagram. Every map is collected **read-only**, drawn as one pend
 change on its own page (keep or revert it like any AI change), and can then be handed
 to your agent to review, complete or dig into.
 
+The Mapper places the shapes itself (`mapper/layout.ts`); the connectors are then routed
+by draw.io's obstacle-avoiding router (the plugin's `layout` operation, type `route`): each
+goes around the shapes in its way and apart from the ones beside it, and no shape moves.
+Maps with more than 600 connectors are left unrouted, as routing them takes too long.
+
 | Category | Maps |
 | --- | --- |
 | Software | Connectivity (services, databases, queues, external APIs from compose, Kubernetes YAML, config and code), data flow (entry points; the agent traces the flows), module dependencies, class diagram, API surface (OpenAPI/Swagger, GraphQL), GitHub Actions workflows, live Kubernetes cluster |

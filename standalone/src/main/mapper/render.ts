@@ -15,6 +15,14 @@ export const STYLES = {
 	edge: "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6b7280;fontSize=10;",
 };
 
+/**
+ * Above this many connectors a map's lines are left plain: neither routed around the shapes
+ * (see drawMap) nor drawn hopping over each other. Both compare every connector with the others,
+ * which a very large map pays for on every redraw.
+ */
+export const MAX_ROUTED_EDGES = 600;
+/** Where two connectors cross, one hops over the other: a crossing is not read as a junction. */
+const EDGE_CROSSINGS = "jumpStyle=arc;jumpSize=6;";
 const ICON_LABEL = "verticalLabelPosition=bottom;verticalAlign=top;labelPosition=center;align=center;";
 
 export const escapeXml = (s: string) =>
@@ -116,13 +124,14 @@ export function renderGraph(graph: MapGraph, options: RenderOptions): { xml: str
 		}
 	}
 
+	const crossings = graph.edges.length <= MAX_ROUTED_EDGES ? EDGE_CROSSINGS : "";
 	graph.edges.forEach((e, i) => {
 		const source = cellId.get(e.from);
 		const target = cellId.get(e.to);
 		if (!source || !target || !layout.boxes.has(e.from) || !layout.boxes.has(e.to)) return;
 		const value = e.label ? ` value="${escapeXml(escapeHtml(e.label))}"` : "";
 		out.push(
-			`<mxCell id="mapE${i + 1}"${value} style="${escapeXml(e.style ?? STYLES.edge)}" edge="1" parent="1" source="${source}" target="${target}"><mxGeometry relative="1" as="geometry"/></mxCell>`
+			`<mxCell id="mapE${i + 1}"${value} style="${escapeXml(withStyle(e.style ?? STYLES.edge, crossings))}" edge="1" parent="1" source="${source}" target="${target}"><mxGeometry relative="1" as="geometry"/></mxCell>`
 		);
 		cells++;
 	});
