@@ -231,6 +231,43 @@ test("group with label, align, distribute, layout and zOrder all apply", async (
 	}
 });
 
+test("route: a connector is taken around the shape in its way; no shape moves, other kinds of connector keep their look, and it is one undo step", async () => {
+	const { idMap } = await apply([
+		{ op: "addShape", tempId: "$ra", label: "From", x: 5000, y: 5000, width: 120, height: 60 },
+		{ op: "addShape", tempId: "$rb", label: "In the way", x: 5200, y: 4960, width: 120, height: 140 },
+		{ op: "addShape", tempId: "$rc", label: "To", x: 5400, y: 5000, width: 120, height: 60 },
+		{ op: "addEdge", tempId: "$re", source: "$ra", target: "$rc" },
+		{ op: "addEdge", tempId: "$rs", source: "$ra", target: "$rc", styleProps: { edgeStyle: "none", curved: 1 } },
+	]);
+	const state = (id) =>
+		page.evaluate((id) => {
+			const g = editorUi.editor.graph;
+			const s = g.view.getState(g.model.getCell(id));
+			return { box: [s.x, s.y, s.width, s.height], points: (s.absolutePoints || []).filter(Boolean).map((p) => [p.x, p.y]), style: g.model.getStyle(g.model.getCell(id)), waypoints: (g.model.getGeometry(g.model.getCell(id)).points || []).length };
+		}, id);
+	// (a stretch of the line and the shape's inside share some area)
+	const through = (points, [x, y, w, h]) =>
+		points.some((p, i) => i > 0 && Math.max(Math.min(points[i - 1][0], p[0]), x + 2) <= Math.min(Math.max(points[i - 1][0], p[0]), x + w - 2) && Math.max(Math.min(points[i - 1][1], p[1]), y + 2) <= Math.min(Math.max(points[i - 1][1], p[1]), y + h - 2));
+	const blocker = (await state(idMap.$rb)).box;
+	const boxes = async () => Promise.all([idMap.$ra, idMap.$rb, idMap.$rc].map(async (id) => (await state(id)).box));
+	const placed = await boxes();
+	const before = await state(idMap.$re);
+	assert.ok(through(before.points, blocker), "drawn as it is, the connector runs through the shape between its ends");
+	const straight = await state(idMap.$rs);
+
+	const r = await apply([{ op: "layout", type: "route", ids: [idMap.$ra, idMap.$rb, idMap.$rc] }]);
+	assert.deepEqual(r.results.filter((x) => !x.ok), []);
+	assert.deepEqual(r.results[0].ids, [idMap.$re], "only the right-angled connector is routed");
+	const after = await state(idMap.$re);
+	assert.ok(after.waypoints > 0, "it got waypoints");
+	assert.ok(!through(after.points, blocker), JSON.stringify(after.points));
+	assert.deepEqual(await boxes(), placed, "no shape moved");
+	assert.deepEqual(await state(idMap.$rs), straight, "a connector of another kind is left as it was");
+
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+	assert.deepEqual(await state(idMap.$re), before);
+});
+
 test("ELK layout really separates overlapping shapes, and edit+layout is one undo step", async () => {
 	const { idMap } = await apply([
 		{ op: "addShape", tempId: "$c1", label: "L1", x: 2000, y: 2000 },

@@ -568,6 +568,39 @@ Draw.loadPlugin((ui: any) => {
 			(c: any) => model.isVertex(c) && (!cellFilter || cellFilter(c))
 		);
 
+		if (op.type === "route") {
+			// draw.io's obstacle-avoiding router (libavoid): no shape moves. Each connector gets
+			// waypoints that take it around the shapes in its way, and connectors that would run
+			// along the same stretch are set apart. Only right-angled connectors are routed (the
+			// router makes every connector it touches one): crow's-foot, curved and straight
+			// ones keep their look.
+			if (typeof W.LibavoidRouting === "undefined" || typeof ui.resolveLayoutList !== "function") {
+				throw new Error("The connector router is not available in this version of draw.io");
+			}
+			const under = (cell: any): boolean => {
+				for (let c = cell; c != null; c = model.getParent(c)) if (c === parent) return true;
+				return false;
+			};
+			const routed = new Set<string>();
+			const wanted = (c: any): boolean => {
+				if (!model.isEdge(c) || graph.getCellStyle(c)?.edgeStyle !== "orthogonalEdgeStyle") return false;
+				const source = model.getTerminal(c, true);
+				const target = model.getTerminal(c, false);
+				if (!source || !target) return false;
+				const ok = scope.size === 0 ? under(c) : scope.has(c) || (inScope(source) && inScope(target));
+				if (ok) routed.add(c.id);
+				return ok;
+			};
+			for (const layout of graph.createLayouts(ui.resolveLayoutList(W.LibavoidRouting.LAYOUT_NAME))) {
+				// (always scoped: unscoped, the router takes the user's selection, or every connector of the page)
+				layout.cellFilter = wanted;
+				const apply = await new Promise<() => void>((res, rej) =>
+					layout.prepare(parent, (err: any, ap: () => void) => (err ? rej(err instanceof Error ? err : new Error(String(err))) : res(ap)))
+				);
+				await runLayoutStep(apply);
+			}
+			return [...routed];
+		}
 		if (op.type === "grid") {
 			const cols = Math.ceil(Math.sqrt(vertices.length));
 			const cw = Math.max(...vertices.map((v: any) => model.getGeometry(v).width), 0) + spacing;

@@ -218,6 +218,9 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		},
 	});
 	if (codeSkipped) warnings.push(`Only the first ${maxCode} code files were read (${codeSkipped} more skipped); map a sub-folder for full detail.`);
+	// (hidden folders are skipped, rightly: but where a repository's work goes on in working copies kept in one, say that they are there)
+	const copies = hiddenCheckouts(root);
+	if (copies) warnings.push(`${copies.names.length} working cop${copies.names.length === 1 ? "y" : "ies"} of this repository in ${copies.folder} ${copies.names.length === 1 ? "was" : "were"} not read, as hidden folders are skipped (${copies.names.slice(0, 3).join(", ")}${copies.names.length > 3 ? ", …" : ""}). To map one, choose it as the folder.`);
 
 	const services = new Map<string, ScanService>();
 	const resources = new Map<string, ScanResource>();
@@ -1214,6 +1217,25 @@ function messagingUses(text: string): { name: string; dir: "publishes" | "consum
 	return out;
 }
 
+/**
+ * Working copies of the repository kept in a hidden folder below it (git worktrees, as coding
+ * agents make them), which a scan does not read. The main checkout of such a repository can
+ * hold next to nothing while the work is all in there.
+ */
+export function hiddenCheckouts(root: string): { folder: string; names: string[] } | undefined {
+	for (const folder of [".claude/worktrees", ".worktrees", ".git-worktrees"]) {
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(path.join(root, folder), { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		const names = entries.filter((e) => e.isDirectory() && fs.existsSync(path.join(root, folder, e.name, ".git"))).map((e) => e.name).sort();
+		if (names.length) return { folder, names };
+	}
+	return undefined;
+}
+
 const HTTP_METHODS = "get|post|put|patch|delete|head|options|all";
 
 /** HTTP routes, scheduled jobs and other entry points declared in code. */
@@ -1250,6 +1272,8 @@ export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[]
 		}
 		if (/(^|\/)urls\.py$/.test(rel)) for (const m of text.matchAll(/\b(?:re_)?path\(\s*r?["']([^"']*)["']/g)) add("http", `* /${m[1]}`, m.index ?? 0, "Django");
 		for (const m of text.matchAll(/@(?:click|\w+)\.command\([^)]*\)\s*(?:@[^\n]*\n\s*)*def\s+(\w+)/g)) add("cli", `CLI ${m[1]}`, m.index ?? 0, "click/typer");
+		// (a module that runs as a program: `python -m package`)
+		if (/(^|\/)__main__\.py$/.test(rel)) add("cli", `python -m ${rel.split("/").slice(-2, -1)[0] ?? "package"}`, 0, "Python");
 		for (const m of text.matchAll(/@(?:\w+\.)?(?:task|shared_task)\b/g)) add("consumer", `Celery task (${text.slice((m.index ?? 0) + m[0].length).match(/def\s+(\w+)/)?.[1] ?? "?"})`, m.index ?? 0, "Celery");
 		for (const m of text.matchAll(/(?:scheduled_job|add_job)\([^)]*?["']cron["'][^)]*/g)) add("schedule", m[0].slice(0, 60), m.index ?? 0, "APScheduler");
 		for (const m of text.matchAll(/schedule\.every\([^)]*\)\.[\w.]+/g)) add("schedule", m[0], m.index ?? 0, "schedule");
@@ -1274,6 +1298,21 @@ export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[]
 			const method = /^Handle/.test(m[1]) ? (/^"?(GET|POST|PUT|PATCH|DELETE)\s/.exec(m[2])?.[1] ?? "*") : m[1].toUpperCase();
 			add("http", `${method} ${m[2].replace(/^(GET|POST|PUT|PATCH|DELETE)\s+/, "")}`, m.index ?? 0, "Go net/http");
 		}
+	} else if (lang === "rs") {
+		// a binary: src/main.rs, or one of src/bin/
+		const main = /(?:^|\n)\s*(?:pub\s+)?(?:async\s+)?fn\s+main\s*\(/.exec(text);
+		if (main && /(^|\/)src\/(main\.rs|bin\/[^/]+\.rs|bin\/[^/]+\/main\.rs)$/.test(rel)) {
+			const parts = rel.split("/");
+			const at = parts.lastIndexOf("src");
+			const name = parts[at + 1] === "bin" ? parts[at + 2].replace(/\.rs$/, "") : parts[at - 1] ?? "main";
+			add("cli", `binary ${name}`, main.index ?? 0, "Rust");
+		}
+		// axum / warp-style routers, actix-web and Rocket attributes
+		for (const m of text.matchAll(/\.route\(\s*"([^"]+)"\s*,\s*((?:(?:get|post|put|patch|delete|head|options|any)\s*\([^)]*\)\s*\.?\s*)+)/g)) {
+			if (!m[1].startsWith("/")) continue;
+			for (const method of m[2].matchAll(/\b(get|post|put|patch|delete|head|options|any)\s*\(/g)) add("http", `${method[1] === "any" ? "*" : method[1].toUpperCase()} ${m[1]}`, m.index ?? 0, "axum");
+		}
+		for (const m of text.matchAll(/#\[\s*(get|post|put|patch|delete|head|options)\s*\(\s*"([^"]+)"/g)) if (m[2].startsWith("/")) add("http", `${m[1].toUpperCase()} ${m[2]}`, m.index ?? 0, "actix-web/Rocket");
 	} else if (lang === "rb") {
 		if (/(^|\/)routes\.rb$/.test(rel)) for (const m of text.matchAll(/^\s*(get|post|put|patch|delete|resources?)\s+["':]([^"',\s]+)/gm)) add("http", `${m[1].toUpperCase()} /${m[2]}`, m.index ?? 0, "Rails");
 	}

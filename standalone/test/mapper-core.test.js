@@ -122,6 +122,45 @@ test("layout: a chain of connected nodes goes in layers along the flow; cycles d
 	assert.ok(right.get("a").x < right.get("b").x && right.get("c").x < right.get("d").x);
 });
 
+test("drawing a map: its connectors hop over each other where they cross, and are then routed around the shapes; a map too large for that, or a router that fails, is still drawn", async () => {
+	const { drawMap, MAX_ROUTED_EDGES } = require("../src/main/mapper/draw");
+	const graphOf = (edges, style) => ({ title: "Shop", nodes: [{ id: "a", label: "A", kind: "test:box", data: {} }, { id: "b", label: "B", kind: "test:box", data: {} }], edges: Array.from({ length: edges }, () => ({ from: "a", to: "b", ...(style ? { style } : {}) })) });
+	const client = (route = () => ({ results: [{ ok: true, ids: ["e1", "e2"] }], idMap: {} })) => {
+		const calls = [];
+		return {
+			calls,
+			aiGetModel: async () => ({ page: { name: "Page-1" }, totalCells: 0 }),
+			aiApplyOps: async (ops, options) => {
+				calls.push([ops, options]);
+				return ops[0].op === "layout" ? route() : { results: [{ ok: true, ids: [] }], idMap: {} };
+			},
+		};
+	};
+	const c = client();
+	assert.deepEqual(await drawMap(c, graphOf(2), "test.recipe"), { page: "Page-1", newPage: false, cells: 4 });
+	assert.equal(c.calls.length, 2);
+	assert.equal(c.calls[0][0][0].op, "insertXml");
+	// every connector: the Mapper's own style, and a recipe's
+	assert.equal((c.calls[0][0][0].xml.match(/jumpStyle=arc;jumpSize=6;/g) || []).length, 2);
+	const styled = renderGraph(graphOf(1, "edgeStyle=entityRelationEdgeStyle;endArrow=ERmany"), { recipe: "test.recipe" }).xml;
+	assert.match(styled, /style="edgeStyle=entityRelationEdgeStyle;endArrow=ERmany;jumpStyle=arc;jumpSize=6;"/);
+	assert.match(renderGraph(graphOf(1, "jumpStyle=gap;"), { recipe: "test.recipe" }).xml, /style="jumpStyle=gap;jumpSize=6;"/, "a recipe's own choice is kept");
+	// then the router, as a step of its own that moves no shape
+	assert.deepEqual(c.calls[1], [[{ op: "layout", type: "route" }], { selectResult: false, flash: false, atomic: true, review: true }]);
+
+	// no connectors, or more than routing is worth waiting for: drawn as it is
+	for (const edges of [0, MAX_ROUTED_EDGES + 1]) {
+		const plain = client();
+		await drawMap(plain, graphOf(edges), "test.recipe");
+		assert.equal(plain.calls.length, 1, `${edges} connectors`);
+	}
+	// a router that fails, either way it can: the map is drawn all the same
+	for (const route of [() => ({ results: [{ ok: false, error: "The connector router is not available" }], idMap: {}, rolledBack: true }), () => { throw new Error("the editor went away"); }]) {
+		const failing = client(route);
+		assert.equal((await drawMap(failing, graphOf(2), "test.recipe")).cells, 4);
+	}
+});
+
 test("render: a well-formed draw.io fragment with data on every shape and edges only between drawn shapes", () => {
 	const { xml, cells } = renderGraph(cloudish, { recipe: "test.recipe" });
 	checkModelXml(xml);

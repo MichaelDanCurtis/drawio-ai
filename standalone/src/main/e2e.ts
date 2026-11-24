@@ -216,6 +216,7 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 	const r = await w.mapper.run(recipe.id, { ...(map.input ?? {}) }, !!map.askAgent);
 	log("mapMs", Date.now() - t0);
 	log("mapSummary", r.result?.summary ?? null);
+	log("mapRouting", (await import("./mapper/draw")).lastRouting ?? null);
 	log("mapWarnings", r.result?.warnings ?? []);
 	if (r.error) throw new Error(`Mapper: ${r.error}`);
 	const pages = await w.client.aiPages({ op: "list" });

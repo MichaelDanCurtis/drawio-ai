@@ -11,6 +11,7 @@ The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by w
 
 ### Changed
 
+- `drawio_apply_operations`: the `layout` operation has a new type, `route`. It moves no shape: it re-routes the right-angled connectors around the shapes in their way and apart from each other (draw.io's obstacle-avoiding router), for the page, or for the cells or connectors in `ids`.
 - A shape added from the **Shape Workshop** goes beside what is selected in the diagram (in the middle of the view when nothing is selected).
 - The Workshop's question dialog (a name for a collection, an address): **Enter** is OK (it was Cancel), and **Esc** is always Cancel.
 - A collection in the Shape Workshop shows a shape added to it at once, also when it was being read at that moment.

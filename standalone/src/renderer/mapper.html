@@ -64,6 +64,7 @@
 	#log:not(:empty) { padding: 10px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); }
 	#result { margin-top: 14px; padding: 10px 12px; border-radius: 12px; display: none; max-width: 620px; animation: rise var(--dur) var(--ease-enter); }
 	#result.ok { display: block; background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent); }
+	#result.none { display: block; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--ink-2); }
 	#result.err { display: block; background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--danger); white-space: pre-wrap; }
 	#result ul { margin: 6px 0 0; padding-left: 18px; color: var(--warn); }
 	.empty { color: var(--faint); padding: 30px 10px; text-align: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
@@ -349,7 +350,8 @@
 		const box = $("result");
 		if (!box) return;
 		box.className = kind;
-		box.replaceChildren(el("div", { text }), warnings?.length ? el("ul", {}, ...warnings.slice(0, 20).map((w) => el("li", { text: w }))) : null);
+		// (only what is there: the DOM writes a missing child out as the word "null")
+		box.replaceChildren(...[el("div", { text }), warnings?.length ? el("ul", {}, ...warnings.slice(0, 20).map((w) => el("li", { text: w }))) : null].filter(Boolean));
 	}
 
 	host.onMessage((msg) => {
@@ -394,8 +396,9 @@
 			case "done":
 				state.running = false;
 				renderForm();
-				setResult("ok", "✓ " + msg.summary, msg.warnings);
-				window.drawaiPulse?.(0.5, 0.5);
+				// (a run that found nothing to draw is not a success to tick off: it says what it looked at)
+				setResult(msg.nothing ? "none" : "ok", (msg.nothing ? "" : "✓ ") + msg.summary, msg.warnings);
+				if (!msg.nothing) window.drawaiPulse?.(0.5, 0.5);
 				break;
 			case "failed":
 				state.running = false;

@@ -2,6 +2,12 @@ import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/Custom
 import { escapeXml, renderGraph } from "./render";
 import type { MapGraph } from "./types";
 
+/** Above this many connectors a map is not routed (see drawMap). */
+export const MAX_ROUTED_EDGES = 600;
+
+/** How the last map's connectors were routed (the end-to-end run reads it). */
+export let lastRouting: { edges: number; ms: number; error?: string } | undefined;
+
 export interface DrawResult {
 	/** Name of the page the map is on. */
 	page: string;
@@ -36,6 +42,21 @@ export async function drawMap(
 	const r = await client.aiApplyOps([{ op: "insertXml", xml }], { selectResult: false, flash: true, atomic: true, review: true });
 	const failed = r.results.find((x) => !x.ok);
 	if (failed || r.rolledBack) throw new Error(`Drawing the map failed: ${failed?.error ?? "the change was rolled back"}`);
+	// The Mapper places the shapes; draw.io's connector would then run each line straight through
+	// whatever lies between its ends, and stack the ones that leave a shape on the same side. Its
+	// router takes them around the shapes and apart. (A step of its own, and one that may fail: a
+	// map with plain connectors is still a map. Very large maps are left as they are: routing every
+	// connector around every shape takes too long there.)
+	if (graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES) {
+		try {
+			const started = Date.now();
+			const routed = await client.aiApplyOps([{ op: "layout", type: "route" }], { selectResult: false, flash: false, atomic: true, review: true });
+			lastRouting = { edges: routed.results[0]?.ids?.length ?? 0, ms: Date.now() - started, error: routed.results.find((x) => !x.ok)?.error };
+		} catch (e: any) {
+			// as drawn
+			lastRouting = { edges: 0, ms: 0, error: String(e?.message ?? e) };
+		}
+	}
 	return { page, newPage, cells };
 }
 

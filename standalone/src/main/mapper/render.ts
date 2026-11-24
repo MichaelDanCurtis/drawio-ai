@@ -15,6 +15,8 @@ export const STYLES = {
 	edge: "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;strokeColor=#6b7280;fontSize=10;",
 };
 
+/** Where two connectors cross, one hops over the other: a crossing is not read as a junction. */
+const EDGE_CROSSINGS = "jumpStyle=arc;jumpSize=6;";
 const ICON_LABEL = "verticalLabelPosition=bottom;verticalAlign=top;labelPosition=center;align=center;";
 
 export const escapeXml = (s: string) =>
@@ -122,7 +124,7 @@ export function renderGraph(graph: MapGraph, options: RenderOptions): { xml: str
 		if (!source || !target || !layout.boxes.has(e.from) || !layout.boxes.has(e.to)) return;
 		const value = e.label ? ` value="${escapeXml(escapeHtml(e.label))}"` : "";
 		out.push(
-			`<mxCell id="mapE${i + 1}"${value} style="${escapeXml(e.style ?? STYLES.edge)}" edge="1" parent="1" source="${source}" target="${target}"><mxGeometry relative="1" as="geometry"/></mxCell>`
+			`<mxCell id="mapE${i + 1}"${value} style="${escapeXml(withStyle(e.style ?? STYLES.edge, EDGE_CROSSINGS))}" edge="1" parent="1" source="${source}" target="${target}"><mxGeometry relative="1" as="geometry"/></mxCell>`
 		);
 		cells++;
 	});

@@ -10,7 +10,7 @@ const { renderGraph } = require("../src/main/mapper/render");
 const { MapperError } = require("../src/main/mapper/types");
 const { softwareRecipes } = require("../src/main/mapper/recipes/software");
 const { parseAddress, isSecretKey, scrub, techOf, libraryTech } = require("../src/main/mapper/recipes/software/shared");
-const { scanSystem, stripComments } = require("../src/main/mapper/recipes/software/systemScan");
+const { scanSystem, stripComments, entryPoints, hiddenCheckouts } = require("../src/main/mapper/recipes/software/systemScan");
 const { modulesToGraph, classesToGraph, cycleMembers, moduleFindings } = require("../src/main/mapper/recipes/software/codeStructure");
 const { openApiToGraph, parseGraphQL, graphqlToGraph } = require("../src/main/mapper/recipes/software/api");
 const { hardcodedSecret, maskHint } = require("../src/main/mapper/recipes/software/health");
@@ -345,6 +345,61 @@ test("connectivity: tests / fixtures are skipped unless asked for, and an empty 
 	assert.equal(r.graph, undefined);
 	assert.match(r.summary, /No services/);
 	await assert.rejects(recipe("software.connectivity").collect({ folder: path.join(empty, "nope") }, ctxFor(empty)), /not a folder/);
+});
+
+test("a repository of packages that nothing deploys: a Rust binary and a Python program count as entry points; what is left says what was there, and what was not read", async () => {
+	const os = require("os");
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-map-"));
+	const put = (rel, text) => {
+		fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+		fs.writeFileSync(path.join(root, rel), text);
+	};
+	// (the shape of a real repository this failed on: a Cargo workspace with one binary, a Python package, no Dockerfile)
+	put("edge/Cargo.toml", '[workspace]\nmembers = ["crates/*"]\n');
+	put("edge/crates/gateway-edge/Cargo.toml", '[package]\nname = "gateway-edge"\nversion = "0.1.0"\n');
+	put("edge/crates/gateway-edge/src/main.rs", 'use axum::{routing::{get, post}, Router};\n\n#[tokio::main]\nasync fn main() {\n    let app = Router::new().route("/health", get(health)).route("/files/:id", get(read).put(write));\n}\n');
+	put("service/pyproject.toml", '[project]\nname = "gateway-service"\n');
+	put("service/src/gateway_service/__init__.py", '"""The service."""\n');
+
+	const scan = scanSystem(root);
+	const edge = scan.services.find((s) => s.dir === "edge/crates/gateway-edge");
+	assert.ok(edge, "a package with a binary is a service");
+	assert.deepEqual(edge.entries.map((e) => [e.kind, e.label, e.framework]), [["cli", "binary gateway-edge", "Rust"], ["http", "GET /health", "axum"], ["http", "GET /files/:id", "axum"], ["http", "PUT /files/:id", "axum"]]);
+	assert.deepEqual(scan.libraries.sort(), ["edge", "service"]);
+	const flow = await recipe("software.dataflow").collect({ folder: root }, ctxFor(root));
+	assert.ok(flow.graph, "there is something to draw now");
+	assert.match(flow.summary, /4 entry point\(s\)/);
+
+	// the entry points of other kinds of program
+	const kinds = (text, rel, lang) => entryPoints(text, rel, lang).map((e) => `${e.kind} ${e.label}`);
+	assert.deepEqual(kinds("fn main() {\n}\n", "tools/src/bin/migrate.rs", "rs"), ["cli binary migrate"]);
+	assert.deepEqual(kinds("fn main() {\n}\n", "tools/src/lib.rs", "rs"), [], "a function called main elsewhere is not a binary");
+	assert.deepEqual(kinds('#[get("/users/{id}")]\nasync fn user() {}\n#[post("/users")]\nasync fn add() {}\n', "api/src/routes.rs", "rs"), ["http GET /users/{id}", "http POST /users"]);
+	assert.deepEqual(kinds("print('hi')\n", "service/src/gateway_service/__main__.py", "py"), ["cli python -m gateway_service"]);
+
+	// with the binary gone, nothing is a service: the message says what was read and which packages are there
+	fs.rmSync(path.join(root, "edge/crates/gateway-edge/src/main.rs"));
+	for (const id of ["software.dataflow", "software.connectivity"]) {
+		const r = await recipe(id).collect({ folder: root }, ctxFor(root));
+		assert.equal(r.graph, undefined);
+		assert.match(r.summary, /^No services/);
+		assert.match(r.summary, /1 code file\(s\) were read\. 3 package\(s\) are there \(edge, edge\/crates\/gateway-edge, service\), but none is deployed .*or has an entry point the Mapper recognises/);
+	}
+
+	// working copies kept in a hidden folder are not read, and the scan says so
+	assert.equal(hiddenCheckouts(root), undefined);
+	put(".claude/worktrees/real-run/.git", "gitdir: /elsewhere\n");
+	put(".claude/worktrees/real-run/portal/package.json", '{"name":"portal"}');
+	put(".claude/worktrees/real-run/portal/Dockerfile", "FROM node:22\n");
+	put(".claude/worktrees/second/.git", "gitdir: /elsewhere\n");
+	put(".claude/worktrees/not-a-copy/readme.md", "x");
+	assert.deepEqual(hiddenCheckouts(root), { folder: ".claude/worktrees", names: ["real-run", "second"] });
+	const again = await recipe("software.dataflow").collect({ folder: root }, ctxFor(root));
+	assert.equal(again.graph, undefined, "they are still not read");
+	assert.deepEqual(again.warnings.filter((w) => /working cop/.test(w)), ["2 working copies of this repository in .claude/worktrees were not read, as hidden folders are skipped (real-run, second). To map one, choose it as the folder."]);
+	// chosen as the folder, one is mapped
+	const one = await recipe("software.connectivity").collect({ folder: path.join(root, ".claude/worktrees/real-run") }, ctxFor(root));
+	assert.ok(one.graph && one.graph.nodes.some((n) => /portal/.test(n.label ?? n.id)));
 });
 
 test("data flow: entry points inside the services, focus marked, agent asked to trace", async () => {

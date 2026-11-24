@@ -190,7 +190,7 @@ declare type AiOp =
     | { op: "distribute"; ids: string[]; direction: "horizontal" | "vertical" }
     | { op: "zOrder"; ids: string[]; position: "front" | "back" }
     | { op: "layout"; ids?: string[]; parent?: string;
-        type: "hierarchical" | "horizontalHierarchical" | "tree" | "horizontalTree" | "radialTree" | "organic" | "circle" | "grid";
+        type: "hierarchical" | "horizontalHierarchical" | "tree" | "horizontalTree" | "radialTree" | "organic" | "circle" | "grid" | "route";
         spacing?: number }
     | { op: "insertXml"; xml: string; dx?: number; dy?: number; parent?: string }
     | { op: "replaceAll"; xml: string }
