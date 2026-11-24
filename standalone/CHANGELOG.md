@@ -8,6 +8,13 @@
   only lists its models; this is the check that the provider takes the chat's requests. It
   runs on your click only and uses a little of your credit. No tool is run and the diagram
   is not touched.
+- **A run log.** The app notes when it started and how it ended in `logs/app.log` in its data
+  folder (on macOS `~/Library/Application Support/OmniDraw`): a quit, a window's page or a
+  helper process that ended and why, an error in the main process. A run that ended without a
+  word (a crash, a kill) is named by the next start. It holds times and reasons only, never a
+  diagram, a request or a key.
+- Development: the end-to-end run builds into `out-e2e` and starts the app from there, so a
+  test no longer replaces the files of a copy of the app that is running from `out`.
 - **Mapper: map a working copy with one click.** When a folder's code is in working copies the
   scan does not read (git worktrees in `.claude/worktrees`, `.worktrees`, `.git-worktrees`),
   the result now offers them, the six worked in last first and the rest behind a button: a click maps one. The
