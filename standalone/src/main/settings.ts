@@ -73,6 +73,7 @@ const DEFAULTS: Settings = {
 	editor: {
 		"drawio-ai.reviewChanges": true,
 		"drawio-ai.flashChanges": true,
+		"drawio-ai.animateChanges": true,
 		"drawio-ai.selectChangedCells": false,
 		"drawio-ai.maxCellsInContext": 400,
 	},

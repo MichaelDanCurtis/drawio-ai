@@ -15,6 +15,21 @@
   hidden folder (`.claude/worktrees`), that they were not read and how to map one.
 - The Mapper's dialog wrote "null" under a result without warnings, and ticked off a run that
   found nothing. A run that found nothing now says so plainly and keeps the dialog open.
+- **Watch it build.** An edit by the AI is shown being made: new shapes appear one after
+  another in the order they were added, connectors draw in from start to end, and shapes that
+  were moved (also by a layout) glide to their place. It takes about a second at most. The
+  edit itself is applied at once, as before (one undo step, pending changes to keep or
+  revert); only how it is shown changes. Off when the system asks for reduced motion, and
+  under Settings → Editor → **Show edits being built**.
+- **Send while it works.** The chat's box stays open during a request. What you send waits in
+  a strip above it and is handed to the model with its next step (it reads it as it works), or
+  sent as the next request when this one ends; ✕ takes it back. After Stop, an error or New Chat it goes
+  back into the box instead of being sent. The line under the box says so, where it used to
+  repeat "Working… watch the diagram".
+- A new diagram that is not saved yet was described to the model as "no diagram is open", so
+  it would not draw on it, or added a page of its own. It is told the diagram is "Untitled",
+  that an empty page is the place to draw, and not to add a page because the one shown is
+  empty.
 
 - **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's, Gemini's, Grok's or
   Kimi's models, or the many behind OpenRouter, with your own API key, without an agent

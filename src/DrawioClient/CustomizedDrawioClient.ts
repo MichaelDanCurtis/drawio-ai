@@ -264,9 +264,11 @@ export class CustomizedDrawioClient extends DrawioClient<
 
 	public async aiApplyOps(
 		ops: AiOp[],
-		/** `user`: the user's own change through the host's UI, not an AI change (see AiApplyOpsAction). */
-		/** `page`: only while this page (its id) is the one shown; every operation fails on another. */
-		options: { selectResult: boolean; flash: boolean; atomic: boolean; review: boolean; user?: boolean; page?: string }
+		/**
+		 * `user`: the user's own change through the host's UI, not an AI change (see AiApplyOpsAction).
+		 * `page`: only while this page (its id) is the one shown; every operation fails on another.
+		 */
+		options: { selectResult: boolean; flash: boolean; atomic: boolean; review: boolean; user?: boolean; animate?: boolean; page?: string }
 	): Promise<{
 		results: AiOpResult[];
 		idMap: Record<string, string>;
