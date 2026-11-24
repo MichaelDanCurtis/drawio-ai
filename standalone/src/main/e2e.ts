@@ -1,5 +1,6 @@
 import { app } from "electron";
 import * as fs from "fs";
+import { paths } from "./paths";
 import * as path from "path";
 import { AgentId } from "./agents";
 import { DiagramWindow } from "./diagramWindow";
@@ -189,6 +190,12 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("pdf", pdf);
 		const svg = await exportDiagram(w.client, "svg", path.join(config.out, "diagram.drawio.svg"));
 		log("svgBytes", svg.bytes);
+		// a test run is built into, and started from, a folder of its own (a copy of the app that is running keeps its
+		// files), and every run leaves word of its start in the data folder's log
+		const started = fs.readFileSync(path.join(app.getPath("userData"), "logs", "app.log"), "utf8").split("\n")[0];
+		log("runLog", { built: path.basename(paths.out), started: started.replace(/^\S+ /, "").replace(/pid=\d+/, "pid=…") });
+		if (!app.isPackaged && path.basename(paths.out) !== "out-e2e") throw new Error("The test run was not started from its own build folder.");
+		if (!/^started version=\S+ pid=… built=\S+ test=yes$/.test(started.replace(/^\S+ /, "").replace(/pid=\d+/, "pid=…"))) throw new Error(`The run log does not start with this run: ${started}`);
 		fs.writeFileSync(path.join(config.out, "edited.drawio"), await w.client.getXml());
 		w.chat.dispose();
 		finish(0);
