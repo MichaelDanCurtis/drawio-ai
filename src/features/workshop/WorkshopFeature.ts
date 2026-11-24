@@ -53,6 +53,9 @@ export class WorkshopFeature {
 	/** What the page's other half posted last (tests read it; the panel gets it when it is open), and how many messages there were in all. */
 	private posted: unknown[] = [];
 	private postedTotal = 0;
+	/** What the page was last told of the diagram's selection, and how often it was told (tests). */
+	private selectionPosts = 0;
+	private lastSelection: unknown;
 
 	constructor(private readonly deps: WorkshopDeps) {
 		const track = (d: vscode.Disposable | vscode.Disposable[]) => (Array.isArray(d) ? d : [d]).forEach((x) => this.dispose.track(x));
@@ -63,6 +66,8 @@ export class WorkshopFeature {
 			dispose: autorun(() => {
 				void this.deps.editorService.targetDrawioEditor;
 				this.core?.postState();
+				// (another diagram is the one used last: the Shape Shifter shows its selection)
+				this.core?.postSelection();
 			}),
 		});
 		this.dispose.track({
@@ -300,6 +305,10 @@ export class WorkshopFeature {
 	private hookEditor(editor: DrawioEditor): void {
 		const client = editor.drawioClient;
 		const subs = [
+			// the Shape Shifter shows what is selected in the diagram used last, as it changes
+			client.onSelectedCellsChanged.sub(() => {
+				if (this.panel && this.deps.editorService.targetDrawioEditor === editor) this.core?.postSelection();
+			}),
 			// the Workshop button in the toolbar, and "+ More Shapes" under the shapes sidebar
 			client.onEditorCommand.sub(({ command }) => {
 				if (command === "workshop") void vscode.commands.executeCommand("drawio-ai.shapeWorkshop");
@@ -363,6 +372,10 @@ export class WorkshopFeature {
 	private post(msg: unknown): void {
 		this.posted.push(msg);
 		this.postedTotal++;
+		if ((msg as { type?: unknown })?.type === "selection") {
+			this.selectionPosts++;
+			this.lastSelection = msg;
+		}
 		if (this.posted.length > 60) this.posted.splice(0, this.posted.length - 60);
 		// (a closed panel has no webview to post to)
 		if (this.panel) void this.panel.webview.postMessage(msg);
@@ -401,7 +414,11 @@ export class WorkshopFeature {
 				);
 			});
 			// the sidebar can change in the editor itself (the Scratchpad's ✕, a set enabled from a search): ask again
-			const focused = panel.onDidChangeViewState(() => panel.active && this.host()?.refreshShapeSets());
+			const focused = panel.onDidChangeViewState(() => {
+				if (!panel.active) return;
+				this.host()?.refreshShapeSets();
+				this.core?.postSelection();
+			});
 			panel.onDidDispose(() => {
 				received.dispose();
 				focused.dispose();
@@ -444,6 +461,8 @@ export class WorkshopFeature {
 			panelOpen: !!this.panel,
 			panelPage: this.panel ? this.page : undefined,
 			shifter: !!this.host()?.shifter,
+			selectionPosts: this.selectionPosts,
+			lastSelection: this.lastSelection,
 		};
 	}
 }

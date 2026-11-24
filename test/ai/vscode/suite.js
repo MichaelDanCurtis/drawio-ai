@@ -860,6 +860,12 @@ async function runSteps() {
 		const recoloured = await message({ type: "restyle", fill: "#ff5500" });
 		assert.deepEqual([recoloured.error, recoloured.posted.filter((m) => m.type === "notice").map((m) => m.message)], [undefined, ["Changed 1 shape. Undo in the diagram takes it back."]]);
 		assert.match(await styleOf(ownAdded.id), /fillColor=#ff5500/i);
+		// the Workshop is told of the selection as it changes in the diagram (its controls follow without a change of tab)
+		const sinceSelect = (await workshop()).selectionPosts;
+		await invoke("drawio_select_cells", { ids: [] });
+		await waitFor(async () => { const st = await workshop(); return st.selectionPosts > sinceSelect && st.lastSelection?.count === 0 ? true : undefined; }, "the Workshop to hear that nothing is selected");
+		await invoke("drawio_select_cells", { ids: [ownAdded.id] });
+		await waitFor(async () => ((await workshop()).lastSelection?.count === 1 ? true : undefined), "the Workshop to hear of the selected shape");
 		// with nothing selected it says so, and changes nothing
 		await invoke("drawio_select_cells", { ids: [] });
 		assert.match((await message({ type: "restyle", fill: "#00ff00" })).error, /Select the shapes to change/);
