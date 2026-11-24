@@ -353,13 +353,20 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 	const twice = new Promise<{ stop?: string; error?: string }>((resolve) => (w.chat.onTurnEnd = (stop, error) => ++ended === 2 && resolve({ stop, error })));
 	void w.chat.send("Add a shape labelled 'Not this one'.");
 	await until("a permission card", async () => (await waiting()).length);
+	// (what is selected as it is sent is what it is about, whatever is selected when its turn comes)
+	const pick = (how: string) => w.editorView.webContents.executeJavaScript(`(() => { const g = editorUi.editor.graph; ${how}; return g.getSelectionCount(); })()`);
+	const picked: number = await pick(`g.setSelectionCell(Object.values(g.getModel().cells).find((c) => c.vertex))`);
+	await until("the selection to reach the app", () => w.client.currentSelection.length === 1);
+	const pickedId = w.client.currentSelection[0];
 	await type("Add a shape labelled 'Sent after'.");
 	await until("the waiting strip", async () => (await strip()).length === 1);
+	await pick(`g.clearSelection()`);
+	await until("the selection to be gone", () => w.client.currentSelection.length === 0);
 	await answer("Deny");
 	await answer("Allow");
 	const followed = await twice;
 	log("apiChatFollowed", { ...followed, users: users().slice(-2) });
-	expect(followed.stop === "end_turn" && (await has("Sent after")) && !(await has("Not this one")) && users().pop() === "|Add a shape labelled 'Sent after'.", "what was still waiting when the request ended was not sent as the next one.");
+	expect(followed.stop === "end_turn" && (await has("Sent after")) && !(await has("Not this one")) && picked === 1 && !!pickedId && users().pop() === "◉ 1 selected|Add a shape labelled 'Sent after'.", "what was still waiting when the request ended was not sent as the next one, or not with what was selected as it was sent.");
 
 	// Stop while a card waits: the request ends as stopped, and nothing is changed; what was waiting goes back into the box, unsent
 	done = turn("Add a shape labelled 'Stopped shape'.");

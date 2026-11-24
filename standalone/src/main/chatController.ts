@@ -75,7 +75,7 @@ const MAX_IMAGES = 4;
 /** How many messages may wait while a request is under way. */
 const MAX_WAITING = 8;
 /** Something the user sent while a request was under way. */
-type Waiting = { id: number; text: string; images: ImageData[] };
+type Waiting = { id: number; text: string; images: ImageData[]; /** What was selected in the diagram as it was sent. */ selected: string[] };
 /** What a diagram that has no file yet is called for the model. */
 const UNSAVED = "Untitled (a new diagram, not saved to a file yet)";
 let versionCounter = 0;
@@ -669,7 +669,8 @@ export class ChatController {
 			this.push({ kind: "error", text: `Only ${MAX_IMAGES} pictures can wait at a time. Send this one when it has finished.` });
 			return false;
 		}
-		this.waiting.push({ id: ++this.waitingIds, text, images });
+		// (what "the selected one" means is settled as it is sent, as for a request: not when it is its turn)
+		this.waiting.push({ id: ++this.waitingIds, text, images, selected: [...(this.host.client()?.currentSelection ?? [])] });
 		this.postState();
 		return true;
 	}
@@ -682,23 +683,28 @@ export class ChatController {
 	private takeAdditions(turn: number): string | undefined {
 		// (`turn`: the request the tool call began in. One that ends during a later request is not read by anyone.)
 		if (!this.busy || this.turnCancelled || turn !== this.turn) return undefined;
-		const words: string[] = [];
-		while (this.waiting.length && !this.waiting[0].images.length) words.push(this.waiting.shift()!.text);
-		if (!words.length) return undefined;
-		for (const text of words) this.push({ kind: "user", text, scope: "↪ added while it works" });
+		const taken: Waiting[] = [];
+		while (this.waiting.length && !this.waiting[0].images.length) taken.push(this.waiting.shift()!);
+		if (!taken.length) return undefined;
+		for (const w of taken) this.push({ kind: "user", text: w.text, scope: `↪ added while it works${w.selected.length ? ` · ◉ ${w.selected.length} selected` : ""}` });
 		this.postState();
-		return words.join("\n\n");
+		return taken.map((w) => (w.selected.length ? `${w.text}\n(Selected in the diagram as this was sent: ${w.selected.length} item(s) with ids ${w.selected.slice(0, 80).join(", ")}${w.selected.length > 80 ? ", ..." : ""}.)` : w.text)).join("\n\n");
 	}
 
 	/**
-	 * What was still waiting when a request ended. After one that ran to its end it is sent as
-	 * the next request. After one that was stopped or failed nothing is sent by itself: it goes
-	 * back into the box, for the user to send or drop.
+	 * What was still waiting when a request ended. After one that ran to its end the first is
+	 * sent as the next request, with its pictures and what was selected as it was sent; the
+	 * others wait on, for that request. After one that was stopped or failed nothing is sent by
+	 * itself: it all goes back into the box, for the user to send or drop.
 	 */
-	private afterTurn(left: { text: string; images: ImageData[] }[], finished: boolean): void {
+	private afterTurn(left: Waiting[], finished: boolean): void {
 		if (!finished) return this.giveBack(left);
-		// (never more pictures than a request takes: addWhileWorking keeps what waits within that)
-		void this.send(left.map((w) => w.text).join("\n\n"), undefined, left.flatMap((w) => w.images));
+		const [first, ...rest] = left;
+		this.waiting = [...rest, ...this.waiting];
+		void this.send(first.text, { cellIds: first.selected }, first.images);
+		// (it did not start, e.g. the diagram is loading: nothing would ever come for what still waits)
+		if (!this.busy) this.giveBack(this.waiting.splice(0));
+		else if (rest.length) this.postState();
 	}
 
 	/** Puts what was not sent back into the box: the user sends it again, or drops it. */
