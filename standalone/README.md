@@ -380,9 +380,13 @@ a new chat starts with.
   that lands on the API keys.
 - **Long chats.** The whole conversation goes to the provider with every request (OpenAI
   keeps it on its side). With Anthropic, what was sent before is read from its cache at a
-  fraction of the price. When a conversation outgrows the model, the provider refuses the
-  request; the app then starts the conversation over and says so. **New Chat** does the same
-  on purpose.
+  fraction of the price. When it has grown long (about 60,000 tokens of what was said,
+  called and answered: `SUMMARISE_AT` in `api/chatSession.ts`), the next request first has
+  the model sum the conversation up for itself, and then goes to a new conversation that
+  starts with that summary. The chat says so; the summary is not shown, and no tool runs
+  for it. If no summary can be had, the conversation goes on as it is and it is tried again
+  later. A conversation the provider refuses as too long still starts over, and the app
+  says so. **New Chat** does the same on purpose.
 
 Code: `src/main/api/`: `keyStore.ts` (the file and its encryption; `keys.ts` gives it
 `safeStorage`), `access.ts` (keeping, checking and removing a key, and the models it can

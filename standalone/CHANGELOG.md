@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Long chats with an API model.** The whole conversation goes to the provider with every
+  request, so a long chat cost more each time and in the end the provider refused it. When a
+  conversation has grown long (about 60,000 tokens), the model is asked to sum it up for
+  itself, and the chat goes on in a new conversation that starts with that summary. The chat
+  says so; the summary itself is not shown. The diagram is read again as needed.
 - **Test an API key** (Settings → Agents & models → API keys → **Test**): sends one short
   request to the provider the way the chat does (the chat's tools as they are, one tool call
   and its answer) and says whether it worked, or what the provider answered. Keeping a key
