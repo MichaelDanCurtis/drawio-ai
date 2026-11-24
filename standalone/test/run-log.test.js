@@ -54,8 +54,13 @@ test("the run log: one line whatever is in it, an error by its name and first li
 	for (let i = 0; i < 4000; i++) log.write("filler", { n: i, pad: "p".repeat(200) });
 	assert.ok(fs.statSync(file).size < 300 * 1024, `${fs.statSync(file).size} bytes`);
 	const kept = fs.readFileSync(file, "utf8").trim().split("\n");
-	assert.match(kept[0], /^\S+ filler n=\d+ /, "what is kept starts at a whole line");
+	assert.match(kept[1], /^\S+ filler n=\d+ /, "what is kept starts at a whole line");
 	assert.match(kept.at(-1), / n=3999 /);
+
+	// the run's own start is kept when the older half goes: a run that then ends without a word is still named by the next
+	assert.match(kept[0], /^\S+ started pid=1$/);
+	new RunLog(file).started({ pid: 2 });
+	assert.match(fs.readFileSync(file, "utf8").trim().split("\n").at(-2), /^\S+ the run before this one ended without a word \(crashed or was killed\) started=\S+ pid=1$/);
 
 	// a log that cannot be written is not a reason to fail
 	const blocked = path.join(dir, "a-file");

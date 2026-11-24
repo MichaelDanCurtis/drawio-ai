@@ -30,6 +30,8 @@ export function errorDetails(e: unknown): { error: string; at?: string } {
 export class RunLog {
 	private ended = false;
 	private running = false;
+	/** This run's own start, kept when the older half of the file goes: without it the next start could not tell that this run ended without a word. */
+	private startLine: string | undefined;
 
 	constructor(private readonly file: string) {}
 
@@ -44,12 +46,15 @@ export class RunLog {
 				if (fs.statSync(this.file).size > MAX_BYTES) {
 					const text = fs.readFileSync(this.file, "utf8");
 					const half = text.slice(text.length - MAX_BYTES / 2);
-					fs.writeFileSync(this.file, half.slice(half.indexOf("\n") + 1));
+					const kept = half.slice(half.indexOf("\n") + 1);
+					fs.writeFileSync(this.file, this.startLine && !kept.includes(`${this.startLine}\n`) ? `${this.startLine}\n${kept}` : kept);
 				}
 			} catch {
 				// no file yet
 			}
-			fs.appendFileSync(this.file, `${logLine(what, details)}\n`);
+			const line = logLine(what, details);
+			if (what === "started") this.startLine = line;
+			fs.appendFileSync(this.file, `${line}\n`);
 		} catch {
 			// not logged
 		}
