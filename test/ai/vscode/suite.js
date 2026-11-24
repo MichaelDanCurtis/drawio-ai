@@ -872,6 +872,16 @@ async function runSteps() {
 		// the Workshop says that the Shape Shifter is there for this diagram (its tab is not "Next" any more)
 		assert.equal((await workshop()).shifter, true);
 
+		// the Shape Creator, in VS Code too: drawn by a model VS Code offers. This window has none (nobody is signed
+		// in to anything): it is listed, says what to do, and nothing is sent anywhere by listing it.
+		assert.equal((await workshop()).creator, true);
+		const agentsNow = async () => (await message({ type: "creatorAgents" })).posted.filter((m) => m.type === "creatorAgents").pop();
+		const drawers = await waitFor(async () => { const m = await agentsNow(); return m && m.agents.length ? m : undefined; }, "who can draw");
+		assert.deepEqual(drawers.agents.map((a) => [a.id, a.kind, a.label]), [["vscode-lm", "api", "VS Code's models"]]);
+		const models = await vscode.lm.selectChatModels();
+		assert.equal(drawers.agents[0].ready, models.length > 0);
+		if (!models.length) assert.match(drawers.agents[0].problem, /VS Code offers no language model yet/);
+
 		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries", [{ ...mine, enabled: false }]);
 		await waitFor(async () => ((await look())?.palettes.length === 0 ? true : undefined), "the palette to go");
 		assert.deepEqual((await workshop()).galleries.map((g) => [g.id, g.enabled]), [["mine", false]]);

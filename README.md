@@ -49,7 +49,7 @@ The diagram's own buttons and menus (lasso, markup, Ask AI, Convert image, the r
 -   The MCP server is off by default (`drawio-ai.mcp.enabled`). While it runs, each VS Code window records its port, a session token that only works while that window runs, its folders and open diagrams in a file only your user account can read (`~/.drawio-ai/instances/`), so the Claude Code / Codex plugin can find it (`drawio-ai.mcp.discovery`). The long-lived token you copy for hand-configured clients never goes there.
 -   An agent can only open diagrams inside your workspace folders, or ones you already have open, and never through symbolic links.
 -   Exports and imports, including PDF and Visio files, are made inside VS Code. Nothing is uploaded.
--   The [Shape Workshop](#shape-workshop) downloads nothing until you switch a gallery on. Then it fetches that gallery's index and the shapes you look at from jsDelivr or GitHub; nothing about your diagrams is sent.
+-   The [Shape Workshop](#shape-workshop) downloads nothing until you switch a gallery on. Then it fetches that gallery's index and the shapes you look at from jsDelivr or GitHub; nothing about your diagrams is sent. Its Shape Creator sends what you describe, and the pictures you attach, to the model you picked in VS Code when you press Draw, and at no other time.
 -   The [Mapper](#mapper) only reads the systems it maps. Passwords, connection strings and tokens are used for one run and are never stored, drawn or sent to the agent; the facts it collects go to the agent only when you ask it to review, describe or dig into a map.
 
 ## Main Settings
@@ -218,7 +218,11 @@ Its second part is the **Shape Shifter** (the Workshop's second tab):
 -   **Change the selected shapes**: fill, line and text colour, and the one colour of an icon, as one undo step. Or describe the change in words and hand it to the Draw.AI agent in VS Code's chat, where its edits wait for you to keep or revert.
 -   **Import a Visio stencil** (`.vssx`, `.vss`): converted in the editor, looked at first, then saved as a collection of its own.
 
-The Shape Creator (the third tab) is in the desktop app only for now.
+Its third part is the **Shape Creator**:
+
+-   **Describe an icon** (and attach reference pictures if you like); a model draws it as SVG, in one or three variations. You see each at three sizes on light and dark.
+-   **Ask for changes**, then **insert** it into the diagram you used last or **save** it to one of your collections.
+-   The drawing is done by a **model VS Code offers** (GitHub Copilot's, or another provider you added to VS Code): pick it in the Creator. VS Code asks you once whether Draw.AI may use it. The model only gets two tools, one to look at its own drawing and one to hand it in. It reads no file and does not touch the diagram, and nothing is sent to it until you press Draw.
 
 Shapes are downloaded only for galleries you switched on, only from jsDelivr and GitHub (`cdn.jsdelivr.net`, `data.jsdelivr.com`, `raw.githubusercontent.com`), and are kept in the extension's storage for offline use. Every SVG is cleaned of scripts and external links before it is shown or put in a diagram. Shape Shifter and Shape Creator, the Workshop's other two parts, are not there yet.
 
