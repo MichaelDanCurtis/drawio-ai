@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.2.0]
+
 - The dot drawing in an empty chat no longer has a red dot in it: it is all in ink.
 - Polish:
   - A map drawn by the Mapper is shown being built, like any other edit (Settings → Editor →
