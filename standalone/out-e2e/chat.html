@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; font-src $$cspSource$$; style-src 'nonce-$$nonce$$' $$cspSource$$; script-src 'nonce-$$nonce$$' $$cspSource$$;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--
+	OmniDraw chat panel. Adapted from src/features/ai/chatView.html (the VS Code
+	panel): the provider/model pickers pick an ACP agent and its model or mode, or a
+	provider whose models are used with an API key; permission requests and thoughts
+	get their own transcript items.
+	Look: the omni-design language (ui/*.css): paper and ink, mono caps labels, one
+	signal red, a live dot field behind the head, a 3D dot object when empty.
+-->
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<script nonce="$$nonce$$" src="/ui/tips.js"></script>
+<style nonce="$$nonce$$">
+	body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; border-left: 1px solid var(--border); position: relative; }
+	body.side-left { border-left: 0; border-right: 1px solid var(--border); }
+	/* The inner edge: drag it to resize the chat. */
+	#grip { position: absolute; top: 0; bottom: 0; left: -3px; width: 8px; cursor: col-resize; z-index: 60; touch-action: none; }
+	body.side-left #grip { left: auto; right: -3px; }
+	#grip::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: var(--ink); opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+	#grip:hover::after, body.resizing #grip::after { opacity: 0.35; }
+	body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
+	svg.icon { flex: none; display: block; }
+
+	/* ---------- head: brandmark, agent, model, state; the live dot field behind ---------- */
+	.top { position: relative; flex: none; isolation: isolate; }
+	.top > header, .top > #context { position: relative; z-index: 1; }
+	header { display: flex; align-items: center; gap: 4px; height: 46px; padding: 0 6px 0 8px; }
+	/* Agent and model pickers: in-app menus (native pop-ups lose their place when the window moves between screens). */
+	.pick { display: inline-flex; align-items: center; gap: 6px; min-width: 0; border: 1px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: var(--text-sm); border-radius: var(--radius-pill); padding: 4px 8px 4px 10px; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out); }
+	.pick > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+	.pick::after { content: ""; flex: none; width: 10px; height: 10px; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath d='M2 3.5l3 3 3-3' fill='none' stroke='%238b8984' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat center; }
+	.pick:hover, .pick[aria-expanded="true"] { background: var(--surface-3); }
+	.pick:focus-visible { border-color: var(--ink); outline: none; }
+	#providerBtn { flex: 0 1 auto; max-width: 46%; font-weight: 500; color: var(--ink); }
+	#modelBtn { flex: 1 1 auto; max-width: 50%; }
+	#status { margin: 0 4px; }
+	#pickMenu { position: fixed; z-index: 70; min-width: 220px; max-width: min(340px, calc(100vw - 16px)); max-height: calc(100vh - 70px); overflow: auto; }
+	#pickMenu [role="menuitemradio"] { display: grid; grid-template-columns: 14px 1fr; gap: 2px 8px; align-items: start; width: 100%; text-align: left; border: 0; background: none; color: var(--ink); font: inherit; font-size: var(--text-sm); padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+	#pickMenu [role="menuitemradio"]:hover, #pickMenu [role="menuitemradio"]:focus-visible { background: var(--accent-soft, var(--surface-3)); outline: none; }
+	#pickMenu [role="menuitemradio"] .tick { grid-row: span 2; color: var(--ink); visibility: hidden; padding-top: 1px; }
+	#pickMenu [role="menuitemradio"][aria-checked="true"] .tick { visibility: visible; }
+	#pickMenu [role="menuitemradio"] small { grid-column: 2; color: var(--muted); font-size: 11.5px; line-height: 1.35; }
+	#pickMenu [role="menuitemradio"][aria-disabled="true"] { color: var(--faint); }
+	#pickMenu .more { color: var(--muted); }
+	#pickMenu .group { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 8px 10px 4px; }
+	#pickMenu .group:not(:first-child) { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 10px; }
+
+	/* The chat closes from the edge it shares with the diagram: an arrow pointing the way it goes. */
+	/* The AI symbol: the chat's mark, in the corner the chat shares with the diagram. Clicking it
+	   closes the chat; the same symbol at the end of the editor's toolbar opens it again. */
+	#collapse { margin-left: -2px; margin-right: 0; color: var(--ink); }
+	#collapse svg { width: 17px; height: 17px; }
+	body.side-left #collapse { order: 99; margin-left: 0; margin-right: -2px; }
+
+	/* The toolbar: a row of tabs standing on the line under it; one that is on joins the page below. */
+	#context { display: flex; align-items: flex-end; gap: 4px 3px; flex-wrap: wrap; min-height: 44px; padding: 7px 8px 0; border-bottom: 1px solid var(--border); container-type: inline-size; }
+	#context > * { flex: none; }
+	.tb { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 11px; margin-bottom: -1px; border: 1px solid var(--border); border-bottom-color: transparent; border-radius: 9px 9px 0 0; background: var(--surface-2); color: var(--ink-2); font: inherit; font-size: 13px; white-space: nowrap; cursor: pointer; transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+	.tb svg { width: 16px; height: 16px; flex: none; }
+	.tb:hover { background: var(--surface-3); color: var(--ink); border-color: var(--border-strong); border-bottom-color: transparent; }
+	.tb.active { background: var(--bg); border-color: var(--border-strong); border-bottom-color: var(--bg); color: var(--ink); box-shadow: inset 0 2px 0 var(--ink); }
+	.tb:disabled { opacity: 0.45; cursor: not-allowed; }
+	.tb .count { font-family: var(--font-mono); font-size: 10.5px; min-width: 18px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--signal); color: #fff; display: inline-grid; place-items: center; letter-spacing: 0; }
+	#selection { margin-left: auto; align-self: center; margin-bottom: 6px; }
+	/* Narrow chat: the toolbar shows icons only (each keeps its tooltip and name for screen readers). */
+	@container (max-width: 520px) { .tb .lbl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); } #context > .tb { flex: 1 1 0; min-width: 40px; justify-content: center; padding: 0; } }
+
+	/* ---------- the map menu ---------- */
+	#mapMenu { position: absolute; z-index: 40; left: 8px; right: 8px; top: 92px; }
+	#mapMenu [role="menuitem"] .hint { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.04em; color: var(--faint); text-transform: uppercase; }
+
+	/* ---------- transcript ---------- */
+	#messages { flex: 1; overflow-y: auto; padding: 14px 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+	#messages > * { animation: rise var(--dur) var(--ease-enter) backwards; }
+	#messages.settled > * { animation: none; }
+	.msg { line-height: 1.55; overflow-wrap: anywhere; font-size: var(--text-sm); }
+	.msg.user { align-self: flex-end; max-width: 88%; background: var(--surface-3); padding: 8px 12px; border-radius: var(--radius-lg); white-space: pre-wrap; color: var(--ink); }
+	.msg.user .scope { display: block; margin-bottom: 2px; }
+	.msg.user .attached { display: block; margin-top: 4px; }
+	.msg.assistant { color: var(--ink); }
+	.msg.assistant p { margin: 0 0 8px; }
+	.msg.assistant p:last-child { margin-bottom: 0; }
+	.msg.assistant ul { margin: 0 0 8px; padding-left: 18px; }
+	.msg.assistant li { margin: 2px 0; }
+	.msg.assistant li::marker { color: var(--faint); }
+	.msg.assistant strong { font-weight: 500; }
+	.msg.assistant code { font-family: var(--font-mono); font-size: 0.86em; background: var(--surface-2); border: 1px solid var(--border); padding: 0 4px; border-radius: var(--radius-sm); }
+	.msg.assistant pre { background: var(--surface-2); border: 1px solid var(--border); padding: 8px 10px; border-radius: var(--radius); overflow-x: auto; margin: 0 0 8px; }
+	.msg.assistant pre code { padding: 0; background: none; border: 0; font-size: 11.5px; }
+	.msg.error { color: var(--danger); font-size: 12.5px; white-space: pre-wrap; padding: 8px 12px; border: 1px solid var(--danger-line); background: var(--danger-soft); border-radius: 12px; }
+	.msg.error .btn { margin-top: 8px; }
+
+	.tool { display: flex; gap: 8px; align-items: center; font-family: var(--font-mono); font-size: 11px; color: var(--muted); letter-spacing: 0.01em; padding-left: 2px; }
+	.tool .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
+	.tool.running .dot { background: var(--ink); animation: pulse 1s var(--ease-out) infinite; }
+	.tool.running { color: var(--ink-2); }
+	.tool.ok .dot { background: var(--ok); }
+	.tool.error .dot { background: var(--danger); }
+	.tool.error { color: var(--danger); }
+
+	.thought { font-size: 12px; color: var(--muted); white-space: pre-wrap; border-left: 2px dotted var(--border-strong); padding-left: 10px; max-height: 6.5em; overflow: hidden; }
+	.note { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); text-align: center; }
+	.note::before, .note::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+	/* A request that needs the person: the one signal on screen. */
+	.permission { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+	.permission .phead { display: flex; align-items: center; gap: 8px; }
+	.permission .title { font-weight: 500; color: var(--ink); }
+	.permission .detail { font-family: var(--font-mono); font-size: 11px; color: var(--ink-2); white-space: pre-wrap; max-height: 9em; overflow: auto; background: var(--surface-2); border: 1px solid var(--border); padding: 6px 8px; border-radius: var(--radius); }
+	.permission .options { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+	.permission .options .allow-all { margin-left: auto; }
+	.permission .outcome { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+	.permission.resolved .tag { display: none; }
+	.permission.auto { background: none; border: 0; padding: 0 2px; flex-direction: row; gap: 8px; font-family: var(--font-mono); font-size: 11px; color: var(--faint); }
+	.permission.auto .title { font-weight: 400; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.permission.auto .options, .permission.auto .phead .tag { display: none; }
+
+	/* Reports (findings, recent changes, refresh): a ranked card. */
+	.report { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; font-size: 12.5px; }
+	.report .rhead { padding: 12px 14px 10px; }
+	.report .rtitle { font-weight: 500; color: var(--ink); }
+	.report .rsub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+	.report .row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-top: 1px solid var(--border); transition: background var(--dur-fast) var(--ease-out); }
+	.report .row:hover { background: var(--surface-2); }
+	.report .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 6px; flex: none; }
+	.report .rbody { flex: 1; min-width: 0; }
+	.report .rdetail { color: var(--muted); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+	.report .ractions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+	.report .rfooter { color: var(--muted); font-size: 11.5px; white-space: pre-wrap; border-top: 1px solid var(--border); background: var(--surface-2); padding: 10px 14px; }
+
+	/* ---------- empty: a 3D dot object that changes shape (a square of layers, a human bust, a galaxy…) ---------- */
+	#empty { padding: 4px 4px 8px; display: flex; flex-direction: column; gap: 12px; }
+	#empty .dotobject-stage { aspect-ratio: 16 / 10; margin: 0 -6px; max-height: 460px; overflow: hidden; transition: max-height var(--dur-slow, 380ms) var(--ease-out), margin-bottom var(--dur-slow, 380ms) var(--ease-out); }
+	/* once the object has left for the corner, its place closes up */
+	body.orb-docked #empty .dotobject-stage { max-height: 0; margin-bottom: -12px; }
+	/* The object itself floats over its place in the empty chat, so it can fly to the top right
+	   corner when you start to type (and live there while there is a conversation). */
+	#orb { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 5; will-change: transform; }
+	#orb .dotobject { border-radius: var(--radius-lg); }
+	#orb.docked { pointer-events: none; }
+	body.orb-docked #context { padding-right: 56px; }
+	#empty h2 { margin: 0; font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; }
+	#empty p { margin: 0; color: var(--muted); font-size: 12.5px; }
+	.suggestions { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
+	.suggestions button { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--border); color: var(--ink); font: inherit; font-size: var(--text-sm); padding: 10px 14px; cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
+	.suggestions button:first-child { border-top: 0; }
+	.suggestions button::after { content: "→"; color: var(--faint); transition: transform var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out); }
+	.suggestions button:hover { background: var(--surface-2); }
+	.suggestions button:hover::after { transform: translateX(2px); color: var(--ink); }
+
+	/* ---------- composer ---------- */
+	footer { flex: none; border-top: 1px solid var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+	#queued { display: flex; flex-direction: column; gap: 4px; }
+	#queued .queued { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface-2); font-size: 12.5px; color: var(--ink-2); animation: fade-in var(--dur) var(--ease-out); }
+	#queued .queued::before { content: "WAITING"; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--faint); flex: none; }
+	#queued .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	#queued .drop { flex: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: var(--radius-sm, 6px); }
+	#queued .drop:hover, #queued .drop:focus-visible { background: var(--surface-3); color: var(--ink); outline: none; }
+	#working { display: flex; align-items: center; gap: 10px; padding: 0 2px; animation: fade-in var(--dur) var(--ease-out); }
+	textarea#input { width: 100%; resize: none; min-height: 58px; max-height: 200px; padding: 10px 12px; border-radius: var(--radius-lg); line-height: 1.5; }
+	.row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+	.row > span:last-child { display: inline-flex; gap: 6px; align-items: center; }
+	.hint { font-size: 11.5px; color: var(--faint); }
+	#review { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 12px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); animation: rise var(--dur) var(--ease-enter); }
+	#review .counts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+	#review .counts .label { color: var(--ink); margin-right: 2px; }
+	#review .added { color: var(--ok); }
+	#review .changed { color: var(--warn); }
+	#review .removed { color: var(--danger); }
+	#review .pages { color: var(--ink-2); }
+	#review > span:last-child { display: inline-flex; gap: 6px; }
+	#attachments { display: flex; gap: 8px; flex-wrap: wrap; }
+	#attachments:empty { display: none; }
+	.att { position: relative; animation: rise var(--dur) var(--ease-enter); }
+	.att img { height: 52px; max-width: 104px; object-fit: cover; border-radius: var(--radius); border: 1px solid var(--border); display: block; }
+	.att-x { position: absolute; top: -7px; right: -7px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font: inherit; font-size: 11px; line-height: 18px; cursor: pointer; }
+	body.dragging footer { outline: 2px dashed var(--ink); outline-offset: -6px; }
+</style>
+</head>
+<body>
+	<div class="top" data-dot-host>
+		<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
+		<header>
+			<button id="collapse" class="icon-btn" title="Close the AI chat (⌘J opens it again)" aria-label="Close the AI chat"><span data-icon="sparkle"></span></button>
+			<button id="providerBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Who answers: one of your agents, or a model used with an API key"><span id="providerLabel">Agent</span></button>
+			<button id="modelBtn" class="pick" aria-haspopup="menu" aria-expanded="false" title="Model or mode"><span id="modelLabel">Model</span></button>
+			<span class="spacer"></span>
+			<button id="allowAllChip" class="tag hidden" data-tone="warn" title="Allow all is on: the agent's requests in this chat are approved without asking. Click to turn it off.">Allow all ✕</button>
+			<span id="status" class="state" data-state="off" role="img" aria-label="Agent status" title=""></span>
+			<button id="newChat" class="icon-btn" title="New chat (starts a new agent session)" aria-label="New chat"><span data-icon="plus"></span></button>
+			<button id="settingsBtn" class="icon-btn" title="Settings (⌘,)" aria-label="Settings"><span data-icon="gear"></span></button>
+		</header>
+		<div id="context">
+			<button id="lasso" class="tb" title="Lasso: draw around shapes in the diagram to select them (Alt+L)"><span data-icon="lasso"></span><span class="lbl">Lasso</span></button>
+			<button id="askInDiagram" class="tb" title="Ask about the selection right in the diagram (Alt+K)"><span data-icon="sparkle"></span><span class="lbl">Inline</span></button>
+			<button id="markup" class="tb" title="Markup: draw arrows, strike-throughs and notes on the diagram, then send them as one request (Alt+M)"><span data-icon="pen"></span><span class="lbl">Markup</span></button>
+			<button id="lint" class="tb" title="Review: ask the agent to check the diagram for problems and fix them"><span data-icon="check"></span><span class="lbl">Review</span></button>
+			<button id="map" class="tb" title="Map software, a database, a cloud environment or an ML system into this diagram (read-only)"><span data-icon="map"></span><span class="lbl">Map…</span></button>
+			<button id="digDeeper" class="tb hidden" title="Dig deeper: ask the agent to investigate the selected mapped shapes, read-only. Type a question in the box first to focus it."><span data-icon="search"></span><span id="digDeeperLabel" class="lbl">Dig deeper</span></button>
+			<button id="mapActions" class="tb hidden" aria-haspopup="menu" aria-expanded="false" title="Map actions for the maps on this page: findings, plain-English descriptions, recent changes, refresh, tour, ask"><span id="mapActionsLabel">Map</span><span id="mapCount" class="count hidden"></span><svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M2 3.5l3 3 3-3"/></svg></button>
+			<span class="tag hidden" data-tone="plain" id="selection"></span>
+		</div>
+	</div>
+	<div id="grip" role="separator" aria-orientation="vertical" aria-label="Resize the chat" title="Drag to resize the chat"></div>
+	<div id="pickMenu" class="menu hidden" role="menu"></div>
+	<div id="mapMenu" class="menu hidden" role="menu" aria-labelledby="mapActions">
+		<button role="menuitem" data-action="findings">Findings <span class="hint">health</span></button>
+		<div role="separator"></div>
+		<button role="menuitem" data-action="describe">Describe in plain English</button>
+		<button role="menuitem" data-action="describe-dev">Describe for developers</button>
+		<div role="separator"></div>
+		<button role="menuitem" data-action="recent">Recent changes <span class="hint">git</span></button>
+		<button role="menuitem" data-action="refresh">Refresh map</button>
+		<div role="separator"></div>
+		<button role="menuitem" data-action="tour">Build a tour <span class="hint">focus: box</span></button>
+		<button role="menuitem" data-action="ask">Ask the map <span class="hint">question: box</span></button>
+	</div>
+	<div id="messages">
+		<div id="empty">
+			<figure class="dotobject-stage" id="emptyStage"></figure>
+			<h2>What should we draw?</h2>
+			<p>Pick one of your coding agents above, or a model you have an API key for, and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
+			<div class="suggestions">
+				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
+				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
+				<button data-prompt="Restyle the diagram so it looks professional and consistent: one colour per concept, consistent fonts and edge styles. Do not change structure.">Make it look professional</button>
+				<button data-prompt="Create an architecture diagram of a typical three-tier web application on AWS with a load balancer, autoscaled web servers, an API layer, a cache and a database.">Draw an example AWS architecture</button>
+			</div>
+		</div>
+	</div>
+	<div id="orb"><canvas class="dotobject" id="emptyObject" aria-label="A shape drawn in dots that keeps changing: stacked layers, a human bust, a galaxy and more"></canvas></div>
+	<footer>
+		<div id="review" class="hidden" role="status">
+			<span class="counts"><span class="label">Pending changes</span><span id="reviewCounts" class="counts"></span></span>
+			<span>
+				<button id="reviewReject" class="btn btn-sm" title="Revert every pending AI change">Reject</button>
+				<button id="reviewAccept" class="btn btn-sm btn-primary" title="Keep every pending AI change">Accept</button>
+			</span>
+		</div>
+		<div id="working" class="hidden" role="status"><span class="dot-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="label">Working · watch the diagram</span></div>
+		<div id="queued" class="hidden" aria-label="Waiting to be sent"></div>
+		<div id="attachments"></div>
+		<textarea id="input" rows="2" placeholder="Describe a change, or paste a sketch…"></textarea>
+		<div class="row">
+			<span class="hint" id="hint">↵ send · ⇧↵ new line · ⌘Z undoes edits</span>
+			<span>
+				<button id="attach" class="icon-btn" title="Attach a sketch, whiteboard photo or screenshot" aria-label="Attach image"><span data-icon="image"></span></button>
+				<button id="stop" class="btn btn-sm btn-danger hidden">Stop</button>
+				<button id="send" class="btn btn-sm btn-primary">Send</button>
+			</span>
+		</div>
+	</footer>
+<script type="module" nonce="$$nonce$$">
+	// The dot layers: one live field behind the head, and a 3D dot object that changes shape.
+	import { mountDotField } from "/ui/dots.js";
+	import { mountDotObject } from "/ui/dot-object.js";
+	import { mountMatrix } from "/ui/matrix.js";
+	const field = mountDotField(document.getElementById("field"), { density: 0.42, grid: 7, anchor: "viewport" });
+	// the same dots over the whole chat (ui/matrix.js)
+	window.omnidrawMatrix = mountMatrix();
+
+	// The object sits in the empty chat. When you start to type (or a conversation starts) it
+	// shoots to the top right corner and lives there, small; in a new, empty chat it comes back.
+	const orb = document.getElementById("orb"), stage = document.getElementById("emptyStage"), empty = document.getElementById("empty");
+	const input = document.getElementById("input"), row = document.getElementById("context");
+	const SHAPES = ["planes", "bust", "tetrahedron", "spiral", "galaxy", "saturn", "helix", "heart", "cube", "torus", "wave", "sphere"];
+	const DOCK = 42, FLY_MS = 560;
+	const still = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+	let object = null, docked = false, flight = null, at = null;
+	const home = () => { const r = stage.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; };
+	const dock = () => { const r = row.getBoundingClientRect(); return { x: r.right - DOCK - 8, y: r.top + (r.height - DOCK) / 2, w: DOCK, h: DOCK }; };
+	function put(r) {
+		at = r;
+		orb.style.transform = "translate(" + r.x.toFixed(1) + "px, " + r.y.toFixed(1) + "px)";
+		orb.style.width = Math.max(1, Math.round(r.w)) + "px";
+		orb.style.height = Math.max(1, Math.round(r.h)) + "px";
+	}
+	function place() {
+		if (!flight) put(docked ? dock() : home());
+	}
+	function fly() {
+		const from = at || home(), t0 = performance.now();
+		const step = (now) => {
+			const u = Math.min(1, (now - t0) / FLY_MS);
+			// leaves fast, lands softly; it shrinks (or grows) on the way
+			const e = 1 - (1 - u) ** 3, to = docked ? dock() : home();
+			put({ x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, w: from.w + (to.w - from.w) * e, h: from.h + (to.h - from.h) * e });
+			flight = u < 1 ? requestAnimationFrame(step) : null;
+			if (!flight) field?.pulse(docked ? 0.94 : 0.5, docked ? 0.75 : 0.9);
+		};
+		cancelAnimationFrame(flight);
+		flight = requestAnimationFrame(step);
+	}
+	function syncEmpty() {
+		const shown = !empty.classList.contains("hidden");
+		const want = !shown || input.value.trim() !== "";
+		if (!object) {
+			docked = want;
+			orb.classList.toggle("docked", docked);
+			document.body.classList.toggle("orb-docked", docked);
+			place();
+			object = mountDotObject(document.getElementById("emptyObject"), { morph: SHAPES, signalAt: [0.72, 0.55, 0.72], dot: 2.1, scale: 0.4 });
+			return;
+		}
+		if (want === docked) return place();
+		docked = want;
+		orb.classList.toggle("docked", docked);
+		document.body.classList.toggle("orb-docked", docked);
+		if (still()) place();
+		else fly();
+	}
+	input.addEventListener("input", syncEmpty);
+	document.getElementById("messages").addEventListener("scroll", place, { passive: true });
+	new ResizeObserver(place).observe(document.body);
+	new ResizeObserver(place).observe(stage);
+	window.drawaiUI = { pulse: (x = 0.85, y = 0.35) => field?.pulse(x, y), syncEmpty, orb: () => ({ docked, shape: object?.object.canvas.dataset.shape || "planes", rect: at }) };
+	syncEmpty();
+</script>
+<script nonce="$$nonce$$">
+(function () {
+	const vscode = acquireVsCodeApi();
+	const $ = (id) => document.getElementById(id);
+	const messages = $("messages"), input = $("input"), empty = $("empty");
+	let state = { transcript: [], busy: false };
+	let lastAssistant = null, lastAssistantText = "";
+	const toolEls = new Map();
+
+	function escapeHtml(s) {
+		return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+	}
+
+	// Minimal, safe markdown: everything is escaped first, then a few constructs are re-introduced.
+	function renderMarkdown(src) {
+		const blocks = src.split(/```/);
+		let html = "";
+		blocks.forEach((block, i) => {
+			if (i % 2 === 1) {
+				const code = block.replace(/^[\w-]*\n/, "");
+				html += "<pre><code>" + escapeHtml(code) + "</code></pre>";
+				return;
+			}
+			const paragraphs = block.split(/\n{2,}/);
+			for (const para of paragraphs) {
+				if (!para.trim()) continue;
+				const lines = para.split("\n");
+				if (lines.every((l) => /^\s*([-*]|\d+\.)\s+/.test(l) || !l.trim())) {
+					html += "<ul>" + lines.filter((l) => l.trim()).map((l) => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + "</ul>";
+				} else {
+					html += "<p>" + lines.map(inline).join("<br>") + "</p>";
+				}
+			}
+		});
+		return html;
+	}
+	function inline(s) {
+		return escapeHtml(s)
+			.replace(/`([^`]+)`/g, "<code>$1</code>")
+			.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+			.replace(/(^|[^*])\*([^*\s][^*]*)\*/g, "$1<em>$2</em>")
+			.replace(/(^|\s)_([^_]+)_(?=\s|$|[.,])/g, "$1<em>$2</em>");
+	}
+
+	function scrollDown() { messages.scrollTop = messages.scrollHeight; }
+
+	function setEmpty(on) {
+		empty.classList.toggle("hidden", !on);
+		window.drawaiUI?.syncEmpty();
+	}
+
+	function addItem(item) {
+		if (!empty.classList.contains("hidden")) setEmpty(false);
+		const el = document.createElement("div");
+		if (item.kind === "user") {
+			el.className = "msg user";
+			if (item.scope) {
+				const s = document.createElement("span");
+				s.className = "scope label";
+				s.textContent = item.scope;
+				el.appendChild(s);
+			}
+			el.appendChild(document.createTextNode(item.text));
+			if (item.attachments && item.attachments.length) {
+				const a = document.createElement("span");
+				a.className = "attached label";
+				a.textContent = item.attachments.join(" · ");
+				el.appendChild(a);
+			}
+			lastAssistant = null;
+		} else if (item.kind === "assistant") {
+			el.className = "msg assistant";
+			el.innerHTML = renderMarkdown(item.text);
+			lastAssistant = el;
+			lastAssistantText = item.text;
+		} else if (item.kind === "tool") {
+			el.className = "tool " + item.status;
+			const dot = document.createElement("span");
+			dot.className = "dot";
+			const label = document.createElement("span");
+			label.textContent = item.summary;
+			el.append(dot, label);
+			toolEls.set(item.id, { el, label });
+			lastAssistant = null;
+		} else if (item.kind === "note") {
+			el.className = "note";
+			el.textContent = item.text;
+			lastAssistant = null;
+		} else if (item.kind === "thought") {
+			el.className = "thought";
+			el.dataset.raw = item.text;
+			el.textContent = item.text.trim();
+			el.title = item.text;
+			lastThought = el;
+			lastAssistant = null;
+		} else if (item.kind === "report") {
+			el.className = "report";
+			const head = document.createElement("div");
+			head.className = "rhead";
+			const t = document.createElement("div");
+			t.className = "rtitle";
+			t.textContent = item.title;
+			head.appendChild(t);
+			if (item.subtitle) {
+				const s = document.createElement("div");
+				s.className = "rsub";
+				s.textContent = item.subtitle;
+				head.appendChild(s);
+			}
+			el.appendChild(head);
+			for (const r of item.rows || []) {
+				const row = document.createElement("div");
+				row.className = "row";
+				const dot = document.createElement("span");
+				dot.className = "dot";
+				dot.style.background = r.color || "transparent";
+				row.appendChild(dot);
+				const body = document.createElement("div");
+				body.className = "rbody";
+				const tx = document.createElement("div");
+				tx.textContent = r.text;
+				body.appendChild(tx);
+				if (r.detail) {
+					const d = document.createElement("div");
+					d.className = "rdetail";
+					d.textContent = r.detail;
+					body.appendChild(d);
+				}
+				if (r.actions && r.actions.length) {
+					const acts = document.createElement("div");
+					acts.className = "ractions";
+					for (const a of r.actions) {
+						const b = document.createElement("button");
+						b.className = "btn btn-sm";
+						b.textContent = a.title;
+						b.addEventListener("click", () => vscode.postMessage({ type: "reportAction", action: a.action }));
+						acts.appendChild(b);
+					}
+					body.appendChild(acts);
+				}
+				row.appendChild(body);
+				el.appendChild(row);
+			}
+			if (item.footer) {
+				const f = document.createElement("div");
+				f.className = "rfooter";
+				f.textContent = item.footer;
+				el.appendChild(f);
+			}
+			lastAssistant = null;
+		} else if (item.kind === "permission") {
+			el.className = "permission" + (item.auto ? " auto" : "") + (item.outcome ? " resolved" : "");
+			const head = document.createElement("div");
+			head.className = "phead";
+			const title = document.createElement("div");
+			title.className = "title";
+			title.textContent = (item.auto ? "⚡ " : "") + item.title;
+			if (item.detail && item.auto) title.title = item.detail;
+			const tag = document.createElement("span");
+			tag.className = "tag";
+			tag.dataset.tone = "signal";
+			tag.textContent = "Needs you";
+			head.append(tag, title);
+			el.appendChild(head);
+			if (item.detail && !item.auto) {
+				const d = document.createElement("div");
+				d.className = "detail";
+				d.textContent = item.detail;
+				el.appendChild(d);
+			}
+			const opts = document.createElement("div");
+			opts.className = "options";
+			el.appendChild(opts);
+			permissionEls.set(item.id, { el, opts });
+			renderPermission(item);
+			lastAssistant = null;
+		} else if (item.kind === "error") {
+			el.className = "msg error";
+			el.textContent = item.text;
+			if (item.action) {
+				const b = document.createElement("button");
+				b.className = "btn btn-sm";
+				b.textContent = item.action.title;
+				b.addEventListener("click", () => vscode.postMessage({ type: "command", command: item.action.command }));
+				el.appendChild(document.createElement("br"));
+				el.appendChild(b);
+			}
+			lastAssistant = null;
+		}
+		messages.appendChild(el);
+		scrollDown();
+	}
+
+	let lastThought = null;
+	const permissionEls = new Map();
+	function renderPermission(item) {
+		const p = permissionEls.get(item.id);
+		if (!p) return;
+		p.opts.textContent = "";
+		p.el.classList.toggle("resolved", !!item.outcome);
+		if (item.outcome) {
+			const o = document.createElement("span");
+			o.className = "outcome";
+			o.textContent = item.outcome;
+			p.opts.appendChild(o);
+			return;
+		}
+		for (const opt of item.options || []) {
+			const b = document.createElement("button");
+			b.textContent = opt.name;
+			b.className = "btn btn-sm" + (opt.kind === "allow_once" ? " btn-primary" : opt.kind.startsWith("reject") ? " btn-ghost" : "");
+			b.title = opt.kind.replace("_", " ");
+			b.addEventListener("click", () => vscode.postMessage({ type: "permissionReply", id: item.id, optionId: opt.optionId }));
+			p.opts.appendChild(b);
+		}
+		if ((item.options || []).some((o) => o.kind === "allow_once" || o.kind === "allow_always")) {
+			const all = document.createElement("button");
+			all.className = "btn btn-sm btn-ghost allow-all";
+			all.textContent = "Allow all";
+			all.title = "Allow this and everything else the agent asks for in this chat, until New Chat or you turn it off (⚡ chip at the top)";
+			all.addEventListener("click", () => vscode.postMessage({ type: "allowAll", on: true }));
+			p.opts.appendChild(all);
+		}
+	}
+	function appendThought(text) {
+		if (!lastThought || lastThought !== messages.lastElementChild) addItem({ kind: "thought", text: "" });
+		lastThought.dataset.raw = (lastThought.dataset.raw || "") + text;
+		lastThought.textContent = lastThought.dataset.raw.trim();
+		lastThought.title = lastThought.textContent;
+		lastThought.scrollTop = lastThought.scrollHeight;
+		scrollDown();
+	}
+
+	function appendText(text) {
+		if (!lastAssistant) {
+			addItem({ kind: "assistant", text: "" });
+		}
+		lastAssistantText += text;
+		lastAssistant.innerHTML = renderMarkdown(lastAssistantText);
+		scrollDown();
+	}
+
+	function renderAll() {
+		messages.classList.add("settled");
+		for (const el of [...messages.children]) if (el !== empty) el.remove();
+		toolEls.clear();
+		permissionEls.clear();
+		lastAssistant = null;
+		lastThought = null;
+		setEmpty(state.transcript.length === 0);
+		state.transcript.forEach(addItem);
+		requestAnimationFrame(() => messages.classList.remove("settled"));
+	}
+
+	let iconStyle = null, side = null;
+	function renderLook() {
+		if (state.chatSide !== side) {
+			side = state.chatSide || "right";
+			document.body.classList.toggle("side-left", side === "left");
+			iconStyle = null;
+		}
+		document.documentElement.dataset.matrix = state.matrix || "grey";
+		const style = state.iconStyle || "dots2d";
+		if (style !== iconStyle && window.DrawAIIcons) {
+			iconStyle = style;
+			window.DrawAIIcons.apply(style);
+		}
+	}
+
+	function renderChrome() {
+		renderLook();
+		const prov = (state.providers || []).find((p) => p.id === state.providerId);
+		$("providerLabel").textContent = prov ? prov.label.replace(/ — .*$/, "") : "Agent";
+		const cur = (state.models || []).find((m) => m.id === state.modelId);
+		$("modelLabel").textContent = state.modelsError ? "⚠ " + state.modelsError : cur ? cur.name : state.modelsLoading ? "Loading models…" : (state.models || []).length ? "Model" : "No models";
+		$("modelBtn").title = state.modelsError || (cur ? cur.name + (cur.description ? " · " + cur.description : "") : "Model");
+		const sel = $("selection");
+		sel.classList.toggle("hidden", !state.selectionCount);
+		sel.textContent = state.selectionCount + " selected";
+		$("lasso").classList.toggle("active", !!state.lassoActive);
+		$("digDeeper").classList.toggle("hidden", !state.mappedSelection);
+		$("mapActions").classList.toggle("hidden", !state.pageMaps);
+		$("mapActionsLabel").textContent = "Map";
+		$("mapCount").classList.toggle("hidden", !state.pageFindings);
+		$("mapCount").textContent = state.pageFindings || "";
+		$("mapActions").title = (state.pageFindings ? state.pageFindings + " finding(s) on this page's maps. " : "") + "Map actions: findings, plain-English descriptions, recent changes, refresh, tour, ask";
+		$("digDeeperLabel").textContent = state.mappedSelection ? "Dig deeper (" + state.mappedSelection + ")" : "Dig deeper";
+		$("lasso").disabled = $("askInDiagram").disabled = $("markup").disabled = $("lint").disabled = !state.file;
+		$("providerBtn").title = state.providerTitle || "Who answers: one of your agents, or a model used with an API key";
+		const status = $("status");
+		if (status.dataset.state !== (state.agentState || "off") && state.agentState === "ready") window.drawaiUI?.pulse();
+		status.dataset.state = state.agentState || "off";
+		status.title = state.agentInfo || state.modelsError || "";
+		status.setAttribute("aria-label", "Agent " + (state.agentState || "off") + (status.title ? ": " + status.title : ""));
+		renderReview(state.review);
+		$("allowAllChip").classList.toggle("hidden", !state.allowAll);
+		renderQueued(state.queued || []);
+		setBusy(state.busy);
+	}
+
+	// What was sent while it works and has not reached the model yet: each can still be taken back.
+	function renderQueued(list) {
+		const box = $("queued");
+		box.classList.toggle("hidden", !list.length);
+		box.textContent = "";
+		list.forEach((q) => {
+			const chip = document.createElement("span");
+			chip.className = "queued";
+			const text = document.createElement("span");
+			text.className = "what";
+			text.textContent = (q.images ? "🖼 " : "") + q.text;
+			text.title = q.text;
+			const drop = document.createElement("button");
+			drop.className = "drop";
+			drop.textContent = "✕";
+			drop.title = "Do not send this";
+			drop.setAttribute("aria-label", "Do not send: " + q.text);
+			drop.addEventListener("click", () => vscode.postMessage({ type: "unqueue", id: q.id }));
+			chip.append(text, drop);
+			box.appendChild(chip);
+		});
+	}
+
+	function renderReview(summary) {
+		$("review").classList.toggle("hidden", !summary);
+		const counts = $("reviewCounts");
+		counts.textContent = "";
+		if (!summary) return;
+		for (const k of ["added", "changed", "removed"]) {
+			if (!summary[k]) continue;
+			const s = document.createElement("span");
+			s.className = k;
+			s.textContent = summary[k] + " " + k;
+			counts.appendChild(s);
+		}
+		if (summary.pages) {
+			const s = document.createElement("span");
+			s.className = "pages";
+			s.textContent = summary.pages + (summary.pages === 1 ? " page change" : " page changes");
+			counts.appendChild(s);
+		}
+	}
+
+	function setBusy(busy) {
+		state.busy = busy;
+		// (while it works the box stays open: what is sent joins the request, or follows it)
+		$("send").textContent = busy ? "Add" : "Send";
+		$("send").title = busy ? "Add this to what it is working on: it reads it with its next step, or gets it as the next request" : "";
+		$("send").classList.toggle("btn-primary", !busy);
+		$("stop").classList.toggle("hidden", !busy);
+		$("working").classList.toggle("hidden", !busy);
+		$("input").placeholder = busy ? "Add to the request while it works…" : "Describe a change, or paste a sketch…";
+		$("hint").textContent = busy ? "↵ adds this to the request · Stop ends it" : "↵ send · ⇧↵ new line · ⌘Z undoes edits";
+	}
+
+	// Providers accept at most 5 MB of base64 per image; larger or huge images are re-encoded smaller.
+	const MAX_IMAGES = 4, MAX_SEND_B64 = 5000000, MAX_SIDE = 2048;
+	let images = [];
+	function renderAttachments() {
+		const box = $("attachments");
+		box.textContent = "";
+		images.forEach((img, i) => {
+			const wrap = document.createElement("span");
+			wrap.className = "att";
+			const el = document.createElement("img");
+			el.src = "data:" + img.mimeType + ";base64," + img.base64;
+			el.alt = "attached image " + (i + 1);
+			const x = document.createElement("button");
+			x.className = "att-x";
+			x.textContent = "×";
+			x.title = "Remove";
+			x.addEventListener("click", () => { images.splice(i, 1); renderAttachments(); });
+			wrap.append(el, x);
+			box.appendChild(wrap);
+		});
+	}
+	function flashHint(text) {
+		$("hint").textContent = text;
+		setTimeout(() => setBusy(state.busy), 4000);
+	}
+	function addImageDataUrl(url) {
+		const m = /^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/.exec(url);
+		if (!m || images.length >= MAX_IMAGES) return;
+		const img = new Image();
+		img.onload = () => {
+			if (images.length >= MAX_IMAGES) return;
+			const w = img.naturalWidth, h = img.naturalHeight;
+			if (m[2].length <= MAX_SEND_B64 && Math.max(w, h) <= MAX_SIDE) {
+				images.push({ mimeType: m[1], base64: m[2] });
+			} else {
+				const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+				const canvas = document.createElement("canvas");
+				canvas.width = Math.max(1, Math.round(w * scale));
+				canvas.height = Math.max(1, Math.round(h * scale));
+				const ctx = canvas.getContext("2d");
+				ctx.fillStyle = "#ffffff";
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+				ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+				let out = "", quality = 0.9;
+				do {
+					out = canvas.toDataURL("image/jpeg", quality).split(",")[1];
+					quality -= 0.15;
+				} while (out.length > MAX_SEND_B64 && quality > 0.3);
+				if (out.length > MAX_SEND_B64) return flashHint("That image is too large to send.");
+				images.push({ mimeType: "image/jpeg", base64: out });
+			}
+			renderAttachments();
+		};
+		img.onerror = () => flashHint("Could not read that image.");
+		img.src = url;
+	}
+	function addFiles(files) {
+		for (const f of files) {
+			if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) continue;
+			const r = new FileReader();
+			r.onload = () => addImageDataUrl(String(r.result));
+			r.readAsDataURL(f);
+		}
+	}
+
+	function send(text) {
+		text = (text ?? input.value).trim();
+		if (!text && images.length === 0) return;
+		const msg = { type: "send", text };
+		if (images.length) msg.images = images;
+		vscode.postMessage(msg);
+		images = [];
+		renderAttachments();
+		input.value = ""; window.drawaiUI?.syncEmpty();
+		autosize();
+	}
+
+	function autosize() { input.style.height = "auto"; input.style.height = Math.min(200, input.scrollHeight) + "px"; }
+
+	$("send").addEventListener("click", () => send());
+	$("stop").addEventListener("click", () => vscode.postMessage({ type: "stop" }));
+	$("newChat").addEventListener("click", () => { window.drawaiUI?.pulse(0.95, 0.3); vscode.postMessage({ type: "newChat" }); });
+	$("allowAllChip").addEventListener("click", () => vscode.postMessage({ type: "allowAll", on: false }));
+	$("lasso").addEventListener("click", () => vscode.postMessage({ type: "lasso" }));
+	$("askInDiagram").addEventListener("click", () => vscode.postMessage({ type: "askInDiagram" }));
+	$("markup").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.markup" }));
+	$("lint").addEventListener("click", () => vscode.postMessage({ type: "command", command: "drawio-ai.reviewDiagram" }));
+	$("attach").addEventListener("click", () => vscode.postMessage({ type: "pickImage" }));
+	$("map").addEventListener("click", () => vscode.postMessage({ type: "openMapper" }));
+	function closeMapMenu(focus) {
+		$("mapMenu").classList.add("hidden");
+		$("mapActions").setAttribute("aria-expanded", "false");
+		if (focus) $("mapActions").focus();
+	}
+	$("mapActions").addEventListener("click", (e) => {
+		e.stopPropagation();
+		const menu = $("mapMenu");
+		if (!menu.classList.contains("hidden")) return closeMapMenu(false);
+		const r = $("mapActions").getBoundingClientRect();
+		menu.style.top = r.bottom + 6 + "px";
+		menu.classList.remove("hidden");
+		$("mapActions").setAttribute("aria-expanded", "true");
+		menu.querySelector('[role="menuitem"]').focus();
+	});
+	$("mapMenu").addEventListener("keydown", (e) => {
+		const all = [...$("mapMenu").querySelectorAll('[role="menuitem"]')], i = all.indexOf(document.activeElement);
+		if (e.key === "Escape") closeMapMenu(true);
+		else if (e.key === "ArrowDown") all[(i + 1) % all.length].focus();
+		else if (e.key === "ArrowUp") all[(i - 1 + all.length) % all.length].focus();
+		else return;
+		e.preventDefault();
+	});
+	document.addEventListener("click", () => closeMapMenu(false));
+	for (const b of document.querySelectorAll("#mapMenu button")) {
+		b.addEventListener("click", () => {
+			closeMapMenu(false);
+			const text = $("input").value.trim();
+			const action = b.dataset.action;
+			if ((action === "ask" || action === "tour") && text) $("input").value = ""; window.drawaiUI?.syncEmpty();
+			vscode.postMessage({ type: "mapAction", action, text });
+		});
+	}
+	$("digDeeper").addEventListener("click", () => {
+		const question = $("input").value.trim();
+		$("input").value = ""; window.drawaiUI?.syncEmpty();
+		vscode.postMessage({ type: "digDeeper", text: question });
+	});
+	input.addEventListener("paste", (e) => {
+		const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith("image/"));
+		if (files.length) { e.preventDefault(); addFiles(files); }
+	});
+	document.addEventListener("dragover", (e) => { e.preventDefault(); document.body.classList.add("dragging"); });
+	document.addEventListener("dragleave", (e) => { if (!e.relatedTarget) document.body.classList.remove("dragging"); });
+	document.addEventListener("drop", (e) => {
+		e.preventDefault();
+		document.body.classList.remove("dragging");
+		addFiles([...(e.dataTransfer?.files || [])]);
+	});
+	$("reviewAccept").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "accept" }));
+	$("reviewReject").addEventListener("click", () => vscode.postMessage({ type: "review", decision: "reject" }));
+	// ----- agent and model pickers: in-app menus -----
+	const pickMenu = $("pickMenu");
+	let pickOwner = null;
+	function closePick(focus) {
+		if (!pickOwner) return;
+		pickMenu.classList.add("hidden");
+		pickOwner.setAttribute("aria-expanded", "false");
+		if (focus) pickOwner.focus();
+		pickOwner = null;
+	}
+	function openPick(button, items, footer) {
+		if (pickOwner === button) return closePick(false);
+		closePick(false);
+		pickMenu.textContent = "";
+		let group;
+		for (const it of items) {
+			// (a heading where a group begins: the agents, then the providers used with an API key)
+			if (it.group && it.group !== group) {
+				const h = document.createElement("div");
+				h.className = "group";
+				h.setAttribute("role", "presentation");
+				h.textContent = it.group;
+				pickMenu.appendChild(h);
+			}
+			group = it.group;
+			const b = document.createElement("button");
+			b.setAttribute("role", "menuitemradio");
+			b.setAttribute("aria-checked", String(!!it.checked));
+			if (it.disabled) b.setAttribute("aria-disabled", "true");
+			const tick = document.createElement("span");
+			tick.className = "tick";
+			tick.textContent = "✓";
+			const name = document.createElement("span");
+			name.textContent = it.label;
+			b.append(tick, name);
+			if (it.detail) {
+				const d = document.createElement("small");
+				d.textContent = it.detail;
+				b.appendChild(d);
+			}
+			b.addEventListener("click", (e) => { e.stopPropagation(); closePick(false); if (!it.disabled) it.pick(); });
+			pickMenu.appendChild(b);
+		}
+		if (footer) {
+			const sep = document.createElement("div");
+			sep.setAttribute("role", "separator");
+			const f = document.createElement("button");
+			f.setAttribute("role", "menuitem");
+			f.className = "more";
+			f.textContent = footer.label;
+			f.addEventListener("click", (e) => { e.stopPropagation(); closePick(false); footer.pick(); });
+			pickMenu.append(sep, f);
+		}
+		pickOwner = button;
+		button.setAttribute("aria-expanded", "true");
+		pickMenu.classList.remove("hidden");
+		const r = button.getBoundingClientRect();
+		const w = pickMenu.offsetWidth;
+		pickMenu.style.top = Math.round(r.bottom + 6) + "px";
+		pickMenu.style.left = Math.round(Math.max(8, Math.min(r.left, window.innerWidth - w - 8))) + "px";
+		(pickMenu.querySelector('[aria-checked="true"]') || pickMenu.querySelector("button"))?.focus();
+	}
+	pickMenu.addEventListener("keydown", (e) => {
+		const all = [...pickMenu.querySelectorAll("button")], i = all.indexOf(document.activeElement);
+		if (e.key === "Escape") closePick(true);
+		else if (e.key === "ArrowDown") all[(i + 1) % all.length].focus();
+		else if (e.key === "ArrowUp") all[(i - 1 + all.length) % all.length].focus();
+		else if (e.key === "Tab") closePick(false);
+		else return;
+		e.preventDefault();
+	});
+	document.addEventListener("click", (e) => { if (pickOwner && !pickMenu.contains(e.target)) closePick(false); });
+	window.addEventListener("blur", () => closePick(false));
+	window.addEventListener("resize", () => closePick(false));
+	// (where in Settings the one who answers is set up: the agents, or the API keys)
+	const settingsPart = () => (String(state.providerId || "").startsWith("api:") ? "api" : "agents");
+	$("providerBtn").addEventListener("click", (e) => {
+		e.stopPropagation();
+		openPick($("providerBtn"), (state.providers || []).map((p) => {
+			const m = / — (.*)$/.exec(p.label);
+			return { label: p.label.replace(/ — .*$/, ""), detail: m ? m[1] : "", group: p.group, checked: p.id === state.providerId, pick: () => { if (p.id !== state.providerId) { window.drawaiUI?.pulse(0.6, 0.35); vscode.postMessage({ type: "pickProvider", providerId: p.id }); } } };
+		}), { label: "Agents, API keys & models…", pick: () => vscode.postMessage({ type: "openSettings", section: settingsPart() }) });
+	});
+	$("modelBtn").addEventListener("click", (e) => {
+		e.stopPropagation();
+		const models = state.models || [];
+		const items = models.length
+			? models.map((m) => ({ label: m.name, detail: m.description || "", checked: m.id === state.modelId, pick: () => { if (m.id !== state.modelId) vscode.postMessage({ type: "pickModel", modelId: m.id }); } }))
+			: [{ label: state.modelsError ? "⚠ " + state.modelsError : state.modelsLoading ? "Loading models…" : "No models", disabled: true, pick: () => undefined }];
+		openPick($("modelBtn"), items, { label: "Choose which models show…", pick: () => vscode.postMessage({ type: "openSettings", section: settingsPart() }) });
+	});
+	$("settingsBtn").addEventListener("click", () => vscode.postMessage({ type: "openSettings" }));
+	$("collapse").addEventListener("click", () => vscode.postMessage({ type: "collapseChat" }));
+
+	// ----- drag the inner edge to resize the chat -----
+	const grip = $("grip");
+	let dragging = false, lastSent = 0, pendingX = null;
+	grip.addEventListener("pointerdown", (e) => {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		dragging = true;
+		grip.setPointerCapture(e.pointerId);
+		document.body.classList.add("resizing");
+	});
+	grip.addEventListener("pointermove", (e) => {
+		if (!dragging) return;
+		pendingX = e.screenX;
+		const now = performance.now();
+		if (now - lastSent > 16) { lastSent = now; vscode.postMessage({ type: "resizeChat", screenX: pendingX }); }
+	});
+	function endDrag(e) {
+		if (!dragging) return;
+		dragging = false;
+		document.body.classList.remove("resizing");
+		// pointercancel / lost capture can report 0: use the last real position instead.
+		const x = e.type === "pointerup" && typeof e.screenX === "number" && e.screenX > 0 ? e.screenX : pendingX;
+		vscode.postMessage({ type: "resizeChat", screenX: typeof x === "number" ? x : null, done: true });
+	}
+	grip.addEventListener("pointerup", endDrag);
+	grip.addEventListener("pointercancel", endDrag);
+	grip.addEventListener("lostpointercapture", endDrag);
+
+	for (const b of document.querySelectorAll(".suggestions button")) {
+		b.addEventListener("click", () => send(b.dataset.prompt));
+	}
+	input.addEventListener("input", autosize);
+	input.addEventListener("keydown", (e) => {
+		if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+			e.preventDefault();
+			send();
+		}
+	});
+
+	window.addEventListener("message", (e) => {
+		const m = e.data;
+		switch (m.type) {
+			case "state": {
+				const transcriptChanged = m.state.transcriptVersion !== state.transcriptVersion;
+				state = m.state;
+				if (transcriptChanged) renderAll();
+				renderChrome();
+				break;
+			}
+			case "append": state.transcript.push(m.item); addItem(m.item); break;
+			case "appendText": appendText(m.text); break;
+			case "appendThought": appendThought(m.text); break;
+			case "restoreInput": {
+				// (what was waiting when a request was stopped or failed: back in the box, not sent by itself)
+				if (m.text) input.value = m.text + (input.value.trim() ? "\n" + input.value : "");
+				const back = m.images || [];
+				const room = Math.max(0, MAX_IMAGES - images.length);
+				back.slice(0, room).forEach((img) => addImageDataUrl("data:" + img.mimeType + ";base64," + img.base64));
+				// (the box holds four: say so when pictures attached meanwhile leave no room for these)
+				if (back.length > room) flashHint((back.length - room) + " picture" + (back.length - room === 1 ? "" : "s") + " did not fit back in: attach again.");
+				window.drawaiUI?.syncEmpty();
+				autosize();
+				input.focus();
+				break;
+			}
+			case "permissionResolved": {
+				const item = state.transcript.find((t) => t.kind === "permission" && t.id === m.id);
+				if (item) item.outcome = m.outcome;
+				renderPermission({ id: m.id, outcome: m.outcome });
+				break;
+			}
+			case "tool": {
+				const t = toolEls.get(m.id);
+				if (t) { t.el.className = "tool " + m.status; t.label.textContent = m.summary; }
+				break;
+			}
+			case "busy": setBusy(m.busy); break;
+			case "focusInput": input.focus(); break;
+			case "addImages": (m.images || []).forEach((img) => addImageDataUrl("data:" + img.mimeType + ";base64," + img.base64)); input.focus(); break;
+		}
+	});
+
+	vscode.postMessage({ type: "ready" });
+})();
+</script>
+</body>
+</html>

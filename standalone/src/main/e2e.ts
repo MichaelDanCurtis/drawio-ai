@@ -219,6 +219,26 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 	log("mapRouting", (await import("./mapper/draw")).lastRouting ?? null);
 	log("mapWarnings", r.result?.warnings ?? []);
 	if (r.error) throw new Error(`Mapper: ${r.error}`);
+	if (map.dialog && r.result?.elsewhere?.length) {
+		// the folder held next to nothing and its working copies were not read: the dialog offers them, and a click maps one
+		const dlg = w.mapper.window!.webContents;
+		const offered: string[] = await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).map((b) => b.textContent)`);
+		await new Promise((r) => setTimeout(r, 700));
+		fs.writeFileSync(path.join(config.out, "mapper-elsewhere.png"), (await dlg.capturePage()).toPNG());
+		// (more than six: the rest are behind a button, and all of them are there once it is pressed)
+		await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).find((b) => / more…$/.test(b.textContent))?.click()`);
+		const all: string[] = await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).map((b) => b.textContent)`);
+		if (all.join() !== r.result.elsewhere.map((e) => e.label).join()) throw new Error(`The Mapper dialog does not offer every working copy: ${all.join(", ")}`);
+		await dlg.executeJavaScript(`document.querySelector("#result .elsewhere button").click()`);
+		const end = Date.now() + 30_000;
+		let after = "";
+		while (Date.now() < end && !/^✓/.test(after)) {
+			await new Promise((r) => setTimeout(r, 200));
+			after = await dlg.executeJavaScript(`document.getElementById("result").className === "ok" ? document.querySelector("#result div").textContent : ""`);
+		}
+		log("mapElsewhere", { offered, expected: r.result.elsewhere.map((e) => e.label), folder: await dlg.executeJavaScript(`Array.from(document.querySelectorAll("input[type=text]")).map((i) => i.value).find((v) => v.includes("worktrees")) || ""`), after });
+		if (offered.filter((o) => !/ more…$/.test(o)).join() !== r.result.elsewhere.slice(0, 6).map((e) => e.label).join() || (r.result.elsewhere.length > 6) !== offered.some((o) => / more…$/.test(o)) || !/^✓/.test(after)) throw new Error("The Mapper dialog did not offer the working copies, or a click on one did not map it.");
+	}
 	const pages = await w.client.aiPages({ op: "list" });
 	log("pages", pages.pages.map((p) => `${p.name}${p.current ? " (shown)" : ""}: ${p.cells}`));
 	const model = await w.client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 5000 });
