@@ -10,7 +10,7 @@
 	provider whose models are used with an API key; permission requests and thoughts
 	get their own transcript items.
 	Look: the omni-design language (ui/*.css): paper and ink, mono caps labels, one
-	signal red, a live dot field behind the head, a 3D dot object when empty.
+	signal red, a live dot field behind the head, a 3D dot object when empty (all in ink: no red dot in it).
 -->
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
 <link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
@@ -308,7 +308,7 @@
 			orb.classList.toggle("docked", docked);
 			document.body.classList.toggle("orb-docked", docked);
 			place();
-			object = mountDotObject(document.getElementById("emptyObject"), { morph: SHAPES, signalAt: [0.72, 0.55, 0.72], dot: 2.1, scale: 0.4 });
+			object = mountDotObject(document.getElementById("emptyObject"), { morph: SHAPES, dot: 2.1, scale: 0.4 });
 			return;
 		}
 		if (want === docked) return place();
