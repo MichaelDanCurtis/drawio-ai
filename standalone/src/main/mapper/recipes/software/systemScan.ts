@@ -1258,12 +1258,29 @@ export function withoutTestItems(text: string): string {
 	let from = 0;
 	for (let m = guard.exec(text); m; m = guard.exec(text)) {
 		if (m.index < from) continue;
-		// the item ends at its `;`, or at the brace that closes the one it opens
+		// the item ends at its `;`, or at the brace that closes the one it opens; a brace or a
+		// semicolon inside a string or a character is text, not the item's
 		let end = m.index + m[0].length;
 		let depth = 0;
 		for (; end < text.length; end++) {
 			const ch = text[end];
-			if (ch === "{") depth++;
+			if (ch === '"') {
+				// r"…", r#"…"#: ends at the quote with as many #, and knows no escapes
+				let hashes = 0;
+				while (text[end - 1 - hashes] === "#") hashes++;
+				if (text[end - 1 - hashes] === "r") {
+					const close = text.indexOf(`"${"#".repeat(hashes)}`, end + 1);
+					end = close < 0 ? text.length : close + hashes;
+				} else {
+					for (end++; end < text.length && text[end] !== '"'; end++) if (text[end] === "\\") end++;
+				}
+			} else if (ch === "'") {
+				// a character ('{', '\n', '\u{7b}'), not a lifetime ('a)
+				if (text[end + 1] === "\\") {
+					const close = text.indexOf("'", end + 3);
+					if (close > 0 && close - end <= 12) end = close;
+				} else if (text[end + 2] === "'") end += 2;
+			} else if (ch === "{") depth++;
 			else if (ch === "}" && --depth <= 0) break;
 			else if (ch === ";" && depth === 0) break;
 		}

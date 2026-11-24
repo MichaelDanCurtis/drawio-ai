@@ -398,9 +398,21 @@ test("a repository of packages that nothing deploys: a Rust binary and a Python 
 	assert.equal(withoutTestItems(mixed).split("\n").length, mixed.split("\n").length, "the lines stay where they are");
 	assert.ok(!/fake|deep|StatusCode/.test(withoutTestItems(mixed)) && /pub fn app\(\)/.test(withoutTestItems(mixed)));
 	assert.equal(withoutTestItems("fn a() {}\n#[cfg(test)]\nmod t {"), "fn a() {}\n            \n       ", "an item that never closes ends with the file");
+	// a brace or a semicolon in a string or a character of a test item is text: the item still ends where it ends
+	const texts = [
+		'#[cfg(test)]\nfn fixture() { assert_eq!(body(), "{"); }\n',
+		'#[cfg(test)]\nfn fixture() { let a = "say \\"{\\" twice {{"; let b = \'{\'; let c = \'\\\'\'; let d = \'\\u{7b}\'; }\n',
+		'#[cfg(test)]\nfn fixture<\'a>(x: &\'a str) -> &\'a str { let raw = r#"{ "quoted" {"#; let plain = r"{\\"; x }\n',
+		'#[cfg(test)]\nconst OPEN: &str = "a;{";\n',
+	];
+	for (const item of texts) {
+		const source = `${item}pub fn app() -> Router { Router::new().route("/kept", get(kept)) }\n`;
+		assert.deepEqual(entryPoints(source, "api/src/lib.rs", "rs").map((e) => e.label), ["GET /kept"], item);
+		assert.ok(!/fixture|OPEN/.test(withoutTestItems(source)), item);
+	}
 	// a large file of nothing but blank lines, comments blanked out or an unclosed call is read at once
 	// (each of these took many seconds: the patterns looked again from every line, or to the end of the file)
-	for (const [what, text] of [["blank lines", "\n".repeat(300_000)], ["blanked comments", "          \n".repeat(30_000)], ["unclosed routes", '.route("/a",get('.repeat(20_000)], ["unclosed attributes", '#[get(   '.repeat(30_000)], ["test guards without end", "#[cfg(test)] mod t { ".repeat(20_000)], ["test guards, one after another", "#[cfg(test)]\n".repeat(40_000)]]) {
+	for (const [what, text] of [["blank lines", "\n".repeat(300_000)], ["blanked comments", "          \n".repeat(30_000)], ["unclosed routes", '.route("/a",get('.repeat(20_000)], ["unclosed attributes", '#[get(   '.repeat(30_000)], ["test guards without end", "#[cfg(test)] mod t { ".repeat(20_000)], ["test guards, one after another", "#[cfg(test)]\n".repeat(40_000)], ["test guards and open strings", '#[cfg(test)] const A: &str = r#"x'.repeat(20_000)], ["test guards and quotes", "#[cfg(test)] fn f() { 'a 'b \" ".repeat(20_000)]]) {
 		const started = Date.now();
 		entryPoints(text, "big/src/main.rs", "rs");
 		assert.ok(Date.now() - started < 1500, `${what}: ${Date.now() - started} ms`);
