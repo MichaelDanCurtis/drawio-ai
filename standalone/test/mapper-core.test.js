@@ -163,10 +163,26 @@ test("drawing a map: its connectors hop over each other where they cross, and ar
 		await drawMap(plain, graphOf(edges), "test.recipe");
 		assert.equal(plain.calls.length, 1, `${edges} connectors`);
 	}
-	// shown being built when the setting says so, as any other edit
-	const shownBuilt = client();
-	await drawMap(shownBuilt, graphOf(2), "test.recipe", { animate: true });
-	assert.equal(shownBuilt.calls[0][1].animate, true);
+	// shown being built when the setting says so, as any other edit. Drawn and routed as one edit then (a second
+	// one would end the showing of the first), which is not all or nothing: a router that fails leaves the map
+	const built = (routed) => {
+		const calls = [];
+		return { calls, aiGetModel: async () => ({ page: { name: "Page-1" }, totalCells: 0 }), aiApplyOps: async (ops, options) => (calls.push([ops, options]), { results: [{ ok: true, ids: ["map1", "map2", "mapE1", "mapE2"] }, routed].slice(0, ops.length), idMap: {}, rolledBack: false, page: "page-7" }) };
+	};
+	const shownBuilt = built({ ok: true, ids: ["mapE1", "mapE2"] });
+	assert.equal((await drawMap(shownBuilt, graphOf(2), "test.recipe", { animate: true })).cells, 4);
+	assert.equal(shownBuilt.calls.length, 1);
+	assert.deepEqual([shownBuilt.calls[0][0].map((o) => [o.op, o.type, o.ids]), shownBuilt.calls[0][1]], [[["insertXml", undefined, undefined], ["layout", "route", undefined]], { selectResult: false, flash: true, atomic: false, review: true, animate: true }]);
+	assert.equal(require("../src/main/mapper/draw").lastRouting.edges, 2);
+	const unrouted = built({ ok: false, error: "The connector router is not available" });
+	assert.equal((await drawMap(unrouted, graphOf(2), "test.recipe", { animate: true })).cells, 4, "drawn all the same");
+	assert.deepEqual([unrouted.calls.length, require("../src/main/mapper/draw").lastRouting.error], [1, "The connector router is not available"]);
+	const undrawn = { ...built({ ok: true, ids: [] }), aiApplyOps: async () => ({ results: [{ ok: false, error: "bad xml" }, { ok: true, ids: [] }], idMap: {}, rolledBack: false }) };
+	await assert.rejects(drawMap(undrawn, graphOf(2), "test.recipe", { animate: true }), /Drawing the map failed: bad xml/);
+	// a map without connectors has nothing to route: drawn alone, shown being built
+	const alone = built(undefined);
+	await drawMap(alone, graphOf(0), "test.recipe", { animate: true });
+	assert.deepEqual([alone.calls[0][0].length, alone.calls[0][1].atomic, alone.calls[0][1].animate], [1, true, true]);
 	assert.equal(c.calls[0][1].animate, undefined);
 
 	// a map too large to route as one: the connectors inside each top-level box are routed, box by box, the smallest

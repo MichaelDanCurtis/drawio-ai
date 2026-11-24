@@ -65,9 +65,23 @@ export async function drawMap(
 		newPage = true;
 	}
 	const { xml, cells } = renderGraph(graph, { recipe, mapId: opts.mapId, descriptions: opts.descriptions });
-	const r = await client.aiApplyOps([{ op: "insertXml", xml }], { selectResult: false, flash: true, atomic: true, review: true, ...(opts.animate ? { animate: true } : {}) });
-	const failed = r.results.find((x) => !x.ok);
+	// Shown being built, the map is drawn and its connectors routed as one edit: a second edit would end
+	// the showing of the first as it begins, and the map would be built with lines that then jump. The
+	// page holds nothing but the map (it was empty, or is new), so the routing needs no ids. Not all or
+	// nothing: a router that fails leaves the map drawn.
+	const routable = graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES;
+	const together = !!opts.animate && routable;
+	const began = Date.now();
+	const r = await client.aiApplyOps(together ? [{ op: "insertXml", xml }, { op: "layout", type: "route" }] : [{ op: "insertXml", xml }], {
+		selectResult: false,
+		flash: true,
+		atomic: !together,
+		review: true,
+		...(opts.animate ? { animate: true } : {}),
+	});
+	const failed = together ? (r.results[0]?.ok ? undefined : r.results[0] ?? { error: "nothing was drawn" }) : r.results.find((x) => !x.ok);
 	if (failed || r.rolledBack) throw new Error(`Drawing the map failed: ${failed?.error ?? "the change was rolled back"}`);
+	if (together) lastRouting = { edges: r.results[1]?.ok ? r.results[1].ids?.length ?? 0 : 0, ms: Date.now() - began, ...(r.results[1]?.ok ? {} : { error: r.results[1]?.error ?? "not routed" }) };
 	// The Mapper places the shapes; draw.io's connector would then run each line straight through
 	// whatever lies between its ends, and stack the ones that leave a shape on the same side. Its
 	// router takes them around the shapes and apart. (A step of its own, and one that may fail: a
@@ -75,8 +89,10 @@ export async function drawMap(
 	// connector around every shape takes too long there.) Only what was just drawn is routed: by
 	// its ids, and on the page it was drawn on. Should the user have turned to another page
 	// meanwhile, the step does nothing there, also when that page is a map with the same ids.
-	const drawn = r.results.flatMap((x) => x.ids ?? []);
-	if (r.page && drawn.length > 0 && graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES) {
+	const drawn = (together ? r.results.slice(0, 1) : r.results).flatMap((x) => x.ids ?? []);
+	if (together) {
+		// routed with the drawing
+	} else if (r.page && drawn.length > 0 && routable) {
 		try {
 			const started = Date.now();
 			const routed = await client.aiApplyOps([{ op: "layout", type: "route", ids: drawn }], { selectResult: false, flash: false, atomic: true, review: true, page: r.page });
