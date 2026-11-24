@@ -630,7 +630,7 @@
 		const box = $("queued");
 		box.classList.toggle("hidden", !list.length);
 		box.textContent = "";
-		list.forEach((q, index) => {
+		list.forEach((q) => {
 			const chip = document.createElement("span");
 			chip.className = "queued";
 			const text = document.createElement("span");
@@ -642,7 +642,7 @@
 			drop.textContent = "✕";
 			drop.title = "Do not send this";
 			drop.setAttribute("aria-label", "Do not send: " + q.text);
-			drop.addEventListener("click", () => vscode.postMessage({ type: "unqueue", index }));
+			drop.addEventListener("click", () => vscode.postMessage({ type: "unqueue", id: q.id }));
 			chip.append(text, drop);
 			box.appendChild(chip);
 		});
@@ -968,7 +968,12 @@
 			case "appendThought": appendThought(m.text); break;
 			case "restoreInput": {
 				// (what was waiting when a request was stopped or failed: back in the box, not sent by itself)
-				input.value = m.text + (input.value.trim() ? "\n" + input.value : "");
+				if (m.text) input.value = m.text + (input.value.trim() ? "\n" + input.value : "");
+				const back = m.images || [];
+				const room = Math.max(0, MAX_IMAGES - images.length);
+				back.slice(0, room).forEach((img) => addImageDataUrl("data:" + img.mimeType + ";base64," + img.base64));
+				// (the box holds four: say so when pictures attached meanwhile leave no room for these)
+				if (back.length > room) flashHint((back.length - room) + " picture" + (back.length - room === 1 ? "" : "s") + " did not fit back in: attach again.");
 				window.drawaiUI?.syncEmpty();
 				autosize();
 				input.focus();

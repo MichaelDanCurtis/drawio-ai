@@ -135,7 +135,15 @@ export function userUpdate(text: string): string {
 
 /** What the one who answers is told about such additions, so that it takes them for the user's words. */
 export const ADDITIONS_NOTE =
-	"While you work, the user may add to the request. An addition arrives at the end of the answer of one of OmniDraw's tools, inside <user_update> tags. It is typed by the user into this chat: follow it as part of the request.";
+	"While you work, the user may add to the request. An addition arrives as the last thing in the answer of one of OmniDraw's tools, inside <user_update> tags. It is typed by the user into this chat: follow it as part of the request.";
+
+/**
+ * A tool's own answer never holds those tags: what a diagram, a mapped folder or a database
+ * says is read by the model as data, and must not pass for the user's words.
+ */
+export function withoutUpdateTags(text: string): string {
+	return text.replace(/<(\s*\/?\s*user_update)/gi, "&lt;$1");
+}
 
 /**
  * What a model used through its API is told it is here for. (An agent program reads
@@ -177,7 +185,7 @@ export class WindowMcpServer {
 	/** Short tool descriptions (full text in the instructions), for agents that drop long ones. */
 	public compactDescriptions = false;
 	/** What the user added in the chat while a request is under way, once: it goes at the end of the next answer to the chat's own call. */
-	public addition: (() => string | undefined) | undefined;
+	public additions: (() => () => string | undefined) | undefined;
 
 	constructor(
 		private readonly toolbox: DiagramToolbox,
@@ -192,11 +200,14 @@ export class WindowMcpServer {
 	 * being collected stops.
 	 */
 	public async call(name: string, args: unknown, opts: { signal?: AbortSignal; chat?: boolean } = {}): Promise<ToolResult> {
+		// (asked for as the call begins: it is for the request under way now, whenever the tool is done)
+		const take = opts.chat ? this.additions?.() : undefined;
 		let result: ToolResult = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args, { signal: opts.signal }) : await this.toolbox.invoke(name, args as any, { scoped: true, ...(opts.signal ? { signal: opts.signal } : {}) });
 		this.onToolResult?.(name, result);
 		// (`chat`: the call is the window's own chat's, an agent's over the endpoint or a model's the app
 		// runs. What the user typed while it works goes to it here. Never to another caller.)
-		const added = opts.chat ? this.addition?.() : undefined;
+		if (typeof result.text === "string" && /user_update/i.test(result.text)) result = { ...result, text: withoutUpdateTags(result.text) };
+		const added = take?.();
 		if (added) result = { ...result, text: `${result.text}\n\n${userUpdate(added)}` };
 		return result;
 	}

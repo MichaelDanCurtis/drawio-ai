@@ -4,7 +4,7 @@
 
 - **Send while it works.** The chat's box stays open during a request. What you send waits in
   a strip above it and is handed to the model with its next step (it reads it as it works), or
-  sent as the next request when this one ends; ✕ takes it back. After Stop or an error it goes
+  sent as the next request when this one ends; ✕ takes it back. After Stop, an error or New Chat it goes
   back into the box instead of being sent. The line under the box says so, where it used to
   repeat "Working… watch the diagram".
 - A new diagram that is not saved yet was described to the model as "no diagram is open", so

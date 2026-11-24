@@ -74,6 +74,8 @@ type Answerer = Omit<AgentStatus, "id"> & { id: ChatAgent; api?: boolean; detail
 const MAX_IMAGES = 4;
 /** How many messages may wait while a request is under way. */
 const MAX_WAITING = 8;
+/** Something the user sent while a request was under way. */
+type Waiting = { id: number; text: string; images: ImageData[] };
 /** What a diagram that has no file yet is called for the model. */
 const UNSAVED = "Untitled (a new diagram, not saved to a file yet)";
 let versionCounter = 0;
@@ -116,7 +118,12 @@ export class ChatController {
 	 * model with the next answer of one of the window's tools (it reads them as it works); what
 	 * is left when the request ends is sent as the next one.
 	 */
-	private waiting: { text: string; images: ImageData[] }[] = [];
+	private waiting: Waiting[] = [];
+	private waitingIds = 0;
+	/** Counts the requests: a tool call that outlives its request takes nothing meant for the next. */
+	private turn = 0;
+	/** The window is gone: nothing is sent any more. */
+	private closed = false;
 	/** Tests: answer permission requests automatically. */
 	public autoApprove = false;
 	/** Tests: called whenever a prompt turn ends. */
@@ -127,7 +134,10 @@ export class ChatController {
 			this.toolSummaries.push({ name, result });
 			if (this.toolSummaries.length > 50) this.toolSummaries.shift();
 		};
-		mcp.addition = () => this.takeAdditions();
+		mcp.additions = () => {
+			const turn = this.turn;
+			return () => this.takeAdditions(turn);
+		};
 		this.refreshStatuses();
 		// (a saved choice that is no longer one: an agent of an earlier version, a provider that is gone)
 		if (!this.statuses.some((s) => s.id === this.agent)) this.agent = "claude";
@@ -177,13 +187,16 @@ export class ChatController {
 				if (typeof msg.text === "string" && (msg.text.trim() || msg.images?.length)) {
 					const text = msg.text.trim() || "Recreate the attached sketch/screenshot as an editable diagram.";
 					// (sent while a request is under way: it joins that request, or follows it)
-					if (this.busy) this.addWhileWorking(text, sanitizeImages(msg.images));
-					else await this.send(text, undefined, sanitizeImages(msg.images));
+					const images = sanitizeImages(msg.images);
+					// (the page emptied its box as it sent: what cannot wait goes back into it)
+					if (!this.busy) await this.send(text, undefined, images);
+					else if (!this.addWhileWorking(text, images)) this.giveBack([{ text: msg.text.trim(), images }]);
 				}
 				break;
 			case "unqueue":
-				if (Number.isInteger(msg.index) && msg.index >= 0 && msg.index < this.waiting.length) {
-					this.waiting.splice(msg.index, 1);
+				// (by its id: the page's list may be older than this one, and a place in it another item's by now)
+				if (this.waiting.some((w) => w.id === msg.id)) {
+					this.waiting = this.waiting.filter((w) => w.id !== msg.id);
 					this.postState();
 				}
 				break;
@@ -587,6 +600,7 @@ export class ChatController {
 		}
 
 		this.setBusy(true);
+		this.turn++;
 		this.turnCancelled = false;
 		let stop: string | undefined;
 		let error: string | undefined;
@@ -638,18 +652,26 @@ export class ChatController {
 			const next = this.waiting.splice(0);
 			this.postState(true);
 			this.onTurnEnd?.(stop, error);
-			if (next.length) this.afterTurn(next, stop === "end_turn" || stop === "max_tokens" || stop === "max_turn_requests");
+			// (a request that was stopped can still come back as ended, when the two crossed: it counts as stopped)
+			const finished = !this.turnCancelled && !this.closed && (stop === "end_turn" || stop === "max_tokens" || stop === "max_turn_requests");
+			if (next.length) this.afterTurn(next, finished);
 		}
 	}
 
 	/** Something sent while a request is under way: kept until the model can be handed it, or the request ends. */
-	private addWhileWorking(text: string, images: ImageData[]): void {
+	private addWhileWorking(text: string, images: ImageData[]): boolean {
 		if (this.waiting.length >= MAX_WAITING) {
 			this.push({ kind: "error", text: "That is a lot to add while it works. Wait for it to finish, or press Stop." });
-			return;
+			return false;
 		}
-		this.waiting.push({ text, images });
+		// (what is left at the end goes as one request, which takes this many pictures)
+		if (images.length && this.waiting.reduce((n, w) => n + w.images.length, images.length) > MAX_IMAGES) {
+			this.push({ kind: "error", text: `Only ${MAX_IMAGES} pictures can wait at a time. Send this one when it has finished.` });
+			return false;
+		}
+		this.waiting.push({ id: ++this.waitingIds, text, images });
 		this.postState();
+		return true;
 	}
 
 	/**
@@ -657,8 +679,9 @@ export class ChatController {
 	 * (mcpServer.ts): the words of what is waiting, up to the first that has images (those go as
 	 * a request of their own). Shown in the chat where it reached the model.
 	 */
-	private takeAdditions(): string | undefined {
-		if (!this.busy || this.turnCancelled) return undefined;
+	private takeAdditions(turn: number): string | undefined {
+		// (`turn`: the request the tool call began in. One that ends during a later request is not read by anyone.)
+		if (!this.busy || this.turnCancelled || turn !== this.turn) return undefined;
 		const words: string[] = [];
 		while (this.waiting.length && !this.waiting[0].images.length) words.push(this.waiting.shift()!.text);
 		if (!words.length) return undefined;
@@ -673,13 +696,15 @@ export class ChatController {
 	 * back into the box, for the user to send or drop.
 	 */
 	private afterTurn(left: { text: string; images: ImageData[] }[], finished: boolean): void {
-		const text = left.map((w) => w.text).join("\n\n");
-		const images = left.flatMap((w) => w.images).slice(0, MAX_IMAGES);
-		if (finished) void this.send(text, undefined, images);
-		else {
-			this.post({ type: "restoreInput", text });
-			if (images.length) this.post({ type: "addImages", images });
-		}
+		if (!finished) return this.giveBack(left);
+		// (never more pictures than a request takes: addWhileWorking keeps what waits within that)
+		void this.send(left.map((w) => w.text).join("\n\n"), undefined, left.flatMap((w) => w.images));
+	}
+
+	/** Puts what was not sent back into the box: the user sends it again, or drops it. */
+	private giveBack(left: { text: string; images: ImageData[] }[]): void {
+		if (this.closed || !left.length) return;
+		this.post({ type: "restoreInput", text: left.map((w) => w.text).filter(Boolean).join("\n\n"), images: left.flatMap((w) => w.images) });
 	}
 
 	public stop(): void {
@@ -690,12 +715,14 @@ export class ChatController {
 	}
 
 	public newChat(): void {
-		this.waiting = [];
+		// (what was waiting was not sent, and is not part of the chat that ends: it stays with the user)
+		const left = this.waiting.splice(0);
 		this.stop();
 		this.resetSession();
 		this.transcript = [];
 		this.version = ++versionCounter;
 		this.postState(true);
+		this.giveBack(left);
 		void this.ensureSession().catch(() => undefined);
 	}
 
@@ -846,6 +873,7 @@ export class ChatController {
 	}
 
 	public dispose(): void {
+		this.closed = true;
 		for (const end of this.unwatch.splice(0)) end();
 		this.stop();
 		this.resetSession();
@@ -914,7 +942,7 @@ export class ChatController {
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
-				queued: this.waiting.map((w) => ({ text: w.text, images: w.images.length })),
+				queued: this.waiting.map((w) => ({ id: w.id, text: w.text, images: w.images.length })),
 				iconStyle: settings().appearance.iconStyle,
 				matrix: settings().appearance.matrix,
 				chatSide: settings().chat.side,

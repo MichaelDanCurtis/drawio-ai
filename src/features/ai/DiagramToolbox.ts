@@ -486,8 +486,8 @@ export class DiagramToolbox {
 		const prefix = "data:image/png;base64,";
 		if (!dataUrl?.startsWith(prefix)) {
 			return {
-				text: "There is nothing to render: the page shown is empty (or the cells asked for are not on it). An empty page is normal for a new diagram; draw on it with drawio_apply_operations, then render.",
-				summary: "Nothing to render",
+				text: "No picture could be made of the page shown. An empty page gives none, which is normal for a new diagram: drawio_get_diagram says what is on it. If it is empty, draw on it with drawio_apply_operations, then render.",
+				summary: "Nothing rendered",
 				isError: true,
 			};
 		}
