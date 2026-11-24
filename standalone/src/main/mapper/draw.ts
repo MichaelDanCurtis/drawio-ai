@@ -11,8 +11,8 @@ export let lastRouting: { edges: number; ms: number; error?: string; /** A map t
 export const ROUTE_BUDGET_MS = 6000;
 
 /**
- * The top-level boxes of a map with connectors of their own (both ends inside the box), the
- * ones with the fewest first; a box with more than can be routed as one is left out.
+ * The top-level boxes of a map with connectors of their own (both ends inside the box, or on
+ * it), the ones with the fewest first; a box with more than can be routed as one is left out.
  */
 export function routeGroups(graph: MapGraph): { id: string; edges: number }[] {
 	const parent = new Map(graph.nodes.map((n) => [n.id, n.parent]));
@@ -28,8 +28,9 @@ export function routeGroups(graph: MapGraph): { id: string; edges: number }[] {
 	const inside = new Map<string, number>();
 	for (const e of graph.edges) {
 		const a = top(e.from);
-		// (a connector between two shapes that are themselves at the top is between boxes)
-		if (a !== undefined && a === top(e.to) && a !== e.from && a !== e.to) inside.set(a, (inside.get(a) ?? 0) + 1);
+		// (counted as the router takes them: every connector with both ends in the box or on the box itself.
+		// One between two shapes that are themselves at the top is between boxes.)
+		if (a !== undefined && a === top(e.to)) inside.set(a, (inside.get(a) ?? 0) + 1);
 	}
 	return [...inside].map(([id, edges]) => ({ id, edges })).filter((g) => g.edges <= MAX_ROUTED_EDGES).sort((a, b) => a.edges - b.edges || a.id.localeCompare(b.id));
 }

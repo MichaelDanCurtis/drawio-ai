@@ -195,7 +195,10 @@ test("drawing a map: its connectors hop over each other where they cross, and ar
 		nodes: [box("vpc-a"), box("a1", "vpc-a"), box("a2", "vpc-a"), box("vpc-b"), box("sub-b", "vpc-b"), box("b1", "sub-b"), box("b2", "sub-b"), box("vpc-c"), box("c1", "vpc-c"), box("c2", "vpc-c"), box("lone")],
 		edges: [...many("a1", "a2", 40), ...many("b1", "b2", 10), ...many("c1", "c2", MAX_ROUTED_EDGES + 1), ...many("a1", "b1", 30), ...many("lone", "a1", 5), ...many("vpc-a", "a1", 3)],
 	};
-	assert.deepEqual(routeGroups(large), [{ id: "vpc-b", edges: 10 }, { id: "vpc-a", edges: 40 }]);
+	// (a connector from a box to what is inside it counts for that box: the router takes it with the rest)
+	assert.deepEqual(routeGroups(large), [{ id: "vpc-b", edges: 10 }, { id: "vpc-a", edges: 43 }]);
+	const overByItsOwn = { title: "Over", nodes: [box("hub"), box("h1", "hub"), box("h2", "hub")], edges: [...many("hub", "h1", MAX_ROUTED_EDGES), ...many("h1", "h2", 1)] };
+	assert.deepEqual(routeGroups(overByItsOwn), [], "600 to its own shapes and one between them is 601: not routed as one");
 	const ids = large.nodes.map((_, i) => `map${i + 1}`);
 	const grouped = client(() => ({ results: [{ ok: true, ids: ["e1", "e2", "e3"] }], idMap: {} }), ids);
 	await drawMap(grouped, large, "test.recipe");
