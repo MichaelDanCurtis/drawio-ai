@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **Watch it build.** An edit by the AI is shown being made: new shapes appear one after
+  another in the order they were added, connectors draw in from start to end, and shapes that
+  were moved (also by a layout) glide to their place. It takes about a second at most. The
+  edit itself is applied at once, as before (one undo step, pending changes to keep or
+  revert); only how it is shown changes. Off when the system asks for reduced motion, and
+  under Settings → Editor → **Show edits being built**.
+
 - **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's, Gemini's, Grok's or
   Kimi's models, or the many behind OpenRouter, with your own API key, without an agent
   program. A key is checked with its provider, then kept

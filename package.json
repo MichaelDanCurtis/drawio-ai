@@ -1918,6 +1918,11 @@
 						"default": true,
 						"description": "Briefly highlight cells changed by the AI."
 					},
+					"drawio-ai.animateChanges": {
+						"type": "boolean",
+						"default": true,
+						"description": "Show an AI edit being built: new shapes appear one after another, connectors draw in, moved shapes glide to their place. Off when the system asks for reduced motion."
+					},
 					"drawio-ai.selectChangedCells": {
 						"type": "boolean",
 						"default": false,

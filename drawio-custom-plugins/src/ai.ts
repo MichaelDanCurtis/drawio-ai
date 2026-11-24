@@ -935,6 +935,9 @@ Draw.loadPlugin((ui: any) => {
 		const root = model.getRoot();
 		let switched = false;
 		const ops: AiOp[] = action.ops || [];
+		// (what is where before the batch, to show afterwards what it added and moved)
+		stopBuild();
+		const placedBefore = action.animate && canShowBuild() ? placesNow() : undefined;
 		let failed = false;
 		const fail = (index: number, op: any, e: any) => {
 			failed = true;
@@ -995,6 +998,7 @@ Draw.loadPlugin((ui: any) => {
 
 		if (!rolledBack && !switched) {
 			const alive = [...touched].filter((c) => model.contains(c) && !isLayer(c));
+			if (placedBefore) showBuild(results, placedBefore);
 			if (action.flash) flash(alive);
 			if (action.selectResult && alive.length > 0) {
 				graph.setSelectionCells(alive.filter((c) => model.isVertex(c)));
@@ -1003,6 +1007,174 @@ Draw.loadPlugin((ui: any) => {
 		}
 
 		return { event: "aiApplyOpsResult", message: action, results, idMap, rolledBack, historyBefore, switched };
+	}
+
+	// ----- watching a batch being built -----
+	//
+	// The batch is applied in one go, as always: one undo step, rolled back whole, and the next
+	// tool call sees the result. What follows is only how it is SHOWN for a second: new shapes
+	// appear one after another in the order of the operations, connectors draw in along their
+	// path, and shapes that were moved glide from where they were. It is done with animations
+	// on the drawn elements (Web Animations): the model, the view's states and the shapes are
+	// not touched, so an export, the review's outlines or an undo in the middle of it see the
+	// finished diagram. Nothing is shown when the system asks for reduced motion or the page
+	// is not visible.
+
+	interface Place { x: number; y: number; width: number; height: number }
+	const BUILD = { item: 240, glide: 320, total: 1400, together: 120, none: 600 };
+	const BUILD_EASE = "cubic-bezier(0.16, 0.84, 0.3, 1)";
+	let building: { animations: Animation[]; restore: (() => void)[]; timer: any } | undefined;
+	/** For tests: how many batches were shown being built, and how many elements the last one animated. */
+	const buildStats = (W.drawioAiBuild = { shown: 0, elements: 0, playing: () => !!building });
+
+	function canShowBuild(): boolean {
+		try {
+			return typeof Element.prototype.animate === "function" && !document.hidden && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		} catch {
+			return false;
+		}
+	}
+
+	/** Where a shape is drawn, in the diagram's own units (the view may scroll or shift while a batch is applied). */
+	function placeOf(state: any): Place {
+		const { scale, translate } = graph.view;
+		return { x: state.x / scale - translate.x, y: state.y / scale - translate.y, width: state.width / scale, height: state.height / scale };
+	}
+
+	/** Every cell of the page shown, with where its shape is drawn (connectors: null). */
+	function placesNow(): Map<any, Place | null> | undefined {
+		const cells = allCells(model.getRoot());
+		if (cells.length > 4000) return undefined;
+		const places = new Map<any, Place | null>();
+		for (const c of cells) {
+			const s = model.isVertex(c) ? graph.view.getState(c) : undefined;
+			places.set(c, s ? placeOf(s) : null);
+		}
+		return places;
+	}
+
+	/** Ends what is being shown: everything is as drawn. */
+	function stopBuild(): void {
+		const b = building;
+		if (!b) return;
+		building = undefined;
+		clearTimeout(b.timer);
+		for (const a of b.animations) {
+			try {
+				a.cancel();
+			} catch {
+				// already over
+			}
+		}
+		for (const r of b.restore) r();
+	}
+
+	function showBuild(results: AiOpResult[], before: Map<any, Place | null>): void {
+		const added: any[] = [];
+		const moved: { cell: any; dx: number; dy: number }[] = [];
+		const seen = new Set<any>();
+		const take = (cell: any) => {
+			if (!cell || seen.has(cell) || !model.contains(cell) || isLayer(cell)) return;
+			seen.add(cell);
+			const state = graph.view.getState(cell);
+			if (!state || !state.shape?.node) return;
+			if (!before.has(cell)) return void added.push(cell);
+			const was = before.get(cell);
+			if (!was) return;
+			const now = placeOf(state);
+			const dx = (was.x + was.width / 2 - (now.x + now.width / 2)) * graph.view.scale;
+			const dy = (was.y + was.height / 2 - (now.y + now.height / 2)) * graph.view.scale;
+			if (Math.abs(dx) > 1 || Math.abs(dy) > 1) moved.push({ cell, dx, dy });
+		};
+		// in the order of the operations; what an operation added or moved brings what is inside it along
+		for (const r of results) {
+			if (!r.ok) continue;
+			for (const id of r.ids ?? []) {
+				const cell = model.getCell(id);
+				take(cell);
+				if (cell) for (const d of model.getDescendants(cell)) take(d);
+			}
+		}
+		// (a layout moves cells it does not list: every shape that is elsewhere now glides)
+		for (const [cell, was] of before) if (was) take(cell);
+		const count = added.length + moved.length;
+		if (!count || count > BUILD.none) return;
+
+		const b = { animations: [] as Animation[], restore: [] as (() => void)[], timer: undefined as any };
+		const play = (el: Element | null | undefined, frames: Keyframe[], duration: number, delay: number) => {
+			if (!el) return;
+			try {
+				b.animations.push(el.animate(frames, { duration, delay, easing: BUILD_EASE, fill: "backwards" }));
+			} catch {
+				// shown without it
+			}
+		};
+		const nodes = (cell: any): { shape?: SVGElement; text?: SVGElement } => {
+			const s = graph.view.getState(cell);
+			return { shape: s?.shape?.node, text: s?.text?.node };
+		};
+
+		// shapes that were moved glide from where they were; the connectors on them come back as they arrive
+		const glide = moved.length ? BUILD.glide : 0;
+		const rejoined = new Set<any>();
+		for (const m of moved) {
+			const from = [{ transform: `translate(${m.dx}px, ${m.dy}px)` }, { transform: "translate(0px, 0px)" }];
+			const n = nodes(m.cell);
+			play(n.shape, from, glide, 0);
+			play(n.text, from, glide, 0);
+			for (const e of model.getEdges(m.cell) || []) {
+				if (rejoined.has(e) || !before.has(e)) continue;
+				rejoined.add(e);
+				const en = nodes(e);
+				play(en.shape, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], glide, 0);
+				play(en.text, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], glide, 0);
+			}
+		}
+
+		// what is new appears in order: a shape grows in, a connector is drawn from its start to its end
+		const together = added.length > BUILD.together;
+		const item = together ? BUILD.glide : BUILD.item;
+		const step = together || added.length < 2 ? 0 : Math.min(90, (BUILD.total - glide - item) / (added.length - 1));
+		added.forEach((cell, i) => {
+			const delay = glide * 0.5 + i * step;
+			const n = nodes(cell);
+			if (model.isEdge(cell) && n.shape) {
+				for (const path of Array.from(n.shape.querySelectorAll("path")) as SVGPathElement[]) {
+					const filled = (path.getAttribute("fill") || "none") !== "none";
+					let length = 0;
+					try {
+						length = filled ? 0 : path.getTotalLength();
+					} catch {
+						// not laid out: it fades in
+					}
+					// (an arrowhead comes with the end of its line)
+					if (length > 0) play(path, [{ strokeDasharray: `${length} ${length}`, strokeDashoffset: length }, { strokeDasharray: `${length} ${length}`, strokeDashoffset: 0 }], item, delay);
+					else play(path, [{ opacity: 0 }, { opacity: 0, offset: 0.7 }, { opacity: 1 }], item, delay);
+				}
+				play(n.text, [{ opacity: 0 }, { opacity: 0, offset: 0.5 }, { opacity: 1 }], item, delay);
+			} else if (n.shape) {
+				// (grown from its own middle: the box of the element, not the page's origin)
+				const style = n.shape.style;
+				const kept = [style.transformBox, style.transformOrigin];
+				style.transformBox = "fill-box";
+				style.transformOrigin = "center";
+				b.restore.push(() => {
+					style.transformBox = kept[0];
+					style.transformOrigin = kept[1];
+				});
+				play(n.shape, [{ opacity: 0, transform: "scale(0.82)" }, { opacity: 1, transform: "scale(1)" }], item, delay);
+				play(n.text, [{ opacity: 0 }, { opacity: 1 }], item, delay);
+			}
+		});
+
+		if (!b.animations.length) return void b.restore.forEach((r) => r());
+		building = b;
+		buildStats.shown++;
+		buildStats.elements = b.animations.length;
+		const end = () => building === b && stopBuild();
+		// (a page that is hidden meanwhile does not run animations: a shape must never stay invisible for that)
+		b.timer = setTimeout(end, glide + (added.length ? glide * 0.5 + (added.length - 1) * step + item : 0) + 400);
+		Promise.all(b.animations.map((a) => a.finished.catch(() => undefined))).then(end);
 	}
 
 	function flash(cells: any[]) {
@@ -1741,6 +1913,8 @@ Draw.loadPlugin((ui: any) => {
 	for (const name of [W.mxEvent.UNDO, W.mxEvent.REDO]) {
 		ui.editor.undoManager.addListener(name, (_sender: any, evt: any) => {
 			const edit = evt.getProperty("edit");
+			// (what was being shown is of a diagram that is no longer that one)
+			stopBuild();
 			if (!review) return;
 			if (edit === review.edit) scheduleReviewRefresh();
 			else absorbUserEdit(edit);
@@ -1749,6 +1923,7 @@ Draw.loadPlugin((ui: any) => {
 	model.addListener(W.mxEvent.CHANGE, () => scheduleReviewRefresh());
 	// Switching pages parks the pending changes of the page left and shows those of the page shown.
 	ui.editor.addListener("pageSelected", () => {
+		stopBuild();
 		if (!reviewing) return;
 		syncReviewPage();
 		scheduleReviewRefresh();

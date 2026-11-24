@@ -374,6 +374,7 @@ export class DiagramToolbox {
 			atomic: input.atomic !== false,
 			selectResult: input.selectResult ?? settings.selectChangedCells,
 			flash: settings.flashChanges,
+			animate: settings.animateChanges,
 			review: settings.reviewChanges,
 		});
 

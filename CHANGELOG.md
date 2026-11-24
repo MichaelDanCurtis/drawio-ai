@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). In the extension those tabs still say "Next". The desktop app can also use Anthropic's, OpenAI's, Gemini's, Grok's and Kimi's models, and those behind OpenRouter, with your own API key (Settings → Agents & models), in the chat and in the Shape Creator, listed beside the agents; the extension works with agents as before.
 
+### Added
+
+- **Watch an AI edit being built**: new shapes appear one after another in the order they were added, connectors draw in from start to end, and shapes that were moved (also by a layout) glide to their place, in about a second at most. Only how the edit is shown changes: it is applied at once, as one undo step, and what reads the diagram next sees the result. Setting `drawio-ai.animateChanges` (on by default); nothing is shown when the system asks for reduced motion.
+
 ### Changed
 
 - A shape added from the **Shape Workshop** goes beside what is selected in the diagram (in the middle of the view when nothing is selected).
