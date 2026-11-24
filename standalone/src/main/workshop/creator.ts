@@ -28,6 +28,8 @@ export interface CreatorAgent {
 	 * its models is always named: there is no "its own choice".
 	 */
 	kind?: "api";
+	/** What is missing when it is not ready, in two or three words for the list ("no key" when left out). */
+	missing?: string;
 }
 
 export interface CreatorImage {

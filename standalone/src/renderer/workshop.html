@@ -538,7 +538,7 @@
 		// agent programs first, then the providers whose models are used with an API key
 		const programs = creator.agents.filter((a) => a.kind !== "api");
 		const apis = creator.agents.filter((a) => a.kind === "api");
-		const option = (a) => el("option", { value: a.id, text: a.label + (a.ready ? "" : a.kind === "api" ? " (no key)" : " (not ready)") });
+		const option = (a) => el("option", { value: a.id, text: a.label + (a.ready ? "" : " (" + (a.missing || (a.kind === "api" ? "no key" : "not ready")) + ")") });
 		if (programs.length && apis.length) {
 			agents.append(el("optgroup", { label: "Agents" }, ...programs.map(option)), el("optgroup", { label: "With an API key" }, ...apis.map(option)));
 		} else for (const a of creator.agents) agents.append(option(a));

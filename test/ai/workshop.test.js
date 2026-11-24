@@ -347,3 +347,129 @@ test("a diagram's name is taken as it is on disk, and a remote folder counts as 
 	assert.match(feature, /return to \? this\.onDisk\(to, "That place"\) : undefined;/);
 	assert.doesNotMatch(feature, /scheme === "file"/);
 });
+
+// ----- the Shape Creator in VS Code: a model VS Code offers draws (src/features/workshop/lmCreator.ts) -----
+
+/** The part of the `vscode` module the Creator uses, with a model that answers from a script. */
+function fakeLm(script, { vision = false, models = [{ id: "copilot-a", name: "Model A", vendor: "copilot" }, { id: "copilot-b", name: "Model B", vendor: "copilot" }] } = {}) {
+	class LanguageModelTextPart { constructor(value) { this.value = value; } }
+	class LanguageModelToolCallPart { constructor(callId, name, input) { Object.assign(this, { callId, name, input }); } }
+	class LanguageModelToolResultPart { constructor(callId, content) { Object.assign(this, { callId, content }); } }
+	class CancellationTokenSource {
+		constructor() { const self = this; this.token = { isCancellationRequested: false, onCancellationRequested: (l) => (self.listeners.push(l), { dispose() {} }) }; this.listeners = []; }
+		cancel() { this.token.isCancellationRequested = true; this.listeners.forEach((l) => l()); }
+		dispose() {}
+	}
+	const sent = [];
+	const api = {
+		LanguageModelTextPart, LanguageModelToolCallPart, LanguageModelToolResultPart, CancellationTokenSource,
+		LanguageModelChatMessage: { User: (content) => ({ role: "user", content }), Assistant: (content) => ({ role: "assistant", content }) },
+		...(vision ? { LanguageModelDataPart: { image: (data, mimeType) => ({ image: Buffer.from(data).toString("base64"), mimeType }) } } : {}),
+		lm: {
+			selectChatModels: async () =>
+				models.map((m) => ({
+					...m,
+					capabilities: { supportsImageToText: vision },
+					sendRequest: async (messages, options, token) => {
+						sent.push({ model: m.id, messages: JSON.parse(JSON.stringify(messages)), options });
+						const next = script.shift();
+						if (next instanceof Error) throw next;
+						return { stream: (async function* () { for (const part of next ?? []) { if (typeof part === "function") await part(token); else yield part; } })() };
+					},
+				})),
+		},
+	};
+	return { api, sent, text: (t) => new LanguageModelTextPart(t), call: (id, name, input) => new LanguageModelToolCallPart(id, name, input) };
+}
+
+test("the Shape Creator in VS Code: one entry with VS Code's models, the Creator's two tools and nothing else, each tool call answered, and a request that is stopped or fails forgotten whole", async () => {
+	const { LmCreator, LM_AGENT, MAX_ROUNDS } = require(path.join(root, "src/features/workshop/lmCreator.ts"));
+	const { CREATOR_TOOLS } = workshop("creator.ts");
+	const offered = CREATOR_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
+	const script = [];
+	const lm = fakeLm(script, { vision: true });
+	let changes = 0;
+	let kept;
+	const creator = new LmCreator(lm.api, offered, { get: () => kept, set: (id) => (kept = id) }, () => changes++);
+
+	// before VS Code has been asked: listed, not ready, and it says what to do; asking tells the page
+	assert.deepEqual(creator.ports.agents().map((a) => [a.id, a.kind, a.ready, a.missing, a.models.length, /Sign in to GitHub Copilot/.test(a.problem)]), [[LM_AGENT, "api", false, "none available", 0, true]]);
+	await creator.refresh();
+	assert.equal(changes, 1);
+	const [listed] = creator.ports.agents();
+	assert.deepEqual([listed.ready, listed.problem, listed.models, listed.model], [true, undefined, [{ value: "copilot-a", name: "Model A · copilot" }, { value: "copilot-b", name: "Model B · copilot" }], "copilot-a"]);
+	await creator.refresh();
+	assert.equal(changes, 1, "the same models: the page is not told again");
+	assert.equal(lm.sent.length, 0, "listing models sends nothing");
+
+	// a request: the model looks at its drawing, hands it in, and says so
+	const called = [];
+	const said = [];
+	const tools = { call: async (name, args) => (called.push([name, args]), name === "workshop_render_preview" ? { text: "Here it is.", image: { mimeType: "image/png", base64: "AAAA" } } : { text: "Handed in." }) };
+	const session = await creator.ports.open({ agent: LM_AGENT, model: "copilot-b", tools, onText: (t) => said.push(t), onExit: () => undefined });
+	assert.deepEqual([session.label, session.images, session.fresh(), kept], ["VS Code · Model B · copilot", true, true, "copilot-b"]);
+	script.push(
+		[lm.text("Drawing. "), lm.call("c1", "workshop_render_preview", { svg: "<svg/>" })],
+		[lm.call("c2", "workshop_submit_svg", { svg: "<svg/>", name: "Gate" }), lm.call("c3", "made_up_tool", {})],
+		[lm.text("Done.")]
+	);
+	assert.equal(await session.prompt("Draw a gate.", [{ mimeType: "image/png", base64: "BBBB" }]), "end_turn");
+	assert.equal(said.join(""), "Drawing. Done.");
+	assert.deepEqual(called, [["workshop_render_preview", { svg: "<svg/>" }], ["workshop_submit_svg", { svg: "<svg/>", name: "Gate" }]], "a tool that is not one of the two is not run");
+	assert.equal(lm.sent.length, 3);
+	assert.deepEqual(lm.sent.map((s) => s.model), ["copilot-b", "copilot-b", "copilot-b"]);
+	assert.deepEqual(lm.sent[0].options.tools.map((t) => t.name), ["workshop_submit_svg", "workshop_render_preview"]);
+	assert.match(lm.sent[0].options.justification, /Shape Creator/);
+	// what the model is here for leads the first request, with the picture that was attached
+	assert.match(lm.sent[0].messages[0].content[0].value, /^You draw icons as SVG[\s\S]*\n\nDraw a gate\.$/);
+	assert.deepEqual(lm.sent[0].messages[0].content[1], { image: "BBBB", mimeType: "image/png" });
+	// each call is answered, in the request that follows: the picture of its drawing, and an error for the made-up tool
+	const answers = lm.sent[2].messages.at(-1).content;
+	assert.deepEqual(lm.sent[1].messages.at(-1).content, [{ callId: "c1", content: [{ value: "Here it is." }, { image: "AAAA", mimeType: "image/png" }] }]);
+	assert.deepEqual(answers, [{ callId: "c2", content: [{ value: "Handed in." }] }, { callId: "c3", content: [{ value: "There is no tool called made_up_tool." }] }]);
+	assert.equal(session.fresh(), false);
+
+	// a change goes on in the same conversation, without saying again what the model is here for
+	script.push([lm.text("Thicker.")]);
+	assert.equal(await session.prompt("Thicker lines.", []), "end_turn");
+	assert.deepEqual(lm.sent.at(-1).messages.map((m) => m.role), ["user", "assistant", "user", "assistant", "user", "assistant", "user"]);
+	assert.equal(lm.sent.at(-1).messages.at(-1).content[0].value, "Thicker lines.");
+
+	// Stop while it writes: stopped, and the conversation is as it was before that request
+	// (what was sent last, the model's answer to it, and the next request)
+	const before = lm.sent.at(-1).messages.length + 2;
+	script.push([lm.text("Half "), (token) => new Promise((resolve) => token.onCancellationRequested(resolve))]);
+	const asking = session.prompt("And round.", []);
+	await new Promise((r) => setTimeout(r, 20));
+	session.cancel();
+	assert.equal(await asking, "cancelled");
+	// VS Code refuses (no consent, a quota): said in its words, with the model's name, and forgotten too
+	script.push(new Error("Request failed: quota exceeded\nstack"));
+	await assert.rejects(session.prompt("Again.", []), /^Error: Model B: Request failed: quota exceeded$/);
+	script.push([lm.text("Back.")]);
+	assert.equal(await session.prompt("Once more.", []), "end_turn");
+	assert.equal(lm.sent.at(-1).messages.length, before, "neither the stopped nor the failed request is in it");
+
+	// a model that only ever calls tools is stopped after a bounded number of rounds
+	for (let i = 0; i < MAX_ROUNDS + 3; i++) script.push([lm.call(`r${i}`, "workshop_render_preview", { svg: "<svg/>" })]);
+	const rounds = lm.sent.length;
+	assert.equal(await session.prompt("Loop.", []), "max_turn_requests");
+	assert.equal(lm.sent.length - rounds, MAX_ROUNDS);
+	script.length = 0;
+
+	// closed: nothing more is sent
+	session.dispose();
+	assert.equal(await session.prompt("After.", []), "cancelled");
+	// another agent's id is refused; a model that takes no pictures gets none
+	await assert.rejects(creator.ports.open({ agent: "claude", tools, onText() {}, onExit() {} }), /not something Draw\.AI can draw with here/);
+	const blind = fakeLm([[lm.text("ok")]], { vision: false });
+	const plain = new LmCreator(blind.api, offered, { get: () => undefined, set() {} }, () => undefined);
+	const noPictures = await plain.ports.open({ agent: LM_AGENT, tools, onText() {}, onExit() {} });
+	assert.equal(noPictures.images, false);
+	await noPictures.prompt("Draw.", [{ mimeType: "image/png", base64: "BBBB" }]);
+	assert.equal(blind.sent[0].messages[0].content.length, 1);
+	// no model at all: opening says what to do
+	const none = new LmCreator(fakeLm([], { models: [] }).api, offered, { get: () => undefined, set() {} }, () => undefined);
+	await assert.rejects(none.ports.open({ agent: LM_AGENT, tools, onText() {}, onExit() {} }), /VS Code offers no language model yet/);
+});
+

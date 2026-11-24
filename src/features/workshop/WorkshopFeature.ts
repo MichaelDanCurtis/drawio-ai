@@ -39,6 +39,8 @@ export class WorkshopFeature {
 	private runtimePromise: Promise<Runtime> | undefined;
 	private service: GalleryService | undefined;
 	private core: WorkshopCore | undefined;
+	/** The Shape Creator's side: a model VS Code offers draws (see lmCreator.ts). */
+	private lmCreator: import("./lmCreator").LmCreator | undefined;
 	private panel: vscode.WebviewPanel | undefined;
 	private opening = false;
 	/** What the panel's page reported (tests): that it started, and what the webview could load. */
@@ -157,6 +159,17 @@ export class WorkshopFeature {
 				this.palettesSoon();
 			});
 		}
+		if (!this.lmCreator) {
+			const key = "drawio-ai.workshop.creatorModel";
+			this.lmCreator = new rt.LmCreator(
+				vscode,
+				rt.CREATOR_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
+				{ get: () => this.deps.context.globalState.get<string>(key), set: (id) => void this.deps.context.globalState.update(key, id) },
+				() => this.core?.creatorChanged()
+			);
+			// (models come and go: a sign-in, another provider added)
+			this.dispose.track(vscode.lm.onDidChangeChatModels(() => void this.lmCreator?.refresh()));
+		}
 		if (!this.core) {
 			this.core = new rt.WorkshopCore({
 				post: (msg) => this.post(msg),
@@ -208,6 +221,8 @@ export class WorkshopFeature {
 					});
 					return picked?.[0] ? this.onDisk(picked[0], "That stencil") : undefined;
 				},
+				// The Shape Creator: a model VS Code offers draws the icon. Nothing is sent until the user asks for one.
+				creator: this.lmCreator.ports,
 				// Draw.AI sends nothing anywhere unasked: a gallery downloads only once the user has switched it on
 				offStaysOff: true,
 			});
@@ -461,6 +476,7 @@ export class WorkshopFeature {
 			panelOpen: !!this.panel,
 			panelPage: this.panel ? this.page : undefined,
 			shifter: !!this.host()?.shifter,
+			creator: !!this.lmCreator,
 			selectionPosts: this.selectionPosts,
 			lastSelection: this.lastSelection,
 		};
