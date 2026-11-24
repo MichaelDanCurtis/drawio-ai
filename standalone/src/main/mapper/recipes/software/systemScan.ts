@@ -910,7 +910,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		ingresses,
 		exposed,
 		warnings,
-		elsewhere: copies ? newestFirst(root, copies).slice(0, 6) : [],
+		elsewhere: copies ? newestFirst(root, copies).slice(0, 60) : [],
 		secretKeys,
 		libraries,
 		health,
@@ -1248,14 +1248,33 @@ export function hiddenCheckouts(root: string): { folder: string; names: string[]
 	return undefined;
 }
 
-/** The working copies as folders to map, the one worked in last first (only their folders' dates are read). */
+/**
+ * The working copies as folders to map, the one worked in last first. A folder's own date only
+ * changes when something is added to or removed from it, not when a file in it is edited: what
+ * says when a working copy was last worked in is git's record of it (its index and its HEAD,
+ * written on every add, commit and checkout). Only dates are read, and only below `root`.
+ */
 function newestFirst(root: string, copies: { folder: string; names: string[] }): { label: string; folder: string }[] {
-	const changed = (folder: string): number => {
+	const date = (file: string): number => {
 		try {
-			return fs.statSync(folder).mtimeMs;
+			return fs.statSync(file).mtimeMs;
 		} catch {
 			return 0;
 		}
+	};
+	const changed = (folder: string): number => {
+		const dates = [date(folder)];
+		try {
+			// a worktree's `.git` is a file that names where git keeps its record: in the repository's own .git
+			const dotGit = path.join(folder, ".git");
+			const named = fs.lstatSync(dotGit).isFile() ? /^gitdir:\s*(.+)$/m.exec(fs.readFileSync(dotGit, "utf8").slice(0, 2000))?.[1]?.trim() : undefined;
+			const record = named ? path.resolve(folder, named) : dotGit;
+			// (a record this file points to outside the mapped folder is not looked at)
+			if (!path.relative(root, record).startsWith("..") && !path.isAbsolute(path.relative(root, record))) for (const f of ["index", "HEAD", "logs/HEAD"]) dates.push(date(path.join(record, f)));
+		} catch {
+			// the folder's own date
+		}
+		return Math.max(...dates);
 	};
 	return copies.names
 		.map((name) => ({ label: name, folder: path.join(root, copies.folder, name) }))

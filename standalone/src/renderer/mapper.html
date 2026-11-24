@@ -353,9 +353,10 @@
 		if (!box) return;
 		box.className = kind;
 		// (other folders the same map can be made of, e.g. a repository's working copies: one click maps one)
-		const others = elsewhere?.length
-			? el("div", { class: "elsewhere" }, el("span", { class: "label", text: "Map one instead" }), ...elsewhere.slice(0, 6).map((e) => el("button", { class: "btn btn-sm", text: e.label, title: e.folder, onclick: () => mapFolder(e.folder) })))
-			: null;
+		// (the ones worked in last, and the rest behind a button: none is out of reach)
+		const offer = (e) => el("button", { class: "btn btn-sm", text: e.label, title: e.folder, onclick: () => mapFolder(e.folder) });
+		const rest = elsewhere?.length > 6 ? el("button", { class: "btn btn-sm btn-ghost", text: (elsewhere.length - 6) + " more…", onclick: () => rest.replaceWith(...elsewhere.slice(6).map(offer)) }) : null;
+		const others = elsewhere?.length ? el("div", { class: "elsewhere" }, el("span", { class: "label", text: "Map one instead" }), ...elsewhere.slice(0, 6).map(offer), rest) : null;
 		// (only what is there: the DOM writes a missing child out as the word "null")
 		box.replaceChildren(...[el("div", { text }), warnings?.length ? el("ul", {}, ...warnings.slice(0, 20).map((w) => el("li", { text: w }))) : null, others].filter(Boolean));
 		// (it is below the form: a result nobody sees is a run that seemed to do nothing)

@@ -4,7 +4,7 @@
 
 - **Mapper: map a working copy with one click.** When a folder's code is in working copies the
   scan does not read (git worktrees in `.claude/worktrees`, `.worktrees`, `.git-worktrees`),
-  the result now offers up to six of them, the one worked in last first: a click maps it. The
+  the result now offers them, the six worked in last first and the rest behind a button: a click maps one. The
   result also scrolls into view; it could end up below the form, unseen.
 - A request made elsewhere in the app while the chat works (the Mapper's, the Shape Workshop's
   "Ask the agent") is no longer refused with "press Stop first". It waits in the strip above

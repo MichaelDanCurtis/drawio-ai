@@ -233,7 +233,7 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 			after = await dlg.executeJavaScript(`document.getElementById("result").className === "ok" ? document.querySelector("#result div").textContent : ""`);
 		}
 		log("mapElsewhere", { offered, expected: r.result.elsewhere.map((e) => e.label), folder: await dlg.executeJavaScript(`Array.from(document.querySelectorAll("input[type=text]")).map((i) => i.value).find((v) => v.includes("worktrees")) || ""`), after });
-		if (offered.join() !== r.result.elsewhere.map((e) => e.label).join() || !/^✓/.test(after)) throw new Error("The Mapper dialog did not offer the working copies, or a click on one did not map it.");
+		if (offered.filter((o) => !/ more…$/.test(o)).join() !== r.result.elsewhere.slice(0, 6).map((e) => e.label).join() || (r.result.elsewhere.length > 6) !== offered.some((o) => / more…$/.test(o)) || !/^✓/.test(after)) throw new Error("The Mapper dialog did not offer the working copies, or a click on one did not map it.");
 	}
 	const pages = await w.client.aiPages({ op: "list" });
 	log("pages", pages.pages.map((p) => `${p.name}${p.current ? " (shown)" : ""}: ${p.cells}`));
