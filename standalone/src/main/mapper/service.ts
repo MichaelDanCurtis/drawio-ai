@@ -22,6 +22,8 @@ export interface MapperHostContext {
 	/** The diagram file, to tell this diagram's maps from others in the folder. */
 	diagram(): string | undefined;
 	context(signal?: AbortSignal, progress?: (t: string) => void): CollectContext;
+	/** Whether edits are shown being built (Settings → Editor): a map is one, too. */
+	animate?(): boolean;
 }
 
 export interface RunOutcome {
@@ -107,7 +109,7 @@ export class MapperService {
 		if (result.graph && result.graph.nodes.length > 0) {
 			progress(`Drawing ${result.graph.nodes.length} shapes…`);
 			const descriptions = Object.fromEntries(Object.entries(record.descriptions).map(([k, v]) => [k, v.description]));
-			drawn = await drawMap(this.host.client, result.graph, recipe.id, { mapId: record.id, descriptions, forceNewPage: !!opts.previous });
+			drawn = await drawMap(this.host.client, result.graph, recipe.id, { mapId: record.id, descriptions, forceNewPage: !!opts.previous, animate: this.host.animate?.() });
 			record.page = drawn.page;
 			badges = await this.drawHealth(record);
 		}
@@ -286,7 +288,7 @@ export class MapperService {
 		const records = this.records();
 		const { graph, problems } = answerGraph(records, question, answer, steps);
 		if (graph.nodes.length === 0) return { drawn: false, problems: problems.length ? problems : ["no steps refer to mapped shapes"] };
-		const drawn = await drawMap(this.host.client, graph, "mapper.ask", { forceNewPage: true });
+		const drawn = await drawMap(this.host.client, graph, "mapper.ask", { forceNewPage: true, animate: this.host.animate?.() });
 		return { drawn: true, page: drawn.page, shapes: graph.nodes.length, problems };
 	}
 

@@ -1,11 +1,38 @@
 import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/CustomizedDrawioClient";
-import { escapeXml, MAX_ROUTED_EDGES, renderGraph } from "./render";
+import { escapeXml, mapCellId, MAX_ROUTED_EDGES, renderGraph } from "./render";
 import type { MapGraph } from "./types";
 
 export { MAX_ROUTED_EDGES };
 
 /** How the last map's connectors were routed (the end-to-end run reads it). */
-export let lastRouting: { edges: number; ms: number; error?: string } | undefined;
+export let lastRouting: { edges: number; ms: number; error?: string; /** A map too large to route as one: how many of its boxes were routed. */ groups?: number } | undefined;
+
+/** How long the box-by-box routing of a very large map may take before the rest is left as drawn. */
+export const ROUTE_BUDGET_MS = 6000;
+
+/**
+ * The top-level boxes of a map with connectors of their own (both ends inside the box), the
+ * ones with the fewest first; a box with more than can be routed as one is left out.
+ */
+export function routeGroups(graph: MapGraph): { id: string; edges: number }[] {
+	const parent = new Map(graph.nodes.map((n) => [n.id, n.parent]));
+	const top = (id: string): string | undefined => {
+		let at: string | undefined = id;
+		for (let i = 0; i < 50 && at !== undefined && parent.has(at); i++) {
+			const up: string | undefined = parent.get(at);
+			if (up === undefined || !parent.has(up)) return at;
+			at = up;
+		}
+		return undefined;
+	};
+	const inside = new Map<string, number>();
+	for (const e of graph.edges) {
+		const a = top(e.from);
+		// (a connector between two shapes that are themselves at the top is between boxes)
+		if (a !== undefined && a === top(e.to) && a !== e.from && a !== e.to) inside.set(a, (inside.get(a) ?? 0) + 1);
+	}
+	return [...inside].map(([id, edges]) => ({ id, edges })).filter((g) => g.edges <= MAX_ROUTED_EDGES).sort((a, b) => a.edges - b.edges || a.id.localeCompare(b.id));
+}
 
 export interface DrawResult {
 	/** Name of the page the map is on. */
@@ -23,7 +50,7 @@ export async function drawMap(
 	client: CustomizedDrawioClient,
 	graph: MapGraph,
 	recipe: string,
-	opts: { mapId?: string; descriptions?: Record<string, string>; forceNewPage?: boolean } = {}
+	opts: { mapId?: string; descriptions?: Record<string, string>; forceNewPage?: boolean; /** Show the map being built (Settings → Editor). */ animate?: boolean } = {}
 ): Promise<DrawResult> {
 	const current = await client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 1 });
 	let page = current.page.name;
@@ -38,7 +65,7 @@ export async function drawMap(
 		newPage = true;
 	}
 	const { xml, cells } = renderGraph(graph, { recipe, mapId: opts.mapId, descriptions: opts.descriptions });
-	const r = await client.aiApplyOps([{ op: "insertXml", xml }], { selectResult: false, flash: true, atomic: true, review: true });
+	const r = await client.aiApplyOps([{ op: "insertXml", xml }], { selectResult: false, flash: true, atomic: true, review: true, ...(opts.animate ? { animate: true } : {}) });
 	const failed = r.results.find((x) => !x.ok);
 	if (failed || r.rolledBack) throw new Error(`Drawing the map failed: ${failed?.error ?? "the change was rolled back"}`);
 	// The Mapper places the shapes; draw.io's connector would then run each line straight through
@@ -58,6 +85,34 @@ export async function drawMap(
 			// as drawn
 			lastRouting = { edges: 0, ms: 0, error: String(e?.message ?? e) };
 		}
+	} else if (r.page && drawn.length > 0 && graph.edges.length > MAX_ROUTED_EDGES) {
+		// Too many connectors to route as one: the ones inside each top-level box are routed, box by
+		// box, the smallest first, for as long as it stays quick. What runs between the boxes is left
+		// as drawn. (A box's connectors are its own affair; the long ones between boxes are what costs.)
+		const started = Date.now();
+		let edges = 0;
+		let groups = 0;
+		let error: string | undefined;
+		for (const group of routeGroups(graph)) {
+			if (Date.now() - started > ROUTE_BUDGET_MS) break;
+			const id = mapCellId(graph, group.id);
+			if (!id || !drawn.includes(id)) continue;
+			try {
+				const routed = await client.aiApplyOps([{ op: "layout", type: "route", ids: [id] }], { selectResult: false, flash: false, atomic: true, review: true, page: r.page });
+				const failedStep = routed.results.find((x) => !x.ok)?.error;
+				if (failedStep) {
+					// (the page was left, or the router is not there: the rest would fail the same way)
+					error = failedStep;
+					break;
+				}
+				edges += routed.results[0]?.ids?.length ?? 0;
+				groups++;
+			} catch (e: any) {
+				error = String(e?.message ?? e);
+				break;
+			}
+		}
+		lastRouting = { edges, ms: Date.now() - started, groups, ...(error ? { error } : {}) };
 	}
 	return { page, newPage, cells };
 }

@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+- Polish:
+  - A map drawn by the Mapper is shown being built, like any other edit (Settings → Editor →
+    **Show edits being built**).
+  - The outlines around new and changed shapes (the review's, and the flash) come in with
+    their shapes; they used to stand around shapes that were not there yet.
+  - **New Chat** during a request no longer leaves "Stopped." as the new chat's first line.
+  - A map with more than 600 connectors got no routing at all. The connectors inside each
+    top-level box are now routed, box by box, for up to six seconds; what runs between the
+    boxes is left as drawn.
 - **Mapper: map a working copy with one click.** When a folder's code is in working copies the
   scan does not read (git worktrees in `.claude/worktrees`, `.worktrees`, `.git-worktrees`),
   the result now offers them, the six worked in last first and the rest behind a button: a click maps one. The

@@ -622,6 +622,9 @@ export class ChatController {
 		this.setBusy(true);
 		this.turn++;
 		this.turnCancelled = false;
+		// (New Chat ends a request under way: what that request then says of its end belongs to the chat that is gone)
+		const chat = this.version;
+		const say = (item: Parameters<ChatController["push"]>[0]) => chat === this.version && this.push(item);
 		let stop: string | undefined;
 		let error: string | undefined;
 		try {
@@ -630,14 +633,14 @@ export class ChatController {
 				session = await this.ensureSession();
 			} catch (e: any) {
 				error = String(e?.message ?? e);
-				this.push({ kind: "error", text: error, action: this.errorAction(e) });
+				say({ kind: "error", text: error, action: this.errorAction(e) });
 				return;
 			}
 			if (!session?.info) return;
 			if (this.turnCancelled) {
 				// Stop was pressed while the agent was still starting: never send the request.
 				stop = "cancelled";
-				this.push({ kind: "error", text: "Stopped." });
+				say({ kind: "error", text: "Stopped." });
 				return;
 			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
@@ -652,19 +655,19 @@ export class ChatController {
 				if (session.info.images) {
 					for (const img of images) blocks.push({ type: "image", mimeType: img.mimeType, data: img.base64 });
 				} else {
-					this.push({ kind: "note", text: viaApi ? `${session.label} takes no pictures; sent the text only.` : `${session.label} does not accept images over ACP; sent the text only.` });
+					say({ kind: "note", text: viaApi ? `${session.label} takes no pictures; sent the text only.` : `${session.label} does not accept images over ACP; sent the text only.` });
 				}
 			}
 			this.assistant = undefined;
 			this.thought = undefined;
 			this.toolSummaries = [];
 			stop = await session.prompt(blocks);
-			if (stop === "cancelled") this.push({ kind: "error", text: "Stopped." });
-			else if (stop === "refusal") this.push({ kind: "error", text: `${session.label} declined this request.` });
-			else if (stop === "max_tokens" || stop === "max_turn_requests") this.push({ kind: "note", text: `${session.label} stopped early (${stop.replace(/_/g, " ")}).` });
+			if (stop === "cancelled") say({ kind: "error", text: "Stopped." });
+			else if (stop === "refusal") say({ kind: "error", text: `${session.label} declined this request.` });
+			else if (stop === "max_tokens" || stop === "max_turn_requests") say({ kind: "note", text: `${session.label} stopped early (${stop.replace(/_/g, " ")}).` });
 		} catch (e: any) {
 			error = String(e?.message ?? e);
-			this.push({ kind: "error", text: error, action: e instanceof ApiSetupError ? this.errorAction(e) : this.session ? undefined : { title: "Restart Agent", command: "drawai.retry" } });
+			say({ kind: "error", text: error, action: e instanceof ApiSetupError ? this.errorAction(e) : this.session ? undefined : { title: "Restart Agent", command: "drawai.retry" } });
 		} finally {
 			for (const t of this.transcript) if (t.kind === "tool" && t.status === "running") t.status = stop === "end_turn" ? "ok" : "error";
 			client.aiSetStatus(false);

@@ -412,6 +412,15 @@ test("watching a batch being built: what is new appears in order and what moved 
 	assert.deepEqual(await leftovers([laid.idMap.$la, laid.idMap.$lb]), []);
 	assert.ok((await page.evaluate((id) => Number(getComputedStyle(editorUi.editor.graph.view.getState(editorUi.editor.graph.model.getCell(id)).shape.node).opacity), laid.idMap.$la)) === 1);
 
+	// what is drawn around the new shapes (the flash, the review's outlines) comes in with them, not ahead of them
+	const aroundBefore = (await build()).around;
+	const outlined = await request({ action: "aiApplyOps", ops: [{ op: "addShape", tempId: "$oa", label: "Outlined A", x: 7000, y: 8600 }, { op: "addShape", tempId: "$ob", label: "Outlined B", x: 7300, y: 8600 }], atomic: true, flash: true, selectResult: false, animate: true, review: true });
+	assert.deepEqual(outlined.results.filter((x) => !x.ok), []);
+	assert.equal((await build()).around - aroundBefore, 4, "two for the flash, two for the review's outlines");
+	await waitUntil(async () => !(await build()).playing, 5000);
+	assert.equal((await build()).running, 0);
+	await resolve("accept");
+
 	// a batch that is rolled back shows nothing; neither does one made when the system asks for reduced motion
 	const sofar = (await build()).shown;
 	const bad = await animated([{ op: "addShape", label: "Never", x: 7000, y: 7600 }, { op: "update", id: "no-such-cell", label: "x" }]);

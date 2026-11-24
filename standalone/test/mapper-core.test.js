@@ -163,6 +163,33 @@ test("drawing a map: its connectors hop over each other where they cross, and ar
 		await drawMap(plain, graphOf(edges), "test.recipe");
 		assert.equal(plain.calls.length, 1, `${edges} connectors`);
 	}
+	// shown being built when the setting says so, as any other edit
+	const shownBuilt = client();
+	await drawMap(shownBuilt, graphOf(2), "test.recipe", { animate: true });
+	assert.equal(shownBuilt.calls[0][1].animate, true);
+	assert.equal(c.calls[0][1].animate, undefined);
+
+	// a map too large to route as one: the connectors inside each top-level box are routed, box by box, the smallest
+	// first; a box with too many of its own and what runs between boxes are left as drawn
+	const { routeGroups } = require("../src/main/mapper/draw");
+	const box = (id, parent) => ({ id, label: id, kind: "test:box", data: {}, ...(parent ? { parent } : { container: true }) });
+	const many = (from, to, n) => Array.from({ length: n }, () => ({ from, to }));
+	const large = {
+		title: "Large",
+		nodes: [box("vpc-a"), box("a1", "vpc-a"), box("a2", "vpc-a"), box("vpc-b"), box("sub-b", "vpc-b"), box("b1", "sub-b"), box("b2", "sub-b"), box("vpc-c"), box("c1", "vpc-c"), box("c2", "vpc-c"), box("lone")],
+		edges: [...many("a1", "a2", 40), ...many("b1", "b2", 10), ...many("c1", "c2", MAX_ROUTED_EDGES + 1), ...many("a1", "b1", 30), ...many("lone", "a1", 5), ...many("vpc-a", "a1", 3)],
+	};
+	assert.deepEqual(routeGroups(large), [{ id: "vpc-b", edges: 10 }, { id: "vpc-a", edges: 40 }]);
+	const ids = large.nodes.map((_, i) => `map${i + 1}`);
+	const grouped = client(() => ({ results: [{ ok: true, ids: ["e1", "e2", "e3"] }], idMap: {} }), ids);
+	await drawMap(grouped, large, "test.recipe");
+	assert.deepEqual(grouped.calls.slice(1).map(([ops, o]) => [ops[0].type, ops[0].ids, o.page]), [["route", ["map4"], "page-7"], ["route", ["map1"], "page-7"]]);
+	assert.deepEqual([require("../src/main/mapper/draw").lastRouting.edges, require("../src/main/mapper/draw").lastRouting.groups], [6, 2]);
+	// the page was left meanwhile: the first refusal ends it
+	const left = client(() => ({ results: [{ ok: false, error: "not applied: the page shown changed" }], idMap: {} }), ids);
+	await drawMap(left, large, "test.recipe");
+	assert.equal(left.calls.length, 2);
+
 	// a router that fails, either way it can: the map is drawn all the same
 	for (const route of [() => ({ results: [{ ok: false, error: "The connector router is not available" }], idMap: {}, rolledBack: true }), () => { throw new Error("the editor went away"); }]) {
 		const failing = client(route);

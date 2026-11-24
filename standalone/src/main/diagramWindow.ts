@@ -265,6 +265,7 @@ export class DiagramWindow {
 			cwd: () => this.cwd(),
 			diagram: () => this.file,
 			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress }),
+			animate: () => settings().editor["drawio-ai.animateChanges"] !== false,
 		});
 		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName(), () => this.maps);
 		this.chat = new ChatController(
