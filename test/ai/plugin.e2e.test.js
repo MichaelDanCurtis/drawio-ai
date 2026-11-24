@@ -231,6 +231,149 @@ test("group with label, align, distribute, layout and zOrder all apply", async (
 	}
 });
 
+test("watching a batch being built: what is new appears in order and what moved glides, only as shown; the edit itself is there at once, and nothing is left behind", async () => {
+	// (`running`: the animations a script started, which is how a batch is shown; the page's own styles may be in the middle of a transition of theirs)
+	const build = () => page.evaluate(() => ({ ...window.drawioAiBuild, playing: window.drawioAiBuild.playing(), running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation) && (a.playState === "running" || a.playState === "pending")).length }));
+	const shown = (await build()).shown;
+	const animated = (ops) => request({ action: "aiApplyOps", ops, atomic: true, flash: false, selectResult: false, animate: true });
+	const leftovers = (ids) =>
+		page.evaluate((ids) => {
+			const g = editorUi.editor.graph;
+			return ids.flatMap((id) => {
+				const s = g.view.getState(g.model.getCell(id));
+				return [s.shape && s.shape.node, s.text && s.text.node].filter(Boolean).flatMap((n) => [n.style.transformBox, n.style.transformOrigin, n.style.opacity, n.style.transform].filter(Boolean));
+			});
+		}, ids);
+
+	// without the option nothing is shown being built (every other test, and every caller that does not ask)
+	await apply([{ op: "addShape", label: "Plain", x: 7000, y: 7000 }]);
+	assert.deepEqual([(await build()).shown, (await build()).running], [shown, 0]);
+
+	const r = await animated([
+		{ op: "addShape", tempId: "$wa", label: "First", x: 7000, y: 7200, width: 120, height: 60 },
+		{ op: "addShape", tempId: "$wb", label: "Second", x: 7300, y: 7200, width: 120, height: 60 },
+		{ op: "addEdge", tempId: "$we", source: "$wa", target: "$wb", label: "then" },
+	]);
+	assert.deepEqual(r.results.filter((x) => !x.ok), []);
+	const ids = [r.idMap.$wa, r.idMap.$wb, r.idMap.$we];
+	// (held at its first moment, to look at it: where each element is drawn then, and its line's dashes)
+	const hold = (id) =>
+		page.evaluate((id) => {
+			for (const a of document.getAnimations()) {
+				if (a instanceof CSSTransition || a instanceof CSSAnimation) continue;
+				a.pause();
+				a.currentTime = a.effect.getTiming().delay;
+			}
+			const g = editorUi.editor.graph;
+			const node = g.view.getState(g.model.getCell(id)).shape.node;
+			const r = node.getBoundingClientRect();
+			const line = Array.from(node.querySelectorAll("path")).find((p) => (p.getAttribute("fill") || "none") === "none");
+			return { x: r.x + r.width / 2, y: r.y + r.height / 2, width: r.width, opacity: Number(getComputedStyle(node).opacity), dashOffset: line ? parseFloat(getComputedStyle(line).strokeDashoffset) : 0, length: line ? line.getTotalLength() : 0 };
+		}, id);
+	const resume = () => page.evaluate(() => document.getAnimations().forEach((a) => a.play()));
+	const drawn = (id) =>
+		page.evaluate((id) => {
+			const g = editorUi.editor.graph;
+			const r = g.view.getState(g.model.getCell(id)).shape.node.getBoundingClientRect();
+			return { x: r.x + r.width / 2, y: r.y + r.height / 2, width: r.width };
+		}, id);
+	const close = (a, b, by = 1.5) => Math.abs(a - b) <= by;
+	const first = { shape: await hold(r.idMap.$wb), line: await hold(r.idMap.$we) };
+	await resume();
+
+	// the answer is there while it is still being shown, and so is the diagram: what reads it next sees the result
+	const during = await build();
+	assert.equal(during.shown, shown + 1);
+	assert.ok(during.playing && during.running > 0 && during.elements >= 5, JSON.stringify(during));
+	const model = await getModel();
+	assert.deepEqual(ids.map((id) => model.cells.find((c) => c.id === id).label), ["First", "Second", "then"]);
+	assert.deepEqual(model.cells.find((c) => c.id === r.idMap.$wa).geometry, { x: 7000, y: 7200, width: 120, height: 60 });
+	// a picture taken now is of the finished diagram, not of a moment of it
+	const picture = () => request({ action: "aiExportImage", cellIds: ids, maxSize: 600 }).then((e) => e.dataUrl);
+	const waitUntil = async (done, ms) => {
+		for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) if (await done()) return;
+		assert.fail("waited too long");
+	};
+	const midway = await picture();
+
+	// it ends by itself, and leaves nothing on the elements
+	await waitUntil(async () => !(await build()).playing, 5000);
+	assert.equal((await build()).running, 0);
+	assert.deepEqual(await leftovers(ids), []);
+	assert.equal(await picture(), midway);
+	// what was seen at the first moment: the shape not there yet, smaller, and around its own middle (not the page's corner);
+	// the connector with none of its line drawn
+	const final = await drawn(r.idMap.$wb);
+	assert.ok(first.shape.opacity === 0 && close(first.shape.width, final.width * 0.82, 3) && close(first.shape.x, final.x) && close(first.shape.y, final.y), JSON.stringify([first.shape, final]));
+	assert.ok(first.line.length > 50 && close(first.line.dashOffset, first.line.length, 1), JSON.stringify(first.line));
+
+	// a shape that is moved glides from where it was; the diagram has it in its new place at once
+	const wasAt = await drawn(r.idMap.$wa);
+	await animated([{ op: "move", ids: [r.idMap.$wa], dx: 0, dy: 160 }]);
+	const start = await hold(r.idMap.$wa);
+	await resume();
+	assert.ok(close(start.x, wasAt.x) && close(start.y, wasAt.y), `it starts where it was: ${JSON.stringify([start, wasAt])}`);
+	const moving = await build();
+	assert.ok(moving.shown === shown + 2 && moving.playing, JSON.stringify(moving));
+	assert.equal((await getModel()).cells.find((c) => c.id === r.idMap.$wa).geometry.y, 7360);
+	// undone in the middle of it: the showing stops with it
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+	assert.equal((await build()).playing, false);
+	assert.equal((await getModel()).cells.find((c) => c.id === r.idMap.$wa).geometry.y, 7200);
+	assert.deepEqual(await leftovers(ids), []);
+
+	// zoomed in or out it still starts where it was: the way is as long as it looks, not that times the zoom again
+	for (const zoom of [2, 0.5]) {
+		await page.evaluate((z) => editorUi.editor.graph.zoomTo(z), zoom);
+		const from = await drawn(r.idMap.$wa);
+		await animated([{ op: "move", ids: [r.idMap.$wa], dx: 0, dy: 100 }]);
+		const at = await hold(r.idMap.$wa);
+		await resume();
+		const to = await page.evaluate((id) => { const g = editorUi.editor.graph; const s = g.view.getState(g.model.getCell(id)); return s.y + s.height / 2; }, r.idMap.$wa);
+		assert.ok(close(at.x, from.x, 2) && close(at.y, from.y, 2), `at ${zoom}x it starts where it was: ${JSON.stringify([at, from])}`);
+		await page.evaluate(() => editorUi.editor.undoManager.undo());
+		assert.ok(Number.isFinite(to));
+	}
+	await page.evaluate(() => editorUi.editor.graph.zoomTo(1));
+
+	// a shape that is made wider is not one that travelled: nothing glides
+	const beforeResize = (await build()).shown;
+	await animated([{ op: "update", id: r.idMap.$wa, width: 240 }]);
+	assert.deepEqual([(await build()).shown, (await build()).running], [beforeResize, 0]);
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+
+	// a batch that ends in a layout: what it adds is kept out of sight while the layout is computed,
+	// then built where the layout puts it (not shown first where it was added, taken away, and shown again)
+	const heldBefore = (await build()).held;
+	const laid = await animated([
+		{ op: "addShape", tempId: "$la", label: "Laid A", x: 7000, y: 8200, width: 120, height: 60 },
+		{ op: "addShape", tempId: "$lb", label: "Laid B", x: 7000, y: 8200, width: 120, height: 60 },
+		{ op: "addEdge", source: "$la", target: "$lb" },
+		{ op: "layout", type: "hierarchical", ids: ["$la", "$lb"] },
+	]);
+	assert.deepEqual(laid.results.filter((x) => !x.ok), []);
+	const afterLayout = await build();
+	assert.ok(afterLayout.held === heldBefore + 1 && afterLayout.playing, JSON.stringify(afterLayout));
+	await waitUntil(async () => !(await build()).playing, 5000);
+	assert.equal((await build()).running, 0);
+	assert.deepEqual(await leftovers([laid.idMap.$la, laid.idMap.$lb]), []);
+	assert.ok((await page.evaluate((id) => Number(getComputedStyle(editorUi.editor.graph.view.getState(editorUi.editor.graph.model.getCell(id)).shape.node).opacity), laid.idMap.$la)) === 1);
+
+	// a batch that is rolled back shows nothing; neither does one made when the system asks for reduced motion
+	const sofar = (await build()).shown;
+	const bad = await animated([{ op: "addShape", label: "Never", x: 7000, y: 7600 }, { op: "update", id: "no-such-cell", label: "x" }]);
+	assert.equal(bad.rolledBack, true);
+	assert.equal((await build()).shown, sofar);
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	try {
+		const still = await animated([{ op: "addShape", tempId: "$ws", label: "Still", x: 7000, y: 7800 }]);
+		assert.deepEqual(still.results.filter((x) => !x.ok), []);
+		assert.deepEqual([(await build()).shown, (await build()).running], [sofar, 0]);
+	} finally {
+		await page.emulateMedia({ reducedMotion: "no-preference" });
+	}
+});
+
 test("ELK layout really separates overlapping shapes, and edit+layout is one undo step", async () => {
 	const { idMap } = await apply([
 		{ op: "addShape", tempId: "$c1", label: "L1", x: 2000, y: 2000 },

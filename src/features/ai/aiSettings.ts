@@ -14,6 +14,7 @@ export function getAiSettings() {
 		defaultProvider: c.get<ProviderId>("provider", "vscode-lm"),
 		maxToolRounds: Math.max(1, c.get<number>("maxToolRounds", 16)),
 		flashChanges: c.get<boolean>("flashChanges", true),
+		animateChanges: c.get<boolean>("animateChanges", true),
 		reviewChanges: c.get<boolean>("reviewChanges", true),
 		persistChat: c.get<boolean>("persistChat", true),
 		checkCodeLinks: c.get<boolean>("checkCodeLinks", true),

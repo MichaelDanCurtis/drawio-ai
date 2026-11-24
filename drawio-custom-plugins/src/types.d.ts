@@ -224,6 +224,12 @@ declare interface AiApplyOpsAction {
     ops: AiOp[];
     selectResult: boolean;
     flash: boolean;
+    /**
+     * Show the batch being built: new shapes appear one after another, connectors draw in
+     * along their path, moved shapes glide to their place. Only what is seen: the edit is
+     * applied at once, as without it.
+     */
+    animate?: boolean;
     /** Stop at the first failing operation and roll the whole batch back. */
     atomic: boolean;
     /** Keep the result as a pending AI change the user accepts or rejects. */
