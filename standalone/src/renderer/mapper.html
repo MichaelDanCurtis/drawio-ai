@@ -67,6 +67,8 @@
 	#result.none { display: block; background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--ink-2); }
 	#result.err { display: block; background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--danger); white-space: pre-wrap; }
 	#result ul { margin: 6px 0 0; padding-left: 18px; color: var(--warn); }
+	#result .elsewhere { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+	#result .elsewhere .label { margin-right: 4px; }
 	.empty { color: var(--faint); padding: 30px 10px; text-align: center; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
 	.err-text { color: var(--danger) !important; }
 </style>
@@ -346,12 +348,27 @@
 		}
 	}
 
-	function setResult(kind, text, warnings) {
+	function setResult(kind, text, warnings, elsewhere) {
 		const box = $("result");
 		if (!box) return;
 		box.className = kind;
+		// (other folders the same map can be made of, e.g. a repository's working copies: one click maps one)
+		const others = elsewhere?.length
+			? el("div", { class: "elsewhere" }, el("span", { class: "label", text: "Map one instead" }), ...elsewhere.slice(0, 6).map((e) => el("button", { class: "btn btn-sm", text: e.label, title: e.folder, onclick: () => mapFolder(e.folder) })))
+			: null;
 		// (only what is there: the DOM writes a missing child out as the word "null")
-		box.replaceChildren(...[el("div", { text }), warnings?.length ? el("ul", {}, ...warnings.slice(0, 20).map((w) => el("li", { text: w }))) : null].filter(Boolean));
+		box.replaceChildren(...[el("div", { text }), warnings?.length ? el("ul", {}, ...warnings.slice(0, 20).map((w) => el("li", { text: w }))) : null, others].filter(Boolean));
+		// (it is below the form: a result nobody sees is a run that seemed to do nothing)
+		box.scrollIntoView({ block: "nearest" });
+	}
+
+	/** The same map, of another folder. */
+	function mapFolder(folder) {
+		const r = recipe();
+		if (!r || state.running || !r.fields.some((f) => f.id === "folder")) return;
+		state.values.folder = folder;
+		renderForm();
+		run();
 	}
 
 	host.onMessage((msg) => {
@@ -397,7 +414,7 @@
 				state.running = false;
 				renderForm();
 				// (a run that found nothing to draw is not a success to tick off: it says what it looked at)
-				setResult(msg.nothing ? "none" : "ok", (msg.nothing ? "" : "✓ ") + msg.summary, msg.warnings);
+				setResult(msg.nothing ? "none" : "ok", (msg.nothing ? "" : "✓ ") + msg.summary, msg.warnings, msg.elsewhere);
 				if (!msg.nothing) window.drawaiPulse?.(0.5, 0.5);
 				break;
 			case "failed":

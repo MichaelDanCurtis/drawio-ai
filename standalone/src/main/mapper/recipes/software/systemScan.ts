@@ -114,6 +114,8 @@ export interface SystemScan {
 	/** Services reachable from outside (published ports, ingress, gateways). */
 	exposed: Map<string, string>;
 	warnings: string[];
+	/** Working copies of the repository that were not read (see hiddenCheckouts), newest first: folders to map instead. */
+	elsewhere: { label: string; folder: string }[];
 	stats: { files: number; codeFiles: number; composeFiles: number; k8sObjects: number; envFiles: number; configFiles: number; ms: number };
 	/** Env keys that hold secrets (names only), for the agent to know they exist. */
 	secretKeys: Set<string>;
@@ -908,6 +910,7 @@ export function scanSystem(root: string, options: ScanOptions = {}): SystemScan 
 		ingresses,
 		exposed,
 		warnings,
+		elsewhere: copies ? newestFirst(root, copies).slice(0, 6) : [],
 		secretKeys,
 		libraries,
 		health,
@@ -1243,6 +1246,22 @@ export function hiddenCheckouts(root: string): { folder: string; names: string[]
 		if (names.length) return { folder, names };
 	}
 	return undefined;
+}
+
+/** The working copies as folders to map, the one worked in last first (only their folders' dates are read). */
+function newestFirst(root: string, copies: { folder: string; names: string[] }): { label: string; folder: string }[] {
+	const changed = (folder: string): number => {
+		try {
+			return fs.statSync(folder).mtimeMs;
+		} catch {
+			return 0;
+		}
+	};
+	return copies.names
+		.map((name) => ({ label: name, folder: path.join(root, copies.folder, name) }))
+		.map((c) => ({ ...c, at: changed(c.folder) }))
+		.sort((a, b) => b.at - a.at || a.label.localeCompare(b.label))
+		.map(({ label, folder }) => ({ label, folder }));
 }
 
 const HTTP_METHODS = "get|post|put|patch|delete|head|options|all";

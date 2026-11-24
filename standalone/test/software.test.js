@@ -450,6 +450,14 @@ test("a repository of packages that nothing deploys: a Rust binary and a Python 
 	const again = await recipe("software.dataflow").collect({ folder: root }, ctxFor(root));
 	assert.equal(again.graph, undefined, "they are still not read");
 	assert.deepEqual(again.warnings.filter((w) => /working cop/.test(w)), ["2 working copies of this repository in .claude/worktrees were not read, as hidden folders are skipped (real-run, second). To map one, choose it as the folder."]);
+	// ...and offers them as folders to map, the one worked in last first
+	fs.utimesSync(path.join(root, ".claude/worktrees/real-run"), new Date(2026, 0, 1), new Date(2026, 0, 1));
+	fs.utimesSync(path.join(root, ".claude/worktrees/second"), new Date(2026, 5, 1), new Date(2026, 5, 1));
+	const offered = (await recipe("software.dataflow").collect({ folder: root }, ctxFor(root))).elsewhere;
+	assert.deepEqual(offered, [{ label: "second", folder: path.join(root, ".claude/worktrees/second") }, { label: "real-run", folder: path.join(root, ".claude/worktrees/real-run") }]);
+	assert.deepEqual((await recipe("software.connectivity").collect({ folder: offered[1].folder }, ctxFor(root))).elsewhere, [], "a working copy has none of its own to offer");
+	for (let i = 0; i < 9; i++) put(`.claude/worktrees/more-${i}/.git`, "gitdir: /elsewhere\n");
+	assert.equal((await recipe("software.dataflow").collect({ folder: root }, ctxFor(root))).elsewhere.length, 6, "a handful, not all fifty");
 	// chosen as the folder, one is mapped
 	const one = await recipe("software.connectivity").collect({ folder: path.join(root, ".claude/worktrees/real-run") }, ctxFor(root));
 	assert.ok(one.graph && one.graph.nodes.some((n) => /portal/.test(n.label ?? n.id)));

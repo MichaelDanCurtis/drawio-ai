@@ -141,7 +141,7 @@ export class MapperDialogCore {
 			const summary = [result?.summary, drawn, wantsAgent || describe ? "Handed to the agent in the chat." : ""].filter(Boolean).join(" ");
 			// (collected, and there was nothing to draw: the dialog stays open with what was looked at, instead of ticking it off and closing)
 			const nothing = !!recipe.collect && !drawn && !result?.graph?.nodes?.length;
-			p.post({ type: "done", summary: summary || "Done.", warnings: result?.warnings ?? [], nothing, close: !nothing && !result?.warnings?.length });
+			p.post({ type: "done", summary: summary || "Done.", warnings: result?.warnings ?? [], elsewhere: result?.elsewhere ?? [], nothing, close: !nothing && !result?.warnings?.length });
 			return { result, mapId: record?.id };
 		} catch (e: any) {
 			const message = errorText(e);
