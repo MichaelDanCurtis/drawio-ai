@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **A run log.** The app notes when it started and how it ended in `logs/app.log` in its data
+  folder (on macOS `~/Library/Application Support/OmniDraw`): a quit, a window's page or a
+  helper process that ended and why, an error in the main process. A run that ended without a
+  word (a crash, a kill) is named by the next start. It holds times and reasons only, never a
+  diagram, a request or a key.
+- Development: the end-to-end run builds into `out-e2e` and starts the app from there, so a
+  test no longer replaces the files of a copy of the app that is running from `out`.
 - **Maps: connectors are routed.** After the Mapper has placed the shapes, each connector is
   taken around the shapes in its way and apart from the ones beside it (draw.io's own
   obstacle-avoiding router; no shape moves), and where two still cross, one hops over the
