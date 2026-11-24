@@ -10,7 +10,7 @@ const { renderGraph } = require("../src/main/mapper/render");
 const { MapperError } = require("../src/main/mapper/types");
 const { softwareRecipes } = require("../src/main/mapper/recipes/software");
 const { parseAddress, isSecretKey, scrub, techOf, libraryTech } = require("../src/main/mapper/recipes/software/shared");
-const { scanSystem, stripComments, entryPoints, hiddenCheckouts } = require("../src/main/mapper/recipes/software/systemScan");
+const { scanSystem, stripComments, entryPoints, hiddenCheckouts, withoutTestItems } = require("../src/main/mapper/recipes/software/systemScan");
 const { modulesToGraph, classesToGraph, cycleMembers, moduleFindings } = require("../src/main/mapper/recipes/software/codeStructure");
 const { openApiToGraph, parseGraphQL, graphqlToGraph } = require("../src/main/mapper/recipes/software/api");
 const { hardcodedSecret, maskHint } = require("../src/main/mapper/recipes/software/health");
@@ -392,9 +392,15 @@ test("a repository of packages that nothing deploys: a Rust binary and a Python 
 	assert.deepEqual(kinds('let app = Router::new()\n    .route("/x", get(|| async { get(1); f() }).post(h))\n    .route(\n        "/y",\n        delete(remove),\n    )\n    .route("relative", get(h));\n', "api/src/app.rs", "rs"), ["http GET /x", "http POST /x", "http DELETE /y"]);
 	// routes a crate builds in its own tests are not what it serves
 	assert.deepEqual(kinds('pub fn app() -> Router { Router::new().route("/live", get(live)) }\n\n#[cfg(test)]\nmod tests {\n    fn fake() -> Router { Router::new().route("/fake", get(f)) }\n    #[get("/also-fake")]\n    fn g() {}\n}\n', "api/src/lib.rs", "rs"), ["http GET /live"]);
+	// ...and only those: a test-only import or helper above the real routes does not hide them
+	const mixed = '#[cfg(test)]\nuse axum::http::StatusCode;\n\n#[cfg(test)]\nfn fake() -> Router {\n    Router::new().route("/fake", get(f))\n}\n\npub fn app() -> Router {\n    Router::new().route("/real", get(real).post(make))\n}\n\n#[cfg(test)]\nmod tests {\n    mod deeper { fn r() { Router::new().route("/deep", get(f)); } }\n}\n\n#[get("/after")]\nasync fn after() {}\n';
+	assert.deepEqual(entryPoints(mixed, "api/src/lib.rs", "rs").map((e) => `${e.label} @${e.line}`), ["GET /real @10", "POST /real @10", "GET /after @18"]);
+	assert.equal(withoutTestItems(mixed).split("\n").length, mixed.split("\n").length, "the lines stay where they are");
+	assert.ok(!/fake|deep|StatusCode/.test(withoutTestItems(mixed)) && /pub fn app\(\)/.test(withoutTestItems(mixed)));
+	assert.equal(withoutTestItems("fn a() {}\n#[cfg(test)]\nmod t {"), "fn a() {}\n            \n       ", "an item that never closes ends with the file");
 	// a large file of nothing but blank lines, comments blanked out or an unclosed call is read at once
 	// (each of these took many seconds: the patterns looked again from every line, or to the end of the file)
-	for (const [what, text] of [["blank lines", "\n".repeat(300_000)], ["blanked comments", "          \n".repeat(30_000)], ["unclosed routes", '.route("/a",get('.repeat(20_000)], ["unclosed attributes", '#[get(   '.repeat(30_000)]]) {
+	for (const [what, text] of [["blank lines", "\n".repeat(300_000)], ["blanked comments", "          \n".repeat(30_000)], ["unclosed routes", '.route("/a",get('.repeat(20_000)], ["unclosed attributes", '#[get(   '.repeat(30_000)], ["test guards without end", "#[cfg(test)] mod t { ".repeat(20_000)], ["test guards, one after another", "#[cfg(test)]\n".repeat(40_000)]]) {
 		const started = Date.now();
 		entryPoints(text, "big/src/main.rs", "rs");
 		assert.ok(Date.now() - started < 1500, `${what}: ${Date.now() - started} ms`);

@@ -930,6 +930,11 @@ Draw.loadPlugin((ui: any) => {
 		const root = model.getRoot();
 		// (the user's own change through the host is not the AI's: the undo listener takes it as a user edit)
 		const held = !!action.review && !action.user;
+		const pageId: string | undefined = page?.getId?.();
+		// (meant for one page, and another is shown: nothing is done there)
+		if (action.page && action.page !== pageId) {
+			return { event: "aiApplyOpsResult", message: action, results: (action.ops || []).map((op, index) => ({ index, op: op?.op, ok: false, error: PAGE_SWITCHED })), idMap: {}, rolledBack: false, page: pageId };
+		}
 		const reviewBefore = held && !review ? snapAll() : undefined;
 		if (!action.user) aiEditing++;
 		try {
@@ -947,7 +952,7 @@ Draw.loadPlugin((ui: any) => {
 				refreshReview();
 			}
 			const { historyBefore: _, switched: __, ...event } = result;
-			return event;
+			return { ...event, page: pageId };
 		} finally {
 			if (!action.user) aiEditing--;
 		}

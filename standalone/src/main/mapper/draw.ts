@@ -45,14 +45,14 @@ export async function drawMap(
 	// whatever lies between its ends, and stack the ones that leave a shape on the same side. Its
 	// router takes them around the shapes and apart. (A step of its own, and one that may fail: a
 	// map with plain connectors is still a map. Very large maps are left as they are: routing every
-	// connector around every shape takes too long there.) Only what was just drawn is routed, by
-	// its ids: should the user have turned to another page meanwhile, the step fails there and
-	// that page's connectors stay as they are.
+	// connector around every shape takes too long there.) Only what was just drawn is routed: by
+	// its ids, and on the page it was drawn on. Should the user have turned to another page
+	// meanwhile, the step does nothing there, also when that page is a map with the same ids.
 	const drawn = r.results.flatMap((x) => x.ids ?? []);
-	if (drawn.length > 0 && graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES) {
+	if (r.page && drawn.length > 0 && graph.edges.length > 0 && graph.edges.length <= MAX_ROUTED_EDGES) {
 		try {
 			const started = Date.now();
-			const routed = await client.aiApplyOps([{ op: "layout", type: "route", ids: drawn }], { selectResult: false, flash: false, atomic: true, review: true });
+			const routed = await client.aiApplyOps([{ op: "layout", type: "route", ids: drawn }], { selectResult: false, flash: false, atomic: true, review: true, page: r.page });
 			lastRouting = { edges: routed.results[0]?.ids?.length ?? 0, ms: Date.now() - started, error: routed.results.find((x) => !x.ok)?.error };
 		} catch (e: any) {
 			// as drawn

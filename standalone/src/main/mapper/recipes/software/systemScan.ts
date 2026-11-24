@@ -1247,6 +1247,34 @@ export function hiddenCheckouts(root: string): { folder: string; names: string[]
 
 const HTTP_METHODS = "get|post|put|patch|delete|head|options|all";
 
+/**
+ * Rust source with every item behind `#[cfg(test)]` blanked out (a `use …;`, or a module or
+ * function with its whole body), the rest as it is and on the same lines. Read once from start
+ * to end, whatever is in it.
+ */
+export function withoutTestItems(text: string): string {
+	const guard = /#\[cfg\(test\)\]/g;
+	let out = "";
+	let from = 0;
+	for (let m = guard.exec(text); m; m = guard.exec(text)) {
+		if (m.index < from) continue;
+		// the item ends at its `;`, or at the brace that closes the one it opens
+		let end = m.index + m[0].length;
+		let depth = 0;
+		for (; end < text.length; end++) {
+			const ch = text[end];
+			if (ch === "{") depth++;
+			else if (ch === "}" && --depth <= 0) break;
+			else if (ch === ";" && depth === 0) break;
+		}
+		end = Math.min(text.length, end + 1);
+		out += text.slice(from, m.index) + text.slice(m.index, end).replace(/[^\n]/g, " ");
+		from = end;
+		guard.lastIndex = end;
+	}
+	return out + text.slice(from);
+}
+
 /** HTTP routes, scheduled jobs and other entry points declared in code. */
 export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[] {
 	const out: EntryPoint[] = [];
@@ -1321,7 +1349,7 @@ export function entryPoints(text: string, rel: string, lang: Lang): EntryPoint[]
 			}
 		}
 		// (routes a crate's own tests build are not what it serves)
-		const served = text.slice(0, /#\[cfg\(test\)\]/.exec(text)?.index ?? text.length);
+		const served = withoutTestItems(text);
 		// axum / warp-style routers: `.route("/path", get(a).post(b))`, the handlers read up to the call's own end
 		for (const m of served.matchAll(/\.route\(\s{0,200}"(\/[^"\n]{0,300})"\s{0,200},/g)) {
 			if (out.length >= 400) break;

@@ -262,7 +262,14 @@ test("route: a connector is taken around the shape in its way; no shape moves, o
 	assert.ok(through(before.points, blocker), "drawn as it is, the connector runs through the shape between its ends");
 	const straight = await state(idMap.$rs);
 
-	const r = await apply([{ op: "layout", type: "route", ids: [idMap.$ra, idMap.$rb, idMap.$rc] }]);
+	// meant for one page while another is shown: nothing is done (two pages can hold the same ids, a map's are the same in every map)
+	const routeOn = (pageId) => request({ action: "aiApplyOps", ops: [{ op: "layout", type: "route", ids: [idMap.$ra, idMap.$rb, idMap.$rc] }], atomic: true, flash: false, selectResult: false, page: pageId });
+	const elsewhere = await routeOn("some-other-page");
+	assert.deepEqual(elsewhere.results.map((x) => [x.ok, /the page shown changed/.test(x.error)]), [[false, true]]);
+	assert.deepEqual(await state(idMap.$re), before, "nothing was routed");
+	assert.equal(elsewhere.page, await page.evaluate(() => editorUi.currentPage.getId()), "the answer says which page is shown");
+
+	const r = await routeOn(elsewhere.page);
 	assert.deepEqual(r.results.filter((x) => !x.ok), []);
 	assert.deepEqual(r.results[0].ids, [idMap.$re], "only the right-angled connector is routed");
 	const after = await state(idMap.$re);

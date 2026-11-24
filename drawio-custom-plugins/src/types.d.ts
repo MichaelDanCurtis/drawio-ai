@@ -235,6 +235,12 @@ declare interface AiApplyOpsAction {
      * touches a cell the AI changed).
      */
     user?: boolean;
+    /**
+     * Apply only while this page (its id) is the one shown. On any other page nothing is done and
+     * every operation fails: for a step that follows another batch and must land where that did
+     * (cell ids alone do not say which page, two pages can hold the same ones).
+     */
+    page?: string;
 }
 
 declare interface AiSetSelectionAction {
@@ -322,6 +328,8 @@ declare interface AiApplyOpsResultEvent {
     results: AiOpResult[];
     idMap: Record<string, string>;
     rolledBack: boolean;
+    /** The id of the page the batch was applied on (the one shown as it began). */
+    page?: string;
 }
 
 declare interface AiAckEvent {
