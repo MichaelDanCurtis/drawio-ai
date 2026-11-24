@@ -979,8 +979,13 @@ Draw.loadPlugin((ui: any) => {
 		let switched = false;
 		const ops: AiOp[] = action.ops || [];
 		// (what is where before the batch, to show afterwards what it added and moved)
-		stopBuild();
 		const placedBefore = action.animate && canShowBuild() ? placesNow() : undefined;
+		// A batch that is shown being built takes over from one that still is. A batch that is not (a
+		// step that follows an edit: a map's health badges, a connector being re-routed) leaves it
+		// running: what it adds is simply there, and what it changes is drawn anew as it is. Nothing
+		// of a showing is kept on the elements either way, see showBuild.
+		if (placedBefore) stopBuild();
+		else releaseHeld();
 		let failed = false;
 		const fail = (index: number, op: any, e: any) => {
 			failed = true;

@@ -334,6 +334,13 @@ test("watching a batch being built: what is new appears in order and what moved 
 	const first = { shape: await hold(r.idMap.$wb), line: await hold(r.idMap.$we) };
 	await resume();
 
+	// an edit that follows and is not shown being built (a map's badges, a re-routed connector) does not cut it short:
+	// what that one adds is simply there
+	const follow = await apply([{ op: "addShape", tempId: "$wf", label: "Follows", x: 7600, y: 7200, width: 120, height: 60 }]);
+	assert.deepEqual(follow.results.filter((x) => !x.ok), []);
+	assert.ok((await build()).playing, "the first batch is still being shown");
+	assert.equal(await page.evaluate((id) => Number(getComputedStyle(editorUi.editor.graph.view.getState(editorUi.editor.graph.model.getCell(id)).shape.node).opacity), follow.idMap.$wf), 1);
+
 	// the answer is there while it is still being shown, and so is the diagram: what reads it next sees the result
 	const during = await build();
 	assert.equal(during.shown, shown + 1);
