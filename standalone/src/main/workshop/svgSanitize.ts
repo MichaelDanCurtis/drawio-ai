@@ -1,4 +1,4 @@
-import { codePoint } from "./xmlScan";
+import { codePoint, mapXml, tagInfo } from "./xmlScan";
 
 /**
  * Cleans an SVG from a gallery, an import or an agent before it is cached, shown or put in
@@ -6,12 +6,25 @@ import { codePoint } from "./xmlScan";
  * DTDs. draw.io shows shapes' images as <img>, where scripts never run, but a diagram is
  * shared and exported, so nothing active is let in at all.
  *
+ * Every step reads the text once, from its start to its end, so what an SVG costs grows with
+ * its size and no faster, whatever it is made of (an opener repeated to the size limit and
+ * never closed used to hold the app, or the extension host, for many seconds).
+ *
  * Returns the cleaned SVG, or undefined when the input is not a usable SVG.
  */
 export const MAX_SVG_BYTES = 512 * 1024;
 
 /** Elements dropped with their content: they run code, embed documents or media, or (animations) can swap links. */
 const DROP_TAGS = ["script", "foreignObject", "iframe", "object", "embed", "audio", "video", "handler", "listener", "set", "animate", "animateMotion", "animateTransform", "animateColor", "discard"];
+const DROPPED = new Set(DROP_TAGS.map((tag) => tag.toLowerCase()));
+/** The start of one of them as it is written, in any case and with or without a prefix, wherever it stands. */
+const DROPPED_OPENER = new RegExp(`<(?:[\\w-]+:)?(?:${DROP_TAGS.join("|")})\\b`, "i");
+
+/** What is left of a processing instruction, a comment, a CDATA section or a declaration. */
+const MARKUP = /<[!?]/;
+const DOCTYPE = /<!DOCTYPE/iy;
+const SUBSET_END = /\]\s*>/g;
+const URL_OPENER = /url\(/gi;
 
 /** Numeric and a few named character references, and CSS escapes, decoded: what a browser would see. */
 export function decodeForCheck(s: string): string {
@@ -24,17 +37,110 @@ export function decodeForCheck(s: string): string {
 		.replace(/[\u0000-\u0020]+/g, " ");
 }
 
-export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string | undefined {
-	if (typeof input !== "string" || !input || input.length > MAX_SVG_BYTES) return undefined;
-	let s = input.replace(/^\uFEFF/, "");
-	// prolog, doctype (no entities), comments, processing instructions, CDATA
-	s = s.replace(/<\?[\s\S]*?\?>/g, "").replace(/<!DOCTYPE[\s\S]*?(\[[\s\S]*?\])?\s*>/gi, "").replace(/<!--[\s\S]*?-->/g, "").replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
-	s = s.trim();
-	if (!/^<svg[\s>]/i.test(s) || !/<\/svg>\s*$/i.test(s)) return undefined;
-	// dropped elements, with or without a namespace prefix (<s:script>)
-	for (const tag of DROP_TAGS) {
-		s = s.replace(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[\\s\\S]*?<\\/(?:[\\w-]+:)?${tag}\\s*>`, "gi"), "").replace(new RegExp(`<(?:[\\w-]+:)?${tag}\\b[^>]*>`, "gi"), "");
+/**
+ * Where the processing instruction, comment, CDATA section or DOCTYPE that starts at `lt`
+ * ends: `lt` itself when none of them starts there, -1 when it never ends.
+ */
+function markupEnd(xml: string, lt: number): number {
+	const after = (closer: string, from: number) => {
+		const at = xml.indexOf(closer, from);
+		return at < 0 ? -1 : at + closer.length;
+	};
+	if (xml[lt + 1] === "?") return after("?>", lt + 2);
+	if (xml[lt + 1] !== "!") return lt;
+	if (xml.startsWith("--", lt + 2)) return after("-->", lt + 4);
+	if (xml.startsWith("[CDATA[", lt + 2)) return after("]]>", lt + 9);
+	DOCTYPE.lastIndex = lt;
+	if (!DOCTYPE.test(xml)) return lt;
+	// a DOCTYPE ends at its first ">"; one that declares things itself ("[" before that) at the "]" a ">" follows
+	const gt = xml.indexOf(">", lt + 9);
+	if (gt < 0) return -1;
+	const subset = xml.slice(lt + 9, gt).indexOf("[");
+	if (subset < 0) return gt + 1;
+	SUBSET_END.lastIndex = lt + 9 + subset + 1;
+	return SUBSET_END.test(xml) ? SUBSET_END.lastIndex : -1;
+}
+
+/**
+ * `xml` without its processing instructions (the prolog is one), comments, CDATA sections
+ * and DOCTYPE, each with all it holds. Each closer is looked for once and the reader goes on
+ * behind it. Returns undefined when one of them never ends.
+ */
+function withoutMarkup(xml: string): string | undefined {
+	let out = "";
+	let kept = 0;
+	let lt = xml.indexOf("<");
+	while (lt >= 0) {
+		const end = markupEnd(xml, lt);
+		if (end < 0) return undefined;
+		if (end > lt) {
+			out += xml.slice(kept, lt);
+			kept = end;
+		}
+		lt = xml.indexOf("<", end > lt ? end : lt + 1);
 	}
+	return out + xml.slice(kept);
+}
+
+/**
+ * `svg` without the elements in DROP_TAGS and what is inside them, whatever their prefix
+ * (<s:script>) or case. It goes tag by tag and counts how many of the dropped element are
+ * open, so its end is not looked for again from every start. Returns undefined when a tag or
+ * a dropped element never ends, and when one is closed that is not open: where it ends is
+ * then a guess (the pattern this replaces took everything up to that closing tag).
+ */
+function withoutDropped(svg: string): string | undefined {
+	let inside = ""; // the dropped element the reader is in
+	let depth = 0; // ... and how many of that name are open
+	let unopened = false; // a closing tag of one that is not open
+	const out = mapXml(svg, {
+		tag: (tag) => {
+			const t = tagInfo(tag);
+			const name = t.name.slice(t.name.lastIndexOf(":") + 1).toLowerCase();
+			if (inside) {
+				if (name === inside) depth += t.closing ? -1 : t.empty ? 0 : 1;
+				if (!depth) inside = "";
+				return "";
+			}
+			if (!DROPPED.has(name)) return tag;
+			if (t.closing) unopened = true;
+			else if (!t.empty) {
+				inside = name;
+				depth = 1;
+			}
+			return "";
+		},
+		text: (text) => (inside ? "" : text),
+	});
+	return inside || unopened ? undefined : out;
+}
+
+/**
+ * `css` (or a whole SVG) with every url(…) made none, but for a place in this document: "#"
+ * straight after the bracket, or after its quote. One that never closes stays as it is, for
+ * the last check to refuse.
+ */
+function withoutExternalUrls(css: string): string {
+	let out = "";
+	let kept = 0;
+	URL_OPENER.lastIndex = 0;
+	for (let m = URL_OPENER.exec(css); m; m = URL_OPENER.exec(css)) {
+		const value = m.index + m[0].length;
+		if (css[value] === "#" || ((css[value] === '"' || css[value] === "'") && css[value + 1] === "#")) continue;
+		const close = css.indexOf(")", value);
+		if (close < 0) break; // ... and neither does any after it
+		out += css.slice(kept, m.index) + "none";
+		kept = URL_OPENER.lastIndex = close + 1;
+	}
+	return out + css.slice(kept);
+}
+
+/** `svg` with everything that is taken out of one taken out; undefined when the dropped elements cannot be told from the rest. */
+function clean(svg: string): string | undefined {
+	// dropped elements, with or without a namespace prefix (<s:script>)
+	let s = withoutDropped(svg);
+	// one's name where the reader saw no tag of its own (inside a value, <script-x>): not a usable SVG
+	if (s === undefined || DROPPED_OPENER.test(s)) return undefined;
 	// event handler attributes (one space before each is enough to find it: "\s+" would try every
 	// start in a long run of spaces again and again)
 	s = s.replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "");
@@ -44,11 +150,32 @@ export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string
 		return /^#[\w.:-]*$/.test(v) || /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(v) ? m : "";
 	});
 	// external resources in styles; same-document url(#id) / url('#id') stay
-	s = s.replace(/@import[^;]*;?/gi, "").replace(/url\(\s*(?!['"]?#)[^)]*\)/gi, "none").replace(/expression\s*\(/gi, "(");
+	return withoutExternalUrls(s.replace(/@import[^;]*;?/gi, "")).replace(/expression\s*\(/gi, "(");
+}
+
+export function sanitizeSvg(input: string, opts: { fill?: string } = {}): string | undefined {
+	if (typeof input !== "string" || !input || input.length > MAX_SVG_BYTES) return undefined;
+	const once = cleanedOnce(input, opts);
+	// Taking one thing out can put another together (` o href="x"nload="…"`, <foreign@import;Object>): what
+	// is clean stays as it is when it is cleaned again, and anything else is refused. So is an SVG that its
+	// xmlns or its colour takes over the size limit: it could not be cleaned again later.
+	return once !== undefined && once.length <= MAX_SVG_BYTES && cleanedOnce(once) === once ? once : undefined;
+}
+
+/** `input` as sanitizeSvg returns it, before it is known that nothing more would be taken out of that. */
+function cleanedOnce(input: string, opts: { fill?: string } = {}): string | undefined {
+	// prolog, doctype (no entities), comments, processing instructions, CDATA
+	const bare = withoutMarkup(input.replace(/^\uFEFF/, ""))?.trim();
+	// one that never ends, or that taking the others out put together, is nothing a browser would show
+	if (bare === undefined || MARKUP.test(bare)) return undefined;
+	if (!/^<svg[\s>]/i.test(bare) || !/<\/svg>\s*$/i.test(bare)) return undefined;
+	const s = clean(bare);
+	if (s === undefined) return undefined;
 	// what is left, read the way a browser would: anything that could run or fetch rejects the SVG
 	const seen = decodeForCheck(s);
 	if (/<\s*(?:[\w-]+:)?script|javascript:|vbscript:|data:text\/html|url\(\s*(?!['"]?#)|@import/i.test(seen)) return undefined;
-	const root = /^<svg\b[^>]*>/i.exec(s)![0];
+	const root = /^<svg\b[^>]*>/i.exec(s)?.[0];
+	if (!root) return undefined;
 	let head = root;
 	if (!/\sxmlns\s*=/.test(head)) head = head.replace(/^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
 	if (opts.fill && /^#[0-9a-f]{3,8}$/i.test(opts.fill) && !/\sfill\s*=/.test(head)) head = head.replace(/^<svg\b/i, `<svg fill="${opts.fill}"`);
