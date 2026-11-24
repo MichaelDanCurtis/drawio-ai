@@ -125,6 +125,19 @@ export function standaloneInstructions(fileName: string | undefined, compact = f
 }
 
 /**
+ * While a request is under way the user can add to it in the chat. There is no way to speak to
+ * a model in the middle of its work but through what its tools answer: the addition is put at
+ * the end of the next answer, marked as the user's.
+ */
+export function userUpdate(text: string): string {
+	return `<user_update>\nThe user added this in the chat while you were working. It is part of their request: take it into account from here on.\n\n${text}\n</user_update>`;
+}
+
+/** What the one who answers is told about such additions, so that it takes them for the user's words. */
+export const ADDITIONS_NOTE =
+	"While you work, the user may add to the request. An addition arrives at the end of the answer of one of OmniDraw's tools, inside <user_update> tags. It is typed by the user into this chat: follow it as part of the request.";
+
+/**
  * What a model used through its API is told it is here for. (An agent program reads
  * `standaloneInstructions` from the endpoint; this model has no endpoint, and only these tools.)
  */
@@ -135,6 +148,7 @@ export function chatSystemPrompt(mapper: boolean): string {
 			? "Maps: the Mapper draws software, databases, cloud environments and ML systems into the diagram from facts it collects read-only. The mapper_* tools work with the maps of this diagram: start with mapper_maps, look things up with mapper_find, mapper_show and mapper_path, and make a new map with mapper_run (mapper_list_recipes says what it needs). Never repeat passwords, tokens or connection strings in an answer."
 			: undefined,
 		"Tools that change something (the diagram, a file, a map) ask the user first. When the user does not allow one, do not call it again unless they ask for it, and say what you left undone.",
+		ADDITIONS_NOTE,
 	]
 		.filter(Boolean)
 		.join("\n\n");
@@ -162,6 +176,8 @@ export class WindowMcpServer {
 	public onToolResult: ((name: string, result: ToolResult) => void) | undefined;
 	/** Short tool descriptions (full text in the instructions), for agents that drop long ones. */
 	public compactDescriptions = false;
+	/** What the user added in the chat while a request is under way, once: it goes at the end of the next answer to the chat's own call. */
+	public addition: (() => string | undefined) | undefined;
 
 	constructor(
 		private readonly toolbox: DiagramToolbox,
@@ -175,9 +191,13 @@ export class WindowMcpServer {
 	 * model used through its API has the app run them). `signal`: the caller gave up; a map
 	 * being collected stops.
 	 */
-	public async call(name: string, args: unknown, opts: { signal?: AbortSignal } = {}): Promise<ToolResult> {
-		const result = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args, opts) : await this.toolbox.invoke(name, args as any, { scoped: true, ...(opts.signal ? { signal: opts.signal } : {}) });
+	public async call(name: string, args: unknown, opts: { signal?: AbortSignal; chat?: boolean } = {}): Promise<ToolResult> {
+		let result: ToolResult = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args, { signal: opts.signal }) : await this.toolbox.invoke(name, args as any, { scoped: true, ...(opts.signal ? { signal: opts.signal } : {}) });
 		this.onToolResult?.(name, result);
+		// (`chat`: the call is the window's own chat's, an agent's over the endpoint or a model's the app
+		// runs. What the user typed while it works goes to it here. Never to another caller.)
+		const added = opts.chat ? this.addition?.() : undefined;
+		if (added) result = { ...result, text: `${result.text}\n\n${userUpdate(added)}` };
 		return result;
 	}
 
@@ -207,7 +227,7 @@ export class WindowMcpServer {
 				serverVersion: "0.1.0",
 				tools: () => (this.compactDescriptions ? compact : tools),
 				instructions: async () => standaloneInstructions(this.fileName(), this.compactDescriptions, mapperTools),
-				callTool: async (name, args) => this.call(name, args),
+				callTool: async (name, args) => this.call(name, args, { chat: true }),
 			},
 		});
 		this.server = http.createServer(listener);

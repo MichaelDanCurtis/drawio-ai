@@ -64,6 +64,13 @@ installed and look signed in; when one is not, the chat says what to run (and of
   switching agents, or a click on the ⚡ Allow all chip at the top; also under the
   **Agent** menu. Under **With an API key** the same picker lists the providers whose models
   answer without an agent program: see [the chat with an API key](#the-chat-with-an-api-key).
+- **While it works** the box stays open. What you send then waits in a strip above the box
+  (✕ takes it back) and reaches the model with the next answer of one of the diagram's tools,
+  so it reads it as it works; the chat shows it there as "added while it works". What could
+  not be handed over (no tool answered after it, or it has images) is sent as the next request
+  when this one ends. After Stop or an error nothing is sent by itself: what was waiting goes
+  back into the box. Works with agents and with API models alike (`mcpServer.ts`,
+  `userUpdate`).
 - **Review**: the agent's edits appear as pending changes; **Accept** keeps them,
   **Reject** reverts them (also under the **Agent** menu).
 - **File menu** (both the app menu and draw.io's own File menu in the editor): New,

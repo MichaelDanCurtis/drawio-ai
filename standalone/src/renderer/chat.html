@@ -159,6 +159,12 @@
 
 	/* ---------- composer ---------- */
 	footer { flex: none; border-top: 1px solid var(--border); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+	#queued { display: flex; flex-direction: column; gap: 4px; }
+	#queued .queued { display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 10px; border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface-2); font-size: 12.5px; color: var(--ink-2); animation: fade-in var(--dur) var(--ease-out); }
+	#queued .queued::before { content: "WAITING"; font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--faint); flex: none; }
+	#queued .what { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	#queued .drop { flex: none; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: var(--radius-sm, 6px); }
+	#queued .drop:hover, #queued .drop:focus-visible { background: var(--surface-3); color: var(--ink); outline: none; }
 	#working { display: flex; align-items: center; gap: 10px; padding: 0 2px; animation: fade-in var(--dur) var(--ease-out); }
 	textarea#input { width: 100%; resize: none; min-height: 58px; max-height: 200px; padding: 10px 12px; border-radius: var(--radius-lg); line-height: 1.5; }
 	.row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
@@ -241,6 +247,7 @@
 			</span>
 		</div>
 		<div id="working" class="hidden" role="status"><span class="dot-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="label">Working · watch the diagram</span></div>
+		<div id="queued" class="hidden" aria-label="Waiting to be sent"></div>
 		<div id="attachments"></div>
 		<textarea id="input" rows="2" placeholder="Describe a change, or paste a sketch…"></textarea>
 		<div class="row">
@@ -614,7 +621,31 @@
 		status.setAttribute("aria-label", "Agent " + (state.agentState || "off") + (status.title ? ": " + status.title : ""));
 		renderReview(state.review);
 		$("allowAllChip").classList.toggle("hidden", !state.allowAll);
+		renderQueued(state.queued || []);
 		setBusy(state.busy);
+	}
+
+	// What was sent while it works and has not reached the model yet: each can still be taken back.
+	function renderQueued(list) {
+		const box = $("queued");
+		box.classList.toggle("hidden", !list.length);
+		box.textContent = "";
+		list.forEach((q, index) => {
+			const chip = document.createElement("span");
+			chip.className = "queued";
+			const text = document.createElement("span");
+			text.className = "what";
+			text.textContent = (q.images ? "🖼 " : "") + q.text;
+			text.title = q.text;
+			const drop = document.createElement("button");
+			drop.className = "drop";
+			drop.textContent = "✕";
+			drop.title = "Do not send this";
+			drop.setAttribute("aria-label", "Do not send: " + q.text);
+			drop.addEventListener("click", () => vscode.postMessage({ type: "unqueue", index }));
+			chip.append(text, drop);
+			box.appendChild(chip);
+		});
 	}
 
 	function renderReview(summary) {
@@ -639,10 +670,14 @@
 
 	function setBusy(busy) {
 		state.busy = busy;
-		$("send").classList.toggle("hidden", busy);
+		// (while it works the box stays open: what is sent joins the request, or follows it)
+		$("send").textContent = busy ? "Add" : "Send";
+		$("send").title = busy ? "Add this to what it is working on: it reads it with its next step, or gets it as the next request" : "";
+		$("send").classList.toggle("btn-primary", !busy);
 		$("stop").classList.toggle("hidden", !busy);
 		$("working").classList.toggle("hidden", !busy);
-		$("hint").textContent = busy ? "Working… watch the diagram." : "↵ send · ⇧↵ new line · ⌘Z undoes edits";
+		$("input").placeholder = busy ? "Add to the request while it works…" : "Describe a change, or paste a sketch…";
+		$("hint").textContent = busy ? "↵ adds this to the request · Stop ends it" : "↵ send · ⇧↵ new line · ⌘Z undoes edits";
 	}
 
 	// Providers accept at most 5 MB of base64 per image; larger or huge images are re-encoded smaller.
@@ -712,7 +747,7 @@
 
 	function send(text) {
 		text = (text ?? input.value).trim();
-		if ((!text && images.length === 0) || state.busy) return;
+		if (!text && images.length === 0) return;
 		const msg = { type: "send", text };
 		if (images.length) msg.images = images;
 		vscode.postMessage(msg);
@@ -931,6 +966,14 @@
 			case "append": state.transcript.push(m.item); addItem(m.item); break;
 			case "appendText": appendText(m.text); break;
 			case "appendThought": appendThought(m.text); break;
+			case "restoreInput": {
+				// (what was waiting when a request was stopped or failed: back in the box, not sent by itself)
+				input.value = m.text + (input.value.trim() ? "\n" + input.value : "");
+				window.drawaiUI?.syncEmpty();
+				autosize();
+				input.focus();
+				break;
+			}
 			case "permissionResolved": {
 				const item = state.transcript.find((t) => t.kind === "permission" && t.id === m.id);
 				if (item) item.outcome = m.outcome;

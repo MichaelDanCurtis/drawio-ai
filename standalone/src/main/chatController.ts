@@ -10,7 +10,7 @@ import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./age
 import { apiAccess } from "./api/catalog";
 import { apiChatAgents, ApiChatSession, ApiSetupError } from "./api/chatSession";
 import type { ApiProvider } from "./api/chat";
-import { chatSystemPrompt, type WindowMcpServer } from "./mcpServer";
+import { ADDITIONS_NOTE, chatSystemPrompt, type WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { ChatAgent, KnownModel, settings, settingsPath, updateSettings } from "./settings";
 import { modelsFromSession } from "./modelNames";
@@ -72,6 +72,10 @@ export interface ChatHost {
 type Answerer = Omit<AgentStatus, "id"> & { id: ChatAgent; api?: boolean; detail?: string };
 
 const MAX_IMAGES = 4;
+/** How many messages may wait while a request is under way. */
+const MAX_WAITING = 8;
+/** What a diagram that has no file yet is called for the model. */
+const UNSAVED = "Untitled (a new diagram, not saved to a file yet)";
 let versionCounter = 0;
 
 /**
@@ -107,6 +111,12 @@ export class ChatController {
 	private unwatch: (() => void)[] = [];
 	/** Stop was pressed during the current turn (possibly before the agent finished starting). */
 	private turnCancelled = false;
+	/**
+	 * What the user sent while a request was under way, in order. Words alone are handed to the
+	 * model with the next answer of one of the window's tools (it reads them as it works); what
+	 * is left when the request ends is sent as the next one.
+	 */
+	private waiting: { text: string; images: ImageData[] }[] = [];
 	/** Tests: answer permission requests automatically. */
 	public autoApprove = false;
 	/** Tests: called whenever a prompt turn ends. */
@@ -117,6 +127,7 @@ export class ChatController {
 			this.toolSummaries.push({ name, result });
 			if (this.toolSummaries.length > 50) this.toolSummaries.shift();
 		};
+		mcp.addition = () => this.takeAdditions();
 		this.refreshStatuses();
 		// (a saved choice that is no longer one: an agent of an earlier version, a provider that is gone)
 		if (!this.statuses.some((s) => s.id === this.agent)) this.agent = "claude";
@@ -164,11 +175,16 @@ export class ChatController {
 				break;
 			case "send":
 				if (typeof msg.text === "string" && (msg.text.trim() || msg.images?.length)) {
-					await this.send(
-						msg.text.trim() || "Recreate the attached sketch/screenshot as an editable diagram.",
-						undefined,
-						sanitizeImages(msg.images)
-					);
+					const text = msg.text.trim() || "Recreate the attached sketch/screenshot as an editable diagram.";
+					// (sent while a request is under way: it joins that request, or follows it)
+					if (this.busy) this.addWhileWorking(text, sanitizeImages(msg.images));
+					else await this.send(text, undefined, sanitizeImages(msg.images));
+				}
+				break;
+			case "unqueue":
+				if (Number.isInteger(msg.index) && msg.index >= 0 && msg.index < this.waiting.length) {
+					this.waiting.splice(msg.index, 1);
+					this.postState();
 				}
 				break;
 			case "stop":
@@ -348,7 +364,7 @@ export class ChatController {
 			access: apiAccess(),
 			provider,
 			system: () => chatSystemPrompt(this.mcp.maps),
-			tools: { list: () => this.mcp.chatTools(), call: (name, args, signal) => this.mcp.call(name, args, { signal }) },
+			tools: { list: () => this.mcp.chatTools(), call: (name, args, signal) => this.mcp.call(name, args, { signal, chat: true }) },
 			handlers: {
 				onUpdate: (u) => {
 					if (this.session === session) this.onUpdate(u);
@@ -591,7 +607,8 @@ export class ChatController {
 				return;
 			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
-			const context = describeContext(this.host.fileName(), selection);
+			// (a window always has its diagram: one that is not saved yet has no file name, which must not read as "none open")
+			const context = describeContext(this.host.fileName() ?? UNSAVED, selection);
 			// (an agent program is told where it is and which tools to use; a model used through its API has only these tools, and is told so with every request)
 			const viaApi = session instanceof ApiChatSession;
 			const preamble = this.firstPrompt && !viaApi ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
@@ -618,8 +635,50 @@ export class ChatController {
 			for (const t of this.transcript) if (t.kind === "tool" && t.status === "running") t.status = stop === "end_turn" ? "ok" : "error";
 			client.aiSetStatus(false);
 			this.setBusy(false);
+			const next = this.waiting.splice(0);
 			this.postState(true);
 			this.onTurnEnd?.(stop, error);
+			if (next.length) this.afterTurn(next, stop === "end_turn" || stop === "max_tokens" || stop === "max_turn_requests");
+		}
+	}
+
+	/** Something sent while a request is under way: kept until the model can be handed it, or the request ends. */
+	private addWhileWorking(text: string, images: ImageData[]): void {
+		if (this.waiting.length >= MAX_WAITING) {
+			this.push({ kind: "error", text: "That is a lot to add while it works. Wait for it to finish, or press Stop." });
+			return;
+		}
+		this.waiting.push({ text, images });
+		this.postState();
+	}
+
+	/**
+	 * What the user added that the model can be handed right now, for the end of a tool's answer
+	 * (mcpServer.ts): the words of what is waiting, up to the first that has images (those go as
+	 * a request of their own). Shown in the chat where it reached the model.
+	 */
+	private takeAdditions(): string | undefined {
+		if (!this.busy || this.turnCancelled) return undefined;
+		const words: string[] = [];
+		while (this.waiting.length && !this.waiting[0].images.length) words.push(this.waiting.shift()!.text);
+		if (!words.length) return undefined;
+		for (const text of words) this.push({ kind: "user", text, scope: "↪ added while it works" });
+		this.postState();
+		return words.join("\n\n");
+	}
+
+	/**
+	 * What was still waiting when a request ended. After one that ran to its end it is sent as
+	 * the next request. After one that was stopped or failed nothing is sent by itself: it goes
+	 * back into the box, for the user to send or drop.
+	 */
+	private afterTurn(left: { text: string; images: ImageData[] }[], finished: boolean): void {
+		const text = left.map((w) => w.text).join("\n\n");
+		const images = left.flatMap((w) => w.images).slice(0, MAX_IMAGES);
+		if (finished) void this.send(text, undefined, images);
+		else {
+			this.post({ type: "restoreInput", text });
+			if (images.length) this.post({ type: "addImages", images });
 		}
 	}
 
@@ -631,6 +690,7 @@ export class ChatController {
 	}
 
 	public newChat(): void {
+		this.waiting = [];
 		this.stop();
 		this.resetSession();
 		this.transcript = [];
@@ -854,6 +914,7 @@ export class ChatController {
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
+				queued: this.waiting.map((w) => ({ text: w.text, images: w.images.length })),
 				iconStyle: settings().appearance.iconStyle,
 				matrix: settings().appearance.matrix,
 				chatSide: settings().chat.side,
@@ -866,6 +927,7 @@ function firstPromptNote(fileName: string | undefined): string {
 	return [
 		`You are working inside the OmniDraw app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
 		"Read and change it ONLY with the drawio_* tools of the \"omnidraw\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
+		ADDITIONS_NOTE,
 		"Reply with a brief summary of what you changed.",
 	].join("\n");
 }

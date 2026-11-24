@@ -273,6 +273,10 @@ export class DiagramToolbox {
 			scope === "selection" && model.selection.length === 0
 				? "Nothing is selected, so the whole page is returned."
 				: undefined,
+			// (a model that reads a new diagram must not take "no cells" for "no diagram", nor start a page of its own)
+			model.totalCells === 0 && model.page.current
+				? "This page is empty: nothing is drawn on it yet. It is the diagram to draw on. Put new content here with drawio_apply_operations; do not add a page for it."
+				: undefined,
 		].filter(Boolean);
 		return {
 			text: JSON.stringify({ ...model, notes }),
@@ -481,7 +485,11 @@ export class DiagramToolbox {
 		const dataUrl = await editor.drawioClient.aiExportImage(ids, 1200);
 		const prefix = "data:image/png;base64,";
 		if (!dataUrl?.startsWith(prefix)) {
-			return { text: "Could not render the diagram (it may be empty).", summary: "Render failed", isError: true };
+			return {
+				text: "There is nothing to render: the page shown is empty (or the cells asked for are not on it). An empty page is normal for a new diagram; draw on it with drawio_apply_operations, then render.",
+				summary: "Nothing to render",
+				isError: true,
+			};
 		}
 		return {
 			text: "Rendered PNG attached.",

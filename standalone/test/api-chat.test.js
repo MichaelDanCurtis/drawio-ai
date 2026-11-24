@@ -20,7 +20,7 @@ const { ApiChatSession, ApiSetupError, apiChatAgents, toolArguments } = require(
 const { standInAccess, STAND_IN_ID, STAND_IN_KEY } = require("../src/main/api/standIn");
 const { geminiSchema } = require("../src/main/api/gemini");
 const { modelsFromSession } = require("../src/main/modelNames");
-const { WindowMcpServer, chatSystemPrompt } = require("../src/main/mcpServer");
+const { WindowMcpServer, chatSystemPrompt, userUpdate, ADDITIONS_NOTE } = require("../src/main/mcpServer");
 
 // (made up: nothing a provider issued)
 const KEY = "test-key-for-the-stand-in-1";
@@ -646,7 +646,19 @@ test("the window's tools as a model is offered them: whole, the ones that ask fi
 	assert.deepEqual(calls[2], ["map", "software.folder", { folder: "/x" }, { signal: stop.signal }]);
 	assert.deepEqual(results.map((r) => r[0]), ["drawio_lint", "drawio_lint", "mapper_run"]);
 
+	// what the user adds in the chat while a request is under way goes at the end of the next answer to the
+	// chat's own call, once, marked as the user's; never to another caller (an agent connected from outside)
+	const adding = ["Make it blue too."];
+	server.addition = () => adding.shift();
+	assert.deepEqual(await server.call("drawio_lint", {}), { text: "ok", summary: "Did it" });
+	assert.equal(adding.length, 1);
+	const withIt = await server.call("drawio_lint", {}, { chat: true });
+	assert.equal(withIt.text, `ok\n\n${userUpdate("Make it blue too.")}`);
+	assert.match(withIt.text, /<user_update>\nThe user added this in the chat while you were working\..*\n\nMake it blue too\.\n<\/user_update>$/s);
+	assert.deepEqual(await server.call("drawio_lint", {}, { chat: true }), { text: "ok", summary: "Did it" });
+
 	// what such a model is told it is here for
+	assert.ok(chatSystemPrompt(true).includes(ADDITIONS_NOTE) && /<user_update>/.test(ADDITIONS_NOTE));
 	const told = chatSystemPrompt(true);
 	assert.match(told, /^You are Draw\.AI, an expert diagram designer in the OmniDraw app\./);
 	assert.ok(!/VS Code/.test(told));
