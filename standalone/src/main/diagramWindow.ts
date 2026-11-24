@@ -24,24 +24,9 @@ import { onSettingsChanged, settings, updateSettings, type Settings } from "./se
 import { shapeLibraries } from "./shapeLocations";
 import { galleries, galleryConfigs, searchForEditor } from "./workshop";
 import { galleryPalette } from "./workshop/palette";
-import { styleValue } from "./workshop/shifter";
+import { styleValue, webappPicture } from "./workshop/shifter";
 import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
-
-/** One of draw.io's own picture files (a style's `image=img/lib/…`) as SVG text for a preview, or undefined. */
-function webappPicture(image: string | undefined): string | undefined {
-	const m = image ? /^(?:https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/webapp\/)?((?:img|images|stencils)\/[\w./ -]+\.(svg|png|jpe?g|gif))$/i.exec(image) : undefined;
-	if (!m || m[1].includes("..")) return undefined;
-	const file = path.join(paths.webapp, m[1]);
-	try {
-		if (!file.startsWith(paths.webapp + path.sep) || fs.statSync(file).size > 512 * 1024) return undefined;
-		if (m[2].toLowerCase() === "svg") return fs.readFileSync(file, "utf8");
-		const mime = m[2].toLowerCase() === "png" ? "image/png" : m[2].toLowerCase() === "gif" ? "image/gif" : "image/jpeg";
-		return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><image width="64" height="64" preserveAspectRatio="xMidYMid meet" href="data:${mime};base64,${fs.readFileSync(file).toString("base64")}"/></svg>`;
-	} catch {
-		return undefined;
-	}
-}
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
 let nextId = 1;
@@ -462,7 +447,7 @@ export class DiagramWindow {
 		// A shape that is a picture names a file of draw.io's (img/lib/…): its thumbnail links to it, and
 		// links do not survive the Workshop's cleaning. The picture itself is the preview then.
 		for (const shape of shapes) {
-			const picture = webappPicture(styleValue(shape.style, "image"));
+			const picture = webappPicture(styleValue(shape.style, "image"), paths.webapp);
 			if (picture) shape.preview = picture;
 		}
 		return shapes;

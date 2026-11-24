@@ -73,6 +73,7 @@
 	.agent .keyrow input { flex: 1; min-width: 0; min-height: 30px; padding: 4px 10px; font-family: var(--font-mono); font-size: 12px; }
 	.agent .keyrow .note { flex: 1; color: var(--muted); font-size: 12px; }
 	.agent .models .bad { color: var(--danger); font-size: 12px; padding: 4px 0 8px; }
+	.agent .models .good { color: var(--ok); font-size: 12px; padding: 4px 0 8px; }
 	.agent details { border-top: 1px solid var(--border); padding: 8px 14px 12px; }
 	.agent details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 	.agent details .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
@@ -518,10 +519,16 @@
 			const refresh = document.createElement("button");
 			refresh.className = "refresh-btn";
 			refresh.disabled = !!a.loadingModels;
-			refresh.textContent = a.loadingModels ? "Asking…" : "Refresh";
+			refresh.textContent = a.loadingModels && !a.testing ? "Asking…" : "Refresh";
 			refresh.title = "Ask " + a.company + " which models this key can use now";
 			refresh.onclick = () => post({ type: "refreshApiModels", provider: a.id });
-			head.append(name, sp, refresh, tag);
+			const test = document.createElement("button");
+			test.className = "refresh-btn";
+			test.disabled = !!a.loadingModels;
+			test.textContent = a.testing ? "Testing…" : "Test";
+			test.title = "Send one short request to " + a.company + " the way the chat does (its tools, one tool call) to see that it works. It uses a little of your credit: about as much as a short chat message.";
+			test.onclick = () => post({ type: "testApiKey", provider: a.id });
+			head.append(name, sp, test, refresh, tag);
 		} else head.append(name, sp, tag);
 		card.appendChild(head);
 
@@ -571,6 +578,12 @@
 			e.className = "bad";
 			e.textContent = a.error;
 			body.appendChild(e);
+		}
+		if (a.tested) {
+			const t = document.createElement("div");
+			t.className = "good";
+			t.textContent = a.tested;
+			body.appendChild(t);
 		}
 		const known = a.hasKey ? (s.modelCatalog || {})[a.agent] || [] : [];
 		const prefs = (s.models || {})[a.agent] || {};

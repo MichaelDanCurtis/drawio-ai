@@ -1,3 +1,5 @@
+import * as fs from "fs";
+import * as path from "path";
 import type { Insertable } from "./galleries";
 import { MAX_SVG_BYTES, sanitizeSvg, svgImgUri, svgStyleUri } from "./svgSanitize";
 import { mapAttributes, mapXml, tagInfo } from "./xmlScan";
@@ -66,6 +68,26 @@ export function colourOf(value: unknown, allowNone = true): string | undefined {
 }
 
 /** The value of one key of a draw.io style ("a=1;b=2;"), or undefined. */
+/**
+ * A picture of draw.io's own that a shape names (`img/lib/…` in its style, as it is, or with the
+ * address draw.io is served from in front), as SVG: read from the draw.io files in `webapp`.
+ * A shape that is a picture has a thumbnail that links to that file, and links do not survive
+ * the Workshop's cleaning: the picture itself is its preview. Nothing outside `webapp` is read.
+ */
+export function webappPicture(image: string | undefined, webapp: string): string | undefined {
+	const m = image ? /^(?:[a-z][a-z0-9+.-]*:\/\/[^?#]*\/)?((?:img|images|stencils)\/[\w./ -]+\.(svg|png|jpe?g|gif))$/i.exec(image) : undefined;
+	if (!m || m[1].includes("..")) return undefined;
+	const file = path.join(webapp, m[1]);
+	try {
+		if (!file.startsWith(webapp + path.sep) || fs.statSync(file).size > 512 * 1024) return undefined;
+		if (m[2].toLowerCase() === "svg") return fs.readFileSync(file, "utf8");
+		const mime = m[2].toLowerCase() === "png" ? "image/png" : m[2].toLowerCase() === "gif" ? "image/gif" : "image/jpeg";
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><image width="64" height="64" preserveAspectRatio="xMidYMid meet" href="data:${mime};base64,${fs.readFileSync(file).toString("base64")}"/></svg>`;
+	} catch {
+		return undefined;
+	}
+}
+
 export function styleValue(style: string, key: string): string | undefined {
 	for (const part of style.split(";")) {
 		const at = part.indexOf("=");

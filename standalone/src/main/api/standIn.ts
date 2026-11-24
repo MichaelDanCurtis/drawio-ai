@@ -19,6 +19,13 @@ function chat(o: ApiChatOptions): ApiChat {
 	return {
 		blank: () => held === 0,
 		send: async (text, _images, signal) => {
+			// (Settings → Test: it calls the tool it is asked to and says OK, as a model that works does)
+			if (/connection check/i.test(text)) {
+				await o.callTool(/Call the tool (\w+)/.exec(text)?.[1] ?? "drawio_lint", {});
+				if (signal.aborted) return "cancelled";
+				o.onText("OK");
+				return "end_turn";
+			}
 			o.onText("Reading the diagram. ");
 			const read = await o.callTool("drawio_get_diagram", {});
 			if (signal.aborted) return "cancelled";

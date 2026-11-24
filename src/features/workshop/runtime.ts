@@ -11,3 +11,4 @@ export { WorkshopCore } from "../../../standalone/src/main/workshop/core";
 export { workshopFetch } from "../../../standalone/src/main/workshop/fetch";
 export { GalleryService } from "../../../standalone/src/main/workshop/galleries";
 export { galleryPalette, searchForEditor } from "../../../standalone/src/main/workshop/palette";
+export { styleValue, webappPicture } from "../../../standalone/src/main/workshop/shifter";

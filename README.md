@@ -212,6 +212,14 @@ The agent works through 13 `mapper_*` tools (`mapper_maps`, `mapper_find`, `mapp
 -   A gallery that is **off stays off**: it cannot be browsed, synced or made available offline until you switch it on, and restored default galleries come back switched off.
 -   **draw.io's own shape sets** (General, UML, AWS, …) and the **Scratchpad** are switches in the Workshop, where draw.io's More Shapes dialog used to be. They are kept for every diagram.
 
+Its second part is the **Shape Shifter** (the Workshop's second tab):
+
+-   **Find a shape by words** across draw.io's own shapes and the galleries that are on; a click puts it into the diagram you used last.
+-   **Change the selected shapes**: fill, line and text colour, and the one colour of an icon, as one undo step. Or describe the change in words and hand it to the Draw.AI agent in VS Code's chat, where its edits wait for you to keep or revert.
+-   **Import a Visio stencil** (`.vssx`, `.vss`): converted in the editor, looked at first, then saved as a collection of its own.
+
+The Shape Creator (the third tab) is in the desktop app only for now.
+
 Shapes are downloaded only for galleries you switched on, only from jsDelivr and GitHub (`cdn.jsdelivr.net`, `data.jsdelivr.com`, `raw.githubusercontent.com`), and are kept in the extension's storage for offline use. Every SVG is cleaned of scripts and external links before it is shown or put in a diagram. Shape Shifter and Shape Creator, the Workshop's other two parts, are not there yet.
 
 ## Editor Tools and Look
