@@ -322,15 +322,53 @@ test("watching a batch being built: what is new appears in order and what moved 
 	assert.equal((await getModel()).cells.find((c) => c.id === r.idMap.$wa).geometry.y, 7200);
 	assert.deepEqual(await leftovers(ids), []);
 
+	// zoomed in or out it still starts where it was: the way is as long as it looks, not that times the zoom again
+	for (const zoom of [2, 0.5]) {
+		await page.evaluate((z) => editorUi.editor.graph.zoomTo(z), zoom);
+		const from = await drawn(r.idMap.$wa);
+		await animated([{ op: "move", ids: [r.idMap.$wa], dx: 0, dy: 100 }]);
+		const at = await hold(r.idMap.$wa);
+		await resume();
+		const to = await page.evaluate((id) => { const g = editorUi.editor.graph; const s = g.view.getState(g.model.getCell(id)); return s.y + s.height / 2; }, r.idMap.$wa);
+		assert.ok(close(at.x, from.x, 2) && close(at.y, from.y, 2), `at ${zoom}x it starts where it was: ${JSON.stringify([at, from])}`);
+		await page.evaluate(() => editorUi.editor.undoManager.undo());
+		assert.ok(Number.isFinite(to));
+	}
+	await page.evaluate(() => editorUi.editor.graph.zoomTo(1));
+
+	// a shape that is made wider is not one that travelled: nothing glides
+	const beforeResize = (await build()).shown;
+	await animated([{ op: "update", id: r.idMap.$wa, width: 240 }]);
+	assert.deepEqual([(await build()).shown, (await build()).running], [beforeResize, 0]);
+	await page.evaluate(() => editorUi.editor.undoManager.undo());
+
+	// a batch that ends in a layout: what it adds is kept out of sight while the layout is computed,
+	// then built where the layout puts it (not shown first where it was added, taken away, and shown again)
+	const heldBefore = (await build()).held;
+	const laid = await animated([
+		{ op: "addShape", tempId: "$la", label: "Laid A", x: 7000, y: 8200, width: 120, height: 60 },
+		{ op: "addShape", tempId: "$lb", label: "Laid B", x: 7000, y: 8200, width: 120, height: 60 },
+		{ op: "addEdge", source: "$la", target: "$lb" },
+		{ op: "layout", type: "hierarchical", ids: ["$la", "$lb"] },
+	]);
+	assert.deepEqual(laid.results.filter((x) => !x.ok), []);
+	const afterLayout = await build();
+	assert.ok(afterLayout.held === heldBefore + 1 && afterLayout.playing, JSON.stringify(afterLayout));
+	await waitUntil(async () => !(await build()).playing, 5000);
+	assert.equal((await build()).running, 0);
+	assert.deepEqual(await leftovers([laid.idMap.$la, laid.idMap.$lb]), []);
+	assert.ok((await page.evaluate((id) => Number(getComputedStyle(editorUi.editor.graph.view.getState(editorUi.editor.graph.model.getCell(id)).shape.node).opacity), laid.idMap.$la)) === 1);
+
 	// a batch that is rolled back shows nothing; neither does one made when the system asks for reduced motion
+	const sofar = (await build()).shown;
 	const bad = await animated([{ op: "addShape", label: "Never", x: 7000, y: 7600 }, { op: "update", id: "no-such-cell", label: "x" }]);
 	assert.equal(bad.rolledBack, true);
-	assert.equal((await build()).shown, shown + 2);
+	assert.equal((await build()).shown, sofar);
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	try {
 		const still = await animated([{ op: "addShape", tempId: "$ws", label: "Still", x: 7000, y: 7800 }]);
 		assert.deepEqual(still.results.filter((x) => !x.ok), []);
-		assert.deepEqual([(await build()).shown, (await build()).running], [shown + 2, 0]);
+		assert.deepEqual([(await build()).shown, (await build()).running], [sofar, 0]);
 	} finally {
 		await page.emulateMedia({ reducedMotion: "no-preference" });
 	}

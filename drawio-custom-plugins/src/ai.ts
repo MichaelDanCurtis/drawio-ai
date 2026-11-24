@@ -986,7 +986,11 @@ Draw.loadPlugin((ui: any) => {
 			} finally {
 				model.endUpdate();
 			}
+			// (a layout that follows is computed over several frames: what was just added is not shown
+			// where it lies now, only to be taken away and built where the layout puts it)
+			if (placedBefore && ops.slice(i).some((o) => o?.op === "layout")) holdNew(placedBefore);
 		}
+		releaseHeld();
 
 		// After a page switch, the history holds it between the batch's steps: leave both as they are.
 		if (!switched) squashHistory(historyBefore);
@@ -998,7 +1002,14 @@ Draw.loadPlugin((ui: any) => {
 
 		if (!rolledBack && !switched) {
 			const alive = [...touched].filter((c) => model.contains(c) && !isLayer(c));
-			if (placedBefore) showBuild(results, placedBefore);
+			if (placedBefore) {
+				try {
+					showBuild(results, placedBefore);
+				} catch {
+					// (the edit is made and answered for, shown being built or not)
+					stopBuild();
+				}
+			}
 			if (action.flash) flash(alive);
 			if (action.selectResult && alive.length > 0) {
 				graph.setSelectionCells(alive.filter((c) => model.isVertex(c)));
@@ -1024,8 +1035,10 @@ Draw.loadPlugin((ui: any) => {
 	const BUILD = { item: 240, glide: 320, total: 1400, together: 120, none: 600 };
 	const BUILD_EASE = "cubic-bezier(0.16, 0.84, 0.3, 1)";
 	let building: { animations: Animation[]; restore: (() => void)[]; timer: any } | undefined;
+	/** What is kept out of sight while a layout of the batch is computed (see holdNew). */
+	let held: { animations: Animation[]; timer: any } | undefined;
 	/** For tests: how many batches were shown being built, and how many elements the last one animated. */
-	const buildStats = (W.drawioAiBuild = { shown: 0, elements: 0, playing: () => !!building });
+	const buildStats = (W.drawioAiBuild = { shown: 0, elements: 0, held: 0, playing: () => !!building });
 
 	function canShowBuild(): boolean {
 		try {
@@ -1053,8 +1066,69 @@ Draw.loadPlugin((ui: any) => {
 		return places;
 	}
 
+	/**
+	 * How many pixels of the screen one unit is where this element is drawn. draw.io either gives
+	 * every shape its place in pixels, or draws in the diagram's units and scales the whole
+	 * drawing: a shift given to an element is in the units it is drawn in.
+	 */
+	function unitOf(el: any): number {
+		try {
+			const m = el?.parentNode?.getScreenCTM?.();
+			const k = m ? Math.hypot(m.a, m.b) : 1;
+			return k > 0 && isFinite(k) ? k : 1;
+		} catch {
+			return 1;
+		}
+	}
+
+	/** The drawn parts of a cell: its shape, its label, and the fold icon of a container. */
+	function partsOf(cell: any): { shape?: SVGElement; text?: SVGElement; control?: SVGElement } {
+		const s = graph.view.getState(cell);
+		return { shape: s?.shape?.node, text: s?.text?.node, control: s?.control?.node };
+	}
+
+	/** Keeps what the batch added so far out of sight, until it is shown being built (or the batch ends). */
+	function holdNew(before: Map<any, Place | null>): void {
+		releaseHeld();
+		const h = { animations: [] as Animation[], timer: undefined as any };
+		const cells = allCells(model.getRoot());
+		if (cells.length > 4000) return;
+		for (const cell of cells) {
+			if (before.has(cell) || isLayer(cell)) continue;
+			const n = partsOf(cell);
+			for (const el of [n.shape, n.text, n.control]) {
+				if (!el) continue;
+				try {
+					h.animations.push(el.animate([{ opacity: 0 }, { opacity: 0 }], { duration: 1, fill: "forwards" }));
+				} catch {
+					// shown as it is
+				}
+			}
+		}
+		if (!h.animations.length) return;
+		held = h;
+		buildStats.held++;
+		// (never for long, whatever becomes of the layout: a shape must not stay invisible)
+		h.timer = setTimeout(() => held === h && releaseHeld(), 8000);
+	}
+
+	function releaseHeld(): void {
+		const h = held;
+		if (!h) return;
+		held = undefined;
+		clearTimeout(h.timer);
+		for (const a of h.animations) {
+			try {
+				a.cancel();
+			} catch {
+				// already over
+			}
+		}
+	}
+
 	/** Ends what is being shown: everything is as drawn. */
 	function stopBuild(): void {
+		releaseHeld();
 		const b = building;
 		if (!b) return;
 		building = undefined;
@@ -1082,9 +1156,12 @@ Draw.loadPlugin((ui: any) => {
 			const was = before.get(cell);
 			if (!was) return;
 			const now = placeOf(state);
-			const dx = (was.x + was.width / 2 - (now.x + now.width / 2)) * graph.view.scale;
-			const dy = (was.y + was.height / 2 - (now.y + now.height / 2)) * graph.view.scale;
-			if (Math.abs(dx) > 1 || Math.abs(dy) > 1) moved.push({ cell, dx, dy });
+			// (a shape that changed its size is not one that travelled: it is simply drawn as it is now)
+			if (Math.abs(was.width - now.width) > 0.5 || Math.abs(was.height - now.height) > 0.5) return;
+			// (in the diagram's units; how far that is for each element is settled where it is drawn)
+			const dx = was.x - now.x;
+			const dy = was.y - now.y;
+			if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) moved.push({ cell, dx, dy });
 		};
 		// in the order of the operations; what an operation added or moved brings what is inside it along
 		for (const r of results) {
@@ -1097,8 +1174,20 @@ Draw.loadPlugin((ui: any) => {
 		}
 		// (a layout moves cells it does not list: every shape that is elsewhere now glides)
 		for (const [cell, was] of before) if (was) take(cell);
-		const count = added.length + moved.length;
-		if (!count || count > BUILD.none) return;
+		// the connectors on what moved come back as it arrives: they count, a hub's thousands as much as shapes do
+		const rejoined: any[] = [];
+		const onMoved = new Set<any>();
+		for (const m of moved) {
+			for (const e of model.getEdges(m.cell) || []) {
+				if (onMoved.has(e) || !before.has(e)) continue;
+				onMoved.add(e);
+				rejoined.push(e);
+				if (rejoined.length > BUILD.none) return;
+			}
+		}
+		const count = added.length + moved.length + rejoined.length;
+		if (!added.length && !moved.length) return;
+		if (count > BUILD.none) return;
 
 		const b = { animations: [] as Animation[], restore: [] as (() => void)[], timer: undefined as any };
 		const play = (el: Element | null | undefined, frames: Keyframe[], duration: number, delay: number) => {
@@ -1109,26 +1198,23 @@ Draw.loadPlugin((ui: any) => {
 				// shown without it
 			}
 		};
-		const nodes = (cell: any): { shape?: SVGElement; text?: SVGElement } => {
-			const s = graph.view.getState(cell);
-			return { shape: s?.shape?.node, text: s?.text?.node };
-		};
+		const nodes = partsOf;
 
 		// shapes that were moved glide from where they were; the connectors on them come back as they arrive
 		const glide = moved.length ? BUILD.glide : 0;
-		const rejoined = new Set<any>();
+		const { scale } = graph.view;
 		for (const m of moved) {
-			const from = [{ transform: `translate(${m.dx}px, ${m.dy}px)` }, { transform: "translate(0px, 0px)" }];
 			const n = nodes(m.cell);
-			play(n.shape, from, glide, 0);
-			play(n.text, from, glide, 0);
-			for (const e of model.getEdges(m.cell) || []) {
-				if (rejoined.has(e) || !before.has(e)) continue;
-				rejoined.add(e);
-				const en = nodes(e);
-				play(en.shape, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], glide, 0);
-				play(en.text, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], glide, 0);
+			for (const el of [n.shape, n.text, n.control]) {
+				if (!el) continue;
+				const k = scale / unitOf(el);
+				play(el, [{ transform: `translate(${m.dx * k}px, ${m.dy * k}px)` }, { transform: "translate(0px, 0px)" }], glide, 0);
 			}
+		}
+		for (const e of rejoined) {
+			const en = nodes(e);
+			play(en.shape, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], glide, 0);
+			play(en.text, [{ opacity: 0 }, { opacity: 0, offset: 0.6 }, { opacity: 1 }], glide, 0);
 		}
 
 		// what is new appears in order: a shape grows in, a connector is drawn from its start to its end
@@ -1139,11 +1225,14 @@ Draw.loadPlugin((ui: any) => {
 			const delay = glide * 0.5 + i * step;
 			const n = nodes(cell);
 			if (model.isEdge(cell) && n.shape) {
-				for (const path of Array.from(n.shape.querySelectorAll("path")) as SVGPathElement[]) {
+				// (its line, and what its ends are drawn with: an arrowhead is a path, a dot an ellipse)
+				for (const path of Array.from(n.shape.querySelectorAll("path, ellipse, rect, circle, polygon, polyline")) as SVGGeometryElement[]) {
 					const filled = (path.getAttribute("fill") || "none") !== "none";
+					// (a dashed line is not drawn in: its dashes are what the drawing-in is made with)
+					const dashed = !!path.getAttribute("stroke-dasharray");
 					let length = 0;
 					try {
-						length = filled ? 0 : path.getTotalLength();
+						length = filled || dashed ? 0 : path.getTotalLength();
 					} catch {
 						// not laid out: it fades in
 					}
@@ -1164,6 +1253,7 @@ Draw.loadPlugin((ui: any) => {
 				});
 				play(n.shape, [{ opacity: 0, transform: "scale(0.82)" }, { opacity: 1, transform: "scale(1)" }], item, delay);
 				play(n.text, [{ opacity: 0 }, { opacity: 1 }], item, delay);
+				play(n.control, [{ opacity: 0 }, { opacity: 1 }], item, delay);
 			}
 		});
 
