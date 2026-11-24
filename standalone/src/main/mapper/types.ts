@@ -153,6 +153,11 @@ export interface CollectResult {
 	/** One line for the user, e.g. "42 resources in 3 resource groups". */
 	summary: string;
 	warnings?: string[];
+	/**
+	 * Other folders the same map could be made of, where this one held little or nothing (the
+	 * working copies of a repository whose main checkout is nearly empty). The dialog offers them.
+	 */
+	elsewhere?: { label: string; folder: string }[];
 	/** Health findings on the mapped shapes (precision over recall: only what the facts show). */
 	findings?: MapFinding[];
 	/** The checks that ran, found something or not. */
