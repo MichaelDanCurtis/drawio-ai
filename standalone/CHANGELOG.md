@@ -118,6 +118,16 @@
 - A cleaned SVG has to stay as it is when it is cleaned again. One in which taking a link or
   an `@import` out put an event handler, a link or a `foreignObject` together from its two
   halves (`o href="x"nload="…"`) came back with it; it is now left out.
+- An SVG that keeps its CSS in a CDATA section (Illustrator writes it so) keeps it: the icon
+  has its colours again. The CSS is cleaned like any other.
+- An SVG whose root tag has a `>` inside an attribute's value no longer gets a second `xmlns`
+  (it did not show after that).
+- An SVG with a tag that is not written the way XML writes one (attributes with nothing
+  between them, without quotes or without a value, a `<` in a value, a `<` in text that begins
+  no tag) is left out: a browser shows nothing of it as an image, and read as HTML it could
+  keep an event handler (`<rect width="9"onclick="…"/>`). A link under an unusual prefix
+  (`a.b:href`) is no longer kept. The size of an SVG whose root tag has a `>` inside a value
+  is read right.
 - **Mapper**: YAML merge keys (`<<: *common`) are followed, so a compose service built on an
   anchor keeps its image, its environment and what it depends on (Connectivity, Kubernetes,
   pipelines, MLflow, API maps).
