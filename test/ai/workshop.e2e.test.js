@@ -253,7 +253,7 @@ test("with no diagram open the Workshop says so, and a shape is not put anywhere
 	await page.close();
 });
 
-test("the Shape Shifter is off where the program has none (the extension, for now), and on where it has", async () => {
+test("the Shape Shifter is off where the program has none, and on where it has", async () => {
 	const none = await open();
 	assert.equal(await none.page.$eval('nav button[data-mode="shifter"]', (b) => b.disabled), true);
 	assert.equal(await none.page.$eval('nav button[data-mode="shifter"] .tag', (t) => t.textContent), "Next");

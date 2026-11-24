@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). In the extension those tabs still say "Next". The desktop app can also use Anthropic's, OpenAI's, Gemini's, Grok's and Kimi's models, and those behind OpenRouter, with your own API key (Settings → Agents & models), in the chat and in the Shape Creator, listed beside the agents; the extension works with agents as before.
+The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). The extension has the **Shape Shifter** too; its Shape Creator tab still says "Next". The desktop app can also use Anthropic's, OpenAI's, Gemini's, Grok's and Kimi's models, and those behind OpenRouter, with your own API key (Settings → Agents & models), in the chat and in the Shape Creator, listed beside the agents; the extension works with agents as before.
 
 ### Added
+
+- **Shape Shifter** in the Shape Workshop (the tab said "Next"): find a shape by words across draw.io's own shapes and the galleries that are on, and put it into the diagram used last; recolour the selected shapes (fill, line, text, an icon's colour) as one undo step; describe a change and hand it to the Draw.AI agent in VS Code's chat; import a Visio stencil (`.vssx`, `.vss`) as a collection. It is the desktop app's Shape Shifter, working in the diagram's own editor.
 
 - **Watch an AI edit being built**: new shapes appear one after another in the order they were added, connectors draw in from start to end, and shapes that were moved (also by a layout) glide to their place, in about a second at most. Only how the edit is shown changes: it is applied at once, as one undo step, and what reads the diagram next sees the result. Setting `drawio-ai.animateChanges` (on by default); nothing is shown when the system asks for reduced motion.
 
