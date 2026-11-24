@@ -58,7 +58,7 @@ export class Extension {
 		})
 	);
 
-	private readonly workshopFeature = this.dispose.track(new WorkshopFeature({ context: this.context, editorService: this.editorService }));
+	private readonly workshopFeature = this.dispose.track(new WorkshopFeature({ context: this.context, editorService: this.editorService, askAgent: (text, editor) => this.aiFeature.askAgent(text, editor, { selection: { cellIds: [...editor.drawioClient.currentSelection] } }) }));
 
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.aiFeature.extraTools = this.mapperFeature.tools;

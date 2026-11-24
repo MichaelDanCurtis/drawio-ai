@@ -845,6 +845,27 @@ async function runSteps() {
 		await waitFor(async () => (((await look())?.palettes ?? []).includes("Favourites") ? undefined : true), "the emptied collection's palette to go");
 
 		// the gallery switched off: its palette leaves every open diagram
+		// the Shape Shifter, in VS Code too: draw.io's own shapes are ownFound by words with a picture each, one goes into
+		// the diagram used last, and the selected shape is recoloured as the user's own change (one undo step)
+		const ownFound = (await message({ type: "find", reqId: 7, query: "cylinder" })).posted.find((m) => m.type === "found");
+		assert.ok(ownFound && ownFound.diagram === true && ownFound.own.length > 0, JSON.stringify(ownFound).slice(0, 300));
+		assert.ok(ownFound.own.every((o) => typeof o.src === "string" && o.src.length > 20 && typeof o.title === "string"), "each of draw.io's shapes with its picture");
+		const beforeOwn = await cells();
+		const putOwn = await message({ type: "insertFound", key: ownFound.own[0].key });
+		assert.equal(putOwn.error, undefined);
+		await waitFor(async () => ((await cells()) === beforeOwn + 1 ? true : undefined), "draw.io's own shape to be in the diagram");
+		const ownAdded = JSON.parse(await invoke("drawio_get_diagram", { includeStyles: true })).cells.at(-1);
+		await invoke("drawio_select_cells", { ids: [ownAdded.id] });
+		const styleOf = async (id) => JSON.parse(await invoke("drawio_get_diagram", { includeStyles: true })).cells.find((c) => c.id === id).style;
+		const recoloured = await message({ type: "restyle", fill: "#ff5500" });
+		assert.deepEqual([recoloured.error, recoloured.posted.filter((m) => m.type === "notice").map((m) => m.message)], [undefined, ["Changed 1 shape. Undo in the diagram takes it back."]]);
+		assert.match(await styleOf(ownAdded.id), /fillColor=#ff5500/i);
+		// with nothing selected it says so, and changes nothing
+		await invoke("drawio_select_cells", { ids: [] });
+		assert.match((await message({ type: "restyle", fill: "#00ff00" })).error, /Select the shapes to change/);
+		// the Workshop says that the Shape Shifter is there for this diagram (its tab is not "Next" any more)
+		assert.equal((await workshop()).shifter, true);
+
 		await vscode.commands.executeCommand("drawio-ai.workshop.setGalleries", [{ ...mine, enabled: false }]);
 		await waitFor(async () => ((await look())?.palettes.length === 0 ? true : undefined), "the palette to go");
 		assert.deepEqual((await workshop()).galleries.map((g) => [g.id, g.enabled]), [["mine", false]]);
