@@ -6,6 +6,9 @@
   scan does not read (git worktrees in `.claude/worktrees`, `.worktrees`, `.git-worktrees`),
   the result now offers up to six of them, the one worked in last first: a click maps it. The
   result also scrolls into view; it could end up below the form, unseen.
+- A request made elsewhere in the app while the chat works (the Mapper's, the Shape Workshop's
+  "Ask the agent") is no longer refused with "press Stop first". It waits in the strip above
+  the box under its own name and follows as the next request.
 - **Maps: connectors are routed.** After the Mapper has placed the shapes, each connector is
   taken around the shapes in its way and apart from the ones beside it (draw.io's own
   obstacle-avoiding router; no shape moves), and where two still cross, one hops over the
