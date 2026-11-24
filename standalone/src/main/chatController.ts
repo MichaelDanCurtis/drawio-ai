@@ -10,7 +10,7 @@ import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./age
 import { apiAccess } from "./api/catalog";
 import { apiChatAgents, ApiChatSession, ApiSetupError } from "./api/chatSession";
 import type { ApiProvider } from "./api/chat";
-import { chatSystemPrompt, type WindowMcpServer } from "./mcpServer";
+import { ADDITIONS_NOTE, chatSystemPrompt, type WindowMcpServer } from "./mcpServer";
 import { paths } from "./paths";
 import { ChatAgent, KnownModel, settings, settingsPath, updateSettings } from "./settings";
 import { modelsFromSession } from "./modelNames";
@@ -72,6 +72,12 @@ export interface ChatHost {
 type Answerer = Omit<AgentStatus, "id"> & { id: ChatAgent; api?: boolean; detail?: string };
 
 const MAX_IMAGES = 4;
+/** How many messages may wait while a request is under way. */
+const MAX_WAITING = 8;
+/** Something the user sent while a request was under way. */
+type Waiting = { id: number; text: string; images: ImageData[]; /** What was selected in the diagram as it was sent. */ selected: string[] };
+/** What a diagram that has no file yet is called for the model. */
+const UNSAVED = "Untitled (a new diagram, not saved to a file yet)";
 let versionCounter = 0;
 
 /**
@@ -107,6 +113,17 @@ export class ChatController {
 	private unwatch: (() => void)[] = [];
 	/** Stop was pressed during the current turn (possibly before the agent finished starting). */
 	private turnCancelled = false;
+	/**
+	 * What the user sent while a request was under way, in order. Words alone are handed to the
+	 * model with the next answer of one of the window's tools (it reads them as it works); what
+	 * is left when the request ends is sent as the next one.
+	 */
+	private waiting: Waiting[] = [];
+	private waitingIds = 0;
+	/** Counts the requests: a tool call that outlives its request takes nothing meant for the next. */
+	private turn = 0;
+	/** The window is gone: nothing is sent any more. */
+	private closed = false;
 	/** Tests: answer permission requests automatically. */
 	public autoApprove = false;
 	/** Tests: called whenever a prompt turn ends. */
@@ -116,6 +133,10 @@ export class ChatController {
 		mcp.onToolResult = (name, result) => {
 			this.toolSummaries.push({ name, result });
 			if (this.toolSummaries.length > 50) this.toolSummaries.shift();
+		};
+		mcp.additions = () => {
+			const turn = this.turn;
+			return () => this.takeAdditions(turn);
 		};
 		this.refreshStatuses();
 		// (a saved choice that is no longer one: an agent of an earlier version, a provider that is gone)
@@ -164,11 +185,19 @@ export class ChatController {
 				break;
 			case "send":
 				if (typeof msg.text === "string" && (msg.text.trim() || msg.images?.length)) {
-					await this.send(
-						msg.text.trim() || "Recreate the attached sketch/screenshot as an editable diagram.",
-						undefined,
-						sanitizeImages(msg.images)
-					);
+					const text = msg.text.trim() || "Recreate the attached sketch/screenshot as an editable diagram.";
+					// (sent while a request is under way: it joins that request, or follows it)
+					const images = sanitizeImages(msg.images);
+					// (the page emptied its box as it sent: what cannot wait goes back into it)
+					if (!this.busy) await this.send(text, undefined, images);
+					else if (!this.addWhileWorking(text, images)) this.giveBack([{ text: msg.text.trim(), images }]);
+				}
+				break;
+			case "unqueue":
+				// (by its id: the page's list may be older than this one, and a place in it another item's by now)
+				if (this.waiting.some((w) => w.id === msg.id)) {
+					this.waiting = this.waiting.filter((w) => w.id !== msg.id);
+					this.postState();
 				}
 				break;
 			case "stop":
@@ -348,7 +377,7 @@ export class ChatController {
 			access: apiAccess(),
 			provider,
 			system: () => chatSystemPrompt(this.mcp.maps),
-			tools: { list: () => this.mcp.chatTools(), call: (name, args, signal) => this.mcp.call(name, args, { signal }) },
+			tools: { list: () => this.mcp.chatTools(), call: (name, args, signal) => this.mcp.call(name, args, { signal, chat: true }) },
 			handlers: {
 				onUpdate: (u) => {
 					if (this.session === session) this.onUpdate(u);
@@ -571,6 +600,7 @@ export class ChatController {
 		}
 
 		this.setBusy(true);
+		this.turn++;
 		this.turnCancelled = false;
 		let stop: string | undefined;
 		let error: string | undefined;
@@ -591,7 +621,8 @@ export class ChatController {
 				return;
 			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
-			const context = describeContext(this.host.fileName(), selection);
+			// (a window always has its diagram: one that is not saved yet has no file name, which must not read as "none open")
+			const context = describeContext(this.host.fileName() ?? UNSAVED, selection);
 			// (an agent program is told where it is and which tools to use; a model used through its API has only these tools, and is told so with every request)
 			const viaApi = session instanceof ApiChatSession;
 			const preamble = this.firstPrompt && !viaApi ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
@@ -618,9 +649,68 @@ export class ChatController {
 			for (const t of this.transcript) if (t.kind === "tool" && t.status === "running") t.status = stop === "end_turn" ? "ok" : "error";
 			client.aiSetStatus(false);
 			this.setBusy(false);
+			const next = this.waiting.splice(0);
 			this.postState(true);
 			this.onTurnEnd?.(stop, error);
+			// (a request that was stopped can still come back as ended, when the two crossed: it counts as stopped)
+			const finished = !this.turnCancelled && !this.closed && (stop === "end_turn" || stop === "max_tokens" || stop === "max_turn_requests");
+			if (next.length) this.afterTurn(next, finished);
 		}
+	}
+
+	/** Something sent while a request is under way: kept until the model can be handed it, or the request ends. */
+	private addWhileWorking(text: string, images: ImageData[]): boolean {
+		if (this.waiting.length >= MAX_WAITING) {
+			this.push({ kind: "error", text: "That is a lot to add while it works. Wait for it to finish, or press Stop." });
+			return false;
+		}
+		// (what is left at the end goes as one request, which takes this many pictures)
+		if (images.length && this.waiting.reduce((n, w) => n + w.images.length, images.length) > MAX_IMAGES) {
+			this.push({ kind: "error", text: `Only ${MAX_IMAGES} pictures can wait at a time. Send this one when it has finished.` });
+			return false;
+		}
+		// (what "the selected one" means is settled as it is sent, as for a request: not when it is its turn)
+		this.waiting.push({ id: ++this.waitingIds, text, images, selected: [...(this.host.client()?.currentSelection ?? [])] });
+		this.postState();
+		return true;
+	}
+
+	/**
+	 * What the user added that the model can be handed right now, for the end of a tool's answer
+	 * (mcpServer.ts): the words of what is waiting, up to the first that has images (those go as
+	 * a request of their own). Shown in the chat where it reached the model.
+	 */
+	private takeAdditions(turn: number): string | undefined {
+		// (`turn`: the request the tool call began in. One that ends during a later request is not read by anyone.)
+		if (!this.busy || this.turnCancelled || turn !== this.turn) return undefined;
+		const taken: Waiting[] = [];
+		while (this.waiting.length && !this.waiting[0].images.length) taken.push(this.waiting.shift()!);
+		if (!taken.length) return undefined;
+		for (const w of taken) this.push({ kind: "user", text: w.text, scope: `↪ added while it works${w.selected.length ? ` · ◉ ${w.selected.length} selected` : ""}` });
+		this.postState();
+		return taken.map((w) => (w.selected.length ? `${w.text}\n(Selected in the diagram as this was sent: ${w.selected.length} item(s) with ids ${w.selected.slice(0, 80).join(", ")}${w.selected.length > 80 ? ", ..." : ""}.)` : w.text)).join("\n\n");
+	}
+
+	/**
+	 * What was still waiting when a request ended. After one that ran to its end the first is
+	 * sent as the next request, with its pictures and what was selected as it was sent; the
+	 * others wait on, for that request. After one that was stopped or failed nothing is sent by
+	 * itself: it all goes back into the box, for the user to send or drop.
+	 */
+	private afterTurn(left: Waiting[], finished: boolean): void {
+		if (!finished) return this.giveBack(left);
+		const [first, ...rest] = left;
+		this.waiting = [...rest, ...this.waiting];
+		void this.send(first.text, { cellIds: first.selected }, first.images);
+		// (it did not start, e.g. the diagram is loading: nothing would ever come for what still waits)
+		if (!this.busy) this.giveBack(this.waiting.splice(0));
+		else if (rest.length) this.postState();
+	}
+
+	/** Puts what was not sent back into the box: the user sends it again, or drops it. */
+	private giveBack(left: { text: string; images: ImageData[] }[]): void {
+		if (this.closed || !left.length) return;
+		this.post({ type: "restoreInput", text: left.map((w) => w.text).filter(Boolean).join("\n\n"), images: left.flatMap((w) => w.images) });
 	}
 
 	public stop(): void {
@@ -631,11 +721,14 @@ export class ChatController {
 	}
 
 	public newChat(): void {
+		// (what was waiting was not sent, and is not part of the chat that ends: it stays with the user)
+		const left = this.waiting.splice(0);
 		this.stop();
 		this.resetSession();
 		this.transcript = [];
 		this.version = ++versionCounter;
 		this.postState(true);
+		this.giveBack(left);
 		void this.ensureSession().catch(() => undefined);
 	}
 
@@ -786,6 +879,7 @@ export class ChatController {
 	}
 
 	public dispose(): void {
+		this.closed = true;
 		for (const end of this.unwatch.splice(0)) end();
 		this.stop();
 		this.resetSession();
@@ -854,6 +948,7 @@ export class ChatController {
 					: undefined,
 				review: client?.pendingReview?.pending ? client.pendingReview.summary : undefined,
 				allowAll: this.allowAll,
+				queued: this.waiting.map((w) => ({ id: w.id, text: w.text, images: w.images.length })),
 				iconStyle: settings().appearance.iconStyle,
 				matrix: settings().appearance.matrix,
 				chatSide: settings().chat.side,
@@ -866,6 +961,7 @@ function firstPromptNote(fileName: string | undefined): string {
 	return [
 		`You are working inside the OmniDraw app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
 		"Read and change it ONLY with the drawio_* tools of the \"omnidraw\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
+		ADDITIONS_NOTE,
 		"Reply with a brief summary of what you changed.",
 	].join("\n");
 }

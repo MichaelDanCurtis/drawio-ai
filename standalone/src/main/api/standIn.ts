@@ -7,7 +7,8 @@ import { KeyStore } from "./keyStore";
  * A stand-in for the end-to-end run of the chat (DRAWAI_E2E_API): a provider that is none.
  * Nothing is sent anywhere, and the system keychain is not asked. Its "model" is a script that
  * answers a request the way a model would, through the tools it is offered: it reads the
- * diagram, adds a shape with the label the request names, and says what it did.
+ * diagram, adds a shape with the label the request names, and says what it did. When a tool's
+ * answer carries something the user added meanwhile (`<user_update>`), it adds that shape too.
  */
 export const STAND_IN_ID = "stand-in" as ApiProviderId;
 /** (made up: nothing a provider issued) */
@@ -21,11 +22,27 @@ function chat(o: ApiChatOptions): ApiChat {
 			o.onText("Reading the diagram. ");
 			const read = await o.callTool("drawio_get_diagram", {});
 			if (signal.aborted) return "cancelled";
+			// (asked what it sees, it says what it was told: the diagram's name, and what reading it said of the page)
+			if (/which diagram/i.test(text)) {
+				let notes: unknown;
+				try {
+					notes = JSON.parse(read.text).notes;
+				} catch {
+					// not what a read answers
+				}
+				held++;
+				o.onText(`I was told: ${/^Open diagram: .*$|^No draw\.io diagram is open.*$/m.exec(text)?.[0] ?? "nothing"} Reading it said: ${Array.isArray(notes) ? notes.join(" ") : read.text}`);
+				return "end_turn";
+			}
 			const label = /labelled '([^']+)'/.exec(text)?.[1] ?? "Hello from the API";
 			const made = await o.callTool("drawio_apply_operations", { ops: [{ op: "addShape", label, x: 40, y: 40 + held * 80, width: 180, height: 60 }] });
 			if (signal.aborted) return "cancelled";
+			const added = /<user_update>[\s\S]*?labelled '([^']+)'[\s\S]*?<\/user_update>/.exec(`${read.text}\n${made.text}`)?.[1];
+			const more = added ? await o.callTool("drawio_apply_operations", { ops: [{ op: "addShape", label: added, x: 260, y: 40 + held * 80, width: 180, height: 60 }] }) : undefined;
+			if (signal.aborted) return "cancelled";
 			held++;
 			o.onText(read.isError ? `I could not read it: ${read.text}` : made.isError ? `I left the shape out: ${made.text}` : `Added a shape labelled '${label}' with ${o.model} (request ${held} of this conversation).`);
+			if (added) o.onText(more?.isError ? ` I left out what you added: ${more.text}` : ` Then, as you added, one labelled '${added}'.`);
 			return "end_turn";
 		},
 	};

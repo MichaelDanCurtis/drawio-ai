@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Send while it works.** The chat's box stays open during a request. What you send waits in
+  a strip above it and is handed to the model with its next step (it reads it as it works), or
+  sent as the next request when this one ends; ✕ takes it back. After Stop, an error or New Chat it goes
+  back into the box instead of being sent. The line under the box says so, where it used to
+  repeat "Working… watch the diagram".
+- A new diagram that is not saved yet was described to the model as "no diagram is open", so
+  it would not draw on it, or added a page of its own. It is told the diagram is "Untitled",
+  that an empty page is the place to draw, and not to add a page because the one shown is
+  empty.
+
 - **API keys** (Settings → Agents & models): use Anthropic's, OpenAI's, Gemini's, Grok's or
   Kimi's models, or the many behind OpenRouter, with your own API key, without an agent
   program. A key is checked with its provider, then kept

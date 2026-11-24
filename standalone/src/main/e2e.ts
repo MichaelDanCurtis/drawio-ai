@@ -117,7 +117,7 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		if (config.workshop) {
 			await runWorkshop(w, server, config, log);
 		} else if (config.apiChat) {
-			await runApiChat(w, config, log);
+			await runApiChat(w, server, config, log);
 		} else if (config.polish) {
 			await runPolish(w, server, config, log);
 		} else if (config.insights) {
@@ -253,7 +253,7 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
  * stand-in (api/standIn.ts): the window, the chat page, the key store's file, the tools and
  * the permission cards are the real ones; nothing is sent anywhere and the keychain is not asked.
  */
-async function runApiChat(w: DiagramWindow, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
 	const { apiAccess } = await import("./api/catalog");
 	const { STAND_IN_ID, STAND_IN_KEY } = await import("./api/standIn");
 	const page = w.chatView.webContents;
@@ -326,13 +326,75 @@ async function runApiChat(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 	log("apiChatAllowed", { ...(await done), reply: last("assistant")?.text, tools: w.chat.items.filter((i) => i.kind === "tool").slice(-2).map((i: any) => `${i.status}: ${i.summary}`) });
 	expect(await has("Hello from the API"), "the shape was not added.");
 
-	// Stop while a card waits: the request ends as stopped, and nothing is changed
+	// while it works the box stays open. What is sent then waits in a strip above it...
+	const type = (text: string) => page.executeJavaScript(`(() => { const i = document.getElementById("input"); i.value = ${JSON.stringify(text)}; document.getElementById("send").click(); return document.getElementById("send").textContent; })()`);
+	const strip = (): Promise<string[]> => page.executeJavaScript(`Array.from(document.querySelectorAll("#queued .queued .what")).map((e) => e.textContent)`);
+	const users = () => w.chat.items.filter((i) => i.kind === "user").map((i: any) => `${i.scope ?? ""}|${i.text}`);
+	done = turn("Add a shape labelled 'While working'.");
+	await until("a permission card", async () => (await waiting()).length);
+	const button = await type("Also add a shape labelled 'Steered in'.");
+	await type("And one labelled 'Taken back'.");
+	await until("the waiting strip", async () => (await strip()).length === 2);
+	await pause(500);
+	await save("chat-api-waiting.png");
+	log("apiChatWaiting", { button, strip: await strip(), hint: await page.executeJavaScript(`document.getElementById("hint").textContent`) });
+	// ...can be taken back...
+	await page.executeJavaScript(`document.querySelectorAll("#queued .queued .drop")[1].click()`);
+	await until("one to be taken back", async () => (await strip()).length === 1);
+	// ...and reaches the model with the next tool's answer: it reads it as it works
+	await answer("Allow");
+	await answer("Allow");
+	const steered = await done;
+	log("apiChatSteered", { ...steered, reply: last("assistant")?.text, users: users().slice(-2), strip: await strip() });
+	expect(button === "Add" && steered.stop === "end_turn" && (await has("While working")) && (await has("Steered in")) && !(await has("Taken back")) && users().pop() === "↪ added while it works|Also add a shape labelled 'Steered in'." && !(await strip()).length, "what was added while it worked did not reach the model with a tool's answer.");
+
+	// what could not be handed over (no tool answered after it) is sent as the next request when this one ends
+	let ended = 0;
+	const twice = new Promise<{ stop?: string; error?: string }>((resolve) => (w.chat.onTurnEnd = (stop, error) => ++ended === 2 && resolve({ stop, error })));
+	void w.chat.send("Add a shape labelled 'Not this one'.");
+	await until("a permission card", async () => (await waiting()).length);
+	// (what is selected as it is sent is what it is about, whatever is selected when its turn comes)
+	const pick = (how: string) => w.editorView.webContents.executeJavaScript(`(() => { const g = editorUi.editor.graph; ${how}; return g.getSelectionCount(); })()`);
+	const picked: number = await pick(`g.setSelectionCell(Object.values(g.getModel().cells).find((c) => c.vertex))`);
+	await until("the selection to reach the app", () => w.client.currentSelection.length === 1);
+	const pickedId = w.client.currentSelection[0];
+	await type("Add a shape labelled 'Sent after'.");
+	await until("the waiting strip", async () => (await strip()).length === 1);
+	await pick(`g.clearSelection()`);
+	await until("the selection to be gone", () => w.client.currentSelection.length === 0);
+	await answer("Deny");
+	await answer("Allow");
+	const followed = await twice;
+	log("apiChatFollowed", { ...followed, users: users().slice(-2) });
+	expect(followed.stop === "end_turn" && (await has("Sent after")) && !(await has("Not this one")) && picked === 1 && !!pickedId && users().pop() === "◉ 1 selected|Add a shape labelled 'Sent after'.", "what was still waiting when the request ended was not sent as the next one, or not with what was selected as it was sent.");
+
+	// Stop while a card waits: the request ends as stopped, and nothing is changed; what was waiting goes back into the box, unsent
 	done = turn("Add a shape labelled 'Stopped shape'.");
 	await until("a permission card", async () => (await waiting()).length);
+	await type("And a shape labelled 'Never sent'.");
+	await until("the waiting strip", async () => (await strip()).length === 1);
+	// (only so many wait: one more is not taken, and is back in the box it was sent from)
+	for (let n = 2; n <= 8; n++) await type(`Extra ${n}.`);
+	await until("a full strip", async () => (await strip()).length === 8);
+	await type("One too many.");
+	await until("the one too many, back in the box", () => page.executeJavaScript(`document.getElementById("input").value === "One too many."`));
+	const full = { strip: (await strip()).length, said: last("error")?.text };
+	await page.executeJavaScript(`document.getElementById("input").value = ""`);
+	// (taken back from the end, each by what it is and not by its place: the first stays)
+	for (let left = 7; left >= 1; left--) {
+		await page.executeJavaScript(`Array.from(document.querySelectorAll("#queued .queued .drop")).pop().click()`);
+		await until("one fewer waiting", async () => (await strip()).length === left);
+	}
+	log("apiChatFull", { ...full, left: await strip() });
+	expect(full.strip === 8 && /a lot to add/.test(full.said ?? "") && (await strip()).join() === "And a shape labelled 'Never sent'.", "one more than can wait was lost, or the wrong ones were taken back.");
 	w.chat.stop();
 	const stopped = await done;
-	log("apiChatStopped", { ...stopped, outcome: last("permission")?.outcome });
+	await pause(300);
+	const box: string = await page.executeJavaScript(`(() => { const i = document.getElementById("input"); const v = i.value; i.value = ""; return v; })()`);
+	log("apiChatStopped", { ...stopped, outcome: last("permission")?.outcome, box, strip: await strip() });
 	expect(stopped.stop === "cancelled" && !(await has("Stopped shape")), "Stop did not end the request, or the shape was added all the same.");
+	expect(box === "And a shape labelled 'Never sent'." && !(await strip()).length && !(await has("Never sent")) && !w.chat.items.some((i: any) => i.kind === "user" && /Never sent/.test(i.text)), "what was waiting when Stop was pressed was sent, or lost.");
+
 
 	// another model, picked in the page: a new conversation, and the one a new chat starts with
 	await page.executeJavaScript(`document.getElementById("modelBtn").click()`);
@@ -359,6 +421,22 @@ async function runApiChat(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 	await pause(600);
 	await save("chat-api.png");
 
+	// a new diagram that is not saved yet is a diagram to draw on: the model is not told that none is open,
+	// and reading its empty page says that it is the place to draw
+	settings().agent = "api:stand-in"; // (this run only, as above: what was saved since has put the default back)
+	const blank = await DiagramWindow.open(server);
+	await blank.whenLoaded();
+	expect(blank.chat.agentId === "api:stand-in", "the new window does not use the stand-in.");
+	await until("the new window's chat", () => (blank.chat as any).session?.info);
+	const seen = waitForTurn(blank);
+	void blank.chat.send("Say which diagram you see.");
+	await seen;
+	const told = ([...blank.chat.items].reverse().find((i) => i.kind === "assistant") as any)?.text ?? "";
+	log("apiChatNewDiagram", told || blank.chat.items.map((i: any) => `${i.kind}: ${i.text ?? i.summary ?? i.title ?? ""}`));
+	expect(/I was told: Open diagram: Untitled \(a new diagram, not saved to a file yet\)/.test(told) && /This page is empty: nothing is drawn on it yet\. It is the diagram to draw on\./.test(told) && !/No draw\.io diagram is open/.test(told), "a new, unsaved diagram is not presented to the model as a diagram to draw on.");
+	blank.chat.dispose();
+	blank.win.destroy();
+
 	// the key is nowhere it should not be
 	const data = app.getPath("userData");
 	const keyFile = fs.readFileSync(path.join(data, "api-keys.json"), "utf8");
@@ -383,6 +461,18 @@ async function runApiChat(w: DiagramWindow, config: E2eConfig, log: (k: string, 
 	log("apiChatNewKey", { ...again, reply: last("assistant")?.text, lines: added });
 	expect(again.stop === "end_turn" && /request 1 of this conversation/.test(last("assistant")?.text ?? "") && added.length === 2 && added.every((l) => l.startsWith("ok: ")), "a request after the key was replaced went on with the old conversation, or its tool calls were taken for earlier ones.");
 	fs.writeFileSync(path.join(config.out, "transcript.json"), JSON.stringify(w.chat.items, null, 2));
+
+	// New Chat while something waits: the chat is emptied, and what was not sent stays with the user
+	done = turn("Add a shape labelled 'Before a new chat'.");
+	await until("a permission card", async () => (await waiting()).length);
+	await type("Keep this for later.");
+	await until("the waiting strip", async () => (await strip()).length === 1);
+	w.chat.newChat();
+	const emptied = await done;
+	await pause(300);
+	const kept: string = await page.executeJavaScript(`(() => { const i = document.getElementById("input"); const v = i.value; i.value = ""; return v; })()`);
+	log("apiChatNewChat", { ...emptied, kept, strip: await strip(), items: w.chat.items.length });
+	expect(kept === "Keep this for later." && !(await strip()).length && !(await has("Before a new chat")) && !w.chat.items.some((i: any) => /Keep this/.test(i.text ?? "")), "what was waiting when New Chat was pressed was sent, or lost.");
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {
