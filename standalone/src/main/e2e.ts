@@ -225,6 +225,10 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 		const offered: string[] = await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).map((b) => b.textContent)`);
 		await new Promise((r) => setTimeout(r, 700));
 		fs.writeFileSync(path.join(config.out, "mapper-elsewhere.png"), (await dlg.capturePage()).toPNG());
+		// (more than six: the rest are behind a button, and all of them are there once it is pressed)
+		await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).find((b) => / more…$/.test(b.textContent))?.click()`);
+		const all: string[] = await dlg.executeJavaScript(`Array.from(document.querySelectorAll("#result .elsewhere button")).map((b) => b.textContent)`);
+		if (all.join() !== r.result.elsewhere.map((e) => e.label).join()) throw new Error(`The Mapper dialog does not offer every working copy: ${all.join(", ")}`);
 		await dlg.executeJavaScript(`document.querySelector("#result .elsewhere button").click()`);
 		const end = Date.now() + 30_000;
 		let after = "";
