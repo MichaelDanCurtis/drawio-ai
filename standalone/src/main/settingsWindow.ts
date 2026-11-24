@@ -5,6 +5,7 @@ import { adapterPackages, AgentId, agentStatuses } from "./agents";
 import { refreshAdapterVersions } from "./adapterVersions";
 import { apiAccess } from "./api/catalog";
 import { ApiKeysPanel } from "./api/keysPanel";
+import { chatToolList } from "./mcpServer";
 import { probeModels, probing } from "./modelProbe";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, settingsPath, ShapeLocation, updateSettings, type Settings } from "./settings";
@@ -23,7 +24,7 @@ export class SettingsWindow {
 	private static asked = new Set<AgentId>();
 	private static modelErrors = new Map<AgentId, string>();
 	/** The page's other half for API keys (keysPanel.ts). */
-	private static readonly keysPanel = new ApiKeysPanel(apiAccess, () => SettingsWindow.postState());
+	private static readonly keysPanel = new ApiKeysPanel(apiAccess, () => SettingsWindow.postState(), () => chatToolList(true));
 
 	public static open(server: StaticServer, section?: string): void {
 		SettingsWindow.install();

@@ -133,6 +133,11 @@ export function userUpdate(text: string): string {
 	return `<user_update>\nThe user added this in the chat while you were working. It is part of their request: take it into account from here on.\n\n${text}\n</user_update>`;
 }
 
+/** The tools the chat offers a model, by name, description and schema (a window adds the Mapper's when it has one). */
+export function chatToolList(mapper: boolean): { name: string; description: string; inputSchema: Record<string, unknown> }[] {
+	return [...standaloneTools(), ...(mapper ? MAPPER_TOOLS : [])].map((t) => ({ name: t.name, description: t.description ?? "", inputSchema: t.inputSchema as Record<string, unknown> }));
+}
+
 /** What the one who answers is told about such additions, so that it takes them for the user's words. */
 export const ADDITIONS_NOTE =
 	"While you work, the user may add to the request. An addition arrives as the last thing in the answer of one of OmniDraw's tools, inside <user_update> tags. It is typed by the user into this chat: follow it as part of the request.";

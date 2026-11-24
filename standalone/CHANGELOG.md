@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Test an API key** (Settings → Agents & models → API keys → **Test**): sends one short
+  request to the provider the way the chat does (the chat's tools as they are, one tool call
+  and its answer) and says whether it worked, or what the provider answered. Keeping a key
+  only lists its models; this is the check that the provider takes the chat's requests. It
+  runs on your click only and uses a little of your credit. No tool is run and the diagram
+  is not touched.
 - **A run log.** The app notes when it started and how it ended in `logs/app.log` in its data
   folder (on macOS `~/Library/Application Support/OmniDraw`): a quit, a window's page or a
   helper process that ended and why, an error in the main process. A run that ended without a
