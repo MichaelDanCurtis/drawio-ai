@@ -232,7 +232,8 @@ test("group with label, align, distribute, layout and zOrder all apply", async (
 });
 
 test("watching a batch being built: what is new appears in order and what moved glides, only as shown; the edit itself is there at once, and nothing is left behind", async () => {
-	const build = () => page.evaluate(() => ({ ...window.drawioAiBuild, playing: window.drawioAiBuild.playing(), running: document.getAnimations().filter((a) => a.playState === "running" || a.playState === "pending").length }));
+	// (`running`: the animations a script started, which is how a batch is shown; the page's own styles may be in the middle of a transition of theirs)
+	const build = () => page.evaluate(() => ({ ...window.drawioAiBuild, playing: window.drawioAiBuild.playing(), running: document.getAnimations().filter((a) => !(a instanceof CSSTransition) && !(a instanceof CSSAnimation) && (a.playState === "running" || a.playState === "pending")).length }));
 	const shown = (await build()).shown;
 	const animated = (ops) => request({ action: "aiApplyOps", ops, atomic: true, flash: false, selectResult: false, animate: true });
 	const leftovers = (ids) =>
@@ -259,6 +260,7 @@ test("watching a batch being built: what is new appears in order and what moved 
 	const hold = (id) =>
 		page.evaluate((id) => {
 			for (const a of document.getAnimations()) {
+				if (a instanceof CSSTransition || a instanceof CSSAnimation) continue;
 				a.pause();
 				a.currentTime = a.effect.getTiming().delay;
 			}
