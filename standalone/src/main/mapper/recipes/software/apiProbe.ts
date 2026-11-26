@@ -53,6 +53,8 @@ const GRAPHQL_PLACES = ["graphql", "api/graphql", "query"];
 const MAX_REQUESTS = 40;
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_SPECS = 4;
+/** How many addresses one after the other lead to a description: a docs page, its start-up script, a settings document, the description. */
+const MAX_DEPTH = 3;
 
 /** The standard introspection query, without descriptions (they can be megabytes). */
 const INTROSPECTION = `query IntrospectionQuery { __schema { queryType { name } mutationType { name } subscriptionType { name } types { kind name fields(includeDeprecated: true) { name args { name } type { ...T } } inputFields { name type { ...T } } interfaces { name } enumValues(includeDeprecated: true) { name } possibleTypes { name } } } } fragment T on __Type { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name ofType { kind name } } } } } }`;
@@ -107,7 +109,7 @@ export function specLinks(text: string, base: URL): string[] {
 	const body = text.slice(0, 600_000);
 	// Swagger UI (`url: "…"`, `urls: [{ url: "…" }]`), its config document, Redoc / RapiDoc / Scalar (`spec-url`, `data-url`)
 	for (const m of body.matchAll(/["']?\burl["']?\s*[:=]\s*["']([^"']+)["']/g)) add(m[1]);
-	for (const m of body.matchAll(/\b(?:spec-url|data-url|data-spec-url|apiDescriptionUrl|specUrl|configUrl)\s*[:=]\s*["']([^"']+)["']/gi)) add(m[1]);
+	for (const m of body.matchAll(/\b(?:spec-url|data-url|data-spec-url|apiDescriptionUrl|specUrl|configUrl)["']?\s*[:=]\s*["']([^"']+)["']/gi)) add(m[1]);
 	for (const m of body.matchAll(/<link\b[^>]*\brel=["'](?:service-desc|openapi)["'][^>]*>/gi)) add(/\bhref=["']([^"']+)["']/i.exec(m[0])?.[1]);
 	// anything named like one, however the page writes it down (quoted, in a list, in a template)
 	for (const m of body.matchAll(/(?:^|["'`(=,\s])((?:https?:\/\/|\.{0,2}\/)?[^"'`()=,\s<>]*(?:openapi|swagger|api-docs)[^"'`()=,\s<>]*\.(?:json|ya?ml)(?:\?[^"'`()=,\s<>]*)?)(?=$|["'`),\s<])/gim)) add(m[1]);
@@ -257,11 +259,14 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 			specs.push({ file: others ? `${name} #${others + 1}` : name, doc });
 			return;
 		}
-		if (depth >= 2) return;
-		// A script a page loads names addresses as that page would read them: "./spec.json" in
-		// /static/swagger-initializer.js, loaded by /docs/index.html, is /docs/spec.json.
-		const script = /javascript|ecmascript/i.test(r.type) || /\.[mc]?js$/i.test(r.url.pathname);
-		const base = script && page ? page : r.url;
+		// (as far as a docs page goes: the page, its start-up script, the settings document that names, the
+		// descriptions. Every step is a request, and those are counted)
+		if (depth >= MAX_DEPTH) return;
+		// What a page loads names addresses as that page would read them: "./spec.json" in
+		// /static/swagger-initializer.js, loaded by /docs/index.html, is /docs/spec.json. The same
+		// goes for the settings document such a script points at (`configUrl`).
+		const isPage = /html/i.test(r.type) || /^\s*<(!doctype|html|head|body)\b/i.test(r.text);
+		const base = !isPage && page ? page : r.url;
 		const links = specLinks(r.text, base);
 		for (const m of r.link.matchAll(/<([^>]+)>\s*;[^,]*\brel="?(?:service-desc|openapi)"?/gi)) {
 			try {

@@ -97,6 +97,19 @@ test("the address of the document itself, of a docs page that names it, or of th
 	r = await probeApi(`${apart.url}/docs/index.html`);
 	assert.deepEqual(found(r), [[["/docs/spec.json", "Shop"]], undefined]);
 	assert.deepEqual(apart.paths(), ["GET /docs/index.html", "GET /static/swagger-initializer.js", "GET /docs/spec.json"]);
+	// the script names a settings document, and that names the descriptions (as grouped APIs do): followed to the end,
+	// each address read as the page reads it
+	const other = (title, p) => ({ ...SPEC, info: { title, version: "1" }, paths: { [p]: { get: { responses: { 200: { description: "ok" } } } } } });
+	const grouped = await api({
+		"/docs/index.html": { text: '<html><script src="/static/swagger-initializer.js"></script></html>' },
+		"/static/swagger-initializer.js": { text: 'window.ui = SwaggerUIBundle({ configUrl: "/settings/config.json", dom_id: "#swagger-ui" });', type: "application/javascript" },
+		"/settings/config.json": { json: { configUrl: "/settings/config.json", urls: [{ url: "/descriptions/orders", name: "orders" }, { url: "./billing.json", name: "billing" }] } },
+		"/descriptions/orders": { json: other("Orders", "/orders") },
+		"/docs/billing.json": { json: other("Billing", "/invoices") },
+	});
+	r = await probeApi(`${grouped.url}/docs/index.html`);
+	assert.deepEqual(found(r), [[["/descriptions/orders", "Orders"], ["/docs/billing.json", "Billing"]], undefined]);
+	assert.deepEqual(grouped.paths(), ["GET /docs/index.html", "GET /static/swagger-initializer.js", "GET /settings/config.json", "GET /descriptions/orders", "GET /docs/billing.json"]);
 
 	// a page that names several (springdoc's list, Redoc's attribute): each is read
 	const many = await api({
