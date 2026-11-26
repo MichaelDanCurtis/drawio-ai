@@ -9,8 +9,8 @@ import { MapperError } from "./types";
  * repository, by its address or as owner/name. The repository is downloaded (its newest state
  * only, no history) into the app's own folder and read there, like any folder.
  *
- * Read-only towards the repository: it is fetched, never pushed to. git runs none of the
- * repository's own programs for that (no hooks, no filters, no submodules, no file monitor),
+ * Read-only towards the repository: it is fetched, never pushed to. git runs no program for
+ * the repository's files (no hooks, no filters of any name, no submodules, no file monitor),
  * and asks for nothing at a prompt: it works with the access this computer already has (git's
  * own saved sign-in, the GitHub CLI's, or an SSH key), or it says that it could not.
  */
@@ -84,7 +84,7 @@ export interface FetchOptions {
 }
 
 export interface Fetched {
-	/** The working copy. */
+	/** The working copy: of one commit, in a folder of its own that is not written to again. */
 	dir: string;
 	/** What to map: the working copy, or the folder in it that the address named. */
 	root: string;
@@ -104,7 +104,22 @@ const SAFE = [
 	"-c", "filter.lfs.process=",
 	"-c", "filter.lfs.required=false",
 	"-c", "advice.detachedHead=false",
+	// (Windows: a repository's paths may be longer than its old limit)
+	...(process.platform === "win32" ? ["-c", "core.longpaths=true"] : []),
 ];
+
+/**
+ * What the repository's .gitattributes may not ask for, written to the copy's own
+ * info/attributes, which git reads before any .gitattributes: no filter, whatever it is called
+ * (a filter's program is in this computer's git settings; the repository only names it, and
+ * would have it run on its own files and file names), and no rewriting of keywords, line
+ * endings or encodings either: the files are read as they are in the repository.
+ */
+const NO_FILTERS = "* -filter -ident -text -working-tree-encoding\n";
+
+/** How many downloads of one repository are kept (a download is of one commit), beside those used in the last hour. */
+const KEPT = 4;
+const IN_USE_MS = 60 * 60 * 1000;
 
 function git(args: string[], o: { cwd?: string; env: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs: number }): Promise<{ code: number; stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
@@ -130,21 +145,44 @@ function said(stderr: string): string {
 		.slice(0, 300);
 }
 
-function hasProgram(name: string, env: NodeJS.ProcessEnv): boolean {
-	return (env.PATH ?? "").split(path.delimiter).some((dir) => dir && fs.existsSync(path.join(dir, name)));
+/** Whether a program is on the PATH (on Windows under any of the endings a program has there: gh.exe). */
+export function hasProgram(name: string, env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): boolean {
+	const win = platform === "win32";
+	const dirs = (env.PATH ?? env.Path ?? "").split(win ? ";" : path.delimiter);
+	const names = win ? [name, ...(env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean).flatMap((ext) => [name + ext.toLowerCase(), name + ext.toUpperCase()])] : [name];
+	return dirs.some((dir) => dir && names.some((n) => fs.existsSync(path.join(dir, n))));
+}
+
+/** Removes the downloads of a repository that are neither among the newest nor used lately. */
+function prune(repoDir: string, keep: string): void {
+	try {
+		const now = Date.now();
+		const old = fs
+			.readdirSync(repoDir, { withFileTypes: true })
+			.filter((d) => d.isDirectory() && /^[0-9a-f]{12}$/.test(d.name) && path.join(repoDir, d.name) !== keep)
+			.map((d) => ({ dir: path.join(repoDir, d.name), used: fs.statSync(path.join(repoDir, d.name)).mtimeMs }))
+			.sort((a, b) => b.used - a.used);
+		for (const o of old.slice(KEPT - 1)) if (now - o.used > IN_USE_MS) fs.rmSync(o.dir, { recursive: true, force: true });
+		// (what a download that was stopped half-way left behind, long ago)
+		for (const d of fs.readdirSync(repoDir)) if (/^\.new-/.test(d) && now - fs.statSync(path.join(repoDir, d)).mtimeMs > IN_USE_MS) fs.rmSync(path.join(repoDir, d), { recursive: true, force: true });
+	} catch {
+		// tidying up is not worth failing a map for
+	}
 }
 
 /**
- * Downloads the repository's newest state at `ref` into the cache and returns where it is. A
- * copy fetched before is replaced: a map is of the repository as it is now.
+ * Downloads the repository's newest state at `ref` into the cache and returns where it is: a
+ * folder of that one commit, `<cache>/github.com/<owner>/<repo>/<commit>`. A map of another
+ * branch, or of the same branch later, gets another folder, so a map drawn before still points
+ * at the files it was drawn from, and two maps being read at once do not take each other's files
+ * away. The newest few are kept.
  */
 export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promise<Fetched> {
 	const env: NodeJS.ProcessEnv = { ...o.env, GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1", GIT_OPTIONAL_LOCKS: "0", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: o.env.GIT_SSH_COMMAND ?? "ssh -oBatchMode=yes" };
 	const timeoutMs = o.timeoutMs ?? 180_000;
 	const run = (args: string[], cwd?: string, extra?: NodeJS.ProcessEnv) => git(args, { cwd, env: { ...env, ...extra }, signal: o.signal, timeoutMs });
-	const home = path.join(o.cacheDir, s.host, s.owner.toLowerCase());
-	const final = path.join(home, s.repo.toLowerCase());
-	const fresh = `${final}.new-${randomBytes(4).toString("hex")}`;
+	const home = path.join(o.cacheDir, s.host, s.owner.toLowerCase(), s.repo.toLowerCase());
+	const fresh = path.join(home, `.new-${randomBytes(4).toString("hex")}`);
 	fs.mkdirSync(home, { recursive: true });
 	// (the access this computer has, one way after the other: git's own saved sign-in, the GitHub CLI's, an SSH key)
 	const https = `https://${s.host}/${s.owner}/${s.repo}.git`;
@@ -157,6 +195,13 @@ export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promi
 		o.progress?.(`Downloading ${repositoryLabel({ ...s, subpath: undefined })}…`);
 		const made = await run(["init", "-q", "--template=", fresh]);
 		if (made.code !== 0) throw new MapperError(`Could not make a folder for the repository: ${said(made.stderr)}`);
+		fs.mkdirSync(path.join(fresh, ".git", "info"), { recursive: true });
+		fs.writeFileSync(path.join(fresh, ".git", "info", "attributes"), NO_FILTERS);
+		// (and, for writing the files, git without the user's own settings file or settings from the
+		// environment: the sign-in they hold is for fetching, and a filter's program would be in them)
+		const empty = path.join(fresh, ".git", "no-settings");
+		fs.writeFileSync(empty, "");
+		const quiet: NodeJS.ProcessEnv = { GIT_CONFIG_GLOBAL: empty, GIT_CONFIG_COUNT: "0", GIT_CONFIG_PARAMETERS: "", GIT_ATTR_SOURCE: undefined, GIT_ATTR_NOSYSTEM: "1" };
 		const tried: string[] = [];
 		let fetched = false;
 		for (const r of remotes) {
@@ -176,16 +221,36 @@ export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promi
 				"If the repository is private, sign in with `gh auth login` (or however you use git with GitHub) and try again. Or clone it yourself and choose its folder."
 			);
 		}
-		const out = await run([...SAFE, "checkout", "-q", "--detach", "FETCH_HEAD"], fresh);
-		if (out.code !== 0) throw new MapperError(`The repository was downloaded but its files could not be written: ${said(out.stderr)}`);
-		const head = (await run(["rev-parse", "HEAD"], fresh)).stdout.trim();
-		fs.rmSync(final, { recursive: true, force: true });
-		fs.renameSync(fresh, final);
+		const head = (await run(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], fresh, quiet)).stdout.trim();
+		if (!/^[0-9a-f]{40,64}$/.test(head)) throw new MapperError("The repository was downloaded but git could not say which commit it is.");
+		const final = path.join(home, head.slice(0, 12));
+		if (fs.existsSync(path.join(final, ".git", "HEAD"))) {
+			// this commit is here already (a map of it was drawn before, or is being drawn): it is used as it is
+			const now = new Date();
+			fs.utimesSync(final, now, now);
+		} else {
+			const out = await run([...SAFE, "checkout", "-q", "--detach", "FETCH_HEAD"], fresh, quiet);
+			if (out.code !== 0) throw new MapperError(`The repository was downloaded but its files could not be written: ${said(out.stderr)}`);
+			fs.rmSync(final, { recursive: true, force: true });
+			try {
+				fs.renameSync(fresh, final);
+			} catch (e) {
+				// (another window downloaded the same commit in the meantime: its copy is as good)
+				if (!fs.existsSync(path.join(final, ".git", "HEAD"))) throw e;
+			}
+		}
+		prune(home, final);
 		const root = s.subpath ? path.join(final, ...s.subpath.split("/")) : final;
 		if (!root.startsWith(final + path.sep) && root !== final) throw new MapperError("That folder is not inside the repository.");
 		if (!fs.existsSync(root) || !fs.lstatSync(root).isDirectory()) throw new MapperError(`${s.owner}/${s.repo} has no folder ${s.subpath}${s.ref ? ` at ${s.ref}` : ""}.`);
 		return { dir: final, root, head };
 	} finally {
 		fs.rmSync(fresh, { recursive: true, force: true });
+		try {
+			// (nothing was downloaded: no empty folder is left for it)
+			fs.rmdirSync(home);
+		} catch {
+			// it holds a download
+		}
 	}
 }

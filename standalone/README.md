@@ -98,10 +98,13 @@ the browser (also of a branch, or of a folder in it), its clone address, or `own
 `@branch` for a branch, tag or commit. Its newest state, without history, is downloaded into
 `mapped-repos` in the app's data folder with the access to GitHub this computer already has
 (git's own saved sign-in, then the GitHub CLI's, then an SSH key; it never asks at a prompt) and
-read there like any folder, so the agent can read its files too. A copy downloaded before is
-replaced. git is run so that nothing of the repository runs: no hooks, no filters (Git LFS files
-stay pointers), no submodules, no file monitor, and links in it are written as plain files. A
-folder of that name on this computer wins: `docs/api` beside the diagram is a folder.
+read there like any folder, so the agent can read its files too. Each download is of one commit
+and has a folder of its own (`mapped-repos/github.com/<owner>/<repo>/<commit>`), so a map drawn
+earlier, or of another branch, still points at the files it was drawn from; the newest four of
+a repository are kept. git is run so that no program runs for the repository's files: no hooks,
+no filters of any name (Git LFS files stay pointers, and a filter your own git settings define
+is not run either), no submodules, no file monitor, and links in it are written as plain files.
+A folder of that name on this computer wins: `docs/api` beside the diagram is a folder.
 
 The Mapper places the shapes itself (`mapper/layout.ts`); the connectors are then routed
 by draw.io's obstacle-avoiding router (the plugin's `layout` operation, type `route`): each

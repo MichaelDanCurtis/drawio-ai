@@ -9,8 +9,10 @@
   `owner/name` (`owner/name@branch` for a branch, tag or commit). The repository's newest
   state is downloaded with the access to GitHub this computer already has (git's saved
   sign-in, the GitHub CLI's, or an SSH key) into the app's own folder and read there. It
-  said "is not a folder" before. git runs nothing of the repository's own while it does so,
-  and nothing is ever sent to the repository.
+  said "is not a folder" before. git runs no program for the repository's files while it does
+  so (no hook, no filter of any name, no submodule), and nothing is ever sent to the
+  repository. Each download is of one commit, in a folder of its own, so an earlier map still
+  points at the files it was drawn from; the newest four of a repository are kept.
 
 ## [0.2.0]
 

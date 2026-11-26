@@ -7,7 +7,7 @@ const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
 require("./helpers/ts");
-const { parseRepository, repositoryLabel, fetchRepository } = require("../src/main/mapper/repository");
+const { parseRepository, repositoryLabel, fetchRepository, hasProgram } = require("../src/main/mapper/repository");
 const { withRepositories, FOLDER_FIELD } = require("../src/main/mapper/recipes/common");
 const { recipeById } = require("../src/main/mapper/registry");
 const { MapperError } = require("../src/main/mapper/types");
@@ -76,10 +76,12 @@ test("a repository is downloaded as it is now, into the app's folder, and nothin
 	const spec = parseRepository("octo/Widgets");
 
 	const got = await fetchRepository(spec, o);
-	assert.equal(got.dir, path.join(cacheDir, "github.com", "octo", "widgets"));
-	assert.equal(got.root, got.dir);
+	const repoDir = path.join(cacheDir, "github.com", "octo", "widgets");
 	assert.match(got.head, /^[0-9a-f]{40}$/);
 	assert.equal(got.head, git(origin, "rev-parse", "main").trim());
+	// (a folder of that one commit)
+	assert.equal(got.dir, path.join(repoDir, got.head.slice(0, 12)));
+	assert.equal(got.root, got.dir);
 	assert.deepEqual(said, ["Downloading github.com/octo/Widgets…"]);
 	assert.equal(fs.readFileSync(path.join(got.dir, "README.md"), "utf8"), "main\n");
 	assert.ok(fs.existsSync(path.join(got.dir, ".github/workflows/ci.yml")));
@@ -94,19 +96,102 @@ test("a repository is downloaded as it is now, into the app's folder, and nothin
 	assert.equal(fs.existsSync("/tmp/omnidraw-should-never-exist"), false);
 	assert.equal(fs.existsSync(path.join(got.dir, ".git", "hooks")), false, "no hooks were put in");
 
-	// another branch, a tag, a commit; a folder inside
-	assert.equal(fs.readFileSync(path.join((await fetchRepository({ ...spec, ref: "feature/x" }, o)).dir, "README.md"), "utf8"), "feature\n");
-	assert.equal(fs.readFileSync(path.join((await fetchRepository({ ...spec, ref: "v1" }, o)).dir, "README.md"), "utf8"), "feature\n");
+	// another branch: a folder of its own, and the first map's files are still what they were
+	const branch = await fetchRepository({ ...spec, ref: "feature/x" }, o);
+	assert.notEqual(branch.dir, got.dir);
+	assert.equal(fs.readFileSync(path.join(branch.dir, "README.md"), "utf8"), "feature\n");
+	assert.equal(fs.readFileSync(path.join(got.dir, "README.md"), "utf8"), "main\n", "a map drawn from main still points at main's files");
+	// a tag of that same commit, and the first branch again: the folders that are there are used, not replaced
+	fs.writeFileSync(path.join(branch.dir, "kept"), "the same folder");
+	assert.equal((await fetchRepository({ ...spec, ref: "v1" }, o)).dir, branch.dir);
+	assert.ok(fs.existsSync(path.join(branch.dir, "kept")));
+	// a folder inside
 	const inside = await fetchRepository({ ...spec, subpath: "services/api" }, o);
-	assert.equal(inside.root, path.join(inside.dir, "services", "api"));
-	// (what was fetched before is replaced: a map is of the repository as it is now, and nothing is left beside it)
-	assert.equal(fs.readFileSync(path.join(inside.dir, "README.md"), "utf8"), "main\n");
-	assert.deepEqual(fs.readdirSync(path.join(cacheDir, "github.com", "octo")), ["widgets"]);
+	assert.equal(inside.dir, got.dir);
+	assert.equal(inside.root, path.join(got.dir, "services", "api"));
+	assert.deepEqual(fs.readdirSync(repoDir).sort(), [got.dir, branch.dir].map((d) => path.basename(d)).sort(), "one folder per commit, and nothing half-made beside them");
 
-	// what is not there says so, and leaves the copy from before
+	// what is not there says so, and leaves the copies from before
 	await assert.rejects(fetchRepository({ ...spec, ref: "nope" }, o), (e) => e instanceof MapperError && e.message === "octo/Widgets has no branch, tag or commit called nope.");
 	await assert.rejects(fetchRepository({ ...spec, subpath: "no/such" }, o), /octo\/Widgets has no folder no\/such\./);
+	assert.equal(fs.readdirSync(repoDir).length, 2);
 	assert.deepEqual(fs.readdirSync(path.join(cacheDir, "github.com", "octo")), ["widgets"]);
+});
+
+test("downloads of a repository: the newest few commits are kept, and one in use is never taken away", async () => {
+	const origin = remote();
+	const cacheDir = tmp("cache");
+	const o = { cacheDir, env: process.env, remotes: () => [{ url: origin, how: "a local copy" }] };
+	const spec = parseRepository("octo/widgets");
+	const repoDir = path.join(cacheDir, "github.com", "octo", "widgets");
+	const dirs = [];
+	for (let i = 0; i < 6; i++) {
+		put(origin, "README.md", `commit ${i}\n`);
+		git(origin, "commit", "-q", "-am", `commit ${i}`);
+		dirs.push((await fetchRepository(spec, o)).dir);
+	}
+	// (all six were used a moment ago: a map of any of them may still be read)
+	assert.equal(fs.readdirSync(repoDir).length, 6);
+	// hours later: the oldest go when the next commit is downloaded, the newest four stay
+	const longAgo = (n) => new Date(Date.now() - (10 - n) * 3600_000);
+	dirs.forEach((d, i) => fs.utimesSync(d, longAgo(i), longAgo(i)));
+	fs.mkdirSync(path.join(repoDir, ".new-0badc0de"));
+	fs.utimesSync(path.join(repoDir, ".new-0badc0de"), longAgo(0), longAgo(0));
+	put(origin, "README.md", "commit 6\n");
+	git(origin, "commit", "-q", "-am", "commit 6");
+	const newest = await fetchRepository(spec, o);
+	assert.deepEqual(fs.readdirSync(repoDir).sort(), [dirs[3], dirs[4], dirs[5], newest.dir].map((d) => path.basename(d)).sort());
+	assert.equal(fs.readFileSync(path.join(dirs[3], "README.md"), "utf8"), "commit 3\n");
+	// a commit downloaded before is used again, and counts as used now
+	git(origin, "reset", "-q", "--hard", "HEAD~3");
+	const again = await fetchRepository(spec, o);
+	assert.equal(again.dir, dirs[3]);
+	assert.ok(Date.now() - fs.statSync(dirs[3]).mtimeMs < 60_000);
+});
+
+test("the GitHub CLI is found on Windows too, where a program has an ending", () => {
+	const bin = tmp("bin");
+	fs.writeFileSync(path.join(bin, "gh.exe"), "");
+	assert.equal(hasProgram("gh", { PATH: `C:\\nowhere;${bin}`, PATHEXT: ".COM;.EXE;.BAT;.CMD" }, "win32"), true);
+	assert.equal(hasProgram("gh", { Path: bin }, "win32"), true, "Windows calls it Path, and has endings of its own when PATHEXT is not set");
+	assert.equal(hasProgram("git-lfs", { PATH: bin, PATHEXT: ".EXE" }, "win32"), false);
+	const unix = tmp("bin");
+	fs.writeFileSync(path.join(unix, "gh"), "");
+	assert.equal(hasProgram("gh", { PATH: `/nowhere${path.delimiter}${unix}` }), true);
+	assert.equal(hasProgram("gh", { PATH: "" }), false);
+});
+
+test("a filter this computer's git knows is not run on a downloaded repository's files, whatever it is called and wherever git has it from", async () => {
+	// The repository names the filters in its .gitattributes; the programs are in the user's own git
+	// settings (as Git LFS is, and git-crypt, and whatever else they have installed). Fetching needs
+	// those settings for the sign-in, so they cannot simply be left out.
+	const origin = tmp("remote");
+	git(origin, "init", "-q");
+	put(origin, ".gitattributes", "*.one filter=one\n*.two filter=two\n*.three filter=three\nsub/* filter=one\n*.txt text eol=crlf ident\n");
+	for (const f of ["a.one", "b.two", "c.three", "sub/d.dat"]) put(origin, f, "as committed\n");
+	put(origin, "e.txt", "$Id$ one\ntwo\n");
+	git(origin, "add", "-A");
+	git(origin, "commit", "-q", "-m", "first");
+
+	const marks = tmp("marks");
+	const smudge = (name) => `sh -c 'touch "${path.join(marks, name)}"; echo changed by a filter'`;
+	const settings = tmp("settings");
+	// (from the user's own settings file, from the computer's, and from the environment)
+	execFileSync("git", ["config", "--file", path.join(settings, "global"), "filter.one.smudge", smudge("one")]);
+	execFileSync("git", ["config", "--file", path.join(settings, "global"), "filter.one.required", "true"]);
+	execFileSync("git", ["config", "--file", path.join(settings, "system"), "filter.two.smudge", smudge("two")]);
+	const env = { ...process.env, GIT_CONFIG_GLOBAL: path.join(settings, "global"), GIT_CONFIG_SYSTEM: path.join(settings, "system"), GIT_CONFIG_NOSYSTEM: "", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "filter.three.smudge", GIT_CONFIG_VALUE_0: smudge("three") };
+	// (the filters do run in an ordinary checkout with these settings: this is what is being kept out)
+	const plain = tmp("plain");
+	execFileSync("git", ["clone", "-q", origin, plain], { env, stdio: "ignore" });
+	assert.deepEqual(fs.readdirSync(marks).sort(), ["one", "three", "two"]);
+	for (const m of fs.readdirSync(marks)) fs.rmSync(path.join(marks, m));
+
+	const got = await fetchRepository(parseRepository("octo/filters"), { cacheDir: tmp("cache"), env, remotes: () => [{ url: origin, how: "a local copy" }] });
+	assert.deepEqual(fs.readdirSync(marks), [], "no filter ran");
+	for (const f of ["a.one", "b.two", "c.three", "sub/d.dat"]) assert.equal(fs.readFileSync(path.join(got.dir, f), "utf8"), "as committed\n", f);
+	// (and the files are as they are in the repository: no line endings or keywords rewritten on the way)
+	assert.equal(fs.readFileSync(path.join(got.dir, "e.txt"), "utf8"), "$Id$ one\ntwo\n");
 });
 
 test("the ways of signing in are tried one after the other; when none works it says what each said, never asks, and leaves nothing behind", async () => {
@@ -147,7 +232,8 @@ test("a map of a repository: the recipe reads the downloaded folder, a folder of
 	assert.match(FOLDER_FIELD.placeholder, /GitHub repository/);
 
 	const from = await withRepositories(recipe.fields, { folder: "https://github.com/octo/widgets/tree/main" }, ctx);
-	assert.deepEqual([from.source, from.root, from.input.folder], ["github.com/octo/widgets@main", path.join(cacheDir, "github.com", "octo", "widgets"), path.join(cacheDir, "github.com", "octo", "widgets")]);
+	const copy = path.join(cacheDir, "github.com", "octo", "widgets", git(origin, "rev-parse", "main").trim().slice(0, 12));
+	assert.deepEqual([from.source, from.root, from.input.folder], ["github.com/octo/widgets@main", copy, copy]);
 	const result = await recipe.collect(from.input, ctx);
 	assert.equal(result.summary, "1 workflow(s), 2 job(s)");
 	assert.ok(result.graph.nodes.some((n) => n.kind === "gha:job" && /deploy/.test(n.label)));
