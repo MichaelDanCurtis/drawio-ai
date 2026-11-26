@@ -99,7 +99,8 @@ the browser (also of a branch, or of a folder in it), its clone address, or `own
 `mapped-repos` in the app's data folder with the access to GitHub this computer already has
 (git's own saved sign-in, then the GitHub CLI's, then an SSH key; it never asks at a prompt) and
 read there like any folder, so the agent can read its files too. Each download is of one commit
-and has a folder of its own (`mapped-repos/github.com/<owner>/<repo>/<commit>`), so a map drawn
+and has a folder of its own (`mapped-repos/github.com/<owner>/<repo>/<commit>/<repo>`: called
+what the repository is called, so what a map names after its folder stays the same), so a map drawn
 earlier, or of another branch, still points at the files it was drawn from. A folder that is
 there is never replaced. The newest four of a repository are kept; an older one that a saved
 map points at is downloaded again, as that commit, when the map is used (Dig deeper, recent

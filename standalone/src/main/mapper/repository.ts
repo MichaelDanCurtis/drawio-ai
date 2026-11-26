@@ -84,7 +84,11 @@ export interface FetchOptions {
 }
 
 export interface Fetched {
-	/** The working copy: of one commit, in a folder of its own that is not written to again. */
+	/**
+	 * The working copy: of one commit, in a folder of its own that is not written to again. The
+	 * folder is called what the repository is called, whatever the commit, because that is what a
+	 * map names things after when they have no name of their own (a service at the top).
+	 */
 	dir: string;
 	/** What to map: the working copy, or the folder in it that the address named. */
 	root: string;
@@ -158,25 +162,28 @@ export function hasProgram(name: string, env: NodeJS.ProcessEnv, platform: NodeJ
 	return dirs.some((dir) => dir && names.some((n) => fs.existsSync(path.join(dir, n))));
 }
 
-/** Whether a download is there; if it is, it counts as used now (which keeps it from being cleared away). */
-function used(dir: string): boolean {
-	if (!fs.existsSync(path.join(dir, ".git", "HEAD"))) return false;
+/**
+ * Whether a download is there (`slot`: the folder named by its commit, which holds the working
+ * copy); if it is, it counts as used now, which keeps it from being cleared away.
+ */
+function used(slot: string): boolean {
+	if (!fs.existsSync(path.join(slot, path.basename(path.dirname(slot)), ".git", "HEAD"))) return false;
 	try {
 		const now = new Date();
-		fs.utimesSync(dir, now, now);
+		fs.utimesSync(slot, now, now);
 	} catch {
 		// read-only storage: it is there all the same
 	}
 	return true;
 }
 
-/** The download a folder is in (or is), if it is in one: `<cache>/github.com/<owner>/<repo>/<commit>[/…]`. */
+/** The download a folder is in (or is), if it is in one: `<cache>/github.com/<owner>/<repo>/<commit>/<repo>[/…]`. */
 export function downloadOf(cacheDir: string, folder: string): { dir: string; spec: RepositorySpec } | undefined {
 	const rel = path.relative(path.resolve(cacheDir), path.resolve(folder));
 	if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
-	const [host, owner, repo, commit] = rel.split(path.sep);
-	if (host !== "github.com" || !owner || !repo || !COMMIT.test(commit ?? "") || !NAME.test(owner) || !NAME.test(repo)) return undefined;
-	return { dir: path.join(path.resolve(cacheDir), host, owner, repo, commit), spec: { host, owner, repo, ref: commit } };
+	const [host, owner, repo, commit, copy] = rel.split(path.sep);
+	if (host !== "github.com" || !owner || !repo || !COMMIT.test(commit ?? "") || !NAME.test(owner) || !NAME.test(repo) || copy !== repo) return undefined;
+	return { dir: path.join(path.resolve(cacheDir), host, owner, repo, commit, repo), spec: { host, owner, repo, ref: commit } };
 }
 
 /**
@@ -188,7 +195,7 @@ export function downloadOf(cacheDir: string, folder: string): { dir: string; spe
 export async function keepDownloaded(folder: string, o: FetchOptions): Promise<"elsewhere" | "there" | "restored"> {
 	const of = downloadOf(o.cacheDir, folder);
 	if (!of) return "elsewhere";
-	if (used(of.dir)) return "there";
+	if (used(path.dirname(of.dir))) return "there";
 	const got = await fetchRepository(of.spec, o);
 	if (path.resolve(got.dir) !== of.dir) throw new MapperError("The repository was downloaded again, but not as the commit this map was made from.");
 	return "restored";
@@ -203,9 +210,15 @@ function prune(repoDir: string, keep: string): void {
 			.filter((d) => d.isDirectory() && COMMIT.test(d.name) && path.join(repoDir, d.name) !== keep)
 			.map((d) => ({ dir: path.join(repoDir, d.name), used: fs.statSync(path.join(repoDir, d.name)).mtimeMs }))
 			.sort((a, b) => b.used - a.used);
-		for (const o of old.slice(KEPT - 1)) if (now - o.used > IN_USE_MS) fs.rmSync(o.dir, { recursive: true, force: true });
-		// (what a download that was stopped half-way left behind, long ago)
-		for (const d of fs.readdirSync(repoDir)) if (/^\.new-/.test(d) && now - fs.statSync(path.join(repoDir, d)).mtimeMs > IN_USE_MS) fs.rmSync(path.join(repoDir, d), { recursive: true, force: true });
+		for (const o of old.slice(KEPT - 1)) {
+			if (now - o.used <= IN_USE_MS) continue;
+			// (taken out of its place in one step, then removed: a commit's place is whole or not there)
+			const gone = path.join(repoDir, `.gone-${randomBytes(4).toString("hex")}`);
+			fs.renameSync(o.dir, gone);
+			fs.rmSync(gone, { recursive: true, force: true });
+		}
+		// (what a download or a clearing-away that was stopped half-way left behind, long ago)
+		for (const d of fs.readdirSync(repoDir)) if (/^\.(new|gone)-/.test(d) && now - fs.statSync(path.join(repoDir, d)).mtimeMs > IN_USE_MS) fs.rmSync(path.join(repoDir, d), { recursive: true, force: true });
 	} catch {
 		// tidying up is not worth failing a map for
 	}
@@ -213,7 +226,7 @@ function prune(repoDir: string, keep: string): void {
 
 /**
  * Downloads the repository's newest state at `ref` into the cache and returns where it is: a
- * folder of that one commit, `<cache>/github.com/<owner>/<repo>/<commit>`. A map of another
+ * folder of that one commit, `<cache>/github.com/<owner>/<repo>/<commit>/<repo>`. A map of another
  * branch, or of the same branch later, gets another folder, so a map drawn before still points
  * at the files it was drawn from, and two maps being read at once do not take each other's files
  * away. A folder that is there is never replaced or written to again. The newest few are kept;
@@ -223,9 +236,12 @@ export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promi
 	const env: NodeJS.ProcessEnv = { ...o.env, GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1", GIT_OPTIONAL_LOCKS: "0", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: o.env.GIT_SSH_COMMAND ?? "ssh -oBatchMode=yes" };
 	const timeoutMs = o.timeoutMs ?? 180_000;
 	const run = (args: string[], cwd?: string, extra?: NodeJS.ProcessEnv) => git(args, { cwd, env: { ...env, ...extra }, signal: o.signal, timeoutMs });
-	const home = path.join(o.cacheDir, s.host, s.owner.toLowerCase(), s.repo.toLowerCase());
-	const fresh = path.join(home, `.new-${randomBytes(4).toString("hex")}`);
-	fs.mkdirSync(home, { recursive: true });
+	// <cache>/github.com/<owner>/<repo>/<commit>/<repo>: a slot per commit, and in it the working copy
+	const name = s.repo.toLowerCase();
+	const home = path.join(o.cacheDir, s.host, s.owner.toLowerCase(), name);
+	const slot = path.join(home, `.new-${randomBytes(4).toString("hex")}`);
+	const fresh = path.join(slot, name);
+	fs.mkdirSync(slot, { recursive: true });
 	// (the access this computer has, one way after the other: git's own saved sign-in, the GitHub CLI's, an SSH key)
 	const https = `https://${s.host}/${s.owner}/${s.repo}.git`;
 	const remotes = o.remotes?.(s) ?? [
@@ -265,25 +281,33 @@ export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promi
 		}
 		const head = (await run(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], fresh, quiet)).stdout.trim();
 		if (!COMMIT.test(head)) throw new MapperError("The repository was downloaded but git could not say which commit it is.");
-		const final = path.join(home, head);
-		if (!used(final)) {
+		const place = path.join(home, head);
+		const final = path.join(place, name);
+		if (!used(place)) {
 			const out = await run([...SAFE, "checkout", "-q", "--detach", "FETCH_HEAD"], fresh, quiet);
 			if (out.code !== 0) throw new MapperError(`The repository was downloaded but its files could not be written: ${said(out.stderr)}`);
-			try {
-				// (moved into place whole, and only where nothing is: a folder that is there is being read)
-				fs.renameSync(fresh, final);
-			} catch (e) {
-				// another window downloaded the same commit in the meantime: its copy is the one, and as good
-				if (!used(final)) throw new MapperError(`The repository was downloaded but could not be put in its place: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
-			}
+			// Moved into place whole, and only where nothing is: a download that is there is being read,
+			// so nothing is ever deleted to make room. When the move is refused because another window
+			// downloaded the same commit in the meantime, its copy is the one, and as good.
+			const moved = (from: string, to: string) => {
+				try {
+					fs.renameSync(from, to);
+					return undefined;
+				} catch (e) {
+					return e as Error;
+				}
+			};
+			// (the slot; or, into a slot that is there without a working copy, the working copy)
+			const refused = moved(slot, place) && moved(fresh, final);
+			if (refused && !used(place)) throw new MapperError(`The repository was downloaded but could not be put in its place: ${String(refused.message ?? refused).slice(0, 200)}`);
 		}
-		prune(home, final);
+		prune(home, place);
 		const root = s.subpath ? path.join(final, ...s.subpath.split("/")) : final;
 		if (!root.startsWith(final + path.sep) && root !== final) throw new MapperError("That folder is not inside the repository.");
 		if (!fs.existsSync(root) || !fs.lstatSync(root).isDirectory()) throw new MapperError(`${s.owner}/${s.repo} has no folder ${s.subpath}${s.ref ? ` at ${s.ref}` : ""}.`);
 		return { dir: final, root, head };
 	} finally {
-		fs.rmSync(fresh, { recursive: true, force: true });
+		fs.rmSync(slot, { recursive: true, force: true });
 		try {
 			// (nothing was downloaded: no empty folder is left for it)
 			fs.rmdirSync(home);

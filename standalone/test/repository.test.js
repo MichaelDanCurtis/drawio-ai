@@ -80,7 +80,7 @@ test("a repository is downloaded as it is now, into the app's folder, and nothin
 	assert.match(got.head, /^[0-9a-f]{40}$/);
 	assert.equal(got.head, git(origin, "rev-parse", "main").trim());
 	// (a folder of that one commit)
-	assert.equal(got.dir, path.join(repoDir, got.head));
+	assert.equal(got.dir, path.join(repoDir, got.head, "widgets"), "a place per commit, and in it a folder called what the repository is called");
 	assert.equal(got.root, got.dir);
 	assert.deepEqual(said, ["Downloading github.com/octo/Widgets…"]);
 	assert.equal(fs.readFileSync(path.join(got.dir, "README.md"), "utf8"), "main\n");
@@ -109,7 +109,7 @@ test("a repository is downloaded as it is now, into the app's folder, and nothin
 	const inside = await fetchRepository({ ...spec, subpath: "services/api" }, o);
 	assert.equal(inside.dir, got.dir);
 	assert.equal(inside.root, path.join(got.dir, "services", "api"));
-	assert.deepEqual(fs.readdirSync(repoDir).sort(), [got.dir, branch.dir].map((d) => path.basename(d)).sort(), "one folder per commit, and nothing half-made beside them");
+	assert.deepEqual(fs.readdirSync(repoDir).sort(), [got.head, branch.head].sort(), "one place per commit, and nothing half-made beside them");
 
 	// what is not there says so, and leaves the copies from before
 	await assert.rejects(fetchRepository({ ...spec, ref: "nope" }, o), (e) => e instanceof MapperError && e.message === "octo/Widgets has no branch, tag or commit called nope.");
@@ -134,19 +134,19 @@ test("downloads of a repository: the newest few commits are kept, and one in use
 	assert.equal(fs.readdirSync(repoDir).length, 6);
 	// hours later: the oldest go when the next commit is downloaded, the newest four stay
 	const longAgo = (n) => new Date(Date.now() - (10 - n) * 3600_000);
-	dirs.forEach((d, i) => fs.utimesSync(d, longAgo(i), longAgo(i)));
+	dirs.forEach((d, i) => fs.utimesSync(path.dirname(d), longAgo(i), longAgo(i)));
 	fs.mkdirSync(path.join(repoDir, ".new-0badc0de"));
 	fs.utimesSync(path.join(repoDir, ".new-0badc0de"), longAgo(0), longAgo(0));
 	put(origin, "README.md", "commit 6\n");
 	git(origin, "commit", "-q", "-am", "commit 6");
 	const newest = await fetchRepository(spec, o);
-	assert.deepEqual(fs.readdirSync(repoDir).sort(), [dirs[3], dirs[4], dirs[5], newest.dir].map((d) => path.basename(d)).sort());
+	assert.deepEqual(fs.readdirSync(repoDir).sort(), [dirs[3], dirs[4], dirs[5], newest.dir].map((d) => path.basename(path.dirname(d))).sort());
 	assert.equal(fs.readFileSync(path.join(dirs[3], "README.md"), "utf8"), "commit 3\n");
 	// a commit downloaded before is used again, and counts as used now
 	git(origin, "reset", "-q", "--hard", "HEAD~3");
 	const again = await fetchRepository(spec, o);
 	assert.equal(again.dir, dirs[3]);
-	assert.ok(Date.now() - fs.statSync(dirs[3]).mtimeMs < 60_000);
+	assert.ok(Date.now() - fs.statSync(path.dirname(dirs[3])).mtimeMs < 60_000);
 });
 
 test("the same commit asked for many times at once: one folder, and it is never taken away from a map that is reading it", async () => {
@@ -168,7 +168,7 @@ test("the same commit asked for many times at once: one folder, and it is never 
 	assert.equal(new Set(all).size, 1);
 	assert.equal(new Set(seen).size, 1, "the folder that was handed out first is the one all of them got");
 	assert.equal(fs.readdirSync(all[0]).filter((f) => f.startsWith(".reader-")).length, 12, "nothing a reader had was removed");
-	assert.deepEqual(fs.readdirSync(path.dirname(all[0])), [path.basename(all[0])], "and nothing half-made is left beside it");
+	assert.deepEqual(fs.readdirSync(path.join(cacheDir, "github.com", "octo", "widgets")), [path.basename(path.dirname(all[0]))], "and nothing half-made is left beside it");
 });
 
 test("a saved map's download: counted as used when the map is used, and downloaded again as that commit when it was cleared away", async () => {
@@ -180,18 +180,19 @@ test("a saved map's download: counted as used when the map is used, and download
 	const got = await fetchRepository({ ...parseRepository("octo/Widgets"), subpath: "services/api" }, o);
 	assert.deepEqual(downloadOf(cacheDir, got.root), { dir: got.dir, spec: { host: "github.com", owner: "octo", repo: "widgets", ref: got.head } });
 	// a folder of the user's own, the cache itself, and what only looks like a download
-	for (const other of [origin, cacheDir, path.join(cacheDir, "github.com", "octo"), path.join(cacheDir, "github.com", "octo", "widgets", "main"), path.join(cacheDir, "..", "elsewhere")]) assert.equal(await keepDownloaded(other, o), "elsewhere", other);
+	for (const other of [origin, cacheDir, path.join(cacheDir, "github.com", "octo"), path.join(cacheDir, "github.com", "octo", "widgets", "main", "widgets"), path.join(cacheDir, "github.com", "octo", "widgets", got.head, "other"), path.join(cacheDir, "..", "elsewhere")]) assert.equal(await keepDownloaded(other, o), "elsewhere", other);
 
 	// there: used now, so it is not among the ones cleared away
 	const longAgo = new Date(Date.now() - 5 * 3600_000);
-	fs.utimesSync(got.dir, longAgo, longAgo);
+	const place = path.dirname(got.dir);
+	fs.utimesSync(place, longAgo, longAgo);
 	assert.equal(await keepDownloaded(got.root, o), "there");
-	assert.ok(Date.now() - fs.statSync(got.dir).mtimeMs < 60_000);
+	assert.ok(Date.now() - fs.statSync(place).mtimeMs < 60_000);
 
 	// the repository moved on and the download was cleared away: the map still gets the commit it was made from
 	put(origin, "services/api/package.json", '{"name":"api","version":"2"}');
 	git(origin, "commit", "-q", "-am", "later");
-	fs.rmSync(got.dir, { recursive: true, force: true });
+	fs.rmSync(place, { recursive: true, force: true });
 	assert.equal(await keepDownloaded(got.root, o), "restored");
 	assert.equal(fs.readFileSync(path.join(got.root, "package.json"), "utf8"), '{"name":"api"}');
 	assert.equal(git(got.dir, "rev-parse", "HEAD").trim(), got.head);
@@ -199,6 +200,7 @@ test("a saved map's download: counted as used when the map is used, and download
 	// before an agent is sent to a map's folders: nothing to say when they are there (or the user's own)…
 	const ctx = { keepRepository: (folder) => keepDownloaded(folder, o) };
 	const shapes = [{ data: { mapRoot: got.root } }, { data: { mapRoot: got.root } }, { data: { mapRoot: origin } }, { data: {} }];
+	// (also when only the working copy went and its place was left behind, empty)
 	fs.rmSync(got.dir, { recursive: true, force: true });
 	assert.equal(await mapRootsReady(shapes, ctx), "");
 	assert.ok(fs.existsSync(got.root), "brought back for the agent to read");
@@ -209,6 +211,34 @@ test("a saved map's download: counted as used when the map is used, and download
 	const note = await mapRootsReady(shapes, gone);
 	assert.match(note, /no longer on this computer and could not be downloaded again: ".*services.api" \(Could not download octo\/widgets from GitHub\.\)/);
 	assert.ok(!fs.existsSync(got.dir));
+});
+
+test("a map of a repository names things the same whatever the commit: a later map is compared with an earlier one, shape for shape", async () => {
+	// (a service with no name of its own is called after its folder: the folder is called what the repository is)
+	const origin = tmp("remote");
+	git(origin, "init", "-q");
+	put(origin, "Dockerfile", "FROM node:20\nEXPOSE 8080\nCMD [\"node\", \"server.js\"]\n");
+	put(origin, "server.js", 'const pg = require("pg");\nnew pg.Client({ host: process.env.DB_HOST });\nrequire("http").createServer().listen(8080);\n');
+	git(origin, "add", "-A");
+	git(origin, "commit", "-q", "-m", "first");
+	const cacheDir = tmp("cache");
+	const ctx = { cwd: tmp("diagram"), signal: new AbortController().signal, progress() {}, exec: async () => ({ stdout: "", stderr: "", code: 1 }), repository: (spec) => fetchRepository(spec, { cacheDir, env: process.env, remotes: () => [{ url: origin, how: "a local copy" }] }) };
+	const recipe = recipeById("software.connectivity");
+	const map = async () => {
+		const from = await withRepositories(recipe.fields, { folder: "Octo/Shop-API" }, ctx);
+		return { from, ids: (await recipe.collect(from.input, ctx)).graph.nodes.map((n) => n.id).sort() };
+	};
+	const first = await map();
+	put(origin, "NOTES.md", "nothing a map shows\n");
+	git(origin, "add", "-A");
+	git(origin, "commit", "-q", "-m", "an unrelated commit");
+	const second = await map();
+	assert.notEqual(first.from.root, second.from.root, "another commit, another download");
+	assert.equal(path.basename(first.from.root), "shop-api");
+	assert.equal(path.basename(second.from.root), "shop-api");
+	assert.ok(first.ids.length > 0 && first.ids.some((id) => /shop-api/.test(id)), `named after the repository: ${first.ids.join(", ")}`);
+	assert.deepEqual(second.ids, first.ids, "the same shapes, by the same ids");
+	assert.ok(!first.ids.some((id) => /[0-9a-f]{40}/.test(id)), "no commit in any id");
 });
 
 test("the GitHub CLI is found on Windows too, where a program has an ending", () => {
@@ -294,7 +324,7 @@ test("a map of a repository: the recipe reads the downloaded folder, a folder of
 	assert.match(FOLDER_FIELD.placeholder, /GitHub repository/);
 
 	const from = await withRepositories(recipe.fields, { folder: "https://github.com/octo/widgets/tree/main" }, ctx);
-	const copy = path.join(cacheDir, "github.com", "octo", "widgets", git(origin, "rev-parse", "main").trim());
+	const copy = path.join(cacheDir, "github.com", "octo", "widgets", git(origin, "rev-parse", "main").trim(), "widgets");
 	assert.deepEqual([from.source, from.root, from.input.folder], ["github.com/octo/widgets@main", copy, copy]);
 	const result = await recipe.collect(from.input, ctx);
 	assert.equal(result.summary, "1 workflow(s), 2 job(s)");
