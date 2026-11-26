@@ -7,6 +7,7 @@
 import { dialog, Menu, nativeTheme, session, shell, type WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
+import { DiagramWindow } from "./diagramWindow";
 import type { E2eConfig } from "./e2e";
 import { EXCALIDRAW_SOURCE, parseScene, readScene, sniffExcalidraw } from "./excalidrawFile";
 import { ExcalidrawWindow, NO_AI_YET } from "./excalidrawWindow";
@@ -279,10 +280,13 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	try {
 		await addElement(again, "e2e-unsaved", "ellipse", { x: 520, y: 260 });
 		await until("unsaved changes", () => again.isDirty);
+		// (as when the app is quitting: a window that stays ends the quit, so no diagram window goes on with it later)
+		DiagramWindow.quitting = true;
 		again.win.close();
 		await until("the question to be asked", () => asked.length === 1);
 		await pause(200);
 		expect(!again.win.isDestroyed(), "Cancel keeps the window open");
+		expect(!DiagramWindow.quitting, "Cancel ends a quit that was under way");
 		again.win.close();
 		await closed(again);
 	} finally {

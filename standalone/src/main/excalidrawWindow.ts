@@ -32,6 +32,12 @@ export class ExcalidrawWindow implements DocumentWindow {
 	/** Called when a window comes to the front (it got the focus, or its drawing has just loaded), and after one closes: main.ts rebuilds the menu bar. */
 	public static onFront: (() => void) | undefined;
 	public static onClosed: (() => void) | undefined;
+	/**
+	 * Called when a window that was asked to close stays open after all (Cancel, a save that failed, a
+	 * question of its own already open). If the app was quitting, that is over: main.ts says so to the
+	 * diagram windows, which go on with a quit they held up (DiagramWindow.quitting).
+	 */
+	public static onStayed: (() => void) | undefined;
 	/** How a failure is shown (the end-to-end run records it instead of stopping at a dialog). */
 	public static showError: (title: string, message: string) => void = (title, message) => dialog.showErrorBox(title, message);
 
@@ -517,7 +523,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 	private async onClose(e: Electron.Event): Promise<void> {
 		if (this.closing || !this.dirty) return;
 		e.preventDefault();
-		if (this.asking) return;
+		if (this.asking) return void ExcalidrawWindow.onStayed?.();
 		this.asking = true;
 		let response: number;
 		try {
@@ -534,9 +540,9 @@ export class ExcalidrawWindow implements DocumentWindow {
 		} finally {
 			this.asking = false;
 		}
-		if (response === 2) return;
+		if (response === 2) return void ExcalidrawWindow.onStayed?.();
 		if (response === 0) {
-			if (!(await this.save())) return;
+			if (!(await this.save())) return void ExcalidrawWindow.onStayed?.();
 			// Changed while it was being saved (the editor stays usable meanwhile): those changes are not
 			// in the file, so the window does not close over them. It asks again.
 			if (this.dirty) return void this.win.close();

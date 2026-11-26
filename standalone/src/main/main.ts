@@ -448,6 +448,8 @@ app.whenReady().then(async () => {
 	ExcalidrawWindow.installIpc();
 	ExcalidrawWindow.appCommands = { newDrawing: () => void newDrawing(), open: () => void openDialog(), openPath: (file) => void openDroppedDrawing(file), settings: (section) => openSettings(section) };
 	// the menu bar follows the kind of document in front
+	// (a drawing's window that stays open after all ends a quit, as a diagram's does)
+	ExcalidrawWindow.onStayed = () => (DiagramWindow.quitting = false);
 	ExcalidrawWindow.onFront = () => scheduleMenu();
 	ExcalidrawWindow.onClosed = () => scheduleMenu();
 	DiagramWindow.appCommands = { newDiagram: () => void openFile(), newDrawing: () => void newDrawing(), open: () => void openDialog(), settings: (section) => openSettings(section), workshop: (mode) => WorkshopWindow.open(server, mode ?? "gallery") };
