@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- Mapper, **Kubernetes cluster**: the cluster no longer has to be a context in this computer's
+  kubeconfig. **Where the cluster is** offers Azure (AKS), AWS (EKS) and Google Cloud (GKE):
+  - The clusters are listed with the `az`, `aws` or `gcloud` CLI you are signed in to: those of a
+    subscription, of an account's region or of a project, or of every subscription or every
+    enabled region. A subscription or region that could not be searched is named in the list.
+  - The one you choose is read through a kubeconfig made for that one read, in a file only you
+    can read, which is removed when the read ends. `~/.kube/config` is never written to. For AWS
+    and Google Cloud the file holds no secret (the cluster's address and public certificate, and
+    the CLI as the way to sign in); for Azure it is what `az aks get-credentials` prints for you,
+    never the cluster admin's, with `kubelogin` told to use the Azure CLI's sign-in.
+  - Nothing of that sign-in is in the map, the facts, the log or what an agent is sent.
+- The Map Something dialog's lists: only the ones on show are asked for, one after the other,
+  each with what the ones before it chose (a project's clusters come after the project). What
+  is chosen is always something the list offers, so a choice made under another subscription
+  is not left behind unseen. The lists keep coming while you type in a text box, and what a
+  run said stays when the form is drawn again.
 - **Mapper: map a GitHub repository.** Where a map takes a repository or folder (Connectivity,
   Data flow, GitHub Actions workflows, API surface, Module dependencies, Class diagram,
   Infrastructure as code, dbt, ML pipelines) it now also takes a repository on GitHub: its

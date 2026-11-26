@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mapper: a Kubernetes cluster found in the cloud.** The Kubernetes map no longer needs the cluster to be a context in this computer's kubeconfig. **Where the cluster is** offers Azure (AKS), AWS (EKS) and Google Cloud (GKE): the signed-in `az`, `aws` or `gcloud` CLI lists the clusters of a subscription, an account's region or a project (or of every subscription or region), and the one you choose is read through a sign-in made for that one read. Your own kubeconfig is not changed, and nothing of the sign-in is drawn, stored or sent to an agent.
 - **Mapper: map a GitHub repository.** Where a map takes a repository or folder it also takes a repository on GitHub: its address from the browser (also of a branch or a folder in it), its clone address, or `owner/name` (`owner/name@branch` for a branch, tag or commit). Its newest state is downloaded with the access to GitHub this computer already has into the extension's own storage and read there; nothing is sent to the repository, and git runs nothing of the repository's own.
 
 ## [0.5.0]

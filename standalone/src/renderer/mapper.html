@@ -121,7 +121,7 @@
 		if (window.DrawAIIcons && GLYPHS[id]) ico.innerHTML = window.DrawAIIcons.svg(GLYPHS[id], iconStyle, { size: 20 });
 		return ico;
 	}
-	const state = { animateRecipes: true, animateForm: true, catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, running: false };
+	const state = { animateRecipes: true, animateForm: true, catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, asked: {}, running: false };
 
 	const recipes = () => (state.catalog?.recipes ?? []).filter((r) => r.category === state.category);
 	const recipe = () => state.catalog?.recipes.find((r) => r.id === state.recipeId);
@@ -168,7 +168,7 @@
 			...list.map((r) =>
 				el(
 					"button",
-					{ class: "recipe" + (r.id === state.recipeId ? " active" : ""), onclick: () => selectRecipe(r.id) },
+					{ class: "recipe" + (r.id === state.recipeId ? " active" : ""), "data-recipe": r.id, onclick: () => selectRecipe(r.id) },
 					el("b", {}, shortTitle(r.title), r.mode === "agent" ? el("span", { class: "badge", text: "with agent" }) : null),
 					el("span", { text: r.blurb || "" })
 				)
@@ -190,21 +190,66 @@
 		return v;
 	}
 
-	function loadOptions(r, f) {
+	/** Asks for a list. (Numbered: an answer to an earlier question, for a choice since changed, is not shown.) */
+	function askFor(r, f) {
 		const key = r.id + "/" + f.id;
 		state.loading[key] = true;
 		state.optionErrors[key] = undefined;
-		host.post({ type: "loadOptions", recipeId: r.id, fieldId: f.id, input: { ...state.values } });
+		state.asked[key] = (state.asked[key] ?? 0) + 1;
+		host.post({ type: "loadOptions", recipeId: r.id, fieldId: f.id, input: { ...state.values }, seq: state.asked[key] });
+	}
+
+	/** ↻: the list again. */
+	function loadOptions(r, f) {
+		askFor(r, f);
 		renderForm();
+	}
+
+	/** The lists after a choice are forgotten when it changes: they were listed for the old one (subscription → resource groups). */
+	function forgetAfter(r, f) {
+		for (const g of r.fields.slice(r.fields.indexOf(f) + 1)) {
+			if (!g.dynamic) continue;
+			const key = r.id + "/" + g.id;
+			delete state.options[key];
+			state.loading[key] = false;
+			state.asked[key] = (state.asked[key] ?? 0) + 1;
+		}
+	}
+
+	/**
+	 * What the form's lists need next. It does not depend on the form being drawn (it is not
+	 * redrawn under someone's typing), and goes through the lists on show in their order:
+	 * - A list is asked for once the lists before it are there: it may depend on what they chose
+	 *   (a project's clusters). A list nobody sees is not asked for: it is not worth a call to a cloud.
+	 * - What is chosen is always something the list offers: the first of a list that has just come,
+	 *   or nothing when the list is empty (a cluster chosen under another subscription is not left
+	 *   behind, unseen, to be mapped). A choice made here forgets the lists after it, like one made by hand.
+	 */
+	function advance(r) {
+		for (const f of r.fields) {
+			if (f.type !== "select" || !visible(r, f)) continue;
+			const key = r.id + "/" + f.id;
+			if (f.dynamic && state.options[key] === undefined) {
+				if (!state.loading[key]) askFor(r, f);
+				return;
+			}
+			if (f.dynamic && state.loading[key]) return;
+			const opts = f.dynamic ? state.options[key] : f.options ?? [];
+			if (opts.some((o) => o.value === (state.values[f.id] ?? ""))) continue;
+			const to = opts.length ? opts[0].value : "";
+			if ((state.values[f.id] ?? "") === to) continue;
+			state.values[f.id] = to;
+			if (f.dynamic) forgetAfter(r, f);
+		}
 	}
 
 	function fieldEl(r, f) {
 		const key = r.id + "/" + f.id;
 		const set = (value) => {
 			state.values[f.id] = value;
-			// Selects other fields depend on (subscription → resource groups) reload them.
-			if (f.type === "select") for (const g of r.fields) if (g.dynamic && g.id !== f.id && r.fields.indexOf(g) > r.fields.indexOf(f)) loadOptions(r, g);
-			if (r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
+			const lists = f.type === "select" && r.fields.slice(r.fields.indexOf(f) + 1).some((g) => g.dynamic);
+			if (lists) forgetAfter(r, f);
+			if (lists || r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
 		};
 		let control;
 		switch (f.type) {
@@ -221,15 +266,13 @@
 			case "select": {
 				const opts = f.dynamic ? state.options[key] ?? [] : f.options ?? [];
 				const sel = el("select", { onchange: (e) => set(e.target.value) });
-				if (f.dynamic && state.loading[key]) sel.append(el("option", { value: "", text: "Loading…" }));
+				if (f.dynamic && (state.loading[key] || state.options[key] === undefined)) sel.append(el("option", { value: "", text: "Loading…" }));
 				else if (!opts.length) sel.append(el("option", { value: "", text: f.dynamic ? "(none found — refresh or type in settings)" : "" }));
 				for (const o of opts) sel.append(el("option", { value: o.value, text: o.label }));
-				if (opts.length && !opts.some((o) => o.value === state.values[f.id])) state.values[f.id] = opts[0].value;
 				sel.value = state.values[f.id] ?? "";
 				control = f.dynamic
 					? el("div", { class: "row" }, sel, el("button", { class: "btn", title: "Reload", onclick: () => loadOptions(r, f), text: "↻" }))
 					: sel;
-				if (f.dynamic && state.options[key] === undefined && !state.loading[key]) setTimeout(() => loadOptions(r, f));
 				break;
 			}
 			case "folder":
@@ -270,9 +313,14 @@
 			box.replaceChildren(el("div", { class: "empty", text: "Choose a map on the left." }));
 			return;
 		}
+		// (the lists move on whether or not the form is redrawn just now)
+		advance(r);
 		const focus = document.activeElement;
 		const keepFocus = focus && box.contains(focus) && (focus.tagName === "INPUT" || focus.tagName === "TEXTAREA");
-		if (keepFocus) return; // don't re-render under the user's typing
+		// don't re-render under the user's typing: it is drawn when they leave the box
+		state.renderDue = !!keepFocus;
+		if (keepFocus) return;
+		const same = state.resultOf === r.id;
 		box.classList.toggle("page", !!state.animateForm);
 		state.animateForm = false;
 		const describe = el("input", { type: "checkbox", id: "describe" });
@@ -313,9 +361,24 @@
 				el("button", { class: "btn", id: "cancel", text: state.running ? "Stop" : "Close", onclick: () => host.post({ type: state.running ? "cancel" : "close" }) }),
 				el("button", { class: "btn btn-primary", id: "run", text: state.running ? "Mapping…" : "Map it", disabled: state.running, onclick: run })
 			),
-			el("div", { id: "result" }),
-			el("div", { id: "log" })
+			// What a run said stays when its form is drawn again (a list has come, a text box was
+			// left): it goes when another map is chosen or the next run starts.
+			(same && $("result")) || el("div", { id: "result" }),
+			(same && $("log")) || el("div", { id: "log" })
 		);
+		state.resultOf = r.id;
+		syncActions();
+	}
+
+	/** The buttons and the line beside them say whether a map is being made, also in a form that is not drawn again just now. */
+	function syncActions() {
+		const run = $("run");
+		if (run) {
+			run.textContent = state.running ? "Mapping…" : "Map it";
+			run.disabled = !!state.running;
+		}
+		if ($("cancel")) $("cancel").textContent = state.running ? "Stop" : "Close";
+		$("status")?.replaceChildren(...(state.running ? [el("span", { class: "dot-loader", "aria-hidden": "true" }, el("i"), el("i"), el("i"), el("i"), el("i")), "Mapping…"] : ["Read-only: inventory, catalog and file reads only."]));
 	}
 
 	function run() {
@@ -335,6 +398,8 @@
 		renderRecipes();
 		renderForm();
 	}
+
+	$("form").addEventListener("focusout", () => setTimeout(() => state.renderDue && renderForm()));
 
 	function selectRecipe(id, quiet) {
 		if (id !== state.recipeId) state.animateForm = true;
@@ -388,6 +453,7 @@
 				break;
 			case "options": {
 				const key = msg.recipeId + "/" + msg.fieldId;
+				if (msg.seq !== undefined && msg.seq !== state.asked[key]) break;
 				state.loading[key] = false;
 				state.options[key] = msg.options ?? [];
 				state.optionErrors[key] = msg.error;
@@ -400,8 +466,12 @@
 				break;
 			case "running":
 				state.running = true;
+				// (a new run: what the last one said goes; taken out here, as the form may not be drawn again under typing)
+				$("result")?.replaceChildren();
+				if ($("result")) $("result").className = "";
+				if ($("log")) $("log").textContent = "";
 				renderForm();
-				$("status").replaceChildren(el("span", { class: "dot-loader", "aria-hidden": "true" }, el("i"), el("i"), el("i"), el("i"), el("i")), "Mapping…");
+				syncActions();
 				break;
 			case "progress": {
 				const log = $("log");
@@ -414,6 +484,7 @@
 			case "done":
 				state.running = false;
 				renderForm();
+				syncActions();
 				// (a run that found nothing to draw is not a success to tick off: it says what it looked at)
 				setResult(msg.nothing ? "none" : "ok", (msg.nothing ? "" : "✓ ") + msg.summary, msg.warnings, msg.elsewhere);
 				if (!msg.nothing) window.drawaiPulse?.(0.5, 0.5);
@@ -421,6 +492,7 @@
 			case "failed":
 				state.running = false;
 				renderForm();
+				syncActions();
 				setResult("err", msg.message + (msg.hint ? "\n" + msg.hint : ""));
 				break;
 		}
