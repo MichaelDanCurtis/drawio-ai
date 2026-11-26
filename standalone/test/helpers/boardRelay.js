@@ -255,5 +255,5 @@ async function startBoardRelay(options = {}) {
 module.exports = { startBoardRelay };
 
 if (require.main === module) {
-	startBoardRelay({ port: Number(process.argv[2]) || 8787 }).then((r) => console.log(`Board relay (a stand-in for OmniPad's boards) at ${r.url}\nPut that address in OmniDraw: Settings → Sharing → OmniPad server.`));
+	startBoardRelay({ port: Number(process.argv[2]) || 8787 }).then((r) => console.log(`Board relay (a stand-in for OmniPad's boards) at ${r.url}\nPut that address in OmniDraw: File → Go Live…, OmniPad server.`));
 }

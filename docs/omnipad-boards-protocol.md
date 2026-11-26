@@ -6,9 +6,10 @@ proposes something OmniPad has not built, it says so: those parts are OmniPad's 
 change. Version 4 of this note, 2026-11-26. (Version 1 did not say how someone whose change crossed
 another's catches up with the server's order; version 2 let them vouch for a checksum
 meanwhile; version 3 lost a change that was on its way when the board sent everyone its
-diagram.) Nothing in this note is code yet in this repository's main branch: OmniDraw's side of
-the rules under "How changes are ordered", with tests against a stand-in server, comes in the
-pull request that follows this note. Until then they are a proposal.
+diagram.) OmniDraw's side is in `standalone/src/main/live/` (the rules under "How changes are
+ordered" are `session.ts`), tested in `standalone/test/live.test.js` against
+`standalone/test/helpers/boardRelay.js`, a small stand-in for the server that speaks this
+protocol; `yarn e2e --live` runs two OmniDraw windows through it. OmniPad's side is not built.
 
 ## What it is for
 
@@ -92,8 +93,8 @@ uses, revocable, as pads have them today:
 https://<omnipad>/b/<boardId>?invite=<code>
 ```
 
-OmniDraw recognises both. The server address is a setting (Settings → Sharing → OmniPad
-server); there is no built-in default until OmniPad says which address is the public one.
+OmniDraw recognises both. The server address is typed into the Go live window and remembered;
+there is no built-in default until OmniPad says which address is the public one.
 
 ## HTTP (proposed; OmniPad's to confirm)
 
@@ -227,9 +228,12 @@ in OmniDraw.
 
 ## Building it
 
-- **Here (OmniDraw):** the session (socket, ordering, resync), draw.io loaded with diff sync
-  while live, presence through the existing plugin, the Go live and Join windows, the setting.
-  Tested against a small relay that speaks this protocol (`standalone/test/helpers`), which
-  also lets two OmniDraw windows share a diagram on one computer before OmniPad has boards.
+- **Here (OmniDraw), built:** the session (socket, ordering, catching up), draw.io's diff sync
+  turned on while live, presence through the existing plugin, the Go live window (File → Go
+  Live…, File → Join a Shared Diagram…). The stand-in server also lets two OmniDraw windows
+  share a diagram on one computer before OmniPad has boards:
+  `node standalone/test/helpers/boardRelay.js`, then give its address in the Go live window.
+  Not built here yet: version 2's invite links (they need signing in to OmniPad), opening a
+  link by clicking it (`omnidraw://`), and coming back by itself after the connection drops.
 - **OmniPad:** the board document type and its routes, the browser page with draw.io embedded,
   invites for boards.

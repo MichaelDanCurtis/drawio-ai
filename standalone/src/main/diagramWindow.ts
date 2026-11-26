@@ -164,6 +164,8 @@ export class DiagramWindow {
 		return w;
 	}
 
+	/** Called when a window's sharing changed: it went live, someone came or left, it ended. */
+	public static onLive: ((w: DiagramWindow) => void) | undefined;
 	/** Called when a window's shared diagram ended other than by the window's own doing (the host stopped, the connection was lost). */
 	public static onLiveEnded: ((w: DiagramWindow, why: string) => void) | undefined;
 
@@ -822,10 +824,11 @@ export class DiagramWindow {
 	public async goLive(serverAddress: string, name: string): Promise<string> {
 		if (this.live && this.live.status !== "ended") return this.live.url;
 		const server = serverOrigin(serverAddress);
-		if (!server) throw new Error("Give the OmniPad server's address first (Settings → Sharing). It must be https, or a server on this computer.");
+		if (!server) throw new Error("Give the OmniPad server's address. It must be https, or a server on this computer.");
 		await this.whenLoaded();
 		this.live = await LiveShare.host(this.liveWindow(), server, { name, title: this.fileName() ?? "Untitled" });
 		this.updateTitle();
+		DiagramWindow.onLive?.(this);
 		return this.live.url;
 	}
 
@@ -835,6 +838,7 @@ export class DiagramWindow {
 		this.live = undefined;
 		await live?.stop();
 		this.updateTitle();
+		DiagramWindow.onLive?.(this);
 	}
 
 	private liveWindow() {
@@ -854,7 +858,7 @@ export class DiagramWindow {
 					DiagramWindow.onLiveEnded?.(this, live.ended ?? "The shared diagram ended.");
 				}
 				this.updateTitle();
-				DiagramWindow.onMenus?.(this);
+				DiagramWindow.onLive?.(this);
 			},
 			log: (text: string) => console.warn(text),
 		};

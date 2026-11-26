@@ -86,6 +86,8 @@ class DrawioEditor implements LiveEditor {
 
 export class LiveShare {
 	public status: LiveStatus = "connecting";
+	/** The name this person is here under. */
+	public me = "";
 	/** Why it ended, in words for the person. */
 	public ended: string | undefined;
 	public readonly session: LiveSession;
@@ -183,6 +185,7 @@ export class LiveShare {
 	}
 
 	private connect(name: string): Promise<void> {
+		this.me = name || "Someone";
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			const timer = setTimeout(() => fail(new BoardError("The shared diagram did not arrive in time.")), 30_000);

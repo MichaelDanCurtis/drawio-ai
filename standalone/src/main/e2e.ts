@@ -590,11 +590,52 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 		}
 	};
 	const edit = (win: DiagramWindow, ops: any[]) => win.client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: true, review: false, user: true });
+	// Through the Go live window, as a person does it: the server and a name, Go live, the link; then Join with that link.
+	const { LiveDialog } = await import("./liveDialog");
+	const dialogPage = async () => (await waitFor(() => LiveDialog.window, 10_000)).webContents;
+	const inDialog = async (js: string) => (await dialogPage()).executeJavaScript(js);
+	const fill = (id: string, value: string) => inDialog(`(() => { const i = document.getElementById(${JSON.stringify(id)}); i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+	const shot = async (name: string) => fs.writeFileSync(path.join(config.out, name), (await (await dialogPage()).capturePage()).toPNG());
+	LiveDialog.open(server, w, "share");
+	await new Promise((r) => setTimeout(r, 1200));
+	log("liveDialogBefore", await inDialog(`[document.getElementById("title").textContent, document.getElementById("go").textContent, document.getElementById("live").hidden]`));
+	// (an address that is not one is refused in words, and nothing is shared)
+	await fill("server", "not an address");
+	await inDialog(`document.getElementById("go").click()`);
+	await new Promise((r) => setTimeout(r, 400));
+	log("liveDialogBadServer", await inDialog(`document.getElementById("error").textContent`));
+	await fill("server", config.live!.relay);
+	await fill("name", "Host");
+	await shot("live-dialog-share.png");
 	const t0 = Date.now();
-	const link = await w.goLive(config.live!.relay, "Host");
+	await inDialog(`document.getElementById("go").click()`);
+	await waitFor(() => (w.live?.status === "live" ? w.live : undefined), 20_000);
+	const link = w.live!.url;
 	log("liveLinkShape", /^http:\/\/127\.0\.0\.1:\d+\/b\/[A-Za-z0-9_-]{22}$/.test(link));
-	const guest = await DiagramWindow.join(server, link, "Guest");
+	await new Promise((r) => setTimeout(r, 300));
+	log("liveDialogLive", await inDialog(`[document.getElementById("title").textContent, document.getElementById("url").value === ${JSON.stringify(link)}, document.getElementById("stop").textContent, document.querySelectorAll("#people li").length]`));
+	// someone else: Join, with the link
+	const before = new Set(DiagramWindow.all);
+	await inDialog(`document.getElementById("close").click()`);
+	await new Promise((r) => setTimeout(r, 300));
+	LiveDialog.open(server, undefined, "join");
+	await new Promise((r) => setTimeout(r, 1200));
+	await fill("link", "https://example.com/not-a-board");
+	await inDialog(`document.getElementById("go").click()`);
+	await new Promise((r) => setTimeout(r, 400));
+	log("liveDialogBadLink", await inDialog(`document.getElementById("error").textContent`));
+	await fill("link", link);
+	await fill("name2", "Guest");
+	await inDialog(`document.getElementById("go").click()`);
+	const guest = await waitFor(() => [...DiagramWindow.all].find((x) => !before.has(x) && x.live?.status === "live"), 20_000);
 	log("liveJoinMs", Date.now() - t0);
+	await new Promise((r) => setTimeout(r, 400));
+	log("liveDialogGuest", await inDialog(`[document.getElementById("title").textContent, document.getElementById("stop").textContent, Array.from(document.querySelectorAll("#people li")).map((li) => li.textContent)]`));
+	// the host's own window lists the guest
+	LiveDialog.open(server, w, "share");
+	await new Promise((r) => setTimeout(r, 500));
+	log("liveDialogHostPeople", await inDialog(`Array.from(document.querySelectorAll("#people li")).map((li) => li.textContent)`));
+	await shot("live-dialog-live.png");
 	log("liveCellsOnJoin", await same(w, guest, "joining"));
 	log("liveTitles", [w.win.getTitle(), guest.win.getTitle()]);
 

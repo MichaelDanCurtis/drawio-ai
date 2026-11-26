@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data:; font-src $$cspSource$$; style-src 'nonce-$$nonce$$' $$cspSource$$; script-src 'nonce-$$nonce$$' $$cspSource$$;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Go Live</title>
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/fonts.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/tokens.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/motion.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/depth.css">
+<link rel="stylesheet" nonce="$$nonce$$" href="/ui/app.css">
+<script nonce="$$nonce$$" src="/ui/brandmark.js"></script>
+<style nonce="$$nonce$$">
+	body { display: flex; flex-direction: column; }
+	.head { position: relative; isolation: isolate; flex: none; padding: 22px 24px 16px; border-bottom: 1px solid var(--border); }
+	.head > :not(.backdrop) { position: relative; z-index: 1; }
+	.head .backdrop { height: 100%; }
+	.head .label { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+	.head h1 { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; margin: 0 0 6px; }
+	.head p { margin: 0; color: var(--muted); }
+	main { flex: 1; overflow: auto; padding: 18px 24px 22px; }
+	.field { margin-bottom: 14px; }
+	.field > label { display: block; font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+	.field input { width: 100%; }
+	.help { color: var(--muted); font-size: 12px; margin-top: 5px; line-height: 1.45; }
+	.actions { display: flex; gap: 8px; align-items: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+	.spacer { flex: 1; }
+	.status { font-size: 12px; color: var(--muted); }
+	.link { display: flex; gap: 8px; }
+	.link input { flex: 1; font-family: var(--font-mono); font-size: 12px; }
+	#people { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+	#people li { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+	#people li:last-child { border-bottom: none; }
+	#people .who { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+	#people .me { color: var(--muted); }
+	#people .role { margin-left: auto; font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+	.callout { margin-top: 14px; }
+	.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--surface-3); border-radius: var(--radius-pill); margin-bottom: 16px; }
+	.seg button { border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 12.5px; padding: 5px 14px; border-radius: var(--radius-pill); cursor: pointer; transition: background var(--dur) var(--ease-out), color var(--dur) var(--ease-out); }
+	.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+	[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header class="head" data-dot-host>
+	<div class="backdrop"><canvas class="dotfield" id="field"></canvas></div>
+	<span class="label"><span class="brandmark" aria-hidden="true"><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i data-on></i><i></i><i data-on></i><i data-on></i><i></i><i></i><i data-signal></i><i></i><i></i><i></i></span><span id="kicker">Sharing · OmniPad</span></span>
+	<h1 id="title">Go live</h1>
+	<p id="lead"></p>
+</header>
+<main>
+	<div class="seg" id="tabs" role="group" aria-label="Share or join">
+		<button type="button" id="tab-share" aria-pressed="true">Share this diagram</button>
+		<button type="button" id="tab-join" aria-pressed="false">Join one</button>
+	</div>
+
+	<section id="share">
+		<div class="field">
+			<label for="server">OmniPad server</label>
+			<input type="text" id="server" placeholder="https://pad.example.com" autocomplete="off" spellcheck="false">
+			<div class="help">The diagram is sent there and kept while you share it. Your file stays on this computer and is saved as always.</div>
+		</div>
+		<div class="field">
+			<label for="name">Your name, as the others see it</label>
+			<input type="text" id="name" placeholder="Someone" autocomplete="off" maxlength="60">
+		</div>
+	</section>
+
+	<section id="join" hidden>
+		<div class="field">
+			<label for="link">The link you were sent</label>
+			<input type="text" id="link" placeholder="https://pad.example.com/b/…" autocomplete="off" spellcheck="false">
+			<div class="help">It opens in a new window. What you change there changes the shared diagram, not a file of yours.</div>
+		</div>
+		<div class="field">
+			<label for="name2">Your name, as the others see it</label>
+			<input type="text" id="name2" placeholder="Someone" autocomplete="off" maxlength="60">
+		</div>
+	</section>
+
+	<section id="live" hidden>
+		<div class="field" id="linkField">
+			<label for="url">The link to give to others</label>
+			<div class="link"><input type="text" id="url" readonly><button type="button" class="btn" id="copy">Copy</button></div>
+			<div class="help">Anyone who has this link can change the diagram: send it only to the people you mean. It stops working when you stop sharing.</div>
+		</div>
+		<div class="field">
+			<label>Here now</label>
+			<ul id="people"></ul>
+		</div>
+	</section>
+
+	<div class="callout callout-danger" id="error" hidden></div>
+
+	<div class="actions">
+		<span class="status" id="status"></span>
+		<span class="spacer"></span>
+		<button type="button" class="btn" id="close">Close</button>
+		<button type="button" class="btn btn-danger" id="stop" hidden>Stop sharing</button>
+		<button type="button" class="btn btn-primary" id="go">Go live</button>
+	</div>
+</main>
+<script type="module" nonce="$$nonce$$">
+	import { mountDotField } from "/ui/dots.js";
+	import { mountMatrix } from "/ui/matrix.js";
+	mountDotField(document.getElementById("field"), { density: 0.45, anchor: "viewport" });
+	window.omnidrawMatrix = mountMatrix();
+	const mark = document.querySelector(".head .brandmark");
+	if (mark && window.DrawAIBrandmark) window.DrawAIBrandmark.mount(mark, { size: 18 });
+</script>
+<script nonce="$$nonce$$">
+(() => {
+	const host = window.drawaiLive;
+	const $ = (id) => document.getElementById(id);
+	let state = { mode: "share" };
+	// (what is typed is not overwritten by a state that arrives meanwhile)
+	const typed = { server: false, name: false };
+
+	function render() {
+		const s = state;
+		const live = s.mode === "live" && s.live;
+		const guest = live && s.live.role === "guest";
+		document.documentElement.dataset.matrix = s.matrix || "grey";
+		$("title").textContent = live ? (guest ? "You are in a shared diagram" : "This diagram is live") : s.mode === "join" ? "Join a shared diagram" : "Go live";
+		$("lead").textContent = live
+			? guest
+				? "You and the others see each other's changes as they are made."
+				: `${s.diagram ?? "The diagram"} is shared. Whoever opens the link works on it with you.`
+			: s.mode === "join"
+			? "Work on a diagram someone shared, with them, at the same time."
+			: `Share ${s.diagram ?? "this diagram"} by a link: whoever opens it works on it with you, in a browser or in OmniDraw.`;
+		$("tabs").hidden = !!live || !s.diagram;
+		$("tab-share").setAttribute("aria-pressed", String(s.mode === "share"));
+		$("tab-join").setAttribute("aria-pressed", String(s.mode === "join"));
+		$("share").hidden = !!live || s.mode !== "share";
+		$("join").hidden = !!live || s.mode !== "join";
+		$("live").hidden = !live;
+		if (!typed.server && document.activeElement !== $("server")) $("server").value = s.server ?? "";
+		for (const id of ["name", "name2"]) if (!typed.name && document.activeElement !== $(id)) $(id).value = s.name ?? "";
+		if (live) {
+			$("url").value = s.live.url;
+			const people = [{ name: (s.live.me || "You") + " (you)", me: true, role: guest ? "" : "host" }, ...s.live.people.map((p) => ({ ...p, role: "" }))];
+			$("people").replaceChildren(
+				...people.map((p) => {
+					const li = document.createElement("li");
+					const dot = document.createElement("span");
+					dot.className = "who";
+					dot.style.background = p.me ? "var(--ink)" : p.color;
+					const name = document.createElement("span");
+					name.textContent = p.name;
+					if (p.me) name.className = "me";
+					const role = document.createElement("span");
+					role.className = "role";
+					role.textContent = p.role;
+					li.append(dot, name, role);
+					return li;
+				})
+			);
+		}
+		$("error").hidden = !s.error;
+		$("error").textContent = s.error ?? "";
+		$("status").textContent = s.busy ?? (s.copied ? "Copied." : live ? `${s.live.people.length + 1} here` : "");
+		$("go").hidden = !!live;
+		$("go").textContent = s.mode === "join" ? "Join" : "Go live";
+		$("go").disabled = !!s.busy;
+		$("stop").hidden = !live;
+		$("stop").textContent = guest ? "Leave" : "Stop sharing";
+		$("stop").disabled = !!s.busy;
+	}
+
+	$("server").addEventListener("input", () => (typed.server = true));
+	for (const id of ["name", "name2"]) $(id).addEventListener("input", (e) => { typed.name = true; $(id === "name" ? "name2" : "name").value = e.target.value; });
+	$("tab-share").addEventListener("click", () => host.post({ type: "mode", mode: "share" }));
+	$("tab-join").addEventListener("click", () => host.post({ type: "mode", mode: "join" }));
+	$("go").addEventListener("click", () => {
+		if (state.mode === "join") host.post({ type: "join", link: $("link").value, name: $("name2").value });
+		else host.post({ type: "goLive", server: $("server").value, name: $("name").value });
+	});
+	for (const id of ["server", "name", "link", "name2"]) $(id).addEventListener("keydown", (e) => e.key === "Enter" && $("go").click());
+	$("stop").addEventListener("click", () => host.post({ type: "stop" }));
+	$("copy").addEventListener("click", () => host.post({ type: "copy" }));
+	$("url").addEventListener("focus", (e) => e.target.select());
+	$("close").addEventListener("click", () => host.post({ type: "close" }));
+	document.addEventListener("keydown", (e) => e.key === "Escape" && host.post({ type: "close" }));
+
+	host.onMessage((msg) => {
+		if (msg?.type !== "state") return;
+		state = msg;
+		render();
+	});
+	render();
+	host.post({ type: "ready" });
+})();
+</script>
+</body>
+</html>
