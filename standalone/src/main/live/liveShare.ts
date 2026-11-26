@@ -138,7 +138,10 @@ export class LiveShare {
 	private ownerKey: string | undefined;
 
 	private constructor(private readonly win: LiveWindow, public readonly role: "host" | "guest") {
-		this.editor = new DrawioEditor(win.client, () => win.remoteChanged());
+		// (a host's own diagram coming back from the board as its first one is not a change to its file)
+		this.editor = new DrawioEditor(win.client, () => {
+			if (this.role !== "host" || this.status === "live") win.remoteChanged();
+		});
 		this.session = new LiveSession(this.editor, (m) => this.socket?.send(m), {
 			people: () => this.showPeople(),
 			closed: (reason) =>

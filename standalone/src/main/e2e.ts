@@ -744,6 +744,22 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await waitFor(() => ended3, 10_000);
 	log("liveHostClosedWindow", { boardWhenTheWindowWasGone: goneAtClose, guestTold: ended3 });
 	if (goneAtClose !== 404) throw new Error("The board outlived its host's window.");
+	// A window closed while sharing is still starting (the server is making the board): it waits, and
+	// the board that was made is closed with it rather than left behind.
+	const early = await DiagramWindow.open(server, undefined, { xml: await w.client.getXml(), name: "A third diagram" });
+	await early.whenLoaded();
+	(early as any).dirty = false;
+	const startingEarly = early.goLive(config.live!.relay, "Host").then(
+		(url) => url,
+		(e) => `failed: ${e?.message ?? e}`
+	);
+	await new Promise((r) => setTimeout(r, 300));
+	let earlyGone: number | undefined;
+	early.win.once("closed", () => void startingEarly.then((url) => (url.startsWith("http") ? fetch(`${config.live!.relay}/api/boards/${url.split("/b/")[1]}`).then((r) => (earlyGone = r.status)) : (earlyGone = -1))));
+	early.win.close();
+	await waitFor(() => earlyGone, 15_000);
+	log("liveClosedWhileStarting", { started: (await startingEarly).startsWith("http") ? "yes" : await startingEarly, boardWhenTheWindowWasGone: earlyGone });
+	if (earlyGone !== 404 && earlyGone !== -1) throw new Error("A board made while its window was closing was left behind.");
 	// after that a change in one is not a change in the other
 	await edit(w, [{ op: "addShape", label: "after", x: 500, y: 40, width: 80, height: 40 }]);
 	await new Promise((r) => setTimeout(r, 800));

@@ -179,7 +179,13 @@ export class DiagramWindow {
 		const w = await DiagramWindow.open(server, undefined, { xml: "", name: "Shared diagram" });
 		try {
 			await w.whenLoaded();
-			w.live = await LiveShare.join(w.liveWindow(), link, { name });
+			const live = await LiveShare.join(w.liveWindow(), link, { name });
+			if (w.win.isDestroyed()) {
+				// (the window was closed while joining: nobody is left in it to be on the board)
+				await live.stop();
+				throw new Error("The window was closed before the shared diagram had arrived.");
+			}
+			w.live = live;
 			// (what is in the window now is the board's, not an unsaved diagram of this person's)
 			w.setDirty(false);
 		} catch (e) {
@@ -826,11 +832,30 @@ export class DiagramWindow {
 		const server = serverOrigin(serverAddress);
 		if (!server) throw new Error("Give the OmniPad server's address. It must be https, or a server on this computer.");
 		await this.whenLoaded();
-		this.live = await LiveShare.host(this.liveWindow(), server, { name, title: this.fileName() ?? "Untitled" });
+		// (a window that is closed while this is under way waits for it, and then ends what was started)
+		const starting = LiveShare.host(this.liveWindow(), server, { name, title: this.fileName() ?? "Untitled" });
+		this.startingLive = starting.then(
+			() => undefined,
+			() => undefined
+		);
+		let live: LiveShare;
+		try {
+			live = await starting;
+		} finally {
+			this.startingLive = undefined;
+		}
+		if (this.win.isDestroyed()) {
+			await live.stop();
+			throw new Error("The window was closed before sharing had started.");
+		}
+		this.live = live;
 		this.updateTitle();
 		DiagramWindow.onLive?.(this);
-		return this.live.url;
+		return live.url;
 	}
+
+	/** While sharing is being started (the board made, the connection opened): settles when that is over, either way. */
+	private startingLive: Promise<void> | undefined;
 
 	/** Stops sharing (the host: for everyone), or leaves (a guest). */
 	public async stopLive(): Promise<void> {
@@ -1014,6 +1039,14 @@ export class DiagramWindow {
 
 	private async onClose(e: Electron.Event): Promise<void> {
 		if (this.closing) return;
+		// Sharing is still being started: the board may be made on the server at any moment. The window
+		// waits for that, so that there is a session to end (and a board to close) when it goes.
+		if (this.startingLive) {
+			e.preventDefault();
+			await this.startingLive;
+			this.win.close();
+			return;
+		}
 		const live = this.live?.status === "live" ? this.live : undefined;
 		// What someone on a shared diagram changed last must have reached the board before the window
 		// goes: it is given a moment, and if it still has not, they are asked.
