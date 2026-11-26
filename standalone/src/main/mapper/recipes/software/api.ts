@@ -323,6 +323,8 @@ export function apiFindings(specs: ApiSpec[], graph: MapGraph): { findings: MapF
 interface GqlType {
 	kind: string;
 	name: string;
+	/** What it is the root of, if it is one: named in the document's `schema { … }`, or, without one, called Query / Mutation / Subscription. */
+	root?: "query" | "mutation" | "subscription";
 	fields: { name: string; args: number; type: string }[];
 	members?: string[];
 	implements?: string[];
@@ -364,13 +366,41 @@ export function parseGraphQL(text: string, file: string): GqlType[] {
 			if (impl?.length) existing.implements = [...(existing.implements ?? []), ...impl];
 		} else out.push({ kind, name, fields, file, ...(impl?.length ? { implements: impl } : {}) });
 	}
+	// the roots: what `schema { query: … }` names, or the usual names when the document has no such block
+	const block = /\bschema\s*(?:@[^{]*)?\{([^}]*)\}/.exec(clean)?.[1];
+	const named = new Map<string, GqlType["root"]>();
+	if (block !== undefined) for (const r of block.matchAll(/\b(query|mutation|subscription)\s*:\s*([_A-Za-z]\w*)/g)) named.set(r[2], r[1] as GqlType["root"]);
+	else for (const [n, as] of [["Query", "query"], ["Mutation", "mutation"], ["Subscription", "subscription"]] as const) named.set(n, as);
+	for (const t of out) if (t.kind === "type" && named.has(t.name)) t.root = named.get(t.name);
 	return out;
+}
+
+/**
+ * The types of several documents as one schema: a type that more than one of them describes (a
+ * schema split over files, or a schema file beside the same API asked live) is one type, with
+ * the fields of all of them.
+ */
+export function mergeGqlTypes(types: GqlType[]): GqlType[] {
+	const byName = new Map<string, GqlType>();
+	for (const t of types) {
+		const first = byName.get(t.name);
+		if (!first) {
+			byName.set(t.name, { ...t, fields: [...t.fields], ...(t.members ? { members: [...t.members] } : {}), ...(t.implements ? { implements: [...t.implements] } : {}) });
+			continue;
+		}
+		for (const f of t.fields) if (!first.fields.some((x) => x.name === f.name)) first.fields.push(f);
+		if (t.members) first.members = [...new Set([...(first.members ?? []), ...t.members])];
+		if (t.implements) first.implements = [...new Set([...(first.implements ?? []), ...t.implements])];
+		first.root ??= t.root;
+	}
+	return [...byName.values()];
 }
 
 export function graphqlToGraph(types: GqlType[], name: string): MapGraph {
 	const nodes: MapNode[] = [];
 	const edges: MapEdge[] = [];
-	const ROOTS = new Set(["Query", "Mutation", "Subscription"]);
+	types = mergeGqlTypes(types);
+	const ROOTS = new Set(types.filter((t) => t.root).map((t) => t.name));
 	const objectish = new Map(types.filter((t) => ["type", "interface", "union", "input"].includes(t.kind)).map((t) => [t.name, t]));
 	const base = (t: string) => t.replace(/[[\]!]/g, "");
 	// Most connected types first when there are too many.
@@ -388,7 +418,7 @@ export function graphqlToGraph(types: GqlType[], name: string): MapGraph {
 		nodes.push({
 			id: id(t.name),
 			label: `${root ? "" : t.kind === "type" ? "" : `«${t.kind}» `}${t.name}`,
-			kind: `graphql:${root ? t.name.toLowerCase() : t.kind}`,
+			kind: `graphql:${t.root ?? t.kind}`,
 			shape: "table",
 			style: root ? STYLE.table("#ffe6cc", "#d79b00") : STYLES[t.kind] ?? STYLES.type,
 			rows: t.members ? t.members.map((mm) => ({ text: mm })) : t.fields.map((f) => ({ text: `${f.name}${f.args ? "(…)" : ""}`, detail: f.type || undefined })),
@@ -512,7 +542,7 @@ export const apiRecipe: Recipe = {
 			}
 		}
 		if (graphql.length) {
-			const types = graphql.flatMap((f) => parseGraphQL(f.text, f.rel));
+			const types = mergeGqlTypes(graphql.flatMap((f) => parseGraphQL(f.text, f.rel)));
 			const g = graphqlToGraph(types, name);
 			graphs.push(g);
 			summary.push(`${graphql.length} GraphQL file(s), ${types.length} type(s)`);

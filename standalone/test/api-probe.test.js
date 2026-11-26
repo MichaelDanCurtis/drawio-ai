@@ -8,7 +8,7 @@ const fs = require("fs");
 const path = require("path");
 require("./helpers/ts");
 const { probeApi, apiAddress, asSpec, specLinks, introspectionToSdl, nothingFound, USUAL_PLACES } = require("../src/main/mapper/recipes/software/apiProbe");
-const { apiRecipe, parseGraphQL } = require("../src/main/mapper/recipes/software/api");
+const { apiRecipe, parseGraphQL, graphqlToGraph, mergeGqlTypes } = require("../src/main/mapper/recipes/software/api");
 const { MapperError } = require("../src/main/mapper/types");
 
 const SPEC = { openapi: "3.0.3", info: { title: "Shop", version: "1" }, paths: { "/orders": { get: { tags: ["orders"], responses: { 200: { description: "ok" } } }, post: { tags: ["orders"], responses: { 201: { description: "made" } } } }, "/orders/{id}": { get: { tags: ["orders"], responses: { 200: { description: "ok" } } } } } };
@@ -126,13 +126,44 @@ test("GraphQL: an endpoint is asked for its schema with one read-only question, 
 	const named = await probeApi(`${gql.url}/graphql`);
 	assert.deepEqual(found(named), [[], "/graphql"]);
 	assert.deepEqual(gql.paths(), ["GET /graphql", "POST /graphql"], "the address itself, then the question: nothing else is asked");
-	// the schema as the map reads it: the roots by their usual names, whatever the API calls them
+	// the schema as the map reads it: every type by the name the API gives it, and the roots known as the roots
 	const types = parseGraphQL(named.graphql.sdl, "x");
-	assert.deepEqual(types.map((t) => `${t.kind} ${t.name}`).sort(), ["enum State", "input Filter", "interface Node", "scalar DateTime", "type Mutation", "type Order", "type Query", "union Thing"]);
-	assert.deepEqual(types.find((t) => t.name === "Query").fields.map((f) => `${f.name}:${f.type}:${f.args}`), ["order:Order:1", "orders:[Order!]!:0"]);
+	assert.deepEqual(types.map((t) => `${t.kind} ${t.name}`).sort(), ["enum State", "input Filter", "interface Node", "scalar DateTime", "type Mutation", "type Order", "type RootQuery", "union Thing"]);
+	assert.deepEqual(types.filter((t) => t.root).map((t) => `${t.root}: ${t.name}`), ["query: RootQuery", "mutation: Mutation"]);
+	assert.deepEqual(types.find((t) => t.name === "RootQuery").fields.map((f) => `${f.name}:${f.type}:${f.args}`), ["order:Order:1", "orders:[Order!]!:0"]);
 	assert.deepEqual(types.find((t) => t.name === "Order").implements, ["Node"]);
+	const drawn = graphqlToGraph(types, "x");
+	assert.deepEqual(drawn.nodes.filter((n) => /^graphql:(query|mutation|subscription)$/.test(n.kind)).map((n) => `${n.kind} ${n.label}`), ["graphql:query RootQuery", "graphql:mutation Mutation"]);
 	// (an API with queries only, and one whose answer has a type without a name: read, not tripped over)
-	assert.equal(introspectionToSdl({ data: { __schema: { queryType: { name: "Q" }, types: [{ kind: "OBJECT", name: "Q", fields: [{ name: "a", args: [], type: { kind: "SCALAR", name: "Int" } }, { type: {} }] }, { kind: "OBJECT" }, null] } } }), "type Query {\n  a: Int\n}");
+	assert.equal(introspectionToSdl({ data: { __schema: { queryType: { name: "Q" }, types: [{ kind: "OBJECT", name: "Q", fields: [{ name: "a", args: [], type: { kind: "SCALAR", name: "Int" } }, { type: {} }] }, { kind: "OBJECT" }, null] } } }), "schema {\n  query: Q\n}\n\ntype Q {\n  a: Int\n}");
+	assert.equal(introspectionToSdl({ data: { __schema: { queryType: { name: "Q" }, types: [] } } }), undefined, "roots named, and no types: not a schema");
+
+	// a root with a name of its own that other types point back at, beside an ordinary type that happens to be called Query
+	const own = introspectionToSdl({
+		data: {
+			__schema: {
+				queryType: { name: "Root" },
+				types: [
+					{ kind: "OBJECT", name: "Root", fields: [{ name: "search", args: [], type: { kind: "OBJECT", name: "Query" } }, { name: "viewer", args: [], type: { kind: "OBJECT", name: "User" } }], interfaces: [{ name: "Node" }] },
+					{ kind: "OBJECT", name: "Query", fields: [{ name: "text", args: [], type: { kind: "SCALAR", name: "String" } }] },
+					{ kind: "OBJECT", name: "User", fields: [{ name: "root", args: [], type: { kind: "OBJECT", name: "Root" } }] },
+					{ kind: "INTERFACE", name: "Node", fields: [] },
+					{ kind: "UNION", name: "Any", possibleTypes: [{ name: "Root" }, { name: "User" }] },
+				],
+			},
+		},
+	});
+	const ownTypes = parseGraphQL(own, "x");
+	assert.deepEqual(ownTypes.map((t) => `${t.root ?? "-"} ${t.name}`), ["query Root", "- Query", "- User", "- Node", "- Any"], "one declaration each, and only the root is the root");
+	const g = graphqlToGraph(ownTypes, "x");
+	const ids = g.nodes.map((n) => n.id);
+	assert.equal(new Set(ids).size, ids.length);
+	assert.ok(g.edges.some((e) => e.from === "gql:User" && e.to === "gql:Root"), "what points at the root still does");
+	assert.ok(g.edges.some((e) => e.from === "gql:Any" && e.to === "gql:Root"));
+	assert.equal(g.nodes.find((n) => n.id === "gql:Query").kind, "graphql:type");
+	// a schema file: its own `schema { … }` block is read the same way, and without one the usual names are the roots
+	assert.deepEqual(parseGraphQL("schema { query: Api mutation: Changes }\ntype Api { a: Int }\ntype Changes { b: Int }\ntype Query { c: Int }", "s.graphql").map((t) => `${t.root ?? "-"} ${t.name}`), ["query Api", "mutation Changes", "- Query"]);
+	assert.deepEqual(parseGraphQL("type Query { a: Int }\ntype Subscription { b: Int }\ninput Mutation { c: Int }", "s.graphql").map((t) => `${t.root ?? "-"} ${t.name}`), ["query Query", "subscription Subscription", "- Mutation"]);
 	assert.equal(introspectionToSdl({ data: null }), undefined);
 	assert.equal(introspectionToSdl({ errors: [{ message: "introspection is disabled" }] }), undefined);
 
@@ -176,6 +207,43 @@ test("descriptions at one address that differ only by what is asked of it: each 
 	const ids = map.graph.nodes.map((n) => n.id);
 	assert.equal(new Set(ids).size, ids.length, "no two shapes share an id");
 	assert.match(map.summary, /^2 OpenAPI spec\(s\), 2 endpoint\(s\)/);
+});
+
+test("a schema file in the folder and the same API asked live: one schema, each type once, with the fields of both", async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-gql-"));
+	fs.writeFileSync(path.join(dir, "schema.graphql"), "type Query {\n  item(id: ID!): Item\n}\n\ntype Item {\n  id: ID!\n  legacy: String\n}\n");
+	const live = await api({
+		"/graphql": (q) =>
+			q.method === "POST"
+				? { json: { data: { __schema: { queryType: { name: "Query" }, types: [{ kind: "OBJECT", name: "Query", fields: [{ name: "item", args: [{ name: "id" }], type: { kind: "OBJECT", name: "Item" } }, { name: "items", args: [], type: { kind: "LIST", ofType: { kind: "OBJECT", name: "Item" } } }] }, { kind: "OBJECT", name: "Item", fields: [{ name: "id", args: [], type: { kind: "SCALAR", name: "ID" } }, { name: "name", args: [], type: { kind: "SCALAR", name: "String" } }] }] } } } }
+				: { status: 400, json: {} },
+	});
+	const ctx = { cwd: dir, progress: () => {}, signal: new AbortController().signal, exec: async () => assert.fail("no commands") };
+	const r = await apiRecipe.collect({ folder: dir, url: `${live.url}/graphql` }, ctx);
+	const ids = r.graph.nodes.map((n) => n.id);
+	assert.equal(new Set(ids).size, ids.length, `no two shapes share an id: ${ids.join(", ")}`);
+	assert.deepEqual(ids.filter((id) => id.startsWith("gql:")).sort(), ["gql:Item", "gql:Query"]);
+	assert.deepEqual(r.graph.nodes.find((n) => n.id === "gql:Item").rows.map((x) => x.text), ["id", "legacy", "name"]);
+	assert.deepEqual(r.graph.nodes.find((n) => n.id === "gql:Query").rows.map((x) => x.text), ["item(…)", "items"]);
+	assert.match(r.summary, /2 type\(s\)/);
+	// (the same for a schema split over files)
+	assert.deepEqual(mergeGqlTypes([...parseGraphQL("type Query { a: Int }", "a.graphql"), ...parseGraphQL("extend type Query { b: Int }\nunion U = A", "b.graphql"), ...parseGraphQL("union U = A | B", "c.graphql")]).map((t) => [t.name, t.root, t.file, t.fields.map((f) => f.name), t.members]), [["Query", "query", "a.graphql", ["a", "b"], undefined], ["U", undefined, "b.graphql", [], ["A", "B"]]]);
+});
+
+test("no more requests than the limit, whatever the API answers: each step of a redirect counts", async () => {
+	let fetches = 0;
+	// every address sends on, three times, before it says there is nothing
+	const bouncing = async (u) => {
+		fetches++;
+		const at = new URL(u);
+		const hops = Number(at.searchParams.get("hop") ?? 0);
+		return hops < 3 ? new Response("", { status: 302, headers: { location: `${at.pathname}?hop=${hops + 1}` } }) : new Response("{}", { status: 404 });
+	};
+	const r = await probeApi("https://api.example.com", { fetch: bouncing, deadlineMs: 10_000 });
+	assert.ok(fetches <= 40, `${fetches} requests were sent`);
+	assert.ok(fetches > 20, "and it did look");
+	assert.deepEqual(found(r), [[], undefined]);
+	assert.match(nothingFound(r), /No OpenAPI \/ Swagger document or GraphQL schema was found on api\.example\.com/);
 });
 
 test("it stays on the host it was given: the Authorization header goes nowhere else, and a redirect away is not followed", async () => {

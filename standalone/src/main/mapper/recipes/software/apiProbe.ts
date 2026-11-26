@@ -122,14 +122,15 @@ export function introspectionToSdl(answer: any): string | undefined {
 	if (!schema || !Array.isArray(schema.types)) return undefined;
 	const ref = (t: any): string => (!t ? "Unknown" : t.kind === "NON_NULL" ? `${ref(t.ofType)}!` : t.kind === "LIST" ? `[${ref(t.ofType)}]` : String(t.name ?? "Unknown"));
 	const word = (s: unknown) => (typeof s === "string" && /^[_A-Za-z]\w*$/.test(s) ? s : undefined);
-	const roots: Record<string, string> = {};
-	for (const [key, usual] of [["queryType", "Query"], ["mutationType", "Mutation"], ["subscriptionType", "Subscription"]] as const) if (word(schema[key]?.name)) roots[schema[key].name] = usual;
-	const out: string[] = [];
+	// The roots keep the names the API gives them, and a `schema { … }` block says which they are (as
+	// in a schema file): renamed, what points at them would point at nothing, and a type that happens
+	// to be called Query would be taken for the root.
+	const roots = ([["queryType", "query"], ["mutationType", "mutation"], ["subscriptionType", "subscription"]] as const).filter(([key]) => word(schema[key]?.name)).map(([key, as]) => `  ${as}: ${schema[key].name}`);
+	const out: string[] = roots.length ? [`schema {\n${roots.join("\n")}\n}`] : [];
 	for (const t of schema.types.slice(0, 5000)) {
 		const name = word(t?.name);
 		if (!name || name.startsWith("__")) continue;
-		// (the roots go by their usual names, whatever the API calls them: that is what the map looks for)
-		const shown = roots[name] ?? name;
+		const shown = name;
 		const fields = (list: any[]) =>
 			(list ?? [])
 				.filter((f) => word(f?.name))
@@ -143,7 +144,7 @@ export function introspectionToSdl(answer: any): string | undefined {
 		else if (t.kind === "UNION") out.push(`union ${shown} = ${(t.possibleTypes ?? []).map((p: any) => word(p?.name)).filter(Boolean).join(" | ")}`);
 		else if (t.kind === "SCALAR" && !["String", "Int", "Float", "Boolean", "ID"].includes(name)) out.push(`scalar ${shown}`);
 	}
-	return out.length ? out.join("\n\n") : undefined;
+	return out.length > (roots.length ? 1 : 0) ? out.join("\n\n") : undefined;
 }
 
 /** Asks the API for its description. Never throws for an API that has none: the result says what was asked. */
@@ -159,7 +160,9 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 	const cancelled = () => {
 		if (o.signal?.aborted) throw new MapperError("Cancelled");
 	};
-	const room = () => asked.length < MAX_REQUESTS && Date.now() < deadline;
+	/** Every request counts, also each step of a redirect: no more than MAX_REQUESTS are sent, whatever the API answers. */
+	let sent = 0;
+	const room = () => sent < MAX_REQUESTS && Date.now() < deadline;
 	/**
 	 * Whether an address is the API's own place: the scheme, host and port that were given, or
 	 * that host over https when http was given. Everything that is asked passes this, wherever
@@ -180,6 +183,11 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 				entry.status = "sent elsewhere";
 				return undefined;
 			}
+			if (!room()) {
+				entry.status = hop ? "too many redirects" : "not asked";
+				return undefined;
+			}
+			sent++;
 			const ctrl = new AbortController();
 			const timer = setTimeout(() => ctrl.abort(), Math.max(500, Math.min(o.timeoutMs ?? 8000, deadline - Date.now())));
 			const onAbort = () => ctrl.abort();
@@ -287,7 +295,7 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 		const top = `${start.origin}/`;
 		const places = [...(under === top ? [] : USUAL_PLACES.slice(0, 10).map((p) => new URL(p, under).toString())), ...USUAL_PLACES.map((p) => new URL(p, top).toString())].filter((u, i, all) => all.indexOf(u) === i);
 		// (a few at a time: quick on an API that has none, and gentle on it; room is kept for the GraphQL question)
-		for (let i = 0; i < places.length && !specs.length && asked.length < MAX_REQUESTS - GRAPHQL_PLACES.length - 4 && room(); i += 4) await Promise.all(places.slice(i, i + 4).map((u) => look(u, 1)));
+		for (let i = 0; i < places.length && !specs.length && sent < MAX_REQUESTS - GRAPHQL_PLACES.length - 4 && room(); i += 4) await Promise.all(places.slice(i, i + 4).map((u) => look(u, 1)));
 	}
 	// nothing yet: the usual GraphQL endpoints
 	if (!specs.length && !graphql) await askGraphql(GRAPHQL_PLACES.map((p) => new URL(p, `${start.origin}/`).toString()));
