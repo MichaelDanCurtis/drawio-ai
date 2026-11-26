@@ -252,6 +252,55 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	expect(asked.length === 2 && asked[0] === `Save changes to ${path.basename(config.file)}? [Save / Don't Save / Cancel]`, "the window asks before it closes with unsaved changes");
 	expect(parseScene(fs.readFileSync(config.file, "utf8")).elements.length === 6, "Don't Save leaves the file as it was");
 
+	// ----- Save in that question, and a change made while the file is written: the window does not close over it -----
+	const late = await ExcalidrawWindow.open(server, png);
+	expect(late, "the exported PNG opens");
+	watch(late.editorView.webContents);
+	await late.whenLoaded();
+	await addElement(late, "e2e-before-save", "rectangle", { x: 60, y: 260 });
+	await until("unsaved changes", () => late.isDirty);
+	// (the change arrives after the editor has handed the picture over, and before the file is written)
+	const contents = (late as any).contents.bind(late);
+	let changedMeanwhile = false;
+	(late as any).contents = async (format: string) => {
+		const handed = await contents(format);
+		if (!changedMeanwhile) {
+			changedMeanwhile = true;
+			await addElement(late, "e2e-while-saving", "ellipse", { x: 300, y: 420 });
+		}
+		return handed;
+	};
+	asked.length = 0;
+	answers.push(0, 2); // Save, then Cancel when it asks again
+	(dialog as any).showMessageBox = async (_win: unknown, options: Electron.MessageBoxOptions) => {
+		asked.push(String(options.message));
+		return { response: answers.shift() ?? 2, checkboxChecked: false };
+	};
+	try {
+		late.win.close();
+		await until("the question to be asked again after the save", () => asked.length === 2);
+		await pause(300);
+	} finally {
+		(dialog as any).showMessageBox = realMessageBox;
+	}
+	const lateSaved = readScene("png", fs.readFileSync(png)).elements.map((e: any) => e.id);
+	log("changedWhileSaving", { asked: asked.length, open: !late.win.isDestroyed(), unsaved: late.isDirty, saved: lateSaved.includes("e2e-before-save"), lateChangeInFile: lateSaved.includes("e2e-while-saving") });
+	expect(!late.win.isDestroyed() && late.isDirty, "the window stays open, with the later change unsaved");
+	expect(lateSaved.includes("e2e-before-save") && !lateSaved.includes("e2e-while-saving"), "the file has what was there when Save was chosen");
+	expect(await late.save(), "the later change is saved");
+	expect(!late.isDirty && readScene("png", fs.readFileSync(png)).elements.length === 8, "after a save nothing is unsaved, and the file has both changes");
+	late.win.close();
+	await closed(late);
+	// (back to the six elements the rest of the run counts)
+	const back = await ExcalidrawWindow.open(server, png);
+	expect(back, "the PNG opens again");
+	await back.whenLoaded();
+	await inEditor(back, `x.api.updateScene({ elements: x.api.getSceneElementsIncludingDeleted().filter((e) => !e.id.startsWith("e2e-before") && !e.id.startsWith("e2e-while")), captureUpdate: x.CaptureUpdateAction.IMMEDIATELY });`);
+	await until("unsaved changes", () => back.isDirty);
+	expect(await back.save(), "the PNG is saved with its six elements");
+	back.win.close();
+	await closed(back);
+
 	// ----- an exported picture opens for editing, and is saved back as the picture -----
 	const results: Record<string, unknown> = {};
 	for (const picture of [png, svg]) {

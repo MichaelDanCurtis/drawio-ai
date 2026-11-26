@@ -41,7 +41,7 @@ interface HostDocument {
 }
 type HostMessage =
 	| { type: "serialize"; id: number; format: Format }
-	| { type: "saved"; stamp: string }
+	| { type: "saved"; id: number; stamp: string }
 	| { type: "look"; name: string; saved: boolean; look: Look };
 
 interface Host {
@@ -233,6 +233,8 @@ function App({ doc, initial }: { doc: HostDocument; initial: ExcalidrawInitialDa
 				savedStamp.current = m.stamp;
 				const editor = api.current;
 				if (editor) report(stampOf(editor.getSceneElementsIncludingDeleted(), editor.getAppState()), true);
+				// (the app waits for this before it takes the drawing for saved: a change made while the file was written is not)
+				host.post({ type: "savedState", id: m.id, dirty: wasDirty.current });
 			} else if (m.type === "look") {
 				setName(m.name);
 				setSaved(m.saved);

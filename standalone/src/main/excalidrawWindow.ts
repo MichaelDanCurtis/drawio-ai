@@ -52,6 +52,8 @@ export class ExcalidrawWindow implements DocumentWindow {
 	private offSettings: (() => void) | undefined;
 	private requestSeq = 0;
 	private requests = new Map<number, { resolve: (r: Serialized) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+	/** Saves whose file is written and whose page has not yet said whether the drawing changed meanwhile. */
+	private confirmations = new Map<number, () => void>();
 
 	/**
 	 * Opens a drawing in a window of its own (the window it is already open in comes to the front), or
@@ -225,6 +227,11 @@ export class ExcalidrawWindow implements DocumentWindow {
 			case "openPath":
 				if (typeof msg.path === "string" && path.isAbsolute(msg.path)) ExcalidrawWindow.appCommands.openPath(msg.path);
 				break;
+			case "savedState":
+				// (what the page holds now, against what was just written)
+				this.setDirty(!!msg.dirty);
+				this.confirmations.get(Number(msg.id))?.();
+				break;
 			case "serialized": {
 				const request = this.requests.get(Number(msg.id));
 				if (!request) break;
@@ -289,6 +296,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 	}
 
 	private failRequests(reason: string): void {
+		for (const done of [...this.confirmations.values()]) done();
 		for (const [id, request] of this.requests) {
 			clearTimeout(request.timer);
 			request.reject(new Error(reason));
@@ -432,13 +440,32 @@ export class ExcalidrawWindow implements DocumentWindow {
 		try {
 			const { bytes, stamp } = await this.contents(format);
 			fs.writeFileSync(file, bytes);
-			// (the page compares what it holds now with what was written: a change made meanwhile stays unsaved)
-			this.sendToEditor({ type: "saved", stamp });
+			await this.confirmSaved(stamp);
 			return true;
 		} catch (e: any) {
 			ExcalidrawWindow.showError("Could not save", String(e?.message ?? e));
 			return false;
 		}
+	}
+
+	/**
+	 * Tells the page what was written, and waits for it to say whether the drawing has changed since
+	 * it handed that over (the editor stays usable while a picture is made and a file is written).
+	 * When this returns, `dirty` is true exactly if there is something the file does not have. A page
+	 * that does not answer leaves it as it was: unsaved.
+	 */
+	private async confirmSaved(stamp: string): Promise<void> {
+		const id = ++this.requestSeq;
+		await new Promise<void>((resolve) => {
+			const done = () => {
+				clearTimeout(timer);
+				this.confirmations.delete(id);
+				resolve();
+			};
+			const timer = setTimeout(done, 5_000);
+			this.confirmations.set(id, done);
+			this.sendToEditor({ type: "saved", id, stamp });
+		});
 	}
 
 	/** Export as a PNG or SVG picture with the drawing inside it: it opens again for editing, here or in Excalidraw. */
@@ -499,7 +526,12 @@ export class ExcalidrawWindow implements DocumentWindow {
 			this.asking = false;
 		}
 		if (response === 2) return;
-		if (response === 0 && !(await this.save())) return;
+		if (response === 0) {
+			if (!(await this.save())) return;
+			// Changed while it was being saved (the editor stays usable meanwhile): those changes are not
+			// in the file, so the window does not close over them. It asks again.
+			if (this.dirty) return void this.win.close();
+		}
 		this.closing = true;
 		this.win.close();
 	}
