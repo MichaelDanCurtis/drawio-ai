@@ -479,13 +479,13 @@ export const apiRecipe: Recipe = {
 		"Endpoints from OpenAPI / Swagger specs (v2 and v3, YAML or JSON) grouped by tag, with parameters, request and response types and the schemas they use; GraphQL schemas with queries, mutations and types. Read from a repository's files, or asked of a running API at its address.",
 	mode: "inventory",
 	fields: [
-		{ ...FOLDER_FIELD, required: false, help: `Its OpenAPI and GraphQL files are read. Left empty with no address below: the diagram's folder. ${FOLDER_FIELD.help}` },
+		{ ...FOLDER_FIELD, required: false, help: "Its OpenAPI and GraphQL files are read (a GitHub repository is downloaded first). Left empty with no address below: the diagram's folder." },
 		{
 			id: "url",
 			label: "Or a running API's address",
 			type: "text",
 			placeholder: "https://api.example.com, or the address of its OpenAPI document or docs page",
-			help: "The API is asked for its own description: the address itself, what its docs page links to, then the places frameworks usually serve it from; a GraphQL endpoint is asked for its schema, and so is the address you give when nothing else was found. Only reads (GET, and GraphQL's schema question, which is sent as a POST), only on that host, at most 40 requests. Not every API publishes one: you are told what was asked if none is found.",
+			help: "The API is asked for its own description: the address itself, what its docs page names, then the usual places; failing that, the address and the usual GraphQL endpoints are asked for their schema. Only reads (GET, and GraphQL's schema question, a POST), only on that host, at most 40 requests. Not every API publishes one: you are told what was asked.",
 		},
 		{
 			id: "authorization",

@@ -66,9 +66,9 @@ export class MapperDialogCore {
 				const timer = setTimeout(() => ac.abort(), 60_000);
 				try {
 					const options = await recipe.loadOptions(String(msg.fieldId), msg.input ?? {}, p.context(ac.signal));
-					p.post({ type: "options", recipeId: recipe.id, fieldId: msg.fieldId, options });
+					p.post({ type: "options", recipeId: recipe.id, fieldId: msg.fieldId, seq: msg.seq, options });
 				} catch (e: any) {
-					p.post({ type: "options", recipeId: recipe.id, fieldId: msg.fieldId, options: [], error: errorText(e) });
+					p.post({ type: "options", recipeId: recipe.id, fieldId: msg.fieldId, seq: msg.seq, options: [], error: errorText(e) });
 				} finally {
 					clearTimeout(timer);
 				}

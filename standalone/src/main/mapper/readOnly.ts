@@ -46,6 +46,15 @@ export function checkReadOnly(command: string, args: string[]): string | undefin
 	const { head, verb } = verbOf(args);
 	switch (name) {
 		case "az":
+			// One command that is not a list or a show: the signed-in user's own way into an AKS cluster,
+			// printed (`--file -`) so that nothing is written, least of all ~/.kube/config. Never the
+			// cluster admin's, and never merged into a file.
+			if (head.join(" ") === "aks get-credentials") {
+				const file = args.findIndex((a) => a === "--file" || a === "-f");
+				const printed = file >= 0 && args[file + 1] === "-" && args.filter((a) => a === "--file" || a === "-f" || a.startsWith("--file=") || a.startsWith("-f=")).length === 1;
+				const admin = args.some((a) => a === "--admin" || a === "-a" || a.startsWith("--admin=") || a.startsWith("--overwrite") || a.startsWith("--context"));
+				return printed && !admin ? undefined : "`az aks get-credentials` may only print the signed-in user's access (`--file -`): it is never the admin's and never written to a kubeconfig";
+			}
 			return (AZ_VERBS.has(verb) && !writes(head)) || readVerbAmong(head, AZ_VERBS) ? undefined : `\`az ${head.join(" ")}\` is not a read-only command`;
 		case "aws": {
 			const [service, op = ""] = head;
