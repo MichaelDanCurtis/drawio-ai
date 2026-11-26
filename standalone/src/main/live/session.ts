@@ -336,7 +336,17 @@ export class LiveSession {
 	private async sendSnapshot(): Promise<void> {
 		this.snapshotWanted = false;
 		const revision = this.revision;
-		const { xml, checksum } = await this.editor.snapshot();
+		let xml: string;
+		let checksum: string;
+		try {
+			({ xml, checksum } = await this.editor.snapshot());
+		} catch (e: any) {
+			// The editor did not give the diagram this time. Nothing else depends on it: the board goes
+			// on with the snapshot it has, and it is tried again when things are next quiet or settled.
+			this.events.problem?.(`The diagram could not be read for the board: ${String(e?.message ?? e).slice(0, 200)}`);
+			this.snapshotWanted = true;
+			return;
+		}
 		// (something happened while the editor answered: this is no longer the diagram at that revision)
 		if (!this.settled || this.revision !== revision || this.closed) {
 			this.snapshotWanted = true;
@@ -351,9 +361,12 @@ export class LiveSession {
 		if (!this.owner || this.closed) return;
 		if (this.quiet) clearTimeout(this.quiet);
 		this.quiet = setTimeout(() => {
-			this.work = this.work.then(async () => {
-				if (this.settled && this.revision > this.lastSnapshot) await this.sendSnapshot();
-			});
+			// (whatever goes wrong in here stays in here: the messages queued behind it are dealt with all the same)
+			this.work = this.work
+				.then(async () => {
+					if (this.settled && this.revision > this.lastSnapshot) await this.sendSnapshot();
+				})
+				.catch((e) => this.events.problem?.(`The diagram could not be sent to the board: ${String(e?.message ?? e).slice(0, 200)}`));
 		}, this.options.snapshotQuietMs ?? SNAPSHOT_QUIET_MS);
 		(this.quiet as any).unref?.();
 	}

@@ -661,6 +661,51 @@ test("sharing that is stopped half-way leaves nothing behind: no board that was 
 	assert.equal(afterLeaving.at(-1), "loading:false", "and the editor's tools were told that the loading is over");
 });
 
+test("a host whose diagram cannot be read for the board this once goes on as before: the next message is dealt with, and it is tried again", async () => {
+	const diagram = new Diagram({ a: { label: "start" } });
+	const start = new Diagram(diagram.cells);
+	let fail = true;
+	const read = diagram.snapshot.bind(diagram);
+	diagram.snapshot = async () => {
+		if (fail) throw new Error("draw.io did not answer");
+		return read();
+	};
+	const sent = [];
+	const problems = [];
+	const session = new LiveSession(diagram, (m) => sent.push(m), { problem: (t) => problems.push(t) }, { snapshotQuietMs: 15 });
+	session.receive({ Identity: { id: 1, role: "editor", owner: true } });
+	session.receive({ Board: { revision: 0, epoch: 0, xml: start.xml(), checksum: start.checksum(), patches: [] } });
+	await session.idle();
+	const change = (label) => {
+		diagram.patch(update("a", { label }));
+		session.localPatch(update("a", { label }), diagram.checksum());
+	};
+	change("one");
+	session.receive({ Ack: { revision: 1, clean: true } });
+	// things go quiet, the host's turn to send the whole diagram comes, and the editor does not give it
+	await until(() => problems.length === 1);
+	assert.match(problems[0], /could not be read for the board: draw\.io did not answer/);
+	assert.equal(sent.filter((m) => m.Snapshot).length, 0);
+	// the session is none the worse: a change and its acknowledgement go through
+	change("two");
+	session.receive({ Ack: { revision: 2, clean: true } });
+	await session.idle();
+	assert.deepEqual([session.unsent, session.revision], [0, 2]);
+	// and the diagram is sent once the editor gives it again
+	fail = false;
+	await until(() => sent.some((m) => m.Snapshot));
+	assert.deepEqual(sent.filter((m) => m.Snapshot).map((m) => [m.Snapshot.revision, m.Snapshot.checksum]), [[2, diagram.checksum()]]);
+	// the same when the board asks for it outright
+	fail = true;
+	session.receive({ NeedSnapshot: {} });
+	await session.idle();
+	change("three");
+	session.receive({ Ack: { revision: 3, clean: true } });
+	await session.idle();
+	assert.equal(session.unsent, 0);
+	session.dispose();
+});
+
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {
 	const b = await board(undefined, { maxPatches: 3 });
 	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });
