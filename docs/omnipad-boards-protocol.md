@@ -3,7 +3,8 @@
 A note both sides build to: OmniDraw (this repository) and OmniPad (the `rustpad` repository).
 It says what "Go live" does, what each side has today, and the protocol between them. Where it
 proposes something OmniPad has not built, it says so: those parts are OmniPad's to confirm or
-change. Version 1 of this note, 2026-11-26.
+change. Version 2 of this note, 2026-11-26 (version 1 did not say how someone whose change crossed
+another's catches up with the server's order).
 
 ## What it is for
 
@@ -111,8 +112,8 @@ the pad messages. `revision` counts patches the server has accepted, from 0.
 | Message | Meaning |
 |---|---|
 | `{"Hello": {"name", "hue", "client"}}` | First message. `client` is like `"omnidraw/0.4.0"` or `"omnipad-web/1"` |
-| `{"Patch": {"base", "patch", "checksum"}}` | A change. `base` is the last revision this client had applied when it made it. `patch` is draw.io's object, passed on untouched. `checksum` is draw.io's for the result |
-| `{"Snapshot": {"revision", "xml", "checksum"}}` | The whole diagram as this client has it at `revision`. Sent when the server asks, and by the host now and then when things are quiet |
+| `{"Patch": {"base", "patch", "checksum"}}` | A change. `base` is the revision this client's diagram will be at once all it has sent is accepted (see "How changes are ordered"). `patch` is draw.io's object, passed on untouched. `checksum` is draw.io's for the sender's diagram after the change |
+| `{"Snapshot": {"revision", "xml", "checksum"}}` | The whole diagram at `revision`, from a client whose diagram is in the server's order (rule 6 below). Sent when the server asks, and by the host now and then when things are quiet. The server keeps it only if it has no newer one |
 | `{"Presence": {"page", "cursor", "selection", "rect"}}` | Where this person is. `cursor` `{x, y}` or null and `rect` `{start, end}` or null, in diagram coordinates; `selection` a list of cell ids; `page` the page id. At most 30 a second |
 | `{"Resync": {}}` | "Mine no longer matches: send me the diagram." |
 
@@ -123,7 +124,7 @@ the pad messages. `revision` counts patches the server has accepted, from 0.
 | `{"Identity": {"id", "role", "owner"}}` | Who you are here. `role` `"editor"` or `"viewer"` |
 | `{"Board": {"revision", "xml", "checksum", "patches"}}` | The diagram: the newest snapshot, and the patches accepted since it, in order (`[{revision, from, patch, checksum, clean}]`). Sent on joining and after `Resync`. The client loads the XML (`resetDiff`) and applies the patches |
 | `{"Patch": {"revision", "from", "patch", "checksum", "clean"}}` | Someone's change, numbered. Not sent back to its sender |
-| `{"Ack": {"revision", "clean"}}` | To the sender: your patch is this revision |
+| `{"Ack": {"revision", "clean"}}` | To the sender, in its place in the stream: your patch is this revision. Not clean: see rule 4 below |
 | `{"NeedSnapshot": {}}` | "Send me a `Snapshot`": to one client, when the list of patches since the last snapshot is long (more than 500, or 4 MiB) |
 | `{"UserInfo": {"id", "info"}}` | Someone's name and hue; `info` null when they left |
 | `{"Presence": {"id", "page", "cursor", "selection", "rect"}}` | Someone's position |
@@ -132,20 +133,42 @@ the pad messages. `revision` counts patches the server has accepted, from 0.
 ### How changes are ordered
 
 The server does not read patches. It numbers them in the order they arrive and passes them on.
+That order is the truth: everyone's diagram must end up as the snapshot with the patches
+applied in revision order. Someone who made a change at the same moment as someone else has
+applied the two the other way round, and has to catch up. The rules:
 
-- A patch is **clean** when its `base` is the revision just before the one it gets: nothing
-  arrived between the sender making it and the server numbering it. Then the sender's
-  `checksum` is the checksum everyone should have at that revision.
-- Everyone applies patches in revision order. After applying a clean one, a client compares its
-  own checksum (draw.io gives it in its answer to `patch`) with the patch's. A difference means
-  this client has drifted: it sends `Resync` and loads what comes back.
-- A patch that is not clean (two people changed things at the same moment) is applied all the
-  same: draw.io merges by cell and attribute, the later one winning. Its checksum is not
-  compared. The next clean patch checks everyone again.
-- A client that sent a patch and then receives others with a lower revision than its own
-  `Ack` applies them as they come: they are changes made at the same time as its own.
-- If drift keeps happening (three `Resync`s from one client within a minute), the server asks
-  the host for a `Snapshot` and sends everyone the `Board`. The host's copy settles it.
+1. **`base`** is the revision the sender's diagram will be at once everything it has sent is
+   accepted: the last revision it has applied, plus the number of its own patches not yet
+   acknowledged. (So two quick changes in a row are `base` 5 and `base` 6, not both 5.)
+2. A patch is **clean** when its `base` is the server's revision just before the patch gets its
+   number: nothing of anyone else's arrived in between. Then the sender's `checksum` is the
+   checksum everyone should have at that revision.
+3. **Receiving.** Everyone applies others' patches in revision order as they arrive. After a
+   clean one, a client that has nothing of its own unacknowledged compares its checksum
+   (draw.io gives it in its answer to `patch`) with the patch's. A difference means this client
+   has drifted: it reconciles (rule 5).
+4. **Sending.** A sender whose patch comes back `clean: false` made its change before
+   someone else's that the server put first. Its own diagram has them in the other order, and
+   where the two touched the same thing it now shows the wrong one. (A sets a label, B sets the
+   same label; the server takes A, then B. Everyone must show B's. B received A's patch after
+   making its own and shows A's.) It keeps working, and as soon as none of its own patches are
+   unacknowledged it reconciles (rule 5). It may skip that when it can tell the crossed patches
+   apart: they touch different cells and nothing of a page itself (its name, order, settings),
+   so either order gives the same diagram.
+5. **Reconciling** is `Resync`: the server answers with `Board`, and the client *replaces* its
+   diagram with the snapshot and applies the patches in order. Replacing means the result's
+   checksum equals the snapshot's before the patches go on: a load that merges with what the
+   client had is not enough, and a client that cannot get that checksum loads the snapshot
+   from scratch. Changes the person makes between sending `Resync` and receiving `Board` are
+   held back, not sent; after the `Board` is in, they are applied on top again and sent then.
+6. **Snapshots** come only from a client whose diagram is known to be in the server's order:
+   nothing of its own unacknowledged, and nothing waiting to be reconciled.
+7. If one client asks for `Resync` three times within a minute, the server asks the host for a
+   `Snapshot` and sends everyone the `Board`: the host's copy settles it.
+
+With these, two people changing different shapes never notice each other; two people changing
+the same shape both end with the change the server numbered last, and the one whose change
+lost sees it replaced a moment later.
 
 ### Limits (proposed)
 
