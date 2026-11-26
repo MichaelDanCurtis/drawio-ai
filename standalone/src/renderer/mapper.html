@@ -121,7 +121,7 @@
 		if (window.DrawAIIcons && GLYPHS[id]) ico.innerHTML = window.DrawAIIcons.svg(GLYPHS[id], iconStyle, { size: 20 });
 		return ico;
 	}
-	const state = { animateRecipes: true, animateForm: true, catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, running: false };
+	const state = { animateRecipes: true, animateForm: true, catalog: null, saved: {}, cwd: "", category: decodeURIComponent(location.hash.slice(1)) || "software", recipeId: null, values: {}, options: {}, optionErrors: {}, loading: {}, asked: {}, running: false };
 
 	const recipes = () => (state.catalog?.recipes ?? []).filter((r) => r.category === state.category);
 	const recipe = () => state.catalog?.recipes.find((r) => r.id === state.recipeId);
@@ -194,28 +194,39 @@
 		const key = r.id + "/" + f.id;
 		state.loading[key] = true;
 		state.optionErrors[key] = undefined;
-		host.post({ type: "loadOptions", recipeId: r.id, fieldId: f.id, input: { ...state.values } });
+		// (numbered: an answer to an earlier question, for a choice since changed, is not shown)
+		state.asked[key] = (state.asked[key] ?? 0) + 1;
+		host.post({ type: "loadOptions", recipeId: r.id, fieldId: f.id, input: { ...state.values }, seq: state.asked[key] });
 		renderForm();
 	}
 
 	/**
-	 * Selects other fields depend on (subscription → resource groups) reload them. Only the ones on
-	 * show: a list nobody sees is not worth a call to a cloud, and it loads when it comes into view.
+	 * Selects other fields depend on (subscription → resource groups): the lists after a choice
+	 * are forgotten when it changes, and come again as the form is drawn, one after the other and
+	 * only the ones on show (a list nobody sees is not worth a call to a cloud).
 	 */
 	function reloadAfter(r, f) {
-		for (const g of r.fields) {
-			if (!g.dynamic || g.id === f.id || r.fields.indexOf(g) < r.fields.indexOf(f)) continue;
-			if (visible(r, g)) loadOptions(r, g);
-			else delete state.options[r.id + "/" + g.id];
+		for (const g of r.fields.slice(r.fields.indexOf(f) + 1)) {
+			if (!g.dynamic) continue;
+			const key = r.id + "/" + g.id;
+			delete state.options[key];
+			state.loading[key] = false;
+			state.asked[key] = (state.asked[key] ?? 0) + 1;
 		}
+		renderForm();
+	}
+
+	/** Whether a list shown before this one is still to come. */
+	function waitsForEarlier(r, f) {
+		return r.fields.slice(0, r.fields.indexOf(f)).some((g) => g.dynamic && visible(r, g) && (state.loading[r.id + "/" + g.id] || state.options[r.id + "/" + g.id] === undefined));
 	}
 
 	function fieldEl(r, f) {
 		const key = r.id + "/" + f.id;
 		const set = (value) => {
 			state.values[f.id] = value;
-			if (f.type === "select") reloadAfter(r, f);
-			if (r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
+			if (f.type === "select" && r.fields.slice(r.fields.indexOf(f) + 1).some((g) => g.dynamic)) reloadAfter(r, f);
+			else if (r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
 		};
 		let control;
 		switch (f.type) {
@@ -232,20 +243,22 @@
 			case "select": {
 				const opts = f.dynamic ? state.options[key] ?? [] : f.options ?? [];
 				const sel = el("select", { onchange: (e) => set(e.target.value) });
-				if (f.dynamic && state.loading[key]) sel.append(el("option", { value: "", text: "Loading…" }));
+				if (f.dynamic && (state.loading[key] || state.options[key] === undefined)) sel.append(el("option", { value: "", text: "Loading…" }));
 				else if (!opts.length) sel.append(el("option", { value: "", text: f.dynamic ? "(none found — refresh or type in settings)" : "" }));
 				for (const o of opts) sel.append(el("option", { value: o.value, text: o.label }));
 				if (opts.length && !opts.some((o) => o.value === state.values[f.id])) {
-					const was = state.values[f.id];
 					state.values[f.id] = opts[0].value;
-					// A remembered choice that is no longer offered: what follows was listed for it, not for this one.
-					if (was && !state.loading[key]) setTimeout(() => reloadAfter(r, f));
+					// The choice was made here, not by hand (the first of a list that has just come, or in
+					// place of a remembered one that is no longer offered): what follows is listed for it.
+					if (!state.loading[key]) setTimeout(() => reloadAfter(r, f));
 				}
 				sel.value = state.values[f.id] ?? "";
 				control = f.dynamic
 					? el("div", { class: "row" }, sel, el("button", { class: "btn", title: "Reload", onclick: () => loadOptions(r, f), text: "↻" }))
 					: sel;
-				if (f.dynamic && state.options[key] === undefined && !state.loading[key]) setTimeout(() => loadOptions(r, f));
+				// A list is asked for once the lists before it are there: it may depend on what they chose
+				// (a project's clusters), and asking with nothing chosen yet would only be asked again.
+				if (f.dynamic && state.options[key] === undefined && !state.loading[key] && !waitsForEarlier(r, f)) setTimeout(() => state.options[key] === undefined && !state.loading[key] && loadOptions(r, f));
 				break;
 			}
 			case "folder":
@@ -404,6 +417,7 @@
 				break;
 			case "options": {
 				const key = msg.recipeId + "/" + msg.fieldId;
+				if (msg.seq !== undefined && msg.seq !== state.asked[key]) break;
 				state.loading[key] = false;
 				state.options[key] = msg.options ?? [];
 				state.optionErrors[key] = msg.error;

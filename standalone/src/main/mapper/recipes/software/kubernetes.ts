@@ -70,7 +70,8 @@ export async function aksClusters(ctx: CollectContext, subscription: string): Pr
 		const all = await listSubscriptions(ctx);
 		for (const s of all) names.set(s.value, s.label.replace(/ \([0-9a-f-]{36}\).*$/i, ""));
 		subscriptions = all.map((s) => s.value).filter((id) => SUBSCRIPTION.test(id));
-	} else if (!subscription || SUBSCRIPTION.test(subscription)) subscriptions = [subscription];
+	} else if (SUBSCRIPTION.test(subscription)) subscriptions = [subscription];
+	// (no subscription chosen yet: the list is asked for again once one is)
 	else return [];
 	const skipped = subscriptions.length - MAX_PLACES;
 	const errors: string[] = [];

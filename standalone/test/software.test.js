@@ -740,6 +740,10 @@ test("Kubernetes in the cloud: AKS clusters are found per subscription or in all
 	]);
 	await assert.rejects(rec.loadOptions("aksCluster", { subscription: SUB_B }, ctx), /AuthorizationFailed/);
 	assert.deepEqual(await rec.loadOptions("aksCluster", { subscription: "not-a-subscription; rm -rf" }, ctx), []);
+	// (no subscription chosen yet: nothing is asked of Azure; the dialog asks again once one is)
+	const before = seen.calls.length;
+	assert.deepEqual(await rec.loadOptions("aksCluster", { subscription: "" }, ctx), []);
+	assert.equal(seen.calls.length, before);
 
 	const r = await rec.collect({ where: "azure", subscription: SUB_A, aksCluster: value, context: "kind-dev" }, ctx);
 	const creds = seen.calls.find((c) => c[2] === "get-credentials");

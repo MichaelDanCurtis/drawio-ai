@@ -230,6 +230,8 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 		await new Promise((r) => setTimeout(r, filled.length ? 5000 : 600));
 		fs.writeFileSync(path.join(config.out, "mapper-dialog.png"), (await dlg.webContents.capturePage()).toPNG());
 		log("dialogText", (await dlg.webContents.executeJavaScript("document.body.innerText")).slice(0, 1500));
+		// each list of the form: what is chosen, and how many it offers
+		log("dialogLists", await dlg.webContents.executeJavaScript(`Object.fromEntries(Array.from(document.querySelectorAll(".field")).filter((d) => d.querySelector("select")).map((d) => [d.querySelector("label").textContent.trim(), [d.querySelector("select").selectedOptions[0]?.textContent ?? "", d.querySelector("select").options.length]]))`));
 	}
 	if (config.agent) w.chat.autoApprove = true;
 	const t0 = Date.now();
