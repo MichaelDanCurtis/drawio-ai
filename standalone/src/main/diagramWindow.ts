@@ -982,8 +982,32 @@ export class DiagramWindow {
 	}
 
 	private async onClose(e: Electron.Event): Promise<void> {
-		// (a guest's window holds the board's diagram, which stays on the board: nothing of theirs is lost)
-		if (this.closing || !this.dirty || this.live?.role === "guest") return;
+		if (this.closing) return;
+		// A guest's window holds the board's diagram, which stays on the board: there is nothing to save.
+		// But what they changed last must have reached the board first: it is given a moment, and if it
+		// still has not (a slow connection, the diagram being fetched again), they are asked.
+		if (this.live?.role === "guest") {
+			if (this.live.session.unsent === 0) return;
+			e.preventDefault();
+			const live = this.live;
+			if (!(await live.shared(4000)) && this.live === live) {
+				const r = await dialog.showMessageBox(this.win, {
+					type: "warning",
+					message: "Your last changes have not reached the shared diagram yet",
+					detail: "Closing now loses them. Keep the window open a little longer, or close anyway.",
+					buttons: ["Keep Open", "Close Anyway"],
+					defaultId: 0,
+					cancelId: 0,
+				});
+				if (r.response === 0) return;
+			}
+			// (the session may have ended meanwhile: the diagram is then theirs to save or not, and they are asked that)
+			if (this.live !== live && this.dirty) return void this.win.close();
+			this.closing = true;
+			this.win.close();
+			return;
+		}
+		if (!this.dirty) return;
 		e.preventDefault();
 		const r = await dialog.showMessageBox(this.win, {
 			type: "warning",

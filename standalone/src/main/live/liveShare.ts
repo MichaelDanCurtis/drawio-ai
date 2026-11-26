@@ -191,6 +191,20 @@ export class LiveShare {
 		return live;
 	}
 
+	/**
+	 * Waits until the board has all of this person's changes, for at most `ms`. False when some
+	 * still have not reached it then (a slow connection, a diagram on its way in).
+	 */
+	public async shared(ms: number): Promise<boolean> {
+		const end = Date.now() + ms;
+		for (;;) {
+			await this.session.idle();
+			if (this.status !== "live" || this.session.unsent === 0) return this.status !== "live" || this.session.unsent === 0;
+			if (Date.now() >= end) return false;
+			await new Promise((r) => setTimeout(r, 50));
+		}
+	}
+
 	/** Leaves; the host's leaving ends the board for everyone. */
 	public async stop(): Promise<void> {
 		if (this.stopped) return;

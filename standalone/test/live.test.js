@@ -316,11 +316,14 @@ test("a diagram that has drifted is noticed at the next change and replaced by t
 	// he has asked for the board's diagram, and changes something before it arrives
 	assert.equal(bo.sent.filter((m) => m.Resync).length, 1);
 	assert.match(bo.events.problems[0], /differs from the board's at revision 1/);
+	assert.equal(bo.session.unsent, 0);
 	bo.change(update("b", { color: "green" }));
 	assert.equal(bo.sent.filter((m) => m.Patch).length, 0, "held back, not sent, until the board's diagram is in");
+	assert.equal(bo.session.unsent, 1, "the board does not have it yet: not the moment to close the window");
 	await until(() => bo.events.replaced.length === 2 && bo.session.settled && ann.session.revision === 2);
 	assert.deepEqual(bo.diagram.cells, { a: { label: "next" }, b: { label: "other", color: "green" } });
 	assert.ok(same(ann, bo));
+	assert.equal(bo.session.unsent, 0, "now it has");
 	await b.relay.close();
 });
 

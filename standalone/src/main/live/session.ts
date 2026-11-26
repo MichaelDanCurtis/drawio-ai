@@ -101,6 +101,11 @@ export class LiveSession {
 		return this.ready && !this.awaitingBoard && !this.mustCatchUp && this.pending.length === 0 && this.held.length === 0;
 	}
 
+	/** How many of this person's changes the board has not confirmed: held back here, or sent and not yet acknowledged. */
+	public get unsent(): number {
+		return this.closed ? 0 : this.held.length + this.pending.length;
+	}
+
 	/** How many of this person's changes are held back (the board's diagram is awaited or going in). */
 	public get heldCount(): number {
 		return this.held.length;
