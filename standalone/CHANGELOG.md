@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Mapper: the API surface of a running API.** The API surface map takes an API's address
+  beside (or in place of) a folder, and asks the API for its own description: the address
+  itself, what its docs page and that page's scripts name, then the places frameworks serve
+  an OpenAPI document from; a GraphQL endpoint is asked for its schema (the address you
+  give too, when nothing else was found). An optional Authorization header is sent to that
+  host only and is not saved. It only reads, stays on the host it was given, sends at most
+  40 requests, and when an API publishes no description it says what it asked and what
+  answered. A schema file in the folder and the same API asked live are drawn as one schema.
 - Mapper, **Kubernetes cluster**: the cluster no longer has to be a context in this computer's
   kubeconfig. **Where the cluster is** offers Azure (AKS), AWS (EKS) and Google Cloud (GKE):
   - The clusters are listed with the `az`, `aws` or `gcloud` CLI you are signed in to: those of a

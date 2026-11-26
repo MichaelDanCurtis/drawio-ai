@@ -8,6 +8,7 @@ import * as path from "path";
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug, type FoundFile, loadYaml } from "../common";
 import type { CheckCoverage, CollectResult, MapEdge, MapFinding, MapGraph, MapNode, MapRow, Recipe } from "../../types";
 import { keepOnMap } from "./health";
+import { nothingFound, probeApi } from "./apiProbe";
 import { isLocalHost, scrub, STYLE } from "./shared";
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"];
@@ -322,6 +323,8 @@ export function apiFindings(specs: ApiSpec[], graph: MapGraph): { findings: MapF
 interface GqlType {
 	kind: string;
 	name: string;
+	/** What it is the root of, if it is one: named in the document's `schema { … }`, or, without one, called Query / Mutation / Subscription. */
+	root?: "query" | "mutation" | "subscription";
 	fields: { name: string; args: number; type: string }[];
 	members?: string[];
 	implements?: string[];
@@ -363,13 +366,41 @@ export function parseGraphQL(text: string, file: string): GqlType[] {
 			if (impl?.length) existing.implements = [...(existing.implements ?? []), ...impl];
 		} else out.push({ kind, name, fields, file, ...(impl?.length ? { implements: impl } : {}) });
 	}
+	// the roots: what `schema { query: … }` names, or the usual names when the document has no such block
+	const block = /\bschema\s*(?:@[^{]*)?\{([^}]*)\}/.exec(clean)?.[1];
+	const named = new Map<string, GqlType["root"]>();
+	if (block !== undefined) for (const r of block.matchAll(/\b(query|mutation|subscription)\s*:\s*([_A-Za-z]\w*)/g)) named.set(r[2], r[1] as GqlType["root"]);
+	else for (const [n, as] of [["Query", "query"], ["Mutation", "mutation"], ["Subscription", "subscription"]] as const) named.set(n, as);
+	for (const t of out) if (t.kind === "type" && named.has(t.name)) t.root = named.get(t.name);
 	return out;
+}
+
+/**
+ * The types of several documents as one schema: a type that more than one of them describes (a
+ * schema split over files, or a schema file beside the same API asked live) is one type, with
+ * the fields of all of them.
+ */
+export function mergeGqlTypes(types: GqlType[]): GqlType[] {
+	const byName = new Map<string, GqlType>();
+	for (const t of types) {
+		const first = byName.get(t.name);
+		if (!first) {
+			byName.set(t.name, { ...t, fields: [...t.fields], ...(t.members ? { members: [...t.members] } : {}), ...(t.implements ? { implements: [...t.implements] } : {}) });
+			continue;
+		}
+		for (const f of t.fields) if (!first.fields.some((x) => x.name === f.name)) first.fields.push(f);
+		if (t.members) first.members = [...new Set([...(first.members ?? []), ...t.members])];
+		if (t.implements) first.implements = [...new Set([...(first.implements ?? []), ...t.implements])];
+		first.root ??= t.root;
+	}
+	return [...byName.values()];
 }
 
 export function graphqlToGraph(types: GqlType[], name: string): MapGraph {
 	const nodes: MapNode[] = [];
 	const edges: MapEdge[] = [];
-	const ROOTS = new Set(["Query", "Mutation", "Subscription"]);
+	types = mergeGqlTypes(types);
+	const ROOTS = new Set(types.filter((t) => t.root).map((t) => t.name));
 	const objectish = new Map(types.filter((t) => ["type", "interface", "union", "input"].includes(t.kind)).map((t) => [t.name, t]));
 	const base = (t: string) => t.replace(/[[\]!]/g, "");
 	// Most connected types first when there are too many.
@@ -387,7 +418,7 @@ export function graphqlToGraph(types: GqlType[], name: string): MapGraph {
 		nodes.push({
 			id: id(t.name),
 			label: `${root ? "" : t.kind === "type" ? "" : `«${t.kind}» `}${t.name}`,
-			kind: `graphql:${root ? t.name.toLowerCase() : t.kind}`,
+			kind: `graphql:${t.root ?? t.kind}`,
 			shape: "table",
 			style: root ? STYLE.table("#ffe6cc", "#d79b00") : STYLES[t.kind] ?? STYLES.type,
 			rows: t.members ? t.members.map((mm) => ({ text: mm })) : t.fields.map((f) => ({ text: `${f.name}${f.args ? "(…)" : ""}`, detail: f.type || undefined })),
@@ -444,16 +475,59 @@ export const apiRecipe: Recipe = {
 	id: "software.api",
 	category: "software",
 	title: "API surface (OpenAPI / GraphQL)",
-	description: "Endpoints from OpenAPI / Swagger specs (v2 and v3, YAML or JSON) grouped by tag, with parameters, request and response types and the schemas they use; GraphQL schemas (.graphql) with queries, mutations and types.",
+	description:
+		"Endpoints from OpenAPI / Swagger specs (v2 and v3, YAML or JSON) grouped by tag, with parameters, request and response types and the schemas they use; GraphQL schemas with queries, mutations and types. Read from a repository's files, or asked of a running API at its address.",
 	mode: "inventory",
-	fields: [FOLDER_FIELD],
+	fields: [
+		{ ...FOLDER_FIELD, required: false, help: "Its OpenAPI and GraphQL files are read (a GitHub repository is downloaded first). Left empty with no address below: the diagram's folder." },
+		{
+			id: "url",
+			label: "Or a running API's address",
+			type: "text",
+			placeholder: "https://api.example.com, or the address of its OpenAPI document or docs page",
+			help: "The API is asked for its own description: the address itself, what its docs page names, then the usual places; failing that, the address and the usual GraphQL endpoints are asked for their schema. Only reads (GET, and GraphQL's schema question, a POST), only on that host, at most 40 requests. Not every API publishes one: you are told what was asked.",
+		},
+		{
+			id: "authorization",
+			label: "Authorization header, if the API needs one",
+			type: "password",
+			secret: true,
+			placeholder: "Bearer …",
+			help: "Sent with those requests to that host only. Not saved, not drawn, not given to the agent.",
+		},
+	],
 	async collect(input, ctx): Promise<CollectResult> {
-		const root = folderInput(input, ctx.cwd);
 		const started = Date.now();
-		ctx.progress("Looking for OpenAPI and GraphQL files…");
-		const { specs, graphql, warnings } = findApiFiles(root);
-		const name = path.basename(root);
-		if (!specs.length && !graphql.length) return { summary: `No OpenAPI / Swagger spec or GraphQL schema found in ${root}.`, warnings };
+		const address = (input.url ?? "").trim();
+		const warnings: string[] = [];
+		let specs: ApiSpec[] = [];
+		let graphql: FoundFile[] = [];
+		let name = "";
+		let where = "";
+		// a repository's files, unless only an address was given
+		if (!address || (input.folder ?? "").trim()) {
+			const root = folderInput(input, ctx.cwd);
+			ctx.progress("Looking for OpenAPI and GraphQL files…");
+			const found = findApiFiles(root);
+			({ specs, graphql } = found);
+			warnings.push(...found.warnings);
+			name = path.basename(root);
+			where = root;
+		}
+		// the API itself, at its address
+		if (address) {
+			const asked = await probeApi(address, { authorization: input.authorization, signal: ctx.signal, progress: (t) => ctx.progress(t) });
+			const host = asked.origin.replace(/^https?:\/\//, "");
+			if (!asked.specs.length && !asked.graphql) {
+				if (!specs.length && !graphql.length) return { summary: nothingFound(asked), warnings };
+				warnings.push(nothingFound(asked));
+			}
+			specs = [...specs, ...asked.specs];
+			if (asked.graphql) graphql = [...graphql, { rel: asked.graphql.url, abs: asked.graphql.url, text: asked.graphql.sdl }];
+			name = name ? `${name} + ${host}` : host;
+			where = where ? `${where} or on ${host}` : host;
+		}
+		if (!specs.length && !graphql.length) return { summary: `No OpenAPI / Swagger spec or GraphQL schema found in ${where}.`, warnings };
 		const graphs: MapGraph[] = [];
 		const facts: string[] = [`# API surface of ${name}`];
 		const summary: string[] = [];
@@ -468,7 +542,7 @@ export const apiRecipe: Recipe = {
 			}
 		}
 		if (graphql.length) {
-			const types = graphql.flatMap((f) => parseGraphQL(f.text, f.rel));
+			const types = mergeGqlTypes(graphql.flatMap((f) => parseGraphQL(f.text, f.rel)));
 			const g = graphqlToGraph(types, name);
 			graphs.push(g);
 			summary.push(`${graphql.length} GraphQL file(s), ${types.length} type(s)`);
