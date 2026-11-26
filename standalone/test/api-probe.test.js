@@ -171,6 +171,23 @@ test("it stays on the host it was given: the Authorization header goes nowhere e
 	const page = await api({ "/": { text: `<script>SwaggerUIBundle({ url: "${other.url}/openapi.json" })</script>` } });
 	await probeApi(page.url, { authorization: "Bearer s3cret-token" });
 	assert.equal(other.got.length, 0);
+	// nor is one in a Link header: the one to this host is followed, the one to another host is not asked at all
+	const linked = await api({ "/": { text: "<html></html>", headers: { link: `<${other.url}/openapi.json>; rel="service-desc", </real.json>; rel="service-desc"` } }, "/real.json": { json: SPEC } });
+	r = await probeApi(linked.url, { authorization: "Bearer s3cret-token" });
+	assert.equal(other.got.length, 0, "a Link header does not carry the Authorization header to another host");
+	assert.deepEqual(found(r), [[["/real.json", "Shop"]], undefined]);
+	assert.ok(!r.asked.some((a) => a.url.startsWith(other.url)));
+	// and once https was given, plain http on that host is another place too: a redirect or a link down to it is not followed
+	const calls = [];
+	const downgrade = async (u, init) => {
+		calls.push([String(u), init.headers.Authorization]);
+		if (String(u) === "https://api.example.com/") return new Response("", { status: 302, headers: { location: "http://api.example.com/openapi.json" } });
+		if (String(u) === "https://api.example.com/api-docs") return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html", link: '<http://api.example.com/openapi.json>; rel="service-desc"' } });
+		return new Response("{}", { status: 404 });
+	};
+	r = await probeApi("https://api.example.com", { authorization: "Bearer s3cret-token", fetch: downgrade, deadlineMs: 5000 });
+	assert.ok(calls.length > 5 && calls.every(([u]) => u.startsWith("https://api.example.com/")), `only https on that host: ${calls.find(([u]) => !u.startsWith("https://api.example.com/"))}`);
+	assert.ok(calls.some(([u]) => u === "https://api.example.com/api-docs"), "the page whose Link header pointed down to http was asked");
 	// what is shown of an address has no query in it, and nothing anywhere holds the header
 	const withQuery = await api({ "/spec": { json: SPEC } });
 	r = await probeApi(`${withQuery.url}/spec?api_key=abc123`, { authorization: "Bearer s3cret-token" });

@@ -159,6 +159,14 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 		if (o.signal?.aborted) throw new MapperError("Cancelled");
 	};
 	const room = () => asked.length < MAX_REQUESTS && Date.now() < deadline;
+	/**
+	 * Whether an address is the API's own place: the scheme, host and port that were given, or
+	 * that host over https when http was given. Everything that is asked passes this, wherever
+	 * the address came from (a redirect, a link on a page, a Link header), because the
+	 * Authorization header goes with every request: another host, another port, or plain http
+	 * where https was given, is asked nothing and told nothing.
+	 */
+	const own = (u: URL) => (u.protocol === start.protocol && u.host === start.host) || (start.protocol === "http:" && u.protocol === "https:" && u.hostname === start.hostname);
 
 	/** One request, on the API's own host: a redirect is followed only when it stays there. */
 	async function ask(url: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; text: string; type: string; link: string; url: URL } | undefined> {
@@ -167,6 +175,10 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 		asked.push(entry);
 		for (let hop = 0; hop < 4; hop++) {
 			cancelled();
+			if (!own(at)) {
+				entry.status = "sent elsewhere";
+				return undefined;
+			}
 			const ctrl = new AbortController();
 			const timer = setTimeout(() => ctrl.abort(), Math.max(500, Math.min(o.timeoutMs ?? 8000, deadline - Date.now())));
 			const onAbort = () => ctrl.abort();
@@ -185,8 +197,8 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 				});
 				if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
 					const to = new URL(res.headers.get("location")!, at);
-					// (the same host, also when it only moves from http to https: nothing is asked of, or told to, another one)
-					if (to.hostname !== start.hostname || (to.port !== start.port && !(start.protocol === "http:" && to.protocol === "https:")) || init.method === "POST") {
+					// (the same place, also when it only moves from http to https: nothing is asked of, or told to, another one)
+					if (!own(to) || init.method === "POST") {
 						entry.status = to.hostname !== start.hostname ? "sent elsewhere" : res.status;
 						return undefined;
 					}
@@ -224,8 +236,15 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 		}
 		if (depth >= 2) return;
 		const links = specLinks(r.text, r.url);
-		for (const m of r.link.matchAll(/<([^>]+)>\s*;[^,]*\brel="?(?:service-desc|openapi)"?/gi)) links.unshift(new URL(m[1], r.url).toString());
-		for (const l of links) await look(l, depth + 1);
+		for (const m of r.link.matchAll(/<([^>]+)>\s*;[^,]*\brel="?(?:service-desc|openapi)"?/gi)) {
+			try {
+				links.unshift(new URL(m[1], r.url).toString());
+			} catch {
+				// not an address
+			}
+		}
+		// (a description that is said to be somewhere else is not fetched: see `own`)
+		for (const l of links) if (own(new URL(l))) await look(l, depth + 1);
 	}
 
 	/** Asks GraphQL endpoints for their schema, until one answers with it. */
