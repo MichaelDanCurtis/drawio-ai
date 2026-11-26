@@ -430,6 +430,7 @@ function editorStub(diagram) {
 	};
 	const wait = (ms) => (ms ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 	const client = {
+		onInit: event(),
 		onPatch: event(),
 		onCursorChanged: event(),
 		onSelectedCellsChanged: event(),
@@ -510,6 +511,23 @@ test("what someone changes in the moment their diagram is being replaced is thei
 	await until(() => ann.diagram.cells.a.label === "after");
 	await bo.stop();
 	assert.deepEqual(log, []);
+
+	// the editor's page is loaded anew while sharing: this window is no longer on the board, and says so
+	const diagram2 = new Diagram();
+	const client2 = editorStub(diagram2);
+	let changes = 0;
+	const cy = await LiveShare.join({ client: client2, remoteChanged() {}, changed: () => changes++, log() {} }, b.link, { name: "Cy" });
+	await until(() => ann.session.others().some((p) => p.name === "Cy"));
+	client2.onInit.emit();
+	await until(() => cy.status === "ended");
+	assert.match(cy.ended, /editor was reloaded, so sharing stopped/);
+	await until(() => !ann.session.others().some((p) => p.name === "Cy"));
+	// what is done in the reloaded editor is not sent anywhere
+	const revision = b.relay.stats(b.link.id).revision;
+	client2.userEdit(update("a", { label: "after the reload" }));
+	await new Promise((r) => setTimeout(r, 60));
+	assert.equal(b.relay.stats(b.link.id).revision, revision);
+	assert.ok(changes > 0, "the window was told");
 });
 
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {

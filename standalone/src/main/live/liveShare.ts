@@ -135,7 +135,10 @@ export class LiveShare {
 		this.subscriptions.push(
 			win.client.onPatch.sub(({ patch, checksum }) => {
 				if (!this.editor.replacing) this.session.localPatch(patch, checksum);
-			})
+			}),
+			// The editor's page was loaded anew (Reload Editor): it holds the file again, not the diagram
+			// at the session's revision, and reports no changes. Sharing cannot go on from that.
+			win.client.onInit.sub(() => this.end("The editor was reloaded, so sharing stopped in this window. Go live again to share it."))
 		);
 	}
 
