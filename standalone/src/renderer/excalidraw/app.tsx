@@ -65,9 +65,14 @@ const mac = /mac/i.test(navigator.platform);
 const key = (k: string) => (mac ? `⌘${k}` : `Ctrl+${k}`);
 const command = (name: string) => host.post({ type: "command", command: name });
 
-/** What the drawing held when it was last saved, as one string: a change of any element, or of the background, changes it. */
-function stampOf(elements: Parameters<typeof hashElementsVersion>[0], appState: Pick<AppState, "viewBackgroundColor">): string {
-	return `${hashElementsVersion(elements)}:${appState.viewBackgroundColor}`;
+/**
+ * What the drawing held when it was last saved, as one string: a change of any element changes
+ * it, and so does a change of anything else a saved file holds (the background, the grid).
+ * Which settings those are is Excalidraw's to say: they are what it writes for a drawing with
+ * no elements, so a setting it starts to save one day counts here from that day.
+ */
+function stampOf(elements: Parameters<typeof hashElementsVersion>[0], appState: AppState): string {
+	return `${hashElementsVersion(elements)}:${serializeAsJSON([], appState, {}, "local")}`;
 }
 
 /** The drawing as a file's contents, with what it held at that moment (so a change made while it is written still counts as unsaved). */

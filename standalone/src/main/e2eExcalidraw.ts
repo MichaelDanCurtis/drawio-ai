@@ -4,7 +4,7 @@
 // element, PNG and SVG exports carry the drawing and open again for editing, what is not a
 // drawing is refused, and the window is screenshot in light and dark.
 // Nothing leaves the machine: the page's requests that the app refused are counted, and must be none.
-import { dialog, Menu, nativeTheme, session, type WebContents } from "electron";
+import { dialog, Menu, nativeTheme, session, shell, type WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import type { E2eConfig } from "./e2e";
@@ -194,6 +194,46 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	expect(Array.isArray(saved.elements) && saved.elements.length === 6 && saved.elements.some((e: any) => e.id === "e2e-diamond" && e.type === "diamond"), "the added element is in the file");
 	expect(saved.appState && typeof saved.appState === "object" && saved.files && typeof saved.files === "object", "the file has appState and files");
 	expect(first.win.getTitle() === `${path.basename(config.file)} — OmniDraw` && (await bar()).saveDisabled, "nothing is unsaved after the save");
+
+	// ----- a setting that is saved with the drawing (the grid) is a change to save -----
+	await inEditor(first, `x.api.updateScene({ appState: { gridModeEnabled: true } });`);
+	await until("the grid to count as an unsaved change", async () => first.isDirty && !(await bar()).saveDisabled);
+	menuItem("File", "Save").click();
+	await until("the drawing to be saved with its grid", () => !first.isDirty && JSON.parse(fs.readFileSync(config.file, "utf8")).appState.gridModeEnabled === true);
+	// (what is not saved with a drawing is not a change: the view moved, something selected)
+	await inEditor(first, `x.api.updateScene({ appState: { scrollX: x.api.getAppState().scrollX + 40, zoom: { value: 1.1 } } });`);
+	await pause(300);
+	expect(!first.isDirty, "moving the view is not an unsaved change");
+	await inEditor(first, `x.api.updateScene({ appState: { gridModeEnabled: false, scrollX: x.api.getAppState().scrollX - 40, zoom: { value: 1 } } });`);
+	await until("unsaved changes again", () => first.isDirty);
+	menuItem("File", "Save").click();
+	await until("the drawing to be saved", () => !first.isDirty);
+	log("gridIsSaved", true);
+
+	// ----- an export under a name that gets its ending added: an existing file of that name is asked about -----
+	const typed = path.join(config.out, "typed.svg"), becomes = `${typed}.png`;
+	fs.writeFileSync(becomes, "something else that is already there");
+	const dialogs = { save: dialog.showSaveDialog, box: dialog.showMessageBox, reveal: shell.showItemInFolder };
+	const replaceAsked: string[] = [];
+	const asks = (): number => replaceAsked.length;
+	const replaceAnswers = [1, 0]; // Cancel, then Replace
+	(dialog as any).showSaveDialog = async () => ({ canceled: false, filePath: typed });
+	(dialog as any).showMessageBox = async (_win: unknown, options: Electron.MessageBoxOptions) => {
+		replaceAsked.push(String(options.message));
+		return { response: replaceAnswers.shift() ?? 1, checkboxChecked: false };
+	};
+	(shell as any).showItemInFolder = () => undefined;
+	try {
+		await first.exportInteractive("png");
+		expect(asks() === 1 && fs.readFileSync(becomes, "utf8") === "something else that is already there", "Cancel leaves the file that was there");
+		await first.exportInteractive("png");
+		expect(asks() === 2 && sniffExcalidraw(becomes, () => fs.readFileSync(becomes)) === "png" && !fs.existsSync(typed), "Replace writes the export under the name with its ending");
+	} finally {
+		(dialog as any).showSaveDialog = dialogs.save;
+		(dialog as any).showMessageBox = dialogs.box;
+		(shell as any).showItemInFolder = dialogs.reveal;
+	}
+	log("exportNameWithEndingAdded", replaceAsked);
 
 	// ----- exports carry the drawing -----
 	const png = path.join(config.out, "export.png"), svg = path.join(config.out, "export.svg");

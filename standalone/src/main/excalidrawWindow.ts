@@ -399,19 +399,27 @@ export class ExcalidrawWindow implements DocumentWindow {
 				],
 			});
 			if (r.canceled || !r.filePath) return false;
-			let target = r.filePath;
-			if (!formatForPath(target)) {
-				// a name without an ending the app knows: it becomes a .excalidraw file (asked about, if that one exists)
-				target += ".excalidraw";
-				if (fs.existsSync(target)) {
-					const replace = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)}?`, detail: "A drawing with that name is already there.", buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
-					if (replace.response !== 0) return false;
-				}
-			}
-			return await this.saveTo(target);
+			// (a name without an ending the app knows becomes a .excalidraw file)
+			const target = await this.namedFile(r.filePath, !!formatForPath(r.filePath), ".excalidraw");
+			return target ? await this.saveTo(target) : false;
 		} finally {
 			this.asking = false;
 		}
+	}
+
+	/**
+	 * The file a name chosen in a save dialog stands for: the name itself when it `fits`, else the
+	 * name with `ending` added. The dialog asked about replacing the name it was given, not the one
+	 * made here: when that file exists, the user is asked about it. Undefined when they say no.
+	 */
+	private async namedFile(chosen: string, fits: boolean, ending: string): Promise<string | undefined> {
+		if (fits) return chosen;
+		const target = chosen + ending;
+		if (fs.existsSync(target)) {
+			const replace = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)}?`, detail: `A file with that name is already there (${path.basename(chosen)} became ${path.basename(target)}).`, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
+			if (replace.response !== 0) return undefined;
+		}
+		return target;
 	}
 
 	/** Saves the drawing under a (new) name, in the format the name says, and makes that its file. */
@@ -481,8 +489,9 @@ export class ExcalidrawWindow implements DocumentWindow {
 				filters: [{ name: `${label} with the drawing inside`, extensions: [format] }],
 			});
 			if (r.canceled || !r.filePath) return;
-			const target = formatForPath(r.filePath) === format ? r.filePath : `${r.filePath}.${format}`;
-			if (await this.exportTo(format, target)) shell.showItemInFolder(target);
+			// (a PNG export named drawing.svg is written as drawing.svg.png)
+			const target = await this.namedFile(r.filePath, formatForPath(r.filePath) === format, `.${format}`);
+			if (target && (await this.exportTo(format, target))) shell.showItemInFolder(target);
 		} finally {
 			this.asking = false;
 		}
