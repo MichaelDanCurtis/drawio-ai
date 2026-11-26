@@ -671,11 +671,13 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	// An AI change under review on the host, and a collaborator's change meanwhile: the review is of the
 	// AI's change only, and rejecting it leaves what the collaborator did.
 	const labelOf = async (win: DiagramWindow, id: string) => (await cells(win)).find((c: any) => c.id === id)?.label;
-	const beforeAi = await labelOf(w, hostShape);
 	const quiet = async () => {
 		for (const end = Date.now() + 10_000; Date.now() < end && !(w.live?.session.settled && guest.live?.session.settled); ) await new Promise((r) => setTimeout(r, 50));
 	};
+	// (the two changes to one shape just before may still be settling: whose label it ends with is read once they have)
 	await quiet();
+	await same(w, guest, "settling");
+	const beforeAi = await labelOf(w, hostShape);
 	await w.client.aiApplyOps([{ op: "update", id: hostShape, label: "the AI's wording" }], { selectResult: false, flash: false, atomic: true, review: true });
 	await waitFor(() => w.client.pendingReview, 10_000);
 	// (the host's diagram is fetched from the board again while the review is open: the AI's change is
