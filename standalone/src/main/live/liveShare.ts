@@ -52,22 +52,35 @@ class DrawioEditor implements LiveEditor {
 		return this.client.resetDiff();
 	}
 
+	/** Set when the session has let go of the editor: from then on nothing here touches it (it may be another sharing's by now). */
+	private released = false;
+
 	public stop(): void {
+		if (this.released) return;
+		this.released = true;
 		this.client.setDiffSync(false);
 		this.client.updateLiveshareViewState({ cursors: [], selectedCells: [], selectedRectangles: [] });
 	}
 
+	/** Refuses to go on once the editor has been let go of: a diagram on its way in is not put in. */
+	private mine(): void {
+		if (this.released) throw new BoardError("Sharing has stopped in this window.");
+	}
+
 	public async replace(xml: string, expected?: string): Promise<string> {
+		this.mine();
 		// The diagram is locked while another takes its place. What draw.io reports as changes until
 		// the lock has taken hold is still the user's (it is passed on, and put on top again by the
 		// session); what it reports from then until the new diagram is in is the replacing itself.
 		await this.client.liveLock(true);
 		this.replacing = true;
 		try {
+			this.mine();
 			// draw.io merges the diagram into the open one, which gives exactly that diagram unless the
 			// open one had drifted in a way a merge does not undo: then it is loaded from scratch.
 			let checksum = await this.client.resetDiff(xml);
 			if (expected !== undefined && checksum !== expected) {
+				this.mine();
 				this.fullLoads++;
 				await this.client.loadXmlLike(xml);
 				// (a diagram loaded from scratch can be changed again: locked once more until it is the starting point)
@@ -87,10 +100,12 @@ class DrawioEditor implements LiveEditor {
 	}
 
 	public loading(on: boolean): void {
-		this.client.liveLoading(on);
+		// (the end of a loading is always said, also by a session that has stopped: the review waits for it)
+		if (!this.released || !on) this.client.liveLoading(on);
 	}
 
 	public async apply(patch: DiagramPatch): Promise<string> {
+		this.mine();
 		const checksum = await this.client.applyPatch(patch);
 		this.remoteChanged();
 		return checksum;
@@ -199,6 +214,12 @@ export class LiveShare {
 				}
 			}
 			const made = await createBoard(server, { title: who.title.slice(0, 200), xml: snap.xml, checksum: snap.checksum });
+			if (live.stopped) {
+				// (sharing was stopped while the server was making the board, the editor reloaded say:
+				// the board is not left behind with nobody on it)
+				await closeBoard(made.link, made.ownerKey);
+				throw new BoardError(live.ended ?? "Sharing was stopped before it had started.");
+			}
 			live.link = made.link;
 			live.ownerKey = made.ownerKey;
 			await live.connect(who.name);

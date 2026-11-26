@@ -273,6 +273,7 @@ export class LiveSession {
 		} finally {
 			this.editor.loading?.(false);
 		}
+		if (this.closed) return;
 		this.events.replaced?.(first ? "joined" : "caught-up");
 		if (this.snapshotWanted && this.settled) await this.sendSnapshot();
 		this.touch();
@@ -287,20 +288,28 @@ export class LiveSession {
 			whole = await this.editor.compose(board.xml, after.map((p) => p.patch));
 			after = [];
 		}
+		// (the session ended while that was being worked out: the editor is no longer its to change)
+		if (this.closed) return;
 		const loaded = await this.editor.replace(whole.xml, whole.checksum);
+		if (this.closed) return;
 		// (what was held up to this moment was made on the diagram that has just been replaced)
 		const wiped = this.held.length;
 		if (loaded !== whole.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
 		let revision = board.revision - board.patches.length;
 		for (const p of after) {
+			if (this.closed) return;
 			await this.editor.apply(p.patch);
 			revision = p.revision;
 		}
+		if (this.closed) return;
 		this.revision = Math.max(revision, board.revision);
 		this.epoch = Number(board.epoch) || 0;
 		// Own changes still unacknowledged when the board's diagram arrives (it was not asked for: the
 		// board sent it to everyone) are not in it: the board numbers them after it. They go on top again.
-		for (const patch of this.pending) await this.editor.apply(patch);
+		for (const patch of this.pending) {
+			if (this.closed) return;
+			await this.editor.apply(patch);
+		}
 		this.arrivedWhilePending.length = 0;
 		this.crossedMine.length = 0;
 		this.crossedTheirs.length = 0;
@@ -315,6 +324,7 @@ export class LiveSession {
 		// diagram is fetched once more when these have been acknowledged.
 		for (let i = 0; i < this.held.length; i++) {
 			const patch = this.held[i];
+			if (this.closed) return;
 			if (i < wiped) await this.editor.apply(patch);
 			else this.mustCatchUp = this.mustCatchUpWhatever = true;
 			this.sendPatch(patch, null);

@@ -451,6 +451,8 @@ function editorStub(diagram) {
 			client.calls.push(`sync:${on}`);
 		},
 		async liveCompose(xml, patches) {
+			client.calls.push("compose");
+			await wait(client.composeMs);
 			const d = new Diagram(JSON.parse(xml));
 			for (const p of patches) d.patch(p);
 			return { xml: d.xml(), checksum: d.checksum() };
@@ -622,6 +624,41 @@ test("sharing a diagram again while the last sharing is still being closed on th
 	assert.equal(relay.stats(second.link.id).revision, 1);
 	assert.equal(relay.boards.has(first.link.id), false);
 	await second.stop();
+});
+
+test("sharing that is stopped half-way leaves nothing behind: no board that was still being made, and no diagram put into an editor it has let go of", async () => {
+	// the editor is reloaded while the server is still making the board
+	const relay = await startBoardRelay({ createDelayMs: 120 });
+	relays.push(relay);
+	const diagram = new Diagram({ a: { label: "start" } });
+	const client = editorStub(diagram);
+	const win = { client, remoteChanged() {}, changed() {}, log() {} };
+	const starting = LiveShare.host(win, relay.url, { name: "Host", title: "T" });
+	setTimeout(() => client.onInit.emit(), 40);
+	await assert.rejects(starting, /editor was reloaded/);
+	await until(() => relay.boards.size === 0);
+	assert.equal(client.calls.filter((c) => c.startsWith("sync:")).at(-1), "sync:false");
+
+	// someone leaves while the board's diagram is being worked out for them: it is not put in afterwards
+	const b = await board();
+	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });
+	const diagram2 = new Diagram();
+	const client2 = editorStub(diagram2);
+	const bo = await LiveShare.join({ client: client2, remoteChanged() {}, changed() {}, log() {} }, b.link, { name: "Bo" });
+	ann.change(update("a", { label: "from Ann" }));
+	await until(() => diagram2.cells.a.label === "from Ann");
+	client2.composeMs = 120;
+	client2.calls.length = 0;
+	bo.session.catchUp();
+	await until(() => client2.calls.includes("compose"));
+	await bo.stop();
+	// (what he does in his window after leaving is his own)
+	client2.userEdit(update("a", { label: "after leaving" }));
+	await new Promise((r) => setTimeout(r, 250));
+	const afterLeaving = client2.calls.slice(client2.calls.indexOf("sync:false") + 1);
+	assert.deepEqual(afterLeaving.filter((c) => c === "replace" || c === "lock:true"), [], `nothing was put into the editor after it was let go of: ${afterLeaving.join(", ")}`);
+	assert.equal(diagram2.cells.a.label, "after leaving");
+	assert.equal(afterLeaving.at(-1), "loading:false", "and the editor's tools were told that the loading is over");
 });
 
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {
