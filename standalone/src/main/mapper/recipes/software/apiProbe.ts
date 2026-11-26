@@ -238,7 +238,7 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 	}
 
 	/** Looks at one address: a description, or a page or list that names some. */
-	async function look(url: string, depth = 0): Promise<void> {
+	async function look(url: string, depth = 0, page?: URL): Promise<void> {
 		const key = url.replace(/\/+$/, "");
 		if (seen.has(key) || !room() || specs.length >= MAX_SPECS) return;
 		seen.add(key);
@@ -258,7 +258,11 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 			return;
 		}
 		if (depth >= 2) return;
-		const links = specLinks(r.text, r.url);
+		// A script a page loads names addresses as that page would read them: "./spec.json" in
+		// /static/swagger-initializer.js, loaded by /docs/index.html, is /docs/spec.json.
+		const script = /javascript|ecmascript/i.test(r.type) || /\.[mc]?js$/i.test(r.url.pathname);
+		const base = script && page ? page : r.url;
+		const links = specLinks(r.text, base);
 		for (const m of r.link.matchAll(/<([^>]+)>\s*;[^,]*\brel="?(?:service-desc|openapi)"?/gi)) {
 			try {
 				links.unshift(new URL(m[1], r.url).toString());
@@ -267,7 +271,7 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 			}
 		}
 		// (a description that is said to be somewhere else is not fetched: see `own`)
-		for (const l of links) if (own(new URL(l))) await look(l, depth + 1);
+		for (const l of links) if (own(new URL(l))) await look(l, depth + 1, base);
 	}
 
 	/** Asks GraphQL endpoints for their schema, until one answers with it. */

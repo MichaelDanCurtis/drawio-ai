@@ -88,6 +88,15 @@ test("the address of the document itself, of a docs page that names it, or of th
 	r = await probeApi(`${ui.url}/docs`);
 	assert.deepEqual(found(r), [[["/internal/spec.json", "Shop"]], undefined]);
 	assert.deepEqual(ui.paths(), ["GET /docs", "GET /swagger-initializer.js", "GET /internal/spec.json"], "the page's styles and the Swagger UI bundle are not fetched");
+	// the start-up script is somewhere else than the page: what it names is read as the page reads it
+	const apart = await api({
+		"/docs/index.html": { text: '<html><script src="/static/swagger-initializer.js"></script></html>' },
+		"/static/swagger-initializer.js": { text: 'window.ui = SwaggerUIBundle({ url: "./spec.json", dom_id: "#swagger-ui" });', type: "application/javascript" },
+		"/docs/spec.json": { json: SPEC },
+	});
+	r = await probeApi(`${apart.url}/docs/index.html`);
+	assert.deepEqual(found(r), [[["/docs/spec.json", "Shop"]], undefined]);
+	assert.deepEqual(apart.paths(), ["GET /docs/index.html", "GET /static/swagger-initializer.js", "GET /docs/spec.json"]);
 
 	// a page that names several (springdoc's list, Redoc's attribute): each is read
 	const many = await api({
