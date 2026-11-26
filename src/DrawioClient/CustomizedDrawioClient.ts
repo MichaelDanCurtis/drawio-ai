@@ -72,6 +72,10 @@ export class CustomizedDrawioClient extends DrawioClient<
 	public readonly onSelectedRectangleChanged =
 		this.onSelectedRectangleChangedEmitter.asEvent();
 
+	/** The page that is shown (its id), reported while diff sync is on: at once, and when another page is shown. */
+	private readonly onLivePageEmitter = new EventEmitter<{ page: string }>();
+	public readonly onLivePage = this.onLivePageEmitter.asEvent();
+
 	private readonly onFocusChangedEmitter = new EventEmitter<{
 		hasFocus: boolean;
 	}>();
@@ -535,6 +539,8 @@ export class CustomizedDrawioClient extends DrawioClient<
 		} else if (evt.event === "invokeCommand") {
 			this.onInvokeCommandEmitter.emit({ command: evt.command });
 
+		} else if (evt.event === "livePage") {
+			this.onLivePageEmitter.emit({ page: String(evt.page ?? "") });
 		} else if (evt.event === "selectedRectangleChanged") {
 			this.onSelectedRectangleChangedEmitter.emit({
 				rectangle: evt.rect,

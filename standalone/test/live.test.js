@@ -431,6 +431,8 @@ function editorStub(diagram) {
 	const wait = (ms) => (ms ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 	const client = {
 		onInit: event(),
+		onLivePage: event(),
+		shown: [],
 		onPatch: event(),
 		onCursorChanged: event(),
 		onSelectedCellsChanged: event(),
@@ -446,7 +448,9 @@ function editorStub(diagram) {
 			return true;
 		},
 		setDiffSync() {},
-		updateLiveshareViewState() {},
+		updateLiveshareViewState(state) {
+			client.shown.push(state);
+		},
 		async liveLock(on) {
 			client.calls.push(`lock:${on}`);
 			client.beforeLock?.(on);
@@ -511,6 +515,30 @@ test("what someone changes in the moment their diagram is being replaced is thei
 	await until(() => ann.diagram.cells.a.label === "after");
 	await bo.stop();
 	assert.deepEqual(log, []);
+
+	// people on a diagram with several pages: each is drawn only for those who are on the same page
+	const diagram3 = new Diagram();
+	const client3 = editorStub(diagram3);
+	const dee = await LiveShare.join({ client: client3, remoteChanged() {}, changed() {}, log() {} }, b.link, { name: "Dee" });
+	client3.onLivePage.emit({ page: "p1" });
+	const drawn = () => {
+		const last = client3.shown.at(-1) ?? { cursors: [], selectedCells: [], selectedRectangles: [] };
+		return [last.cursors.length, last.selectedCells.length, last.selectedRectangles.length];
+	};
+	const where = { cursor: { x: 1, y: 2 }, selection: ["a"], rect: { start: { x: 0, y: 0 }, end: { x: 5, y: 5 } } };
+	ann.session.localPresence({ page: "p2", ...where });
+	await until(() => dee.people().find((p) => p.name === "Ann")?.presence?.page === "p2");
+	assert.deepEqual(drawn(), [0, 0, 0], "Ann is on another page: nothing of hers is drawn on this one");
+	ann.session.localPresence({ page: "p1", ...where });
+	await until(() => drawn().join() === "1,1,1");
+	// Dee goes to the other page: Ann's pointer goes, and the others learn where Dee is
+	client3.onLivePage.emit({ page: "p2" });
+	assert.deepEqual(drawn(), [0, 0, 0]);
+	await until(() => ann.session.others().find((p) => p.name === "Dee")?.presence?.page === "p2");
+	// (someone whose page is not known, an older client, is drawn wherever one is)
+	ann.session.localPresence(where);
+	await until(() => drawn().join() === "1,1,1");
+	await dee.stop();
 
 	// the editor's page is loaded anew while sharing: this window is no longer on the board, and says so
 	const diagram2 = new Diagram();

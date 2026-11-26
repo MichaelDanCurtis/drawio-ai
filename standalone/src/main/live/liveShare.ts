@@ -102,6 +102,8 @@ export class LiveShare {
 	private socket: BoardSocket | undefined;
 	private readonly subscriptions: { dispose(): void }[] = [];
 	private presence: PresenceState = { cursor: null, selection: [], rect: null };
+	/** The page this person has in front of them (its id), once the editor has said. */
+	private page: string | undefined;
 	private presenceTimer: ReturnType<typeof setTimeout> | undefined;
 	private stopped = false;
 
@@ -135,6 +137,12 @@ export class LiveShare {
 		this.subscriptions.push(
 			win.client.onPatch.sub(({ patch, checksum }) => {
 				if (!this.editor.replacing) this.session.localPatch(patch, checksum);
+			}),
+			// Which page this person is on: sent with where they are, and others are only drawn on theirs.
+			win.client.onLivePage.sub(({ page }) => {
+				this.page = page || undefined;
+				this.present({ page: this.page });
+				this.showPeople();
 			}),
 			// The editor's page was loaded anew (Reload Editor): it holds the file again, not the diagram
 			// at the session's revision, and reports no changes. Sharing cannot go on from that.
@@ -300,7 +308,8 @@ export class LiveShare {
 
 	/** Draws the others' pointers, selections and selection rectangles in the editor. */
 	private showPeople(): void {
-		const people = this.session.others();
+		// (someone on another page of the diagram is here, but not on what this person is looking at)
+		const people = this.session.others().filter((p) => !p.presence?.page || !this.page || p.presence.page === this.page);
 		const id = (p: Person) => String(p.id);
 		this.win.client.updateLiveshareViewState({
 			cursors: people.filter((p) => p.presence?.cursor).map((p) => ({ id: id(p), position: p.presence!.cursor!, label: p.name, color: personColor(p.hue) })),

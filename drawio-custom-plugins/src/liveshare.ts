@@ -44,6 +44,11 @@ Draw.loadPlugin((ui) => {
 		);
 		*/
 
+		// Which page is shown: other people's pointers and selections are of a page, and are only drawn
+		// for the one this person is on.
+		const reportPage = () => sendEvent({ event: "livePage", page: String((ui as any).currentPage?.getId?.() ?? "") });
+		(ui.editor as any).addListener("pageSelected", reportPage);
+
 		/** While the diagram is locked for a shared one to go in: whether it could be changed before. */
 		let enabledBeforeLock: boolean | undefined;
 
@@ -82,6 +87,7 @@ Draw.loadPlugin((ui) => {
 					// draw.io's embed handler reads these each time the diagram changes
 					(ui as any).embedDiffSync = !!data.on;
 					(ui as any).embedDiffSyncPatchOnly = false;
+					if (data.on) reportPage();
 					break;
 				}
 				case "updateLiveshareViewState": {
@@ -110,7 +116,8 @@ Draw.loadPlugin((ui) => {
 					for (const s of data.selectedCells) {
 						for (const selectedCellId of s.selectedCellIds) {
 							const cell = graph.model.cells[selectedCellId];
-							highlightInfos.push({ cell, color: s.color });
+							// (a cell of another page, or one that is gone, is not on this page to outline)
+							if (cell) highlightInfos.push({ cell, color: s.color });
 						}
 					}
 					hightlights.updateHighlights(highlightInfos);

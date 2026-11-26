@@ -8,7 +8,7 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction
     | DesktopShapesAction | DesktopInsertShapeAction | DesktopReportShapeSetsAction | DesktopSetShapeSetAction | DesktopGalleryResultsAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
-    | UpdateLocalStorage | PluginLoaded | LiveLockEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
+    | UpdateLocalStorage | PluginLoaded | LiveLockEvent | LivePageEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
     | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
     | DesktopCommandEvent | DesktopStateEvent | DesktopShapeSetsEvent | DesktopGallerySearchEvent;
@@ -610,6 +610,12 @@ declare interface SetDiffSyncAction {
 declare interface LiveLockAction {
     action: "liveLock";
     on: boolean;
+}
+
+/** The page of the diagram that is shown (its id): sent when diff sync is turned on and whenever another page is shown. */
+declare interface LivePageEvent {
+    event: "livePage";
+    page: string;
 }
 
 declare interface LiveLockEvent {
