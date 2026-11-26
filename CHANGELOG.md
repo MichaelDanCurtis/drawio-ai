@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Mapper: a Kubernetes cluster found in the cloud.** The Kubernetes map no longer needs the cluster to be a context in this computer's kubeconfig. **Where the cluster is** offers Azure (AKS), AWS (EKS) and Google Cloud (GKE): the signed-in `az`, `aws` or `gcloud` CLI lists the clusters of a subscription, an account's region or a project (or of every subscription or region), and the one you choose is read through a sign-in made for that one read. Your own kubeconfig is not changed, and nothing of the sign-in is drawn, stored or sent to an agent.
+
 ## [0.5.0]
 
 The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). The extension has both too: its Shape Creator draws with a model VS Code offers. The desktop app can also use Anthropic's, OpenAI's, Gemini's, Grok's and Kimi's models, and those behind OpenRouter, with your own API key (Settings → Agents & models), in the chat and in the Shape Creator, listed beside the agents; the extension works with agents as before.

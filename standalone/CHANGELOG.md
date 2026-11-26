@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- Mapper, **Kubernetes cluster**: the cluster no longer has to be a context in this computer's
+  kubeconfig. **Where the cluster is** offers Azure (AKS), AWS (EKS) and Google Cloud (GKE):
+  - The clusters are listed with the `az`, `aws` or `gcloud` CLI you are signed in to: those of a
+    subscription, of an account's region or of a project, or of every subscription or every
+    enabled region. A subscription or region that could not be searched is named in the list.
+  - The one you choose is read through a kubeconfig made for that one read, in a file only you
+    can read, which is removed when the read ends. `~/.kube/config` is never written to. For AWS
+    and Google Cloud the file holds no secret (the cluster's address and public certificate, and
+    the CLI as the way to sign in); for Azure it is what `az aks get-credentials` prints for you,
+    never the cluster admin's, with `kubelogin` told to use the Azure CLI's sign-in.
+  - Nothing of that sign-in is in the map, the facts, the log or what an agent is sent.
+- The Map Something dialog loads only the lists that are on show, and loads a list again when a
+  remembered choice it depends on is no longer offered.
+
 ## [0.2.0]
 
 - The dot drawing in an empty chat no longer has a red dot in it: it is all in ink.

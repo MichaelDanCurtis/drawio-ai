@@ -651,6 +651,208 @@ test("Kubernetes (live): missing kubectl or an unreachable cluster is a clear Ma
 	await assert.rejects(rec.collect({ namespace: "Bad Name;" }, ctxFor("/", noExec)), /not a namespace name/);
 });
 
+// ----- a cluster found in the cloud -----
+
+const AKS_TOKEN = "aks-user-token-FAKE-0001";
+/** What `az aks get-credentials --file -` prints for a cluster with Microsoft Entra sign-in (and, here, a token as a cluster with local accounts has). */
+const AKS_KUBECONFIG = `apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: Q0VSVA==
+    server: https://aks-prod-dns-1a2b.hcp.westeurope.azmk8s.io:443
+  name: aks-prod
+contexts:
+- context:
+    cluster: aks-prod
+    user: clusterUser_rg-prod_aks-prod
+  name: aks-prod
+current-context: aks-prod
+kind: Config
+users:
+- name: clusterUser_rg-prod_aks-prod
+  user:
+    token: ${AKS_TOKEN}
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      args:
+      - get-token
+      - --server-id
+      - 6dae42f8-4368-4678-94ff-3960e28e3630
+      - --login
+      - devicecode
+      command: kubelogin
+`;
+const SUB_A = "11111111-1111-4111-8111-111111111111";
+const SUB_B = "22222222-2222-4222-8222-222222222222";
+
+/** A stand-in for az, aws, gcloud and kubectl: answers what the Kubernetes map asks, and keeps what kubectl was handed. */
+function cloudExec(seen, over = {}) {
+	const { checkReadOnly } = require("../src/main/mapper/readOnly");
+	return async (cmd, args) => {
+		seen.calls.push([cmd, ...args]);
+		assert.equal(checkReadOnly(cmd, args), undefined, `${cmd} ${args.join(" ")} must pass the read-only guard`);
+		const a = args.join(" ");
+		const json = (x) => ({ stdout: JSON.stringify(x), stderr: "", code: 0 });
+		if (over[cmd]) {
+			const r = await over[cmd](args, a);
+			if (r) return r;
+		}
+		if (cmd === "az" && a.startsWith("account list")) return json([{ id: SUB_B, name: "Sandbox", state: "Enabled" }, { id: SUB_A, name: "Production", state: "Enabled", isDefault: true }]);
+		if (cmd === "az" && a.startsWith("aks list")) {
+			if (a.includes(SUB_B)) return { stdout: "", stderr: "ERROR: (AuthorizationFailed) no access to this subscription", code: 1 };
+			return json([{ id: `/subscriptions/${SUB_A}/resourcegroups/rg-prod/providers/Microsoft.ContainerService/managedClusters/aks-prod`, name: "aks-prod", resourceGroup: "rg-prod", location: "westeurope", kubernetesVersion: "1.30.4", powerState: { code: "Running" } }, { name: "bad name;rm", resourceGroup: "rg" }]);
+		}
+		if (cmd === "az" && a.startsWith("aks get-credentials")) return { stdout: AKS_KUBECONFIG, stderr: "", code: 0 };
+		if (cmd === "aws" && a.startsWith("configure list-profiles")) return { stdout: "default\nprod\n", stderr: "", code: 0 };
+		if (cmd === "aws" && a.startsWith("configure list")) return { stdout: "      Name                    Value             Type    Location\n    region                eu-west-1      config-file    ~/.aws/config\n", stderr: "", code: 0 };
+		if (cmd === "aws" && a.startsWith("ec2 describe-regions")) return json({ Regions: [{ RegionName: "us-east-1" }, { RegionName: "eu-west-1" }, { RegionName: "ap-south-1" }] });
+		if (cmd === "aws" && a.startsWith("eks list-clusters")) {
+			if (a.includes("ap-south-1")) return { stdout: "", stderr: "An error occurred (UnrecognizedClientException): the region is not enabled", code: 254 };
+			return json({ clusters: a.includes("eu-west-1") ? ["shop", "bad name"] : [] });
+		}
+		if (cmd === "aws" && a.startsWith("eks describe-cluster")) return json({ cluster: { name: "shop", endpoint: "https://ABCDEF0123.gr7.eu-west-1.eks.amazonaws.com", certificateAuthority: { data: "Q0VSVA==" }, status: "ACTIVE" } });
+		if (cmd === "gcloud" && a.startsWith("projects list")) return json([{ projectId: "shop-prod", name: "Shop", lifecycleState: "ACTIVE" }]);
+		if (cmd === "gcloud" && a.startsWith("container clusters list")) return json([{ name: "gke-shop", location: "europe-west1", endpoint: "203.0.113.10", currentMasterVersion: "1.30.5-gke.1", status: "RUNNING", masterAuth: { clusterCaCertificate: "Q0VSVA==" } }]);
+		if (cmd === "kubectl") {
+			const file = args[args.indexOf("--kubeconfig") + 1];
+			seen.file = file;
+			seen.mode = fs.statSync(file).mode & 0o777;
+			seen.dirMode = fs.statSync(path.dirname(file)).mode & 0o777;
+			seen.kubeconfig = fs.readFileSync(file, "utf8");
+			return { stdout: KUBECTL_JSON, stderr: "", code: 0 };
+		}
+		throw new Error(`not expected: ${cmd} ${a}`);
+	};
+}
+
+test("Kubernetes in the cloud: AKS clusters are found per subscription or in all of them, and read with a sign-in that is gone afterwards", async () => {
+	const rec = recipe("software.kubernetes");
+	const seen = { calls: [] };
+	const ctx = ctxFor("/", cloudExec(seen));
+	const subs = await rec.loadOptions("subscription", { where: "azure" }, ctx);
+	assert.deepEqual(subs.map((o) => o.value), [SUB_A, SUB_B, "all"], "the default subscription first, every subscription last");
+	const value = `${SUB_A}/rg-prod/aks-prod`;
+	assert.deepEqual(await rec.loadOptions("aksCluster", { subscription: SUB_A }, ctx), [{ value, label: "aks-prod · rg-prod · westeurope · Kubernetes 1.30.4" }]);
+	// Every subscription: one that cannot be read does not hide the others, and the label says whose cluster it is.
+	assert.deepEqual(await rec.loadOptions("aksCluster", { subscription: "all" }, ctx), [
+		{ value, label: "aks-prod · rg-prod · Production · westeurope · Kubernetes 1.30.4" },
+		{ value: "", label: "(1 subscription could not be searched: Sandbox. ↻ to try again)" },
+	]);
+	await assert.rejects(rec.loadOptions("aksCluster", { subscription: SUB_B }, ctx), /AuthorizationFailed/);
+	assert.deepEqual(await rec.loadOptions("aksCluster", { subscription: "not-a-subscription; rm -rf" }, ctx), []);
+
+	const r = await rec.collect({ where: "azure", subscription: SUB_A, aksCluster: value, context: "kind-dev" }, ctx);
+	const creds = seen.calls.find((c) => c[2] === "get-credentials");
+	assert.deepEqual(creds, ["az", "aks", "get-credentials", "--resource-group", "rg-prod", "--name", "aks-prod", "--subscription", SUB_A, "--file", "-", "--only-show-errors"]);
+	const get = seen.calls.find((c) => c[0] === "kubectl");
+	assert.ok(get.includes("--kubeconfig") && !get.includes("--context"), "read through the temporary kubeconfig, not a context of this computer");
+	assert.equal(seen.mode, 0o600);
+	assert.equal(seen.dirMode, 0o700);
+	assert.ok(!fs.existsSync(seen.file) && !fs.existsSync(path.dirname(seen.file)), "the temporary kubeconfig is gone");
+	assert.match(seen.kubeconfig, /- --login\n\s+- azurecli\n/, "kubelogin uses the Azure CLI's sign-in, not a code nobody would see");
+	assert.ok(!/devicecode/.test(seen.kubeconfig));
+	assert.equal(r.graph.title, "Kubernetes · AKS aks-prod (rg-prod)");
+	assert.match(r.graph.legend[0], /^Kubernetes cluster AKS aks-prod \(rg-prod\): 4 workload/);
+	const prompt = rec.agentPrompt({ where: "azure", aksCluster: value }, r);
+	assert.match(prompt, /a cluster found in Azure/);
+	const all = JSON.stringify(r) + renderGraph(r.graph, { recipe: rec.id }).xml + prompt;
+	for (const hidden of [AKS_TOKEN, "Q0VSVA==", seen.file, "azmk8s.io"]) assert.ok(!all.includes(hidden), `nothing of the kubeconfig in the map: ${hidden}`);
+
+	// Nothing chosen, or something that is not a cluster of that list: asked for, not guessed.
+	for (const bad of ["", "rg-prod/aks-prod", `${SUB_A}/rg-prod/aks prod; rm`, `nope/rg-prod/aks-prod`]) await assert.rejects(rec.collect({ where: "azure", aksCluster: bad }, ctx), /Choose the AKS cluster/);
+	// Azure says no: its words, and what is needed.
+	const denied = ctxFor("/", cloudExec({ calls: [] }, { az: (_args, a) => (a.startsWith("aks get-credentials") ? { stdout: "", stderr: "ERROR: (AuthorizationFailed) The client does not have authorization", code: 1 } : undefined) }));
+	await assert.rejects(rec.collect({ where: "azure", aksCluster: value }, denied), (e) => e instanceof MapperError && /Azure did not give access to aks-prod: .*AuthorizationFailed/.test(e.message) && /Cluster User/.test(e.hint));
+	// kubectl cannot reach it: the file is still removed, its path is not in the message, and the hint is the cloud's.
+	const down = { calls: [] };
+	const unreachable = ctxFor(
+		"/",
+		cloudExec(down, {
+			kubectl: (args) => {
+				down.file = args[args.indexOf("--kubeconfig") + 1];
+				return { stdout: "", stderr: `error loading ${down.file}: dial tcp 10.0.0.4:443: i/o timeout`, code: 1 };
+			},
+		})
+	);
+	await assert.rejects(rec.collect({ where: "azure", aksCluster: value }, unreachable), (e) => /Could not read the cluster: error loading the temporary sign-in: dial tcp/.test(e.message) && /kubelogin/.test(e.hint) && /private cluster/.test(e.hint));
+	assert.ok(down.file && !fs.existsSync(down.file));
+});
+
+test("Kubernetes in the cloud: EKS and GKE clusters are found and read through a kubeconfig that holds no secret", async () => {
+	const rec = recipe("software.kubernetes");
+	const seen = { calls: [] };
+	const ctx = ctxFor("/", cloudExec(seen));
+	assert.deepEqual((await rec.loadOptions("profile", {}, ctx)).map((o) => o.value), ["", "default", "prod"]);
+	const regions = await rec.loadOptions("region", { profile: "prod" }, ctx);
+	assert.deepEqual(regions.map((o) => o.value), ["", "all", "ap-south-1", "eu-west-1", "us-east-1"]);
+	assert.equal(regions[0].label, "The profile's region (eu-west-1)");
+	// The profile's region, one region, and every region (one of which the account may not use).
+	const shop = { value: "eu-west-1/shop", label: "shop · eu-west-1" };
+	for (const region of ["", "eu-west-1"]) assert.deepEqual(await rec.loadOptions("eksCluster", { profile: "prod", region }, ctx), [shop], `region "${region}"`);
+	// A region that could not be searched is named: a cluster there is not "not found".
+	assert.deepEqual(await rec.loadOptions("eksCluster", { profile: "prod", region: "all" }, ctx), [shop, { value: "", label: "(1 region could not be searched: ap-south-1. ↻ to try again)" }]);
+	const stalled = seen.calls.find((c) => c[1] === "eks" && c[2] === "list-clusters");
+	assert.ok(stalled.includes("--cli-connect-timeout") && stalled.includes("--cli-read-timeout"), "a stalled connection gives up soon");
+	assert.deepEqual(await rec.loadOptions("eksCluster", { profile: "prod", region: "us-east-1" }, ctx), []);
+	await assert.rejects(rec.loadOptions("eksCluster", { profile: "prod", region: "ap-south-1" }, ctx), /not enabled/);
+	assert.deepEqual(await rec.loadOptions("eksCluster", { profile: "prod; rm", region: "" }, ctx), []);
+
+	const r = await rec.collect({ where: "aws", profile: "prod", region: "all", eksCluster: "eu-west-1/shop" }, ctx);
+	assert.equal(r.graph.title, "Kubernetes · EKS shop (eu-west-1)");
+	const eks = JSON.parse(seen.kubeconfig);
+	assert.equal(eks.clusters[0].cluster.server, "https://ABCDEF0123.gr7.eu-west-1.eks.amazonaws.com");
+	assert.deepEqual(eks.users[0].user, { exec: { apiVersion: "client.authentication.k8s.io/v1beta1", interactiveMode: "Never", command: "aws", args: ["eks", "get-token", "--cluster-name", "shop", "--region", "eu-west-1", "--profile", "prod", "--output", "json"] } });
+	assert.equal(seen.mode, 0o600);
+	assert.ok(!fs.existsSync(seen.file));
+	for (const bad of ["", "shop", "eu-west-1/shop;rm", "nowhere/shop"]) await assert.rejects(rec.collect({ where: "aws", eksCluster: bad }, ctx), /Choose the EKS cluster/);
+	// A cluster still being created has no address yet.
+	const creating = ctxFor("/", cloudExec({ calls: [] }, { aws: (_args, a) => (a.startsWith("eks describe-cluster") ? { stdout: JSON.stringify({ cluster: { name: "shop", status: "CREATING" } }), stderr: "", code: 0 } : undefined) }));
+	await assert.rejects(rec.collect({ where: "aws", eksCluster: "eu-west-1/shop" }, creating), /did not give an address and certificate for shop/);
+
+	assert.deepEqual(await rec.loadOptions("project", {}, ctx), [{ value: "shop-prod", label: "Shop (shop-prod)" }]);
+	assert.deepEqual(await rec.loadOptions("gkeCluster", { project: "shop-prod" }, ctx), [{ value: "europe-west1/gke-shop", label: "gke-shop · europe-west1 · Kubernetes 1.30.5-gke.1" }]);
+	assert.deepEqual(await rec.loadOptions("gkeCluster", { project: "Shop; rm" }, ctx), []);
+	const g = await rec.collect({ where: "gcp", project: "shop-prod", gkeCluster: "europe-west1/gke-shop" }, ctx);
+	assert.equal(g.graph.title, "Kubernetes · GKE gke-shop (europe-west1)");
+	const gke = JSON.parse(seen.kubeconfig);
+	assert.equal(gke.clusters[0].cluster.server, "https://203.0.113.10");
+	assert.equal(gke.users[0].user.exec.command, "gke-gcloud-auth-plugin");
+	assert.equal(gke.users[0].user.exec.provideClusterInfo, true);
+	assert.match(rec.agentPrompt({ where: "gcp" }, g), /a cluster found in Google Cloud/);
+	for (const bad of ["", "gke-shop", "europe-west1/Gke_Shop"]) await assert.rejects(rec.collect({ where: "gcp", project: "shop-prod", gkeCluster: bad }, ctx), /Choose the GKE cluster/);
+	await assert.rejects(rec.collect({ where: "gcp", project: "shop-prod", gkeCluster: "europe-west1/gone" }, ctx), /gone is no longer in shop-prod/);
+
+	// This computer's own contexts are still the default, and the cloud's fields only show for that cloud.
+	const where = rec.fields.find((f) => f.id === "where");
+	assert.equal(where.default, "");
+	for (const [id, cloud] of [["context", ""], ["subscription", "azure"], ["aksCluster", "azure"], ["profile", "aws"], ["region", "aws"], ["eksCluster", "aws"], ["project", "gcp"], ["gkeCluster", "gcp"]])
+		assert.deepEqual(rec.fields.find((f) => f.id === id).showIf, { field: "where", values: [cloud] }, id);
+});
+
+test("read-only guard: `az aks get-credentials` only to print the signed-in user's access", () => {
+	const { checkReadOnly } = require("../src/main/mapper/readOnly");
+	const base = ["aks", "get-credentials", "--resource-group", "rg", "--name", "aks"];
+	assert.equal(checkReadOnly("az", [...base, "--file", "-"]), undefined);
+	assert.equal(checkReadOnly("az", [...base, "--subscription", SUB_A, "-f", "-", "--only-show-errors"]), undefined);
+	for (const extra of [[], ["--file", "/Users/me/.kube/config"], ["--file", "-", "--admin"], ["--file", "-", "-a"], ["--file", "-", "--overwrite-existing"], ["--file", "-", "--context", "x"], ["--file=-"], ["--file", "-", "--file", "config"], ["--file", "-", "-f", "config"], ["-f"]])
+		assert.match(checkReadOnly("az", [...base, ...extra]) ?? "", /may only print/, extra.join(" "));
+	assert.ok(checkReadOnly("az", ["aks", "get-credentials", "now", "--file", "-"]), "nothing but options after the command");
+	assert.ok(checkReadOnly("az", ["aks", "delete", "--name", "aks"]));
+	assert.ok(checkReadOnly("aws", ["eks", "update-kubeconfig", "--name", "x"]), "the Mapper never has a CLI write a kubeconfig");
+	assert.ok(checkReadOnly("gcloud", ["container", "clusters", "get-credentials", "x"]));
+});
+
+test("Kubernetes in the cloud: the AKS sign-in is turned to the Azure CLI's, whatever way kubelogin was told to ask", () => {
+	const { withAzureCliLogin, execKubeconfig } = require("../src/main/mapper/recipes/software/kubernetes");
+	assert.match(withAzureCliLogin("      - --login\n      - devicecode\n      command: kubelogin\n"), /- --login\n      - azurecli\n      command/);
+	assert.match(withAzureCliLogin("      - -l\r\n      - interactive\r\n"), /- -l\r\n      - azurecli\r\n/);
+	assert.match(withAzureCliLogin("      - --login=devicecode\n"), /- --login=azurecli\n/);
+	// Already another way (a service principal, a managed identity), or no kubelogin at all: left as it is.
+	for (const same of ["      - --login\n      - spn\n", "      - --login\n      - azurecli\n", "    token: abc\n    client-certificate-data: Q0VSVA==\n", "  name: devicecode\n"]) assert.equal(withAzureCliLogin(same), same);
+	for (const server of ["http://example.com", "https://example.com/path?x=1", "https://exa mple.com", "file:///etc/passwd", ""]) assert.throws(() => execKubeconfig({ name: "x", server, certificate: "Q0VSVA==" }, { command: "aws" }), /did not give an address/, server);
+	assert.throws(() => execKubeconfig({ name: "x", server: "https://example.com", certificate: '"}], "users": [' }, { command: "aws" }), /did not give an address/);
+});
+
 test("software recipes: ids, fields, agent prompts and dig-deeper on every recipe", () => {
 	const ids = softwareRecipes.map((r) => r.id);
 	assert.deepEqual(ids, ["software.connectivity", "software.dataflow", "software.github-actions", "software.api", "software.modules", "software.classes", "software.kubernetes"]);

@@ -214,6 +214,20 @@ async function runMap(w: DiagramWindow, config: E2eConfig, log: (k: string, v: u
 		w.mapper.open(recipe.category);
 		const dlg = await waitFor(() => w.mapper.window, 10_000);
 		await new Promise((r) => setTimeout(r, 1500));
+		// the picture is of this recipe's form, filled in as the run is (its lists have a moment to load)
+		const filled = recipe.fields.filter((f) => map.input?.[f.id] !== undefined).map((f) => ({ label: f.label, value: map.input![f.id] }));
+		await dlg.webContents.executeJavaScript(`(async () => {
+			document.querySelector(${JSON.stringify(`.recipe[data-recipe="${recipe.id}"]`)})?.click();
+			for (const f of ${JSON.stringify(filled)}) {
+				await new Promise((r) => setTimeout(r, 150));
+				const field = Array.from(document.querySelectorAll(".field")).find((d) => d.querySelector("label")?.textContent.replace(/ \\*$/, "").trim() === f.label);
+				const control = field?.querySelector("select, input[type=text], input[type=password], textarea");
+				if (!control) continue;
+				control.value = f.value;
+				control.dispatchEvent(new Event(control.tagName === "SELECT" ? "change" : "input", { bubbles: true }));
+			}
+		})()`);
+		await new Promise((r) => setTimeout(r, filled.length ? 5000 : 600));
 		fs.writeFileSync(path.join(config.out, "mapper-dialog.png"), (await dlg.webContents.capturePage()).toPNG());
 		log("dialogText", (await dlg.webContents.executeJavaScript("document.body.innerText")).slice(0, 1500));
 	}

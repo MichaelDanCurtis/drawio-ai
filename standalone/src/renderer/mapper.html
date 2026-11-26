@@ -168,7 +168,7 @@
 			...list.map((r) =>
 				el(
 					"button",
-					{ class: "recipe" + (r.id === state.recipeId ? " active" : ""), onclick: () => selectRecipe(r.id) },
+					{ class: "recipe" + (r.id === state.recipeId ? " active" : ""), "data-recipe": r.id, onclick: () => selectRecipe(r.id) },
 					el("b", {}, shortTitle(r.title), r.mode === "agent" ? el("span", { class: "badge", text: "with agent" }) : null),
 					el("span", { text: r.blurb || "" })
 				)
@@ -198,12 +198,23 @@
 		renderForm();
 	}
 
+	/**
+	 * Selects other fields depend on (subscription → resource groups) reload them. Only the ones on
+	 * show: a list nobody sees is not worth a call to a cloud, and it loads when it comes into view.
+	 */
+	function reloadAfter(r, f) {
+		for (const g of r.fields) {
+			if (!g.dynamic || g.id === f.id || r.fields.indexOf(g) < r.fields.indexOf(f)) continue;
+			if (visible(r, g)) loadOptions(r, g);
+			else delete state.options[r.id + "/" + g.id];
+		}
+	}
+
 	function fieldEl(r, f) {
 		const key = r.id + "/" + f.id;
 		const set = (value) => {
 			state.values[f.id] = value;
-			// Selects other fields depend on (subscription → resource groups) reload them.
-			if (f.type === "select") for (const g of r.fields) if (g.dynamic && g.id !== f.id && r.fields.indexOf(g) > r.fields.indexOf(f)) loadOptions(r, g);
+			if (f.type === "select") reloadAfter(r, f);
 			if (r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
 		};
 		let control;
@@ -224,7 +235,12 @@
 				if (f.dynamic && state.loading[key]) sel.append(el("option", { value: "", text: "Loading…" }));
 				else if (!opts.length) sel.append(el("option", { value: "", text: f.dynamic ? "(none found — refresh or type in settings)" : "" }));
 				for (const o of opts) sel.append(el("option", { value: o.value, text: o.label }));
-				if (opts.length && !opts.some((o) => o.value === state.values[f.id])) state.values[f.id] = opts[0].value;
+				if (opts.length && !opts.some((o) => o.value === state.values[f.id])) {
+					const was = state.values[f.id];
+					state.values[f.id] = opts[0].value;
+					// A remembered choice that is no longer offered: what follows was listed for it, not for this one.
+					if (was && !state.loading[key]) setTimeout(() => reloadAfter(r, f));
+				}
 				sel.value = state.values[f.id] ?? "";
 				control = f.dynamic
 					? el("div", { class: "row" }, sel, el("button", { class: "btn", title: "Reload", onclick: () => loadOptions(r, f), text: "↻" }))

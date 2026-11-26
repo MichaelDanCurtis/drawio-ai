@@ -107,6 +107,12 @@ Maps with more than 600 connectors are left unrouted, as routing them takes too 
 | Google Cloud | Project › VPCs › regions › subnetworks › resources (Cloud Asset Inventory); infrastructure as code (Terraform, Deployment Manager) |
 | Machine learning | Pipelines (DVC, Kubeflow/Vertex, Argo, Azure ML, SageMaker, Airflow, Metaflow), MLflow tracking and registry, the end-to-end lifecycle (with gaps marked), model architecture (Hugging Face config + safetensors, GGUF, ONNX, XGBoost, LightGBM) |
 
+- **A cluster in the cloud.** The Kubernetes map reads a context of this computer's
+  kubeconfig, or finds the cluster in Azure (AKS), AWS (EKS) or Google Cloud (GKE) with the
+  CLI you are signed in to. It is then read through a sign-in made for that one read:
+  `~/.kube/config` is not changed. AKS with Microsoft Entra sign-in needs `kubelogin`, GKE
+  needs `gke-gcloud-auth-plugin`, and a private cluster can only be reached from inside its
+  network.
 - **Read-only.** Cloud and Kubernetes maps use your signed-in CLIs (`az`, `aws`,
   `gcloud`, `kubectl`) through a guard that only lets listing, describing and querying
   commands run; databases are read with fixed catalog queries in read-only sessions.
