@@ -320,6 +320,7 @@
 		// don't re-render under the user's typing: it is drawn when they leave the box
 		state.renderDue = !!keepFocus;
 		if (keepFocus) return;
+		const same = state.resultOf === r.id;
 		box.classList.toggle("page", !!state.animateForm);
 		state.animateForm = false;
 		const describe = el("input", { type: "checkbox", id: "describe" });
@@ -360,9 +361,24 @@
 				el("button", { class: "btn", id: "cancel", text: state.running ? "Stop" : "Close", onclick: () => host.post({ type: state.running ? "cancel" : "close" }) }),
 				el("button", { class: "btn btn-primary", id: "run", text: state.running ? "Mapping…" : "Map it", disabled: state.running, onclick: run })
 			),
-			el("div", { id: "result" }),
-			el("div", { id: "log" })
+			// What a run said stays when its form is drawn again (a list has come, a text box was
+			// left): it goes when another map is chosen or the next run starts.
+			(same && $("result")) || el("div", { id: "result" }),
+			(same && $("log")) || el("div", { id: "log" })
 		);
+		state.resultOf = r.id;
+		syncActions();
+	}
+
+	/** The buttons and the line beside them say whether a map is being made, also in a form that is not drawn again just now. */
+	function syncActions() {
+		const run = $("run");
+		if (run) {
+			run.textContent = state.running ? "Mapping…" : "Map it";
+			run.disabled = !!state.running;
+		}
+		if ($("cancel")) $("cancel").textContent = state.running ? "Stop" : "Close";
+		$("status")?.replaceChildren(...(state.running ? [el("span", { class: "dot-loader", "aria-hidden": "true" }, el("i"), el("i"), el("i"), el("i"), el("i")), "Mapping…"] : ["Read-only: inventory, catalog and file reads only."]));
 	}
 
 	function run() {
@@ -450,8 +466,12 @@
 				break;
 			case "running":
 				state.running = true;
+				// (a new run: what the last one said goes; taken out here, as the form may not be drawn again under typing)
+				$("result")?.replaceChildren();
+				if ($("result")) $("result").className = "";
+				if ($("log")) $("log").textContent = "";
 				renderForm();
-				$("status").replaceChildren(el("span", { class: "dot-loader", "aria-hidden": "true" }, el("i"), el("i"), el("i"), el("i"), el("i")), "Mapping…");
+				syncActions();
 				break;
 			case "progress": {
 				const log = $("log");
@@ -464,6 +484,7 @@
 			case "done":
 				state.running = false;
 				renderForm();
+				syncActions();
 				// (a run that found nothing to draw is not a success to tick off: it says what it looked at)
 				setResult(msg.nothing ? "none" : "ok", (msg.nothing ? "" : "✓ ") + msg.summary, msg.warnings, msg.elsewhere);
 				if (!msg.nothing) window.drawaiPulse?.(0.5, 0.5);
@@ -471,6 +492,7 @@
 			case "failed":
 				state.running = false;
 				renderForm();
+				syncActions();
 				setResult("err", msg.message + (msg.hint ? "\n" + msg.hint : ""));
 				break;
 		}
