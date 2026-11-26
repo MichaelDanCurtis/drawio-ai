@@ -3,9 +3,11 @@
 A note both sides build to: OmniDraw (this repository) and OmniPad (the `rustpad` repository).
 It says what "Go live" does, what each side has today, and the protocol between them. Where it
 proposes something OmniPad has not built, it says so: those parts are OmniPad's to confirm or
-change. Version 3 of this note, 2026-11-26 (version 1 did not say how someone whose change crossed
+change. Version 4 of this note, 2026-11-26. (Version 1 did not say how someone whose change crossed
 another's catches up with the server's order; version 2 let them vouch for a checksum
-meanwhile).
+meanwhile; version 3 lost a change that was on its way when the board sent everyone its
+diagram.) The rules under "How changes are ordered" are implemented and tested in
+`standalone/src/main/live/session.ts` and `standalone/test/live.test.js`.
 
 ## What it is for
 
@@ -112,8 +114,8 @@ the pad messages. `revision` counts patches the server has accepted, from 0.
 
 | Message | Meaning |
 |---|---|
-| `{"Hello": {"name", "hue", "client"}}` | First message. `client` is like `"omnidraw/0.4.0"` or `"omnipad-web/1"` |
-| `{"Patch": {"base", "patch", "checksum"}}` | A change. `base` is the revision this client's diagram will be at once all it has sent is accepted (see "How changes are ordered"). `patch` is draw.io's object, passed on untouched. `checksum` is draw.io's for the sender's diagram after the change, or `null` when the sender cannot vouch that its diagram is in the server's order (rule 4 below) |
+| `{"Hello": {"name", "hue", "client", "owner"}}` | First message. `client` is like `"omnidraw/0.4.0"` or `"omnipad-web/1"`. `owner` only from the board's maker: the `owner_key` it was given (a browser cannot put a header on a socket) |
+| `{"Patch": {"base", "epoch", "patch", "checksum"}}` | A change. `epoch` is the one from the last `Board` this client loaded. `base` is the revision this client's diagram will be at once all it has sent is accepted (see "How changes are ordered"). `patch` is draw.io's object, passed on untouched. `checksum` is draw.io's for the sender's diagram after the change, or `null` when the sender cannot vouch that its diagram is in the server's order (rule 4 below) |
 | `{"Snapshot": {"revision", "xml", "checksum"}}` | The whole diagram at `revision`, from a client whose diagram is in the server's order (rule 6 below). Sent when the server asks, and by the host now and then when things are quiet. The server keeps it only if it has no newer one |
 | `{"Presence": {"page", "cursor", "selection", "rect"}}` | Where this person is. `cursor` `{x, y}` or null and `rect` `{start, end}` or null, in diagram coordinates; `selection` a list of cell ids; `page` the page id. At most 30 a second |
 | `{"Resync": {}}` | "Mine no longer matches: send me the diagram." |
@@ -122,8 +124,8 @@ the pad messages. `revision` counts patches the server has accepted, from 0.
 
 | Message | Meaning |
 |---|---|
-| `{"Identity": {"id", "role", "owner"}}` | Who you are here. `role` `"editor"` or `"viewer"` |
-| `{"Board": {"revision", "xml", "checksum", "patches"}}` | The diagram: the newest snapshot, and the patches accepted since it, in order (`[{revision, from, patch, checksum, clean}]`). Sent on joining and after `Resync`. The client loads the XML (`resetDiff`) and applies the patches |
+| `{"Identity": {"id", "role", "owner"}}` | Who you are here, in answer to `Hello`. `role` `"editor"` or `"viewer"`; `owner` true for the board's maker |
+| `{"Board": {"revision", "epoch", "xml", "checksum", "patches"}}` | The diagram: the newest snapshot, and the patches accepted since it, in order (`[{revision, from, patch, checksum, clean}]`). Sent on joining, after `Resync`, and to everyone when the host's copy settles a disagreement (rule 7), which is what `epoch` counts. The client replaces its diagram with the XML and applies the patches (rule 5) |
 | `{"Patch": {"revision", "from", "patch", "checksum", "clean"}}` | Someone's change, numbered. Not sent back to its sender |
 | `{"Ack": {"revision", "clean"}}` | To the sender, in its place in the stream: your patch is this revision. Not clean: see rule 4 below |
 | `{"NeedSnapshot": {}}` | "Send me a `Snapshot`": to one client, when the list of patches since the last snapshot is long (more than 500, or 4 MiB) |
@@ -142,7 +144,9 @@ applied the two the other way round, and has to catch up. The rules:
    accepted: the last revision it has applied, plus the number of its own patches not yet
    acknowledged. (So two quick changes in a row are `base` 5 and `base` 6, not both 5.)
 2. A patch is **clean** when its `base` is the server's revision just before the patch gets its
-   number (nothing of anyone else's arrived in between) *and* it carries a `checksum`. Then
+   number (nothing of anyone else's arrived in between), it carries a `checksum`, *and* its
+   `epoch` is the board's (it was not made before the board last sent everyone its diagram,
+   rule 7). Then
    that checksum is the one everyone should have at that revision. A sender gives a checksum
    only while its own diagram is known to be in the server's order: from the moment someone
    else's patch arrives while one of its own is unacknowledged, until it has reconciled (or
@@ -166,10 +170,16 @@ applied the two the other way round, and has to catch up. The rules:
    client had is not enough, and a client that cannot get that checksum loads the snapshot
    from scratch. Changes the person makes between sending `Resync` and receiving `Board` are
    held back, not sent; after the `Board` is in, they are applied on top again and sent then.
+   A `Board` can also arrive unasked (rule 7) while changes of the client's own are still
+   unacknowledged. Those are not in it: their `Ack`s come after it in the stream, so the board
+   numbers them after it. The client applies them on top again after replacing, in the order
+   it made them, and goes on waiting for their `Ack`s. (They carry the old `epoch`, so nobody
+   checks a checksum against them.)
 6. **Snapshots** come only from a client whose diagram is known to be in the server's order:
    nothing of its own unacknowledged, and nothing waiting to be reconciled.
 7. If one client asks for `Resync` three times within a minute, the server asks the host for a
-   `Snapshot` and sends everyone the `Board`: the host's copy settles it.
+   `Snapshot`, adds one to the board's `epoch`, and sends everyone the `Board`: the host's copy
+   settles it.
 
 With these, two people changing different shapes never notice each other; two people changing
 the same shape both end with the change the server numbered last, and the one whose change
