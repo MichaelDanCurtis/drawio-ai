@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Mapper: map a GitHub repository.** Where a map takes a repository or folder (Connectivity,
+  Data flow, GitHub Actions workflows, API surface, Module dependencies, Class diagram,
+  Infrastructure as code, dbt, ML pipelines) it now also takes a repository on GitHub: its
+  address from the browser (also of a branch or a folder in it), its clone address, or
+  `owner/name` (`owner/name@branch` for a branch, tag or commit). The repository's newest
+  state is downloaded with the access to GitHub this computer already has (git's saved
+  sign-in, the GitHub CLI's, or an SSH key) into the app's own folder and read there. It
+  said "is not a folder" before. git runs nothing of the repository's own while it does so,
+  and nothing is ever sent to the repository.
+
 ## [0.2.0]
 
 - The dot drawing in an empty chat no longer has a red dot in it: it is all in ink.

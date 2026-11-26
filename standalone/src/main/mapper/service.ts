@@ -1,3 +1,4 @@
+import { withRepositories } from "./recipes/common";
 import * as fs from "fs";
 import * as path from "path";
 import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/CustomizedDrawioClient";
@@ -99,9 +100,21 @@ export class MapperService {
 		const ctx = this.host.context(opts.signal, progress);
 		if (!recipe.collect) throw new MapperError(`${recipe.title} is drawn by the agent, not collected.`);
 		progress("Collecting (read-only)…");
-		const result = await recipe.collect(input, ctx);
+		// (a repository given where a folder goes is downloaded first: the recipe reads a folder, as always)
+		const from = await withRepositories(recipe.fields, input, ctx);
 		if (opts.signal?.aborted) throw new MapperError("Cancelled");
-		const root = ["folder", "file"].map((k) => String(input[k] ?? "").trim()).find(Boolean);
+		const result = await recipe.collect(from.input, ctx);
+		if (opts.signal?.aborted) throw new MapperError("Cancelled");
+		if (from.root && from.source) {
+			// (what the user reads names the repository, not the folder it was downloaded to)
+			const named = (text: string) => text.split(from.root!).join(from.source!);
+			result.root ??= from.root;
+			result.source ??= from.source;
+			result.summary = named(result.summary);
+			if (result.warnings) result.warnings = result.warnings.map(named);
+			if (result.graph?.title) result.graph.title = named(result.graph.title);
+		}
+		const root = result.root ?? ["folder", "file"].map((k) => String(input[k] ?? "").trim()).find(Boolean);
 		if (root && result.graph) for (const n of result.graph.nodes) n.data = { mapRoot: root, ...(n.data ?? {}) };
 		const record = createRecord({ id: newMapId(), recipe, input, result, root, git: root ? await this.gitState(root, ctx) : undefined, previous: opts.previous });
 		let drawn: RunOutcome["drawn"];

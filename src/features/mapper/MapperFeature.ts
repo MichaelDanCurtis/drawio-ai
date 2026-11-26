@@ -191,7 +191,7 @@ export class MapperFeature {
 		if (!vscode.workspace.isTrusted) {
 			throw new rt.MapperError("The Mapper runs read-only tools (git, cloud CLIs) in this folder, so the workspace must be trusted first (Workspaces: Manage Workspace Trust).");
 		}
-		return rt.createContext({ cwd: nodePath.dirname(this.fileOf(editor)), env: process.env, signal, progress });
+		return rt.createContext({ cwd: nodePath.dirname(this.fileOf(editor)), env: process.env, signal, progress, repoCache: nodePath.join(this.deps.context.globalStorageUri.fsPath, "mapped-repos") });
 	}
 
 	/**

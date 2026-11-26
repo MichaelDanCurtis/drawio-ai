@@ -249,7 +249,7 @@ export class DiagramWindow {
 			client: this.client,
 			cwd: () => this.cwd(),
 			diagram: () => this.file,
-			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress }),
+			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress, repoCache: path.join(app.getPath("userData"), "mapped-repos") }),
 			animate: () => settings().editor["drawio-ai.animateChanges"] !== false,
 		});
 		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName(), () => this.maps);
