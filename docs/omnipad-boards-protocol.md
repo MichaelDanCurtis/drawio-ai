@@ -171,7 +171,13 @@ applied the two the other way round, and has to catch up. The rules:
    checksum equals the snapshot's before the patches go on: a load that merges with what the
    client had is not enough, and a client that cannot get that checksum loads the snapshot
    from scratch. Changes the person makes between sending `Resync` and receiving `Board` are
-   held back, not sent; after the `Board` is in, they are applied on top again and sent then.
+   held back, not sent; after the `Board` is in, they are applied on top again and sent then,
+   in the order they were made and without a checksum. A change made while all that is going
+   in (the snapshot, the patches, the held changes) is sent after them, in its turn; where it
+   landed among them in the client's own diagram need not be where the board puts it, so the
+   client reconciles once more when these are acknowledged. The same holds for a host's first
+   moments: what it changes between reading the diagram to send and receiving the first
+   `Board` is held and sent then.
    A `Board` can also arrive unasked (rule 7) while changes of the client's own are still
    unacknowledged. Those are not in it: their `Ack`s come after it in the stream, so the board
    numbers them after it. The client applies them on top again after replacing, in the order

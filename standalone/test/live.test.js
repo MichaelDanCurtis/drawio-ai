@@ -48,6 +48,9 @@ class Diagram {
 		return this.checksum();
 	}
 	async apply(p) {
+		// (a real editor takes a moment to answer; `slowMs` makes that moment long enough to do something in)
+		if (this.slowMs) await new Promise((r) => setTimeout(r, this.slowMs));
+		this.applied = (this.applied ?? 0) + 1;
 		this.patch(p);
 		return this.checksum();
 	}
@@ -319,6 +322,61 @@ test("a diagram that has drifted is noticed at the next change and replaced by t
 	assert.deepEqual(bo.diagram.cells, { a: { label: "next" }, b: { label: "other", color: "green" } });
 	assert.ok(same(ann, bo));
 	await b.relay.close();
+});
+
+test("changes held back go out in the order they were made, also one made while the others are going back in; and the diagram is then checked against the board's", async () => {
+	const b = await board();
+	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });
+	const bo = await join(b.link, "Bo");
+	// Bo's diagram has drifted; at Ann's next change he asks for the board's
+	bo.diagram.cells.b.label = "corrupted";
+	bo.hold();
+	ann.change(update("b", { color: "grey" }));
+	await until(() => bo.kept().includes("Patch"));
+	await bo.release(1);
+	assert.equal(bo.sent.filter((m) => m.Resync).length, 1);
+	// before it arrives he sets a label (held); while that is being put back on top he sets it again
+	bo.change(update("a", { label: "A" }));
+	bo.diagram.slowMs = 40;
+	const released = bo.release();
+	await until(() => bo.diagram.replaced === 2);
+	bo.change(update("a", { label: "B" }));
+	await released;
+	const labels = () => bo.sent.filter((m) => m.Patch).map((m) => m.Patch.patch.u.p1.cells.u.a.label);
+	await until(() => labels().length === 2);
+	assert.deepEqual(labels(), ["A", "B"], "in the order he made them");
+	assert.deepEqual(bo.sent.filter((m) => m.Patch).map((m) => m.Patch.checksum), [null, null], "not vouched for: his diagram at each is not his diagram with both");
+	// the second was already in his diagram and is not put in again; where it sat among the rest is not
+	// worked out: the board's diagram is fetched once more, and everyone has B
+	bo.diagram.slowMs = 0;
+	await until(() => bo.sent.filter((m) => m.Resync).length === 2 && bo.session.settled && ann.session.revision === 3);
+	assert.equal(ann.diagram.cells.a.label, "B");
+	assert.equal(bo.diagram.cells.a.label, "B");
+	assert.ok(same(ann, bo));
+	assert.deepEqual(bo.events.replaced, ["joined", "caught-up", "caught-up"]);
+});
+
+test("what someone did before the board's diagram was read is in it; only what came after is held", async () => {
+	// (the host changes the diagram while it is being read and sent: the session is told how many of
+	// the changes it holds are already in what was read)
+	const diagram = new Diagram({ a: { label: "start" } });
+	const sent = [];
+	const session = new LiveSession(diagram, (m) => sent.push(m), {}, { snapshotQuietMs: 60_000 });
+	for (const label of ["one", "two", "three"]) {
+		diagram.patch(update("a", { label }));
+		session.localPatch(update("a", { label }), diagram.checksum());
+	}
+	assert.equal(session.heldCount, 3);
+	assert.equal(sent.length, 0, "nothing goes out before the board's diagram is in");
+	// the diagram was read after the second change
+	const read = new Diagram({ a: { label: "two" } });
+	session.forgetHeld(2);
+	session.receive({ Identity: { id: 1, role: "editor", owner: true } });
+	session.receive({ Board: { revision: 0, epoch: 0, xml: read.xml(), checksum: read.checksum(), patches: [] } });
+	await session.idle();
+	assert.deepEqual(sent.filter((m) => m.Patch).map((m) => [m.Patch.base, m.Patch.patch.u.p1.cells.u.a.label]), [[0, "three"]]);
+	assert.equal(diagram.cells.a.label, "three", "what the read diagram lacked is on top of it again");
+	session.dispose();
 });
 
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {

@@ -98,7 +98,11 @@ export class LiveShare {
 	private presenceTimer: ReturnType<typeof setTimeout> | undefined;
 	private stopped = false;
 
-	private constructor(private readonly win: LiveWindow, public readonly link: BoardLink, public readonly role: "host" | "guest", private readonly ownerKey: string | undefined) {
+	/** Where the board is. (A host's is known once the server has made it.) */
+	public link!: BoardLink;
+	private ownerKey: string | undefined;
+
+	private constructor(private readonly win: LiveWindow, public readonly role: "host" | "guest") {
 		this.editor = new DrawioEditor(win.client, () => win.remoteChanged());
 		this.session = new LiveSession(this.editor, (m) => this.socket?.send(m), {
 			people: () => this.showPeople(),
@@ -106,6 +110,15 @@ export class LiveShare {
 			replaced: () => win.changed(),
 			problem: (text) => win.log(`live: ${text}`),
 		});
+		// The user's changes go to the session from the first moment: what they do while sharing is
+		// still starting (the diagram being sent, the connection being made) is held there and goes
+		// out once the board's diagram is in. (What draw.io reports while a diagram is being put in
+		// place is that, not the user.)
+		this.subscriptions.push(
+			win.client.onPatch.sub(({ patch, checksum }) => {
+				if (!this.editor.replacing) this.session.localPatch(patch, checksum);
+			})
+		);
 	}
 
 	/** The link to give to others. A secret: whoever has it can edit. */
@@ -119,25 +132,30 @@ export class LiveShare {
 
 	/** Puts the window's diagram on the server as a board and joins it as its host. */
 	public static async host(win: LiveWindow, server: string, who: { name: string; title: string }): Promise<LiveShare> {
-		// (the editor first: a diagram that cannot be shared should not leave a board behind)
-		const editor = new DrawioEditor(win.client, () => undefined);
-		let checksum: string;
+		const live = new LiveShare(win, "host");
 		try {
-			checksum = await editor.start();
-		} catch (e) {
-			editor.stop();
-			win.log(`live: diff sync did not start: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
-			throw new BoardError("This diagram's editor cannot share (it did not turn on draw.io's diff sync). Reload the window and try again.");
-		}
-		let made: { link: BoardLink; ownerKey: string };
-		try {
-			made = await createBoard(server, { title: who.title.slice(0, 200), xml: await win.client.getXml(), checksum });
-		} catch (e) {
-			editor.stop();
-			throw e;
-		}
-		const live = new LiveShare(win, made.link, "host", made.ownerKey);
-		try {
+			// (the editor first: a diagram that cannot be shared should not leave a board behind)
+			try {
+				await live.editor.start();
+			} catch (e) {
+				win.log(`live: diff sync did not start: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+				throw new BoardError("This diagram's editor cannot share (it did not turn on draw.io's diff sync). Reload the window and try again.");
+			}
+			// The diagram the board starts from. A change made while it is being read may or may not be
+			// in it: it is read again until nothing changed meanwhile, so that what is held from here on
+			// is exactly what it lacks.
+			let snap = await live.editor.snapshot();
+			for (let i = 0; i < 6; i++) {
+				const held = live.session.heldCount;
+				snap = await live.editor.snapshot();
+				if (live.session.heldCount === held) {
+					live.session.forgetHeld(held);
+					break;
+				}
+			}
+			const made = await createBoard(server, { title: who.title.slice(0, 200), xml: snap.xml, checksum: snap.checksum });
+			live.link = made.link;
+			live.ownerKey = made.ownerKey;
 			await live.connect(who.name);
 		} catch (e) {
 			await live.stop();
@@ -148,9 +166,12 @@ export class LiveShare {
 
 	/** Joins a board: its diagram takes the place of the window's. */
 	public static async join(win: LiveWindow, link: BoardLink, who: { name: string }): Promise<LiveShare> {
-		const live = new LiveShare(win, link, "guest", undefined);
+		const live = new LiveShare(win, "guest");
+		live.link = link;
 		try {
 			await live.editor.start();
+			// (what was in the window is replaced by the board's diagram, not sent to it)
+			live.session.forgetHeld(live.session.heldCount);
 			await live.connect(who.name);
 		} catch (e) {
 			await live.stop();
@@ -169,7 +190,7 @@ export class LiveShare {
 		if (this.presenceTimer) clearTimeout(this.presenceTimer);
 		this.session.dispose();
 		this.socket?.close();
-		if (this.role === "host" && this.ownerKey) await closeBoard(this.link, this.ownerKey);
+		if (this.role === "host" && this.ownerKey && this.link) await closeBoard(this.link, this.ownerKey);
 		try {
 			this.editor.stop();
 		} catch {
@@ -220,13 +241,10 @@ export class LiveShare {
 		});
 	}
 
-	/** The user's changes, pointer and selection go to the board from here on. */
+	/** The user's pointer and selection go to the board from here on. */
 	private wire(): void {
 		const c = this.win.client;
 		this.subscriptions.push(
-			c.onPatch.sub(({ patch, checksum }) => {
-				if (!this.editor.replacing) this.session.localPatch(patch, checksum);
-			}),
 			c.onCursorChanged.sub(({ newPosition }) => this.present({ cursor: newPosition ?? null })),
 			c.onSelectedCellsChanged.sub(({ selectedCellIds }) => this.present({ selection: selectedCellIds.slice(0, 500) })),
 			c.onSelectedRectangleChanged.sub(({ rectangle }) => this.present({ rect: rectangle ?? null })),

@@ -94,6 +94,8 @@ class Socket {
 /**
  * Starts a relay on this computer. Returns { url, boards, close(), stats(id) }.
  * `options.maxPatches`: how many patches are kept before a snapshot is asked for (default 500).
+ * `options.createDelayMs`: how long making a board takes (a slow server, for tests of what
+ * someone does meanwhile).
  */
 async function startBoardRelay(options = {}) {
 	const boards = new Map();
@@ -125,7 +127,7 @@ async function startBoardRelay(options = {}) {
 				const id = crypto.randomBytes(16).toString("base64url");
 				const ownerKey = crypto.randomBytes(24).toString("base64url");
 				boards.set(id, { id, kind: "drawio", title: String(body.title ?? "").slice(0, 200), ownerKey, revision: 0, snapshot: { revision: 0, xml: body.xml, checksum: body.checksum }, patches: [], people: new Map(), nextPerson: 1, resyncs: new Map(), asked: false, epoch: 0 });
-				json(res, 201, { id, revision: 0, owner_key: ownerKey, expires_at: null });
+				setTimeout(() => json(res, 201, { id, revision: 0, owner_key: ownerKey, expires_at: null }), options.createDelayMs ?? 0);
 			});
 			return;
 		}

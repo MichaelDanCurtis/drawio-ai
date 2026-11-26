@@ -64,7 +64,13 @@ export class LiveSession {
 	/** Waiting for the board's diagram (`Board`): after joining, or after asking to catch up. */
 	private awaitingBoard = true;
 	private mustCatchUp = false;
-	/** Own changes made while waiting for the board's diagram: applied on top of it and sent then. */
+	/** With mustCatchUp: whatever the crossed changes touched (this person changed something while the board's diagram was going in). */
+	private mustCatchUpWhatever = false;
+	/**
+	 * Own changes made while the board's diagram is awaited or being put in place: sent, in the
+	 * order they were made, once it is in. The ones made before it replaced this diagram were
+	 * wiped by that and are applied on top again first.
+	 */
 	private held: DiagramPatch[] = [];
 	private snapshotWanted = false;
 	private lastSnapshot = 0;
@@ -95,6 +101,19 @@ export class LiveSession {
 		return this.ready && !this.awaitingBoard && !this.mustCatchUp && this.pending.length === 0 && this.held.length === 0;
 	}
 
+	/** How many of this person's changes are held back (the board's diagram is awaited or going in). */
+	public get heldCount(): number {
+		return this.held.length;
+	}
+
+	/**
+	 * Forgets the first `count` held changes: they are in the diagram the board starts from (the
+	 * host made them while the diagram was being read to send it).
+	 */
+	public forgetHeld(count: number): void {
+		this.held.splice(0, count);
+	}
+
 	/** Resolves when everything that has arrived so far has been dealt with. */
 	public idle(): Promise<void> {
 		return this.work;
@@ -104,14 +123,18 @@ export class LiveSession {
 	public localPatch(patch: DiagramPatch, checksum: string): void {
 		if (this.closed || this.role === "viewer") return;
 		if (this.awaitingBoard) {
-			// (the board's diagram is about to replace this one: the change goes on top of it then)
+			// (the board's diagram is on its way or going in: the change is sent after that, in its turn)
 			this.held.push(patch);
 			return;
 		}
 		// (no checksum while this diagram may not be in the server's order: someone else's change arrived
 		// while one of this person's was unacknowledged, and that is not put right yet)
 		const sure = this.arrivedWhilePending.length === 0 && !this.mustCatchUp;
-		this.send({ Patch: { base: this.revision + this.pending.length, epoch: this.epoch, patch, checksum: sure ? checksum : null } });
+		this.sendPatch(patch, sure ? checksum : null);
+	}
+
+	private sendPatch(patch: DiagramPatch, checksum: string | null): void {
+		this.send({ Patch: { base: this.revision + this.pending.length, epoch: this.epoch, patch, checksum } });
 		this.pending.push(patch);
 		this.touch();
 	}
@@ -167,7 +190,7 @@ export class LiveSession {
 				this.arrivedWhilePending.length = 0;
 				if (this.mustCatchUp) {
 					// (changes to different cells give the same diagram in either order: nothing to put right)
-					if (apart(this.crossedMine, this.crossedTheirs)) this.mustCatchUp = false;
+					if (!this.mustCatchUpWhatever && apart(this.crossedMine, this.crossedTheirs)) this.mustCatchUp = false;
 					this.crossedMine.length = 0;
 					this.crossedTheirs.length = 0;
 					if (this.mustCatchUp) this.catchUp();
@@ -200,14 +223,19 @@ export class LiveSession {
 	private catchUp(): void {
 		if (this.awaitingBoard) return;
 		this.awaitingBoard = true;
-		this.mustCatchUp = false;
+		this.mustCatchUp = this.mustCatchUpWhatever = false;
 		this.send({ Resync: {} });
 	}
 
 	/** The board's diagram: the snapshot, and the changes since, in the server's order. */
 	private async load(board: { revision: number; epoch?: number; xml: string; checksum: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
 		const first = !this.ready;
+		// From here until everything held has gone out, this person's changes are held: one sent now
+		// would overtake those waiting, which were made before it.
+		this.awaitingBoard = true;
 		const loaded = await this.editor.replace(board.xml, board.checksum);
+		// (what was held up to this moment was made on the diagram that has just been replaced)
+		const wiped = this.held.length;
 		if (loaded !== board.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
 		let revision = board.revision - board.patches.length;
 		for (const p of board.patches) {
@@ -222,14 +250,23 @@ export class LiveSession {
 		this.arrivedWhilePending.length = 0;
 		this.crossedMine.length = 0;
 		this.crossedTheirs.length = 0;
-		this.mustCatchUp = false;
-		this.awaitingBoard = false;
+		this.mustCatchUp = this.mustCatchUpWhatever = false;
 		this.ready = true;
-		// what this person did meanwhile goes on top, and to the board
-		for (const patch of this.held.splice(0)) {
-			const checksum = await this.editor.apply(patch);
-			this.localPatch(patch, checksum);
+		// What this person did meanwhile, in the order they did it: the changes the replacing wiped go
+		// on top again, the ones made since are in the diagram already; all are sent. None carries a
+		// checksum: the diagram at each of them is not the diagram once all of them are in.
+		//
+		// A change made while all this was going in sits somewhere among what was applied around it,
+		// which need not be where the board puts it (last). Rather than work out where, the board's
+		// diagram is fetched once more when these have been acknowledged.
+		for (let i = 0; i < this.held.length; i++) {
+			const patch = this.held[i];
+			if (i < wiped) await this.editor.apply(patch);
+			else this.mustCatchUp = this.mustCatchUpWhatever = true;
+			this.sendPatch(patch, null);
 		}
+		this.held.length = 0;
+		this.awaitingBoard = false;
 		this.events.replaced?.(first ? "joined" : "caught-up");
 		if (this.snapshotWanted && this.settled) await this.sendSnapshot();
 		this.touch();

@@ -69,7 +69,8 @@ const mirrorUrl = `http://127.0.0.1:${mirror.address().port}`;
 // Go live's server: the stand-in for OmniPad's boards (test runs reach nothing beyond this computer).
 let relay;
 if (config.live) {
-	relay = await createRequire(import.meta.url)("../test/helpers/boardRelay.js").startBoardRelay();
+	// (making a board takes a moment, as on a real server: time for the run to draw something meanwhile)
+	relay = await createRequire(import.meta.url)("../test/helpers/boardRelay.js").startBoardRelay({ createDelayMs: 900 });
 	config.live.relay = relay.url;
 }
 const r = await new Promise((done) => {

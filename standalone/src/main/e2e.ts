@@ -609,6 +609,10 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await shot("live-dialog-share.png");
 	const t0 = Date.now();
 	await inDialog(`document.getElementById("go").click()`);
+	// while sharing is still starting (the server takes a moment to make the board), the host draws: it must not be lost
+	await new Promise((r) => setTimeout(r, 350));
+	await edit(w, [{ op: "addShape", label: "drawn while starting", x: 620, y: 300, width: 160, height: 40 }]);
+	log("liveStartedBeforeEditLanded", w.live?.status === "live");
 	await waitFor(() => (w.live?.status === "live" ? w.live : undefined), 20_000);
 	const link = w.live!.url;
 	log("liveLinkShape", /^http:\/\/127\.0\.0\.1:\d+\/b\/[A-Za-z0-9_-]{22}$/.test(link));
@@ -637,6 +641,9 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	log("liveDialogHostPeople", await inDialog(`Array.from(document.querySelectorAll("#people li")).map((li) => li.textContent)`));
 	await shot("live-dialog-live.png");
 	log("liveCellsOnJoin", await same(w, guest, "joining"));
+	const drawnEarly = [(await cells(w)).some((c: any) => c.label === "drawn while starting"), (await cells(guest)).some((c: any) => c.label === "drawn while starting")];
+	log("liveDrawnWhileStarting", { host: drawnEarly[0], guest: drawnEarly[1] });
+	if (!drawnEarly[0] || !drawnEarly[1]) throw new Error("What the host drew while sharing was starting was lost.");
 	log("liveTitles", [w.win.getTitle(), guest.win.getTitle()]);
 
 	// the host draws; the guest sees it
