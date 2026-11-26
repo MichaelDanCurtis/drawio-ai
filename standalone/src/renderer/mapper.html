@@ -246,11 +246,17 @@
 				if (f.dynamic && (state.loading[key] || state.options[key] === undefined)) sel.append(el("option", { value: "", text: "Loading…" }));
 				else if (!opts.length) sel.append(el("option", { value: "", text: f.dynamic ? "(none found — refresh or type in settings)" : "" }));
 				for (const o of opts) sel.append(el("option", { value: o.value, text: o.label }));
-				if (opts.length && !opts.some((o) => o.value === state.values[f.id])) {
-					state.values[f.id] = opts[0].value;
-					// The choice was made here, not by hand (the first of a list that has just come, or in
-					// place of a remembered one that is no longer offered): what follows is listed for it.
-					if (!state.loading[key]) setTimeout(() => reloadAfter(r, f));
+				// What is chosen is always something the list offers: the first of a list that has just
+				// come, or nothing when the list is empty (a cluster chosen under another subscription is
+				// not left behind, unseen, to be mapped). A list still on its way decides nothing.
+				const here = !f.dynamic || (state.options[key] !== undefined && !state.loading[key]);
+				if (here && !opts.some((o) => o.value === (state.values[f.id] ?? ""))) {
+					const to = opts.length ? opts[0].value : "";
+					if ((state.values[f.id] ?? "") !== to) {
+						state.values[f.id] = to;
+						// (the choice was made here, not by hand: what follows is listed for it)
+						if (f.dynamic) setTimeout(() => reloadAfter(r, f));
+					}
 				}
 				sel.value = state.values[f.id] ?? "";
 				control = f.dynamic

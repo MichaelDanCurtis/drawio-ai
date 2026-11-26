@@ -192,7 +192,10 @@ async function cloudCluster(input: Record<string, string>, ctx: CollectContext):
 	if (where === "azure") {
 		const parts = (input.aksCluster ?? "").trim().split("/");
 		const [subscription, group, name] = parts.length === 3 ? parts : ["", "", ""];
-		if (!name || !AZ_NAME.test(group) || !AZ_NAME.test(name) || (subscription && !SUBSCRIPTION.test(subscription))) throw new MapperError("Choose the AKS cluster to map.", "The list shows the clusters of the subscription above. If it is empty, sign in with `az login` and press ↻.");
+		// (a cluster of another subscription than the one chosen is not what the form shows: asked for again)
+		const chosen = (input.subscription ?? "").trim();
+		const other = SUBSCRIPTION.test(chosen) && subscription.toLowerCase() !== chosen.toLowerCase();
+		if (!name || !AZ_NAME.test(group) || !AZ_NAME.test(name) || !SUBSCRIPTION.test(subscription) || other) throw new MapperError("Choose the AKS cluster to map.", "The list shows the clusters of the subscription above. If it is empty, sign in with `az login` and press ↻.");
 		ctx.progress(`Asking Azure how to reach ${name}…`);
 		// (the signed-in user's own access, printed and not merged into ~/.kube/config: see readOnly.ts)
 		const r = await ctx.exec("az", ["aks", "get-credentials", "--resource-group", group, "--name", name, ...(subscription ? ["--subscription", subscription] : []), "--file", "-", "--only-show-errors"], { timeoutMs: 60_000 });
@@ -211,7 +214,8 @@ async function cloudCluster(input: Record<string, string>, ctx: CollectContext):
 		if (profile && !AWS_PROFILE.test(profile)) throw new MapperError("That is not an AWS profile name.");
 		const parts = (input.eksCluster ?? "").trim().split("/");
 		const [region, name] = parts.length === 2 ? parts : ["", ""];
-		if (!AWS_REGION.test(region) || !EKS_NAME.test(name)) throw new MapperError("Choose the EKS cluster to map.", "The list shows the clusters of that account and region. If it is empty, sign in (`aws sso login`, or `aws configure`), check the region and press ↻.");
+		const chosen = (input.region ?? "").trim();
+		if (!AWS_REGION.test(region) || !EKS_NAME.test(name) || (AWS_REGION.test(chosen) && chosen !== region)) throw new MapperError("Choose the EKS cluster to map.", "The list shows the clusters of that account and region. If it is empty, sign in (`aws sso login`, or `aws configure`), check the region and press ↻.");
 		ctx.progress(`Asking AWS how to reach ${name}…`);
 		const who = ["--region", region, ...(profile ? ["--profile", profile] : [])];
 		const r = await execJson<any>(ctx, "aws", ["eks", "describe-cluster", "--name", name, ...who, "--output", "json"], { timeoutMs: 60_000 });

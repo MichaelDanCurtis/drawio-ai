@@ -763,7 +763,10 @@ test("Kubernetes in the cloud: AKS clusters are found per subscription or in all
 	for (const hidden of [AKS_TOKEN, "Q0VSVA==", seen.file, "azmk8s.io"]) assert.ok(!all.includes(hidden), `nothing of the kubeconfig in the map: ${hidden}`);
 
 	// Nothing chosen, or something that is not a cluster of that list: asked for, not guessed.
-	for (const bad of ["", "rg-prod/aks-prod", `${SUB_A}/rg-prod/aks prod; rm`, `nope/rg-prod/aks-prod`]) await assert.rejects(rec.collect({ where: "azure", aksCluster: bad }, ctx), /Choose the AKS cluster/);
+	for (const bad of ["", "rg-prod/aks-prod", "/rg-prod/aks-prod", `${SUB_A}/rg-prod/aks prod; rm`, `nope/rg-prod/aks-prod`]) await assert.rejects(rec.collect({ where: "azure", aksCluster: bad }, ctx), /Choose the AKS cluster/);
+	// a cluster of another subscription than the one the form shows is not mapped in its place
+	await assert.rejects(rec.collect({ where: "azure", subscription: SUB_B, aksCluster: value }, ctx), /Choose the AKS cluster/);
+	assert.ok((await rec.collect({ where: "azure", subscription: "all", aksCluster: value }, ctx)).graph, "found among all of them: any subscription");
 	// Azure says no: its words, and what is needed.
 	const denied = ctxFor("/", cloudExec({ calls: [] }, { az: (_args, a) => (a.startsWith("aks get-credentials") ? { stdout: "", stderr: "ERROR: (AuthorizationFailed) The client does not have authorization", code: 1 } : undefined) }));
 	await assert.rejects(rec.collect({ where: "azure", aksCluster: value }, denied), (e) => e instanceof MapperError && /Azure did not give access to aks-prod: .*AuthorizationFailed/.test(e.message) && /Cluster User/.test(e.hint));
@@ -809,6 +812,9 @@ test("Kubernetes in the cloud: EKS and GKE clusters are found and read through a
 	assert.equal(seen.mode, 0o600);
 	assert.ok(!fs.existsSync(seen.file));
 	for (const bad of ["", "shop", "eu-west-1/shop;rm", "nowhere/shop"]) await assert.rejects(rec.collect({ where: "aws", eksCluster: bad }, ctx), /Choose the EKS cluster/);
+	// a cluster of another region than the one the form shows is not mapped in its place
+	await assert.rejects(rec.collect({ where: "aws", region: "us-east-1", eksCluster: "eu-west-1/shop" }, ctx), /Choose the EKS cluster/);
+	assert.ok((await rec.collect({ where: "aws", region: "", eksCluster: "eu-west-1/shop" }, ctx)).graph, "the profile's region");
 	// A cluster still being created has no address yet.
 	const creating = ctxFor("/", cloudExec({ calls: [] }, { aws: (_args, a) => (a.startsWith("eks describe-cluster") ? { stdout: JSON.stringify({ cluster: { name: "shop", status: "CREATING" } }), stderr: "", code: 0 } : undefined) }));
 	await assert.rejects(rec.collect({ where: "aws", eksCluster: "eu-west-1/shop" }, creating), /did not give an address and certificate for shop/);
