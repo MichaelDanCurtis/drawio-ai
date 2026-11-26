@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+- **Excalidraw drawings.** The app opens, edits and saves `.excalidraw` files in the real
+  Excalidraw editor (the `@excalidraw/excalidraw` package, 0.18.1, MIT), offline, as a second
+  kind of document beside draw.io diagrams. **File → New Excalidraw Drawing**
+  (Cmd/Ctrl+Alt+N), or **File → Open…** on a `.excalidraw` file.
+  - A drawing has a window of its own in the same shell as a diagram's: editor and chat, the
+    name in the title with a dot while there are unsaved changes, Save and Save As, and the
+    question before a window with unsaved changes closes. A bar above the canvas names the
+    drawing and holds Save and Export.
+  - Saved files are Excalidraw's own JSON, as Excalidraw writes it. **Export as PNG…** and
+    **Export as SVG…** carry the drawing inside, so an export opens again for editing; such a
+    picture opens as a drawing and is saved back as the picture (**Save As** → Editable PNG,
+    Editable SVG). What is not a drawing is refused with a sentence that says why.
+  - Nothing is loaded from a CDN: Excalidraw's fonts are in the app, and the CDN address it
+    keeps as a fallback for each font is taken out. Light and dark follow Settings →
+    Appearance; Excalidraw's own UI is not restyled.
+  - While a drawing is in front the menu bar is the drawing's (File, Edit, View): draw.io's
+    menus, Shapes, Agent and Map work on diagrams and are not shown.
+  - The chat panel stays, and says that AI editing of Excalidraw drawings is not there yet; no
+    agent is started for a drawing.
+  - The app grows by 21.7 MB (15.9 MB compressed), most of it Excalidraw's hand-drawn Chinese,
+    Japanese and Korean font.
 - A new app icon: the dot mark the app already carries inside (a square of white dots on black,
   one of them red) in place of the orange one. Its drawing is `build/icon.svg`.
 

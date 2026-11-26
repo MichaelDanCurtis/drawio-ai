@@ -150,6 +150,10 @@
 	body.orb-docked #context { padding-right: 56px; }
 	#empty h2 { margin: 0; font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; }
 	#empty p { margin: 0; color: var(--muted); font-size: 12.5px; }
+	/* A kind of document the agents have no tools for yet (an Excalidraw drawing): the chat says so, and
+	   offers nothing that would fail. It still closes, resizes and opens Settings. */
+	body.unavailable #context, body.unavailable footer, body.unavailable #providerBtn, body.unavailable #modelBtn, body.unavailable #status, body.unavailable #newChat, body.unavailable #allowAllChip, body.unavailable #empty h2, body.unavailable #empty .suggestions { display: none; }
+	body.unavailable #empty p { color: var(--ink-2); font-size: var(--text-sm); }
 	.suggestions { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
 	.suggestions button { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--border); color: var(--ink); font: inherit; font-size: var(--text-sm); padding: 10px 14px; cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
 	.suggestions button:first-child { border-top: 0; }
@@ -228,7 +232,7 @@
 		<div id="empty">
 			<figure class="dotobject-stage" id="emptyStage"></figure>
 			<h2>What should we draw?</h2>
-			<p>Pick one of your coding agents above, or a model you have an API key for, and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
+			<p id="emptyText">Pick one of your coding agents above, or a model you have an API key for, and describe a change: it edits the diagram live. Select or lasso shapes to change only those. Paste or drop a sketch to turn it into an editable diagram.</p>
 			<div class="suggestions">
 				<button data-prompt="Explain what this diagram shows.">Explain this diagram</button>
 				<button data-prompt="Tidy up the layout: remove overlaps, align shapes and make edges readable. Keep all content.">Tidy up the layout</button>
@@ -596,6 +600,8 @@
 
 	function renderChrome() {
 		renderLook();
+		document.body.classList.toggle("unavailable", !!state.unavailable);
+		if (state.unavailable) $("emptyText").textContent = state.unavailable;
 		const prov = (state.providers || []).find((p) => p.id === state.providerId);
 		$("providerLabel").textContent = prov ? prov.label.replace(/ — .*$/, "") : "Agent";
 		const cur = (state.models || []).find((m) => m.id === state.modelId);

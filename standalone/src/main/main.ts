@@ -4,6 +4,9 @@ import * as path from "path";
 import { adapterPackages, AGENTS } from "./agents";
 import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
 import { DiagramWindow, type DrawioMenuItem, flushDrawioStorage } from "./diagramWindow";
+import { documentWindows } from "./documentShell";
+import { sniffExcalidraw } from "./excalidrawFile";
+import { ExcalidrawWindow } from "./excalidrawWindow";
 import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
@@ -98,14 +101,31 @@ async function openFile(file?: string): Promise<void> {
 		return;
 	}
 	if (file) app.addRecentDocument(file);
-	await DiagramWindow.open(server, file);
+	// (an Excalidraw drawing, by its name or by what a picture carries, opens in the Excalidraw editor)
+	if (file && sniffExcalidraw(file, () => fs.readFileSync(file))) await ExcalidrawWindow.open(server, file);
+	else await DiagramWindow.open(server, file);
+}
+
+/** File → New Excalidraw Drawing: an empty drawing in the Excalidraw editor. */
+async function newDrawing(): Promise<void> {
+	if (ready) await ExcalidrawWindow.open(server);
+}
+
+/** A drawing dropped on an Excalidraw window: it opens as a document, if it is a file that is one. */
+async function openDroppedDrawing(file: string): Promise<void> {
+	try {
+		if (!fs.statSync(file).isFile() || !sniffExcalidraw(file, () => fs.readFileSync(file))) return;
+	} catch {
+		return;
+	}
+	await openFile(path.resolve(file));
 }
 
 async function openDialog(defaultPath?: string): Promise<void> {
 	const r = await dialog.showOpenDialog({
 		properties: ["openFile", "multiSelections"],
 		defaultPath,
-		filters: [...DiagramWindow.openFilters, { name: "All Files", extensions: ["*"] }],
+		filters: [{ name: "Diagrams and drawings", extensions: [...DiagramWindow.openFilters[0].extensions, "excalidraw"] }, { name: "All Files", extensions: ["*"] }],
 	});
 	for (const f of r.filePaths) await openFile(f);
 }
@@ -118,7 +138,7 @@ app.on("open-file", (e, file) => {
 app.on("second-instance", (_e, argv) => {
 	const files = diagramArgs(argv);
 	if (files.length) files.forEach((f) => void openFile(f));
-	else DiagramWindow.focused()?.win.focus();
+	else documentWindows.front()?.win.focus();
 });
 
 /**
@@ -173,7 +193,7 @@ function drawioItems(win: DiagramWindow, nodes: DrawioMenuItem[] | null | undefi
 
 /** Keys the app or macOS own: draw.io's items never take them in the menu bar. */
 const RESERVED_KEYS = new Set(
-	["Cmd+M", "Cmd+H", "Cmd+Alt+H", "Cmd+Q", "Cmd+W", "Cmd+N", "Cmd+O", "Cmd+S", "Cmd+Shift+S", "Cmd+P", "Cmd+,", "Cmd+J", "Cmd+Shift+N", "Cmd+.", "Cmd+Shift+M", "Cmd+Shift+D", "Cmd+Shift+T", "Cmd+Shift+E", "Cmd+Ctrl+F", "Cmd+`", "F5", "Cmd+Alt+]", "Cmd+Alt+["].map(normalizeAccelerator)
+	["Cmd+M", "Cmd+H", "Cmd+Alt+H", "Cmd+Q", "Cmd+W", "Cmd+N", "Cmd+Alt+N", "Cmd+O", "Cmd+S", "Cmd+Shift+S", "Cmd+P", "Cmd+,", "Cmd+J", "Cmd+Shift+N", "Cmd+.", "Cmd+Shift+M", "Cmd+Shift+D", "Cmd+Shift+T", "Cmd+Shift+E", "Cmd+Ctrl+F", "Cmd+`", "F5", "Cmd+Alt+]", "Cmd+Alt+["].map(normalizeAccelerator)
 );
 function normalizeAccelerator(a: string): string {
 	return a.replace(/CmdOrCtrl|CommandOrControl|Command/g, "Cmd").split("+").map((k) => k.trim()).sort().join("+").toLowerCase();
@@ -185,34 +205,108 @@ function scheduleMenu(): void {
 	menuTimer = setTimeout(buildMenu, 120);
 }
 
-function buildMenu(): void {
-	const w = () => DiagramWindow.focused();
-	const front = DiagramWindow.focused();
-	const dm = front?.drawioMenus;
-	const pick = (menu: string, keys: string[]) => drawioItems(front!, (dm?.[menu] ?? []).filter((n) => n.key && keys.includes(n.key)));
-	const template: MenuItemConstructorOptions[] = [
-		...(process.platform === "darwin"
-			? [
-					{
-						label: app.name,
-						submenu: [
-							{ role: "about" },
-							{ type: "separator" },
-							{ label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => openSettings() },
-							{ type: "separator" },
-							{ role: "hide" },
-							{ role: "hideOthers" },
-							{ role: "unhide" },
-							{ type: "separator" },
-							{ role: "quit" },
-						],
-					} as MenuItemConstructorOptions,
-			  ]
-			: []),
+/** The document in front, of either kind (Save, the chat and the developer tools are the same for both). */
+const doc = () => documentWindows.front();
+
+/** The app's own menu (macOS). */
+function appMenu(): MenuItemConstructorOptions[] {
+	if (process.platform !== "darwin") return [];
+	return [
+		{
+			label: app.name,
+			submenu: [{ role: "about" }, { type: "separator" }, { label: "Settings…", accelerator: "CmdOrCtrl+,", click: () => openSettings() }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }],
+		},
+	];
+}
+
+/** View: the chat beside the document, and the pages' developer tools. */
+function chatAndToolsItems(): MenuItemConstructorOptions[] {
+	return [
+		{ label: "Toggle Chat", accelerator: "CmdOrCtrl+J", click: () => doc()?.toggleChat() },
+		{ label: "Wider Chat", accelerator: "CmdOrCtrl+Alt+]", click: () => doc()?.resizeChat(60) },
+		{ label: "Narrower Chat", accelerator: "CmdOrCtrl+Alt+[", click: () => doc()?.resizeChat(-60) },
+		{ type: "separator" },
+		{ label: "Reload Editor", click: () => doc()?.editorView.webContents.reload() },
+		{ label: "Editor Developer Tools", click: () => doc()?.editorView.webContents.openDevTools({ mode: "detach" }) },
+		{ label: "Chat Developer Tools", click: () => doc()?.chatView.webContents.openDevTools({ mode: "detach" }) },
+		{ type: "separator" },
+		{ role: "togglefullscreen" },
+	];
+}
+
+const HELP_MENU: MenuItemConstructorOptions = { role: "help", submenu: [{ label: "Agent Client Protocol", click: () => void shell.openExternal("https://agentclientprotocol.com") }] };
+
+/** Undo, redo and select all in an Excalidraw window: Excalidraw's own on the canvas, the system's in text. */
+async function excalidrawEdit(key: "undo" | "redo" | "selectAll"): Promise<void> {
+	const front = doc();
+	const x = front instanceof ExcalidrawWindow ? front : undefined;
+	const wc = webContents.getFocusedWebContents() ?? x?.editorView.webContents;
+	if (!wc) return;
+	if (x && wc === x.editorView.webContents && (await x.runEdit(key))) return;
+	ROUTED[key].native(wc);
+}
+
+/**
+ * The menu bar while an Excalidraw drawing is in front: the document's commands, and none of
+ * draw.io's (its menus, Shapes, the agents and the Mapper work on diagrams).
+ */
+function excalidrawMenu(): MenuItemConstructorOptions[] {
+	const x = () => {
+		const front = doc();
+		return front instanceof ExcalidrawWindow ? front : undefined;
+	};
+	return [
+		...appMenu(),
 		{
 			label: "File",
 			submenu: [
 				{ label: "New Diagram", accelerator: "CmdOrCtrl+N", click: () => void openFile() },
+				{ label: "New Excalidraw Drawing", accelerator: "CmdOrCtrl+Alt+N", click: () => void newDrawing() },
+				{ label: "Open…", accelerator: "CmdOrCtrl+O", click: () => void openDialog() },
+				{ label: "Open Example…", click: () => void openDialog(paths.examples) },
+				{ role: "recentDocuments", submenu: [{ role: "clearRecentDocuments" }] } as MenuItemConstructorOptions,
+				{ type: "separator" },
+				{ label: "Save", accelerator: "CmdOrCtrl+S", click: () => void x()?.save() },
+				{ label: "Save As…", accelerator: "CmdOrCtrl+Shift+S", click: () => void x()?.saveAs() },
+				{ type: "separator" },
+				{ label: "Export as PNG…", accelerator: "CmdOrCtrl+Shift+E", click: () => void x()?.exportInteractive("png") },
+				{ label: "Export as SVG…", click: () => void x()?.exportInteractive("svg") },
+				{ type: "separator" },
+				{ role: "close" },
+			],
+		},
+		{
+			label: "Edit",
+			submenu: [
+				{ label: "Undo", accelerator: ROUTED.undo.accelerator, click: () => void excalidrawEdit("undo") },
+				{ label: "Redo", accelerator: ROUTED.redo.accelerator, click: () => void excalidrawEdit("redo") },
+				{ type: "separator" },
+				{ role: "cut" },
+				{ role: "copy" },
+				{ role: "paste" },
+				{ label: "Select All", accelerator: ROUTED.selectAll.accelerator, click: () => void excalidrawEdit("selectAll") },
+			],
+		},
+		{ label: "View", submenu: chatAndToolsItems() },
+		{ role: "windowMenu" },
+		HELP_MENU,
+	];
+}
+
+function buildMenu(): void {
+	if (doc() instanceof ExcalidrawWindow) return Menu.setApplicationMenu(Menu.buildFromTemplate(excalidrawMenu()));
+	// (while an Excalidraw drawing is in front, nothing here acts on a diagram behind it)
+	const w = () => (doc() instanceof ExcalidrawWindow ? undefined : DiagramWindow.focused());
+	const front = DiagramWindow.focused();
+	const dm = front?.drawioMenus;
+	const pick = (menu: string, keys: string[]) => drawioItems(front!, (dm?.[menu] ?? []).filter((n) => n.key && keys.includes(n.key)));
+	const template: MenuItemConstructorOptions[] = [
+		...appMenu(),
+		{
+			label: "File",
+			submenu: [
+				{ label: "New Diagram", accelerator: "CmdOrCtrl+N", click: () => void openFile() },
+				{ label: "New Excalidraw Drawing", accelerator: "CmdOrCtrl+Alt+N", click: () => void newDrawing() },
 				{ label: "Open…", accelerator: "CmdOrCtrl+O", click: () => void openDialog() },
 				{ label: "Open Example…", click: () => void openDialog(paths.examples) },
 				{ role: "recentDocuments", submenu: [{ role: "clearRecentDocuments" }] } as MenuItemConstructorOptions,
@@ -243,15 +337,7 @@ function buildMenu(): void {
 				// Same, for keyboards without easy F-keys (hidden; its shortcut still works).
 				{ label: "Presentation Mode", accelerator: "CmdOrCtrl+Shift+Enter", visible: false, acceleratorWorksWhenHidden: true, click: () => w()?.togglePresentation() },
 				{ type: "separator" },
-				{ label: "Toggle Chat", accelerator: "CmdOrCtrl+J", click: () => w()?.toggleChat() },
-				{ label: "Wider Chat", accelerator: "CmdOrCtrl+Alt+]", click: () => w()?.resizeChat(60) },
-				{ label: "Narrower Chat", accelerator: "CmdOrCtrl+Alt+[", click: () => w()?.resizeChat(-60) },
-				{ type: "separator" },
-				{ label: "Reload Editor", click: () => w()?.editorView.webContents.reload() },
-				{ label: "Editor Developer Tools", click: () => w()?.editorView.webContents.openDevTools({ mode: "detach" }) },
-				{ label: "Chat Developer Tools", click: () => w()?.chatView.webContents.openDevTools({ mode: "detach" }) },
-				{ type: "separator" },
-				{ role: "togglefullscreen" },
+				...chatAndToolsItems(),
 			],
 		},
 		...(dm?.arrange?.length ? [{ label: "Arrange", submenu: drawioItems(front!, dm.arrange) }] : []),
@@ -307,10 +393,7 @@ function buildMenu(): void {
 			],
 		},
 		{ role: "windowMenu" },
-		{
-			role: "help",
-			submenu: [{ label: "Agent Client Protocol", click: () => void shell.openExternal("https://agentclientprotocol.com") }],
-		},
+		HELP_MENU,
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -358,7 +441,12 @@ app.whenReady().then(async () => {
 	useAdapterCache(path.join(app.getPath("userData"), "adapters.json"));
 	if (!process.env.DRAWAI_E2E) void refreshAdapterVersions(adapterPackages());
 	DiagramWindow.installIpc();
-	DiagramWindow.appCommands = { newDiagram: () => void openFile(), open: () => void openDialog(), settings: (section) => openSettings(section), workshop: (mode) => WorkshopWindow.open(server, mode ?? "gallery") };
+	ExcalidrawWindow.installIpc();
+	ExcalidrawWindow.appCommands = { newDrawing: () => void newDrawing(), open: () => void openDialog(), openPath: (file) => void openDroppedDrawing(file), settings: (section) => openSettings(section) };
+	// the menu bar follows the kind of document in front
+	ExcalidrawWindow.onFront = () => scheduleMenu();
+	ExcalidrawWindow.onClosed = () => scheduleMenu();
+	DiagramWindow.appCommands = { newDiagram: () => void openFile(), newDrawing: () => void newDrawing(), open: () => void openDialog(), settings: (section) => openSettings(section), workshop: (mode) => WorkshopWindow.open(server, mode ?? "gallery") };
 	SettingsWindow.openWorkshop = () => WorkshopWindow.open(server, "gallery");
 	WorkshopWindow.openSettings = (section) => openSettings(section);
 	WorkshopWindow.host = {
@@ -418,7 +506,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("activate", () => {
-	if (ready && DiagramWindow.all.size === 0) void openFile();
+	if (ready && documentWindows.size === 0) void openFile();
 });
 
 app.on("window-all-closed", () => {

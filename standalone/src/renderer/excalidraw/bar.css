@@ -1,0 +1,28 @@
+/*
+ * OmniDraw: the bar above the Excalidraw canvas. It lives in a shadow root (see app.tsx), so the
+ * app's classes (ui/app.css: .btn, .icon-btn, .label, .brandmark) style it and nothing of it
+ * reaches Excalidraw's own UI, or the other way round. Only tokens; no colours of its own.
+ */
+:host { display: block; height: 40px; }
+.bar {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	height: 40px;
+	padding: 0 8px 0 12px;
+	background: var(--bg);
+	color: var(--ink);
+	border-bottom: 1px solid var(--border);
+	font-family: var(--font-ui);
+	font-size: var(--text-sm);
+	line-height: 1.5;
+	-webkit-font-smoothing: antialiased;
+	user-select: none;
+}
+.bar .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+/* Unsaved changes: a dot of ink beside the name (the title bar shows the same). */
+.bar .unsaved { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); }
+.bar .kind { flex: none; margin-left: 4px; }
+.bar .chat { color: var(--ink); }
+.bar .chat svg { width: 17px; height: 17px; }
+.bar.side-left .chat { order: -1; margin-left: -6px; }

@@ -11,6 +11,7 @@ import { drawioLocalStorage } from "./diagramWindow";
 import { SettingsWindow } from "./settingsWindow";
 import { Menu, screen } from "electron";
 import type { StaticServer } from "./staticServer";
+import { runExcalidraw } from "./e2eExcalidraw";
 
 export interface E2eConfig {
 	/** Diagram to open (use a copy: the run may save over it). */
@@ -43,6 +44,8 @@ export interface E2eConfig {
 	workshop?: boolean;
 	/** Check the chat answered through an API key, with a stand-in provider (api/standIn.ts): nothing is sent anywhere, and the keychain is not asked. */
 	apiChat?: boolean;
+	/** Check Excalidraw drawings (`file` is a .excalidraw): open, edit through Excalidraw's API, save, reopen, export, themes (see e2eExcalidraw.ts). */
+	excalidraw?: boolean;
 }
 
 /**
@@ -74,6 +77,11 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 			// (before anything asks for the app's API access: this run's is the stand-in's)
 			process.env.DRAWAI_E2E_API = "1";
 			settings().agent = "api:stand-in";
+		}
+		if (config.excalidraw) {
+			// (no diagram window in this run: the drawing is the document)
+			await runExcalidraw(server, config, log);
+			return finish(0);
 		}
 		const t0 = Date.now();
 		const w = await DiagramWindow.open(server, config.file);

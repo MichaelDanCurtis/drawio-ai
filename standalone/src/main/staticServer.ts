@@ -1,4 +1,5 @@
 import { storageLiteral } from "./drawioStorage";
+import { EXCALIDRAW_SOURCE } from "./excalidrawFile";
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as http from "http";
@@ -92,12 +93,14 @@ export class StaticServer {
 			res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-store" });
 			return void res.end(this.editorHtml(o));
 		}
-		if (p === "/chat.html" || p === "/mapper.html" || p === "/settings.html" || p === "/workshop.html") {
+		if (p === "/chat.html" || p === "/mapper.html" || p === "/settings.html" || p === "/workshop.html" || p === "/excalidraw.html") {
 			const nonce = crypto.randomBytes(16).toString("hex");
 			const html = fs
 				.readFileSync(path.join(paths.out, p.slice(1)), "utf8")
 				.replace(/\$\$nonce\$\$/g, nonce)
-				.replace(/\$\$cspSource\$\$/g, this.base);
+				.replace(/\$\$cspSource\$\$/g, this.base)
+				// (the Excalidraw page: what a drawing saved here names as its source)
+				.replace("$$source$$", EXCALIDRAW_SOURCE);
 			res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-store" });
 			return void res.end(html);
 		}
@@ -109,6 +112,11 @@ export class StaticServer {
 			const ui = path.join(paths.out, "ui");
 			file = path.join(ui, p.slice("/ui/".length));
 			if (!file.startsWith(ui + path.sep)) return void res.writeHead(403).end();
+		} else if (p.startsWith("/excalidraw/")) {
+			// the Excalidraw editor page's code, styles and fonts (see build.mjs)
+			const dir = path.join(paths.out, "excalidraw");
+			file = path.join(dir, p.slice("/excalidraw/".length));
+			if (!file.startsWith(dir + path.sep)) return void res.writeHead(403).end();
 		} else if (p.startsWith("/webapp/")) {
 			file = path.join(paths.webapp, p.slice("/webapp/".length));
 			if (!file.startsWith(paths.webapp + path.sep)) return void res.writeHead(403).end();

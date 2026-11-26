@@ -11,6 +11,7 @@
 		var ctrl = Editor.ctrlKey;
 		var commands = [
 			["desktop.new", "New Diagram", "new", ctrl + "+N"],
+			["desktop.newDrawing", "New Excalidraw Drawing", "newDrawing", ctrl + "+Alt+N"],
 			["desktop.open", "Open...", "open", ctrl + "+O"],
 			["desktop.saveAs", "Save As...", "saveAs", ctrl + "+Shift+S"],
 			["desktop.exportPdf", "Export as PDF...", "exportPdf", ctrl + "+Shift+E"],
@@ -30,7 +31,7 @@
 			var fileMenu = ui.menus.get("file");
 			fileMenu.funct = function (menu, parent) {
 				var items = [
-					"desktop.new", "desktop.open", "-",
+					"desktop.new", "desktop.newDrawing", "desktop.open", "-",
 					"save", "desktop.saveAs", "-",
 					"desktop.exportPdf", "desktop.export", "-",
 					"vscode.import", "desktop.openOther", "-",

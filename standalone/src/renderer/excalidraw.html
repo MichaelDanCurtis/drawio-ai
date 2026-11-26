@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!--
+	OmniDraw: the Excalidraw editor (src/renderer/excalidraw/app.tsx, bundled to /excalidraw/app.js).
+	Everything is served by the app itself: Excalidraw's fonts are in /excalidraw/fonts, and nothing
+	is fetched from a CDN. Unlike the app's own pages, styles may be inline here: Excalidraw (and the
+	Mermaid import inside it) write style attributes and <style> elements. Scripts may not, and
+	'wasm-unsafe-eval' is not needed: the one use of WebAssembly (cutting a font down to the letters
+	a drawing uses, for an SVG export) runs in a worker of Excalidraw's, which this policy does not bind.
+-->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src $$cspSource$$ data: blob:; font-src $$cspSource$$ data:; style-src $$cspSource$$ 'unsafe-inline'; script-src 'nonce-$$nonce$$' $$cspSource$$; connect-src $$cspSource$$ data: blob:; worker-src $$cspSource$$;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Excalidraw</title>
+<link rel="stylesheet" href="/ui/fonts.css">
+<link rel="stylesheet" href="/ui/tokens.css">
+<link rel="stylesheet" href="/excalidraw/app.css">
+<style>
+	html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); }
+	body { display: flex; flex-direction: column; }
+	/* The app's bar above the canvas (its own styles are inside it: excalidraw/bar.css). */
+	#bar { flex: none; display: block; height: 40px; }
+	#root { flex: 1 1 auto; min-height: 0; position: relative; }
+	#problem { margin: auto; max-width: 420px; padding: 24px; font: 13px/1.5 var(--font-ui); color: var(--muted); text-align: center; }
+</style>
+<script nonce="$$nonce$$" src="/ui/icons.js"></script>
+<script nonce="$$nonce$$">
+	// Excalidraw reads both when its code loads: where its fonts are, and what a saved drawing names as its source.
+	window.EXCALIDRAW_ASSET_PATH = "/excalidraw/";
+	window.EXCALIDRAW_EXPORT_SOURCE = "$$source$$";
+	// Excalidraw gives every font a second address, on a CDN, for when the first one fails. The fonts
+	// are the app's and nothing here comes from a CDN: an address outside the app is taken out of a
+	// font's sources before the browser sees it (it would refuse it, and say so, once per font).
+	(function () {
+		var Native = window.FontFace;
+		var ours = function (source) {
+			var url = /^\s*url\(\s*["']?([^"')]*)/.exec(source);
+			return !url || !/^[a-z][a-z0-9+.-]*:/i.test(url[1]) || /^data:/i.test(url[1]) || url[1].indexOf(location.origin + "/") === 0;
+		};
+		window.FontFace = function (family, source, descriptors) {
+			if (typeof source === "string") {
+				var kept = source.split(/,\s*(?=url\()/).filter(ours);
+				if (kept.length) source = kept.join(", ");
+			}
+			return new Native(family, source, descriptors);
+		};
+		window.FontFace.prototype = Native.prototype;
+	})();
+</script>
+</head>
+<body>
+<div id="bar"></div>
+<div id="root"></div>
+<script type="module" nonce="$$nonce$$" src="/excalidraw/app.js"></script>
+</body>
+</html>

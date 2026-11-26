@@ -2,7 +2,7 @@
 // MCP stdio proxy with esbuild. Shared code is imported straight from ../src
 // (read-only); `vscode` resolves to a small shim (src/main/vscode-shim.ts).
 import { build } from "esbuild";
-import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
+import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
@@ -76,6 +76,7 @@ const jobs = [
 			"preload-mapper": join(here, "src/preload/mapper.ts"),
 			"preload-settings": join(here, "src/preload/settings.ts"),
 			"preload-workshop": join(here, "src/preload/workshop.ts"),
+			"preload-excalidraw": join(here, "src/preload/excalidraw.ts"),
 		},
 		outdir: out,
 		platform: "node",
@@ -104,10 +105,34 @@ const jobs = [
 		minify: true,
 		tsconfigRaw: { compilerOptions: { experimentalDecorators: true } },
 	},
+	{
+		// The Excalidraw editor page: the npm package (MIT) and React, bundled as they are. What Excalidraw
+		// loads only when it is used (its languages, the Mermaid import, font subsetting) stays in files
+		// of its own beside the page's, so the page starts with the editor alone.
+		...common,
+		entryPoints: { app: join(here, "src/renderer/excalidraw/app.tsx") },
+		outdir: join(out, "excalidraw"),
+		platform: "browser",
+		format: "esm",
+		splitting: true,
+		chunkNames: "chunks/[name]-[hash]",
+		minify: true,
+		sourcemap: false,
+		jsx: "automatic",
+		conditions: ["production"],
+		define: { "process.env.NODE_ENV": '"production"' },
+		// (Excalidraw's stylesheet names its UI font as ./fonts/…: the fonts are copied beside it below)
+		external: ["*.woff2"],
+	},
 ];
 
+// (the editor page's parts are named after what is in them: parts of an earlier build would stay behind)
+rmSync(join(out, "excalidraw"), { recursive: true, force: true });
 await Promise.all(jobs.map((j) => build(j)));
-for (const f of ["chat.html", "mapper.html", "settings.html", "workshop.html", "desktop-menu.js", "desktop-toolbar.js", "desktop-menubar.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+// Excalidraw's fonts (the hand-drawn ones, and its UI's), served by the app: the page never asks a CDN for them.
+cpSync(join(here, "node_modules/@excalidraw/excalidraw/dist/prod/fonts"), join(out, "excalidraw/fonts"), { recursive: true });
+for (const f of ["bar.css", "NOTICE.txt"]) copyFileSync(join(here, "src/renderer/excalidraw", f), join(out, "excalidraw", f));
+for (const f of ["chat.html", "mapper.html", "settings.html", "workshop.html", "excalidraw.html", "desktop-menu.js", "desktop-toolbar.js", "desktop-menubar.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
 // The app's look (omni-design): tokens, motion, the dot layers, and the self-hosted fonts.
 mkdirSync(join(out, "ui/fonts"), { recursive: true });
 for (const f of readdirSync(join(here, "src/renderer/ui"))) copyFileSync(join(here, "src/renderer/ui", f), join(out, "ui", f));
