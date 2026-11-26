@@ -13,8 +13,23 @@
     the CLI as the way to sign in); for Azure it is what `az aks get-credentials` prints for you,
     never the cluster admin's, with `kubelogin` told to use the Azure CLI's sign-in.
   - Nothing of that sign-in is in the map, the facts, the log or what an agent is sent.
-- The Map Something dialog loads only the lists that are on show, and loads a list again when a
-  remembered choice it depends on is no longer offered.
+- The Map Something dialog's lists: only the ones on show are asked for, one after the other,
+  each with what the ones before it chose (a project's clusters come after the project). What
+  is chosen is always something the list offers, so a choice made under another subscription
+  is not left behind unseen. The lists keep coming while you type in a text box, and what a
+  run said stays when the form is drawn again.
+- **Mapper: map a GitHub repository.** Where a map takes a repository or folder (Connectivity,
+  Data flow, GitHub Actions workflows, API surface, Module dependencies, Class diagram,
+  Infrastructure as code, dbt, ML pipelines) it now also takes a repository on GitHub: its
+  address from the browser (also of a branch or a folder in it), its clone address, or
+  `owner/name` (`owner/name@branch` for a branch, tag or commit). The repository's newest
+  state is downloaded with the access to GitHub this computer already has (git's saved
+  sign-in, the GitHub CLI's, or an SSH key) into the app's own folder and read there. It
+  said "is not a folder" before. git runs no program for the repository's files while it does
+  so (no hook, no filter of any name, no submodule), and nothing is ever sent to the
+  repository. Each download is of one commit, in a folder of its own that is never replaced,
+  so an earlier map still points at the files it was drawn from. The newest four of a
+  repository are kept, and an older one comes back, as that commit, when its map is used.
 
 ## [0.2.0]
 

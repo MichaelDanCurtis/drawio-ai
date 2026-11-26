@@ -59,7 +59,7 @@ export class MapperDialog {
 			cwd: () => this.host.cwd(),
 			ready: () => this.host.ready(),
 			service: () => this.host.service,
-			context: (signal, progress) => createContext({ cwd: this.host.cwd(), env: agentEnv(), signal, progress }),
+			context: (signal, progress) => createContext({ cwd: this.host.cwd(), env: agentEnv(), signal, progress, repoCache: path.join(app.getPath("userData"), "mapped-repos") }),
 			askAgent: (text, shown) => this.host.askAgent(text, shown),
 			showChat: () => this.host.showChat(),
 			loadInputs: loadSavedInputs,

@@ -130,7 +130,8 @@ export class MapperDialogCore {
 				p.showChat();
 				p.askAgent(describePrompt(record, "everyone"), `🗺 Describe "${record.title}" in plain English`);
 			} else if (wantsAgent && recipe.agentPrompt) {
-				const task = recipe.agentPrompt(input, result);
+				// (a repository that was downloaded: the agent is told the folder its files are in)
+				const task = recipe.agentPrompt(result?.root && recipe.fields.some((f) => f.repository && f.id === "folder") ? { ...input, folder: result.root } : input, result);
 				const text = agentRequest(
 					`${task}${drawn ? `\n\nThe Mapper has just drawn the map on the page "${result?.graph?.title ?? ""}" from read-only data (${result?.summary ?? ""}); build on it.` : ""}`,
 					result?.facts

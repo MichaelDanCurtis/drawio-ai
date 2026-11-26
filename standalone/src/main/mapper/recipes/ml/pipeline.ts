@@ -168,7 +168,7 @@ export const mlPipelineRecipe: Recipe = {
 		"Steps, datasets, models and metrics of ML pipelines read from their definitions: DVC (dvc.yaml), Kubeflow / Vertex compiled pipelines, Azure ML pipeline jobs, SageMaker pipeline definitions, Airflow DAGs and Metaflow flows. Prefect, Dagster, ZenML, Kedro and Flyte are handed to the agent.",
 	mode: "inventory",
 	fields: [
-		{ id: "folder", label: "Repository or folder", type: "folder", help: "Scanned for pipeline definitions. Read locally; nothing is uploaded except what you then send to the agent." },
+		{ id: "folder", label: "Repository or folder", type: "folder", repository: true, placeholder: "A folder, or a GitHub repository: owner/name or its address", help: "Scanned for pipeline definitions. Read locally; nothing is uploaded except what you then send to the agent." },
 		{ id: "file", label: "…or a single pipeline file", type: "file", help: "dvc.yaml, a compiled KFP pipeline (YAML/JSON), an Azure ML pipeline job, a SageMaker definition JSON or an Airflow DAG." },
 	],
 	async collect(input: MapInput, ctx): Promise<CollectResult> {
