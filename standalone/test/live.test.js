@@ -447,7 +447,9 @@ function editorStub(diagram) {
 			client.onPatch.emit({ patch, checksum: diagram.checksum() });
 			return true;
 		},
-		setDiffSync() {},
+		setDiffSync(on) {
+			client.calls.push(`sync:${on}`);
+		},
 		async liveCompose(xml, patches) {
 			const d = new Diagram(JSON.parse(xml));
 			for (const p of patches) d.patch(p);
@@ -509,7 +511,7 @@ test("what someone changes in the moment their diagram is being replaced is thei
 	assert.equal(bo.status, "live");
 	assert.equal(await bo.shared(3000), true);
 	await until(() => ann.session.revision === 1);
-	assert.deepEqual(client.calls.slice(0, 5), ["loading:true", "lock:true", "replace", "lock:false", "loading:false"], "the editor's tools are told for how long the diagram is not what it will be");
+	assert.deepEqual(client.calls.slice(0, 6), ["sync:true", "loading:true", "lock:true", "replace", "lock:false", "loading:false"], "the editor's tools are told for how long the diagram is not what it will be");
 	assert.equal(client.locked, false, "and it can be changed again afterwards");
 	assert.deepEqual(diagram.cells, { a: { label: "start" }, b: { label: "other", color: "red" } }, "the board's diagram, with what he drew on top");
 	assert.deepEqual(ann.diagram.cells, diagram.cells, "and the board has it");
@@ -598,6 +600,28 @@ test("an editor that can work the board's diagram out first gets it as one diagr
 	session.localPatch(update("b", { color: "red" }), "x");
 	await until(() => ann.diagram.cells.b.color === "red");
 	socket.close();
+});
+
+test("sharing a diagram again while the last sharing is still being closed on the server: the new one keeps the editor", async () => {
+	const relay = await startBoardRelay({ deleteDelayMs: 150 });
+	relays.push(relay);
+	const diagram = new Diagram({ a: { label: "start" } });
+	const client = editorStub(diagram);
+	const win = { client, remoteChanged() {}, changed() {}, log() {} };
+	const first = await LiveShare.host(win, relay.url, { name: "Host", title: "T" });
+	const stopping = first.stop();
+	assert.equal(client.calls.at(-1), "sync:false", "the editor is let go of at once, not when the server has answered");
+	// shared again before the server has closed the first board
+	const second = await LiveShare.host(win, relay.url, { name: "Host", title: "T" });
+	await stopping;
+	await new Promise((r) => setTimeout(r, 50));
+	assert.equal(client.calls.filter((c) => c.startsWith("sync:")).at(-1), "sync:true", "nothing of the first sharing switched the second one's editor off");
+	// and what is drawn now is shared
+	client.userEdit(update("a", { label: "on the second board" }));
+	assert.equal(await second.shared(3000), true);
+	assert.equal(relay.stats(second.link.id).revision, 1);
+	assert.equal(relay.boards.has(first.link.id), false);
+	await second.stop();
 });
 
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {

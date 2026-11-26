@@ -249,12 +249,14 @@ export class LiveShare {
 		if (this.presenceTimer) clearTimeout(this.presenceTimer);
 		this.session.dispose();
 		this.socket?.close();
-		if (this.role === "host" && this.ownerKey && this.link) await closeBoard(this.link, this.ownerKey);
+		// The editor is let go of at once, before anything is waited for: by the time the server has
+		// answered, the diagram may be shared anew, and that sharing's editor is this same one.
 		try {
 			this.editor.stop();
 		} catch {
 			// the window is gone
 		}
+		if (this.role === "host" && this.ownerKey && this.link) await closeBoard(this.link, this.ownerKey);
 		this.win.changed();
 	}
 

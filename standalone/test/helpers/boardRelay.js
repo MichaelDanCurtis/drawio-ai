@@ -94,8 +94,8 @@ class Socket {
 /**
  * Starts a relay on this computer. Returns { url, boards, close(), stats(id) }.
  * `options.maxPatches`: how many patches are kept before a snapshot is asked for (default 500).
- * `options.createDelayMs`: how long making a board takes (a slow server, for tests of what
- * someone does meanwhile).
+ * `options.createDelayMs`, `options.deleteDelayMs`: how long making and closing a board take
+ * (a slow server, for tests of what someone does meanwhile).
  */
 async function startBoardRelay(options = {}) {
 	const boards = new Map();
@@ -144,7 +144,7 @@ async function startBoardRelay(options = {}) {
 				p.socket.close();
 			}
 			boards.delete(b.id);
-			return json(res, 200, { closed: true });
+			return void setTimeout(() => json(res, 200, { closed: true }), options.deleteDelayMs ?? 0);
 		}
 		json(res, 404, { error: "not found" });
 	});
