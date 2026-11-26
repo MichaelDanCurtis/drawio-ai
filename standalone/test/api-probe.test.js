@@ -188,7 +188,12 @@ test("GraphQL: an endpoint is asked for its schema with one read-only question, 
 	const bare = await api({ "/api/graphql": (q) => (q.method === "POST" ? { json: SCHEMA } : undefined) });
 	const r = await probeApi(bare.url);
 	assert.deepEqual(found(r), [[], "/api/graphql"]);
-	assert.deepEqual(bare.got.filter((g) => g.method === "POST").map((g) => g.path), ["/graphql", "/api/graphql"]);
+	assert.deepEqual(bare.got.filter((g) => g.method === "POST").map((g) => g.path), ["/", "/graphql", "/api/graphql"], "the address that was given first, then the usual ones");
+	// an endpoint whose address does not say what it is (/v1/query, /api): asked all the same when nothing else was found, and once
+	const plain = await api({ "/v1/query": (q) => (q.method === "POST" && /IntrospectionQuery/.test(q.body) ? { json: SCHEMA } : { status: 404, json: {} }) });
+	assert.deepEqual(found(await probeApi(`${plain.url}/v1/query`)), [[], "/v1/query"]);
+	assert.deepEqual(plain.got.filter((g) => g.method === "POST").map((g) => g.path), ["/v1/query"]);
+	assert.equal(plain.got[0].method, "GET", "reading comes first");
 	assert.ok(bare.got.length <= 40);
 });
 
@@ -228,6 +233,27 @@ test("a schema file in the folder and the same API asked live: one schema, each 
 	assert.match(r.summary, /2 type\(s\)/);
 	// (the same for a schema split over files)
 	assert.deepEqual(mergeGqlTypes([...parseGraphQL("type Query { a: Int }", "a.graphql"), ...parseGraphQL("extend type Query { b: Int }\nunion U = A", "b.graphql"), ...parseGraphQL("union U = A | B", "c.graphql")]).map((t) => [t.name, t.root, t.file, t.fields.map((f) => f.name), t.members]), [["Query", "query", "a.graphql", ["a", "b"], undefined], ["U", undefined, "b.graphql", [], ["A", "B"]]]);
+});
+
+test("an answer that is not read is let go of: no connection is left open behind a probe", async () => {
+	// every address answers "not there" (or sends on) and never finishes saying so
+	const open = new Set();
+	const server = http.createServer((req, res) => {
+		open.add(res);
+		res.on("close", () => open.delete(res));
+		if (req.url === "/moved") res.writeHead(302, { location: "/openapi.json", "content-type": "text/plain" });
+		else res.writeHead(404, { "content-type": "application/json" });
+		res.write('{"error": "not');
+	});
+	await new Promise((r) => server.listen(0, "127.0.0.1", r));
+	servers.push(server);
+	const t0 = Date.now();
+	const r = await probeApi(`http://127.0.0.1:${server.address().port}/moved`, { timeoutMs: 3000, deadlineMs: 20_000 });
+	assert.ok(Date.now() - t0 < 10_000, "and none is waited for");
+	assert.ok(r.asked.length > 20 && r.asked.every((a) => a.status === 404 || a.status === 302 || a.status === "not asked"), JSON.stringify([...new Set(r.asked.map((a) => a.status))]));
+	await new Promise((r) => setTimeout(r, 300));
+	assert.equal(open.size, 0, `${open.size} answers were left open`);
+	server.closeAllConnections?.();
 });
 
 test("no more requests than the limit, whatever the API answers: each step of a redirect counts", async () => {

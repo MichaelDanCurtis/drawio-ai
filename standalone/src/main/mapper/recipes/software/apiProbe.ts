@@ -206,6 +206,8 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 				});
 				if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
 					const to = new URL(res.headers.get("location")!, at);
+					// (what an answer says that is not read is let go of: the connection is not left open behind it)
+					await res.body?.cancel().catch(() => undefined);
 					// (the same place, also when it only moves from http to https: nothing is asked of, or told to, another one)
 					// (a question, the one POST there is, goes on to where it was sent only as a question: 307 / 308,
 					// and 301 / 302 as servers use them for a missing slash; "see other" would make it a plain read)
@@ -217,7 +219,10 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 					continue;
 				}
 				entry.status = res.status;
-				if (!res.ok) return { status: res.status, text: "", type: "", link: "", url: at };
+				if (!res.ok) {
+					await res.body?.cancel().catch(() => undefined);
+					return { status: res.status, text: "", type: "", link: "", url: at };
+				}
 				return { status: res.status, text: await limited(res), type: res.headers.get("content-type") ?? "", link: res.headers.get("link") ?? "", url: at };
 			} catch (e: any) {
 				cancelled();
@@ -267,9 +272,12 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 
 	/** Asks GraphQL endpoints for their schema, until one answers with it. */
 	let graphql: ProbeResult["graphql"];
+	const questioned = new Set<string>();
 	async function askGraphql(ends: string[]): Promise<void> {
 		for (const end of ends) {
 			if (graphql || !room()) break;
+			if (questioned.has(end)) continue;
+			questioned.add(end);
 			const r = await ask(end, { method: "POST", body: JSON.stringify({ query: INTROSPECTION, operationName: "IntrospectionQuery" }) });
 			if (!r || !r.text) continue;
 			let sdl: string | undefined;
@@ -295,10 +303,11 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 		const top = `${start.origin}/`;
 		const places = [...(under === top ? [] : USUAL_PLACES.slice(0, 10).map((p) => new URL(p, under).toString())), ...USUAL_PLACES.map((p) => new URL(p, top).toString())].filter((u, i, all) => all.indexOf(u) === i);
 		// (a few at a time: quick on an API that has none, and gentle on it; room is kept for the GraphQL question)
-		for (let i = 0; i < places.length && !specs.length && sent < MAX_REQUESTS - GRAPHQL_PLACES.length - 4 && room(); i += 4) await Promise.all(places.slice(i, i + 4).map((u) => look(u, 1)));
+		for (let i = 0; i < places.length && !specs.length && sent < MAX_REQUESTS - GRAPHQL_PLACES.length - 5 && room(); i += 4) await Promise.all(places.slice(i, i + 4).map((u) => look(u, 1)));
 	}
-	// nothing yet: the usual GraphQL endpoints
-	if (!specs.length && !graphql) await askGraphql(GRAPHQL_PLACES.map((p) => new URL(p, `${start.origin}/`).toString()));
+	// nothing yet: the address that was given is asked GraphQL's question whatever it is called (an
+	// endpoint can be at /api or /v1/query), then the usual GraphQL endpoints
+	if (!specs.length && !graphql) await askGraphql([start.toString(), ...GRAPHQL_PLACES.map((p) => new URL(p, `${start.origin}/`).toString())]);
 	return { origin: start.origin, specs, ...(graphql ? { graphql } : {}), asked };
 }
 

@@ -485,7 +485,7 @@ export const apiRecipe: Recipe = {
 			label: "Or a running API's address",
 			type: "text",
 			placeholder: "https://api.example.com, or the address of its OpenAPI document or docs page",
-			help: "The API is asked for its own description: the address itself, what its docs page links to, then the places frameworks usually serve it from; a GraphQL endpoint is asked for its schema. Only reads (GET, and GraphQL's schema question), only on that host, at most 40 addresses. Not every API publishes one: you are told what was asked if none is found.",
+			help: "The API is asked for its own description: the address itself, what its docs page links to, then the places frameworks usually serve it from; a GraphQL endpoint is asked for its schema, and so is the address you give when nothing else was found. Only reads (GET, and GraphQL's schema question, which is sent as a POST), only on that host, at most 40 requests. Not every API publishes one: you are told what was asked if none is found.",
 		},
 		{
 			id: "authorization",
