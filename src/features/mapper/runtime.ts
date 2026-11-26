@@ -11,7 +11,7 @@ export { MapperDialogCore } from "../../../standalone/src/main/mapper/dialog";
 export { mappedSelection, mapsOnPage } from "../../../standalone/src/main/mapper/draw";
 export { callMapperTool } from "../../../standalone/src/main/mapper/mcpTools";
 export { askPrompt, describePrompt, fixFindingPrompt, tourPrompt } from "../../../standalone/src/main/mapper/prompts";
-export { digDeeperRequest, setToolSource } from "../../../standalone/src/main/mapper/recipes/common";
+export { digDeeperRequest, mapRootsReady, setToolSource } from "../../../standalone/src/main/mapper/recipes/common";
 export { catalog, recipeById } from "../../../standalone/src/main/mapper/registry";
 export { MapperService, SEVERITY } from "../../../standalone/src/main/mapper/service";
 export { activeFindings, adoptRecords } from "../../../standalone/src/main/mapper/store";

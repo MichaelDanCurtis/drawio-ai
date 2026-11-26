@@ -11,7 +11,7 @@ import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram } from "./exp
 import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
 import { mappedSelection } from "./mapper/draw";
 import { diagramContent } from "./xmlContent";
-import { digDeeperRequest } from "./mapper/recipes/common";
+import { digDeeperRequest, mapRootsReady } from "./mapper/recipes/common";
 import { recipeById } from "./mapper/registry";
 import { MapperDialog } from "./mapperDialog";
 import { agentEnv } from "./agents";
@@ -249,7 +249,7 @@ export class DiagramWindow {
 			client: this.client,
 			cwd: () => this.cwd(),
 			diagram: () => this.file,
-			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress }),
+			context: (signal, progress) => createContext({ cwd: this.cwd(), env: agentEnv(), signal, progress, repoCache: path.join(app.getPath("userData"), "mapped-repos") }),
 			animate: () => settings().editor["drawio-ai.animateChanges"] !== false,
 		});
 		this.mcp = new WindowMcpServer(this.toolbox, () => this.fileName(), () => this.maps);
@@ -499,7 +499,9 @@ export class DiagramWindow {
 		const recipeId = [...counts].sort((a, b) => b[1] - a[1])[0][0];
 		const recipe = recipeById(recipeId);
 		const data = shapes.map((s) => ({ label: s.label, data: Object.fromEntries(Object.entries(s.data).filter(([k]) => k !== "mapper")) }));
-		const text = recipe?.digDeeper ? recipe.digDeeper(data, question) : digDeeperRequest("mapped items", data, question);
+		// (a map of a downloaded repository: the download is brought back if it was cleared away)
+		const note = await mapRootsReady(data, createContext({ cwd: this.cwd(), env: agentEnv(), repoCache: path.join(app.getPath("userData"), "mapped-repos") }));
+		const text = (recipe?.digDeeper ? recipe.digDeeper(data, question) : digDeeperRequest("mapped items", data, question)) + note;
 		if (!this.chatVisible) this.toggleChat();
 		await this.chat.send(text, { cellIds: this.client.currentSelection }, [], `🔎 Dig deeper into ${shapes.length} shape${shapes.length === 1 ? "" : "s"}${question.trim() ? `: ${question.trim()}` : ""}`);
 	}

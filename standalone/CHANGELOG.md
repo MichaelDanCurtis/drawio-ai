@@ -5,10 +5,23 @@
 - **Mapper: the API surface of a running API.** The API surface map takes an API's address
   beside (or in place of) a folder, and asks the API for its own description: the address
   itself, what its docs page and that page's scripts name, then the places frameworks serve
-  an OpenAPI document from; a GraphQL endpoint is asked for its schema. An optional
-  Authorization header is sent to that host only and is not saved. It only reads, stays on
-  the host it was given, asks at most 40 addresses, and when an API publishes no description
-  it says what it asked and what answered.
+  an OpenAPI document from; a GraphQL endpoint is asked for its schema (the address you
+  give too, when nothing else was found). An optional Authorization header is sent to that
+  host only and is not saved. It only reads, stays on the host it was given, sends at most
+  40 requests, and when an API publishes no description it says what it asked and what
+  answered. A schema file in the folder and the same API asked live are drawn as one schema.
+- **Mapper: map a GitHub repository.** Where a map takes a repository or folder (Connectivity,
+  Data flow, GitHub Actions workflows, API surface, Module dependencies, Class diagram,
+  Infrastructure as code, dbt, ML pipelines) it now also takes a repository on GitHub: its
+  address from the browser (also of a branch or a folder in it), its clone address, or
+  `owner/name` (`owner/name@branch` for a branch, tag or commit). The repository's newest
+  state is downloaded with the access to GitHub this computer already has (git's saved
+  sign-in, the GitHub CLI's, or an SSH key) into the app's own folder and read there. It
+  said "is not a folder" before. git runs no program for the repository's files while it does
+  so (no hook, no filter of any name, no submodule), and nothing is ever sent to the
+  repository. Each download is of one commit, in a folder of its own that is never replaced,
+  so an earlier map still points at the files it was drawn from. The newest four of a
+  repository are kept, and an older one comes back, as that commit, when its map is used.
 
 ## [0.2.0]
 

@@ -1,5 +1,6 @@
 import { execFile } from "child_process";
 import { checkReadOnly } from "./readOnly";
+import { fetchRepository, keepDownloaded, type RepositorySpec } from "./repository";
 import type { CollectContext, ExecResult } from "./types";
 import { MapperError } from "./types";
 
@@ -9,6 +10,8 @@ export interface ContextOptions {
 	env: NodeJS.ProcessEnv;
 	progress?: (text: string) => void;
 	signal?: AbortSignal;
+	/** Where repositories that are mapped by their address are downloaded to (the app's own folder). */
+	repoCache?: string;
 }
 
 /** A CollectContext that runs commands for real, refusing anything that is not read-only. */
@@ -26,10 +29,17 @@ export function createContext(options: ContextOptions): CollectContext {
 		[`GIT_CONFIG_KEY_${gitConfigs}`]: "core.fsmonitor",
 		[`GIT_CONFIG_VALUE_${gitConfigs}`]: "false",
 	};
+	const repoCache = options.repoCache;
 	return {
 		cwd: options.cwd,
 		signal,
 		progress: options.progress ?? (() => undefined),
+		...(repoCache
+			? {
+					repository: (spec: RepositorySpec) => fetchRepository(spec, { cacheDir: repoCache, env: options.env, signal, progress: options.progress }),
+					keepRepository: (folder: string) => keepDownloaded(folder, { cacheDir: repoCache, env: options.env, signal, progress: options.progress }),
+			  }
+			: {}),
 		exec(command, args, opts = {}): Promise<ExecResult> {
 			const refused = checkReadOnly(command, args);
 			if (refused) return Promise.reject(new MapperError(`Refused: ${refused}. The Mapper only reads.`));

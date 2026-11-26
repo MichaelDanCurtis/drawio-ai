@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Mapper: the API surface of a running API.** The API surface map takes an API's address beside (or in place of) a folder and asks the API for its own description: the address itself, what its docs page names, then the places frameworks serve an OpenAPI document from; a GraphQL endpoint is asked for its schema. An optional Authorization header goes to that host only and is not saved. It only reads, stays on the host it was given, and says what it asked when an API publishes no description.
+- **Mapper: map a GitHub repository.** Where a map takes a repository or folder it also takes a repository on GitHub: its address from the browser (also of a branch or a folder in it), its clone address, or `owner/name` (`owner/name@branch` for a branch, tag or commit). Its newest state is downloaded with the access to GitHub this computer already has into the extension's own storage and read there; nothing is sent to the repository, and git runs nothing of the repository's own.
 
 ## [0.5.0]
 

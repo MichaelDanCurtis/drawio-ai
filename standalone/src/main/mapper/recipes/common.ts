@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as yaml from "js-yaml";
 import * as path from "path";
-import type { FieldDef, MapInput } from "../types";
+import { parseRepository, repositoryLabel } from "../repository";
+import type { CollectContext, FieldDef, MapInput } from "../types";
 import { MapperError } from "../types";
 
 /**
@@ -110,12 +111,41 @@ export function folderInput(input: MapInput, cwd: string, field = "folder"): str
 	return dir;
 }
 
+/**
+ * A recipe's input with every repository in it downloaded: a field that takes a repository
+ * (FieldDef.repository) and holds one, by its address or as owner/name, gets the folder the
+ * repository was downloaded to, so that the recipe reads a folder as it always does. A folder of
+ * that name on this computer wins: `docs/api` in the diagram's folder is a folder.
+ */
+export async function withRepositories(fields: FieldDef[], input: MapInput, ctx: CollectContext): Promise<{ input: MapInput; root?: string; source?: string }> {
+	let out = input;
+	let root: string | undefined;
+	let source: string | undefined;
+	for (const f of fields) {
+		if (!f.repository) continue;
+		const typed = (input[f.id] ?? "").trim();
+		if (!typed) continue;
+		const local = path.resolve(ctx.cwd, typed);
+		if (fs.existsSync(local)) continue;
+		const spec = parseRepository(typed);
+		if (!spec) throw new MapperError(`${typed} is not a folder on this computer, and not a GitHub repository (its address, or owner/name).`);
+		if (!ctx.repository) throw new MapperError(`${typed} looks like a GitHub repository, and repositories cannot be downloaded here. Clone it and choose its folder.`);
+		const fetched = await ctx.repository(spec);
+		out = { ...out, [f.id]: fetched.root };
+		root ??= fetched.root;
+		source ??= repositoryLabel(spec);
+	}
+	return { input: out, ...(root ? { root, source } : {}) };
+}
+
 export const FOLDER_FIELD: FieldDef = {
 	id: "folder",
 	label: "Repository or folder",
 	type: "folder",
 	required: true,
-	help: "Read locally; nothing is uploaded except what you then send to the agent.",
+	repository: true,
+	placeholder: "A folder, or a GitHub repository: owner/name or its address",
+	help: "A folder is read where it is. A GitHub repository is downloaded first (its newest state, with the access to GitHub this computer already has) and read from the app's own folder. Nothing is uploaded except what you then send to the agent.",
 };
 
 /** Where the agent finds the diagram tools. The desktop app serves them as an MCP server; the VS Code extension names its own. */
@@ -144,6 +174,25 @@ export function agentRequest(task: string, facts?: string, maxFacts = 60_000): s
 		parts.push("", "<facts collected read-only by the Mapper>", trimmed, "</facts>");
 	}
 	return parts.join("\n");
+}
+
+/**
+ * Before an agent is sent to the folders some shapes were mapped from: a map of a downloaded
+ * repository points at its download, which may have been cleared away since, so it is brought
+ * back first. Returns what to add to the request when one could not be (the agent then knows the
+ * files are not there, and says so), or "".
+ */
+export async function mapRootsReady(shapes: { data: Record<string, string> }[], ctx: Pick<CollectContext, "keepRepository">): Promise<string> {
+	if (!ctx.keepRepository) return "";
+	const missing: string[] = [];
+	for (const root of new Set(shapes.map((s) => s.data.mapRoot).filter(Boolean))) {
+		try {
+			await ctx.keepRepository(root);
+		} catch (e: any) {
+			missing.push(`"${root}" (${String(e?.message ?? e).split("\n")[0].slice(0, 200)})`);
+		}
+	}
+	return missing.length ? `\n\nNote: the downloaded copy of the repository this map was made from is no longer on this computer and could not be downloaded again: ${missing.join("; ")}. Its files cannot be read: say so, and work from the shapes' data.` : "";
 }
 
 /** The usual "dig deeper" request: the selected shapes' data plus the user's question. */

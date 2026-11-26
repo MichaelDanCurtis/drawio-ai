@@ -191,7 +191,7 @@ export class MapperFeature {
 		if (!vscode.workspace.isTrusted) {
 			throw new rt.MapperError("The Mapper runs read-only tools (git, cloud CLIs) in this folder, so the workspace must be trusted first (Workspaces: Manage Workspace Trust).");
 		}
-		return rt.createContext({ cwd: nodePath.dirname(this.fileOf(editor)), env: process.env, signal, progress });
+		return rt.createContext({ cwd: nodePath.dirname(this.fileOf(editor)), env: process.env, signal, progress, repoCache: nodePath.join(this.deps.context.globalStorageUri.fsPath, "mapped-repos") });
 	}
 
 	/**
@@ -468,7 +468,9 @@ export class MapperFeature {
 		for (const s of shapes) counts.set(s.recipe, (counts.get(s.recipe) ?? 0) + 1);
 		const recipe = rt.recipeById([...counts].sort((a, b) => b[1] - a[1])[0][0]);
 		const data = shapes.map((s) => ({ label: s.label, data: Object.fromEntries(Object.entries(s.data).filter(([k]) => k !== "mapper")) }));
-		const text = recipe?.digDeeper ? recipe.digDeeper(data, q) : rt.digDeeperRequest("mapped items", data, q);
+		// (a map of a downloaded repository: the download is brought back if it was cleared away)
+		const note = vscode.workspace.isTrusted ? await rt.mapRootsReady(data, this.collectContext(rt, editor)) : "";
+		const text = (recipe?.digDeeper ? recipe.digDeeper(data, q) : rt.digDeeperRequest("mapped items", data, q)) + note;
 		return this.ask(editor, text, { selection: { cellIds: [...editor.drawioClient.currentSelection] } });
 	}
 
