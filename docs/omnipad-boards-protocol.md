@@ -3,8 +3,9 @@
 A note both sides build to: OmniDraw (this repository) and OmniPad (the `rustpad` repository).
 It says what "Go live" does, what each side has today, and the protocol between them. Where it
 proposes something OmniPad has not built, it says so: those parts are OmniPad's to confirm or
-change. Version 2 of this note, 2026-11-26 (version 1 did not say how someone whose change crossed
-another's catches up with the server's order).
+change. Version 3 of this note, 2026-11-26 (version 1 did not say how someone whose change crossed
+another's catches up with the server's order; version 2 let them vouch for a checksum
+meanwhile).
 
 ## What it is for
 
@@ -112,7 +113,7 @@ the pad messages. `revision` counts patches the server has accepted, from 0.
 | Message | Meaning |
 |---|---|
 | `{"Hello": {"name", "hue", "client"}}` | First message. `client` is like `"omnidraw/0.4.0"` or `"omnipad-web/1"` |
-| `{"Patch": {"base", "patch", "checksum"}}` | A change. `base` is the revision this client's diagram will be at once all it has sent is accepted (see "How changes are ordered"). `patch` is draw.io's object, passed on untouched. `checksum` is draw.io's for the sender's diagram after the change |
+| `{"Patch": {"base", "patch", "checksum"}}` | A change. `base` is the revision this client's diagram will be at once all it has sent is accepted (see "How changes are ordered"). `patch` is draw.io's object, passed on untouched. `checksum` is draw.io's for the sender's diagram after the change, or `null` when the sender cannot vouch that its diagram is in the server's order (rule 4 below) |
 | `{"Snapshot": {"revision", "xml", "checksum"}}` | The whole diagram at `revision`, from a client whose diagram is in the server's order (rule 6 below). Sent when the server asks, and by the host now and then when things are quiet. The server keeps it only if it has no newer one |
 | `{"Presence": {"page", "cursor", "selection", "rect"}}` | Where this person is. `cursor` `{x, y}` or null and `rect` `{start, end}` or null, in diagram coordinates; `selection` a list of cell ids; `page` the page id. At most 30 a second |
 | `{"Resync": {}}` | "Mine no longer matches: send me the diagram." |
@@ -141,8 +142,12 @@ applied the two the other way round, and has to catch up. The rules:
    accepted: the last revision it has applied, plus the number of its own patches not yet
    acknowledged. (So two quick changes in a row are `base` 5 and `base` 6, not both 5.)
 2. A patch is **clean** when its `base` is the server's revision just before the patch gets its
-   number: nothing of anyone else's arrived in between. Then the sender's `checksum` is the
-   checksum everyone should have at that revision.
+   number (nothing of anyone else's arrived in between) *and* it carries a `checksum`. Then
+   that checksum is the one everyone should have at that revision. A sender gives a checksum
+   only while its own diagram is known to be in the server's order: from the moment someone
+   else's patch arrives while one of its own is unacknowledged, until it has reconciled (or
+   found there was nothing to reconcile, rule 4), it sends `checksum: null`. Its patches then
+   count as not clean for everyone, itself included, whatever their `base`.
 3. **Receiving.** Everyone applies others' patches in revision order as they arrive. After a
    clean one, a client that has nothing of its own unacknowledged compares its checksum
    (draw.io gives it in its answer to `patch`) with the patch's. A difference means this client
@@ -151,8 +156,8 @@ applied the two the other way round, and has to catch up. The rules:
    someone else's that the server put first. Its own diagram has them in the other order, and
    where the two touched the same thing it now shows the wrong one. (A sets a label, B sets the
    same label; the server takes A, then B. Everyone must show B's. B received A's patch after
-   making its own and shows A's.) It keeps working, and as soon as none of its own patches are
-   unacknowledged it reconciles (rule 5). It may skip that when it can tell the crossed patches
+   making its own and shows A's.) It keeps working (its patches in the meantime carry no checksum, rule 2),
+   and as soon as none of its own patches are unacknowledged it reconciles (rule 5). It may skip that when it can tell the crossed patches
    apart: they touch different cells and nothing of a page itself (its name, order, settings),
    so either order gives the same diagram.
 5. **Reconciling** is `Resync`: the server answers with `Board`, and the client *replaces* its
