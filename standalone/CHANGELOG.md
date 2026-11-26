@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- **Go live** (File → Go Live…): share the open diagram by a link, and work on it with others at
+  the same time. Whoever joins (File → Join a Shared Diagram…, with the link) sees your changes
+  as you make them and you see theirs, with their pointers and what they have selected. Two
+  people changing different shapes never get in each other's way; on the same shape the later
+  change wins for everyone. Your file stays on your computer and is saved as always; a guest
+  works on the shared diagram, not on a file of their own. Stop sharing and the link is dead.
+  - It goes through an OmniPad server that has diagram boards, whose address you give. OmniPad
+    does not have them yet (`docs/omnipad-boards-protocol.md` is what both sides build to), so
+    for now this works between OmniDraw windows through the small stand-in server in the
+    repository: `node standalone/test/helpers/boardRelay.js`.
+  - The link is the permission: anyone who has it can change the diagram. It is shown and
+    copied when you ask, and is not written to the log or sent to an agent.
+  - Not yet: invite links with roles and an expiry, joining from a browser, opening a link by
+    clicking it, and reconnecting by itself when the connection drops.
 - **Excalidraw drawings.** The app opens, edits and saves `.excalidraw` files in the real
   Excalidraw editor (the `@excalidraw/excalidraw` package, 0.18.1, MIT), offline, as a second
   kind of document beside draw.io diagrams. **File → New Excalidraw Drawing**
@@ -23,6 +37,7 @@
     agent is started for a drawing.
   - The app grows by 21.7 MB (15.9 MB compressed), most of it Excalidraw's hand-drawn Chinese,
     Japanese and Korean font.
+
 - A new app icon: the dot mark the app already carries inside (a square of white dots on black,
   one of them red) in place of the orange one. Its drawing is `build/icon.svg`.
 

@@ -6,9 +6,10 @@ proposes something OmniPad has not built, it says so: those parts are OmniPad's 
 change. Version 4 of this note, 2026-11-26. (Version 1 did not say how someone whose change crossed
 another's catches up with the server's order; version 2 let them vouch for a checksum
 meanwhile; version 3 lost a change that was on its way when the board sent everyone its
-diagram.) Nothing in this note is code yet in this repository's main branch: OmniDraw's side of
-the rules under "How changes are ordered", with tests against a stand-in server, comes in the
-pull request that follows this note. Until then they are a proposal.
+diagram.) OmniDraw's side is in `standalone/src/main/live/` (the rules under "How changes are
+ordered" are `session.ts`), tested in `standalone/test/live.test.js` against
+`standalone/test/helpers/boardRelay.js`, a small stand-in for the server that speaks this
+protocol; `yarn e2e --live` runs two OmniDraw windows through it. OmniPad's side is not built.
 
 ## What it is for
 
@@ -92,8 +93,8 @@ uses, revocable, as pads have them today:
 https://<omnipad>/b/<boardId>?invite=<code>
 ```
 
-OmniDraw recognises both. The server address is a setting (Settings → Sharing → OmniPad
-server); there is no built-in default until OmniPad says which address is the public one.
+OmniDraw recognises both. The server address is typed into the Go live window and remembered;
+there is no built-in default until OmniPad says which address is the public one.
 
 ## HTTP (proposed; OmniPad's to confirm)
 
@@ -166,11 +167,22 @@ applied the two the other way round, and has to catch up. The rules:
    apart: they touch different cells and nothing of a page itself (its name, order, settings),
    so either order gives the same diagram.
 5. **Reconciling** is `Resync`: the server answers with `Board`, and the client *replaces* its
-   diagram with the snapshot and applies the patches in order. Replacing means the result's
+   diagram with the snapshot and applies the patches in order. (A client may work that diagram
+   out first, off to one side, and put it in as one: OmniDraw does, with draw.io's own
+   functions, so that only what differs from the open diagram changes and shapes are not taken
+   out and made again.) Replacing means the result's
    checksum equals the snapshot's before the patches go on: a load that merges with what the
    client had is not enough, and a client that cannot get that checksum loads the snapshot
    from scratch. Changes the person makes between sending `Resync` and receiving `Board` are
-   held back, not sent; after the `Board` is in, they are applied on top again and sent then.
+   held back, not sent; after the `Board` is in, they are applied on top again and sent then,
+   in the order they were made and without a checksum. A change made while all that is going
+   in (the snapshot, the patches, the held changes) is sent after them, in its turn; where it
+   landed among them in the client's own diagram need not be where the board puts it, so the
+   client reconciles once more when these are acknowledged. (OmniDraw locks its editor for the
+   moment the diagram is replaced, so that what draw.io reports of the replacing itself is not
+   mistaken for a change of the person's, and nothing of theirs is mistaken for it.) The same holds for a host's first
+   moments: what it changes between reading the diagram to send and receiving the first
+   `Board` is held and sent then.
    A `Board` can also arrive unasked (rule 7) while changes of the client's own are still
    unacknowledged. Those are not in it: their `Ack`s come after it in the stream, so the board
    numbers them after it. The client applies them on top again after replacing, in the order
@@ -227,9 +239,12 @@ in OmniDraw.
 
 ## Building it
 
-- **Here (OmniDraw):** the session (socket, ordering, resync), draw.io loaded with diff sync
-  while live, presence through the existing plugin, the Go live and Join windows, the setting.
-  Tested against a small relay that speaks this protocol (`standalone/test/helpers`), which
-  also lets two OmniDraw windows share a diagram on one computer before OmniPad has boards.
+- **Here (OmniDraw), built:** the session (socket, ordering, catching up), draw.io's diff sync
+  turned on while live, presence through the existing plugin, the Go live window (File → Go
+  Live…, File → Join a Shared Diagram…). The stand-in server also lets two OmniDraw windows
+  share a diagram on one computer before OmniPad has boards:
+  `node standalone/test/helpers/boardRelay.js`, then give its address in the Go live window.
+  Not built here yet: version 2's invite links (they need signing in to OmniPad), opening a
+  link by clicking it (`omnidraw://`), and coming back by itself after the connection drops.
 - **OmniPad:** the board document type and its routes, the browser page with draw.io embedded,
   invites for boards.

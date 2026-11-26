@@ -64,6 +64,8 @@ export interface Settings {
 	modelCatalog: Partial<Record<ChatAgent, KnownModel[]>>;
 	shapes: { locations: ShapeLocation[] };
 	workshop: { galleries: GalleryConfig[] };
+	/** Go live: the OmniPad server diagrams are shared through (its origin), and the name others see. */
+	sharing: { server: string; name: string };
 }
 
 const DEFAULTS: Settings = {
@@ -83,6 +85,7 @@ const DEFAULTS: Settings = {
 	modelCatalog: {},
 	shapes: { locations: [] },
 	workshop: { galleries: DEFAULT_GALLERIES },
+	sharing: { server: "", name: "" },
 };
 
 let cached: Settings | undefined;
@@ -122,6 +125,10 @@ function merge(user: any): Settings {
 		modelCatalog: cleanCatalog(obj(user.modelCatalog)),
 		shapes: { locations },
 		workshop: { galleries: cleanGalleries(obj(user.workshop).galleries) },
+		sharing: {
+			server: typeof obj(user.sharing).server === "string" ? user.sharing.server.trim().slice(0, 300) : "",
+			name: typeof obj(user.sharing).name === "string" ? user.sharing.name.trim().slice(0, 60) : "",
+		},
 	};
 }
 

@@ -72,6 +72,10 @@ export class CustomizedDrawioClient extends DrawioClient<
 	public readonly onSelectedRectangleChanged =
 		this.onSelectedRectangleChangedEmitter.asEvent();
 
+	/** The page that is shown (its id), reported while diff sync is on: at once, and when another page is shown. */
+	private readonly onLivePageEmitter = new EventEmitter<{ page: string }>();
+	public readonly onLivePage = this.onLivePageEmitter.asEvent();
+
 	private readonly onFocusChangedEmitter = new EventEmitter<{
 		hasFocus: boolean;
 	}>();
@@ -421,6 +425,41 @@ export class CustomizedDrawioClient extends DrawioClient<
 		return response.vertices;
 	}
 
+	/**
+	 * Turns draw.io's diff sync on or off for the open diagram (see DrawioClient.resetDiff, to
+	 * be called next when turning it on). While it is on, changes arrive on onPatch.
+	 */
+	public setDiffSync(on: boolean): void {
+		this.sendCustomAction({ action: "setDiffSync", on });
+	}
+
+	/**
+	 * Stops the user from changing the diagram, or lets them again, for the moment a shared
+	 * diagram is put in place of the open one. Resolves when the editor says the lock has taken
+	 * hold (or been lifted): changes reported on onPatch before that were the user's. An editor
+	 * that does not answer (an old page) is not waited for beyond `timeoutMs`.
+	 */
+	public async liveLock(on: boolean, timeoutMs = 3000): Promise<void> {
+		await withTimeout(this.sendCustomActionExpectResponse({ action: "liveLock", on }), timeoutMs, "").catch(() => undefined);
+	}
+
+	/**
+	 * Works out, without touching the open diagram, the diagram that `xml` becomes with `patches`
+	 * applied in order (draw.io's own patches, as onPatch reports them), and its checksum.
+	 */
+	public async liveCompose(xml: string, patches: Record<string, unknown>[], timeoutMs = 20000): Promise<{ xml: string; checksum: string }> {
+		const evt = (await withTimeout(this.sendCustomActionExpectResponse({ action: "liveCompose", xml, patches }), timeoutMs, "The editor did not work out the shared diagram in time.")) as { event: string; xml?: string; checksum?: string; error?: string };
+		if (evt.event !== "liveCompose" || evt.error || typeof evt.xml !== "string" || typeof evt.checksum !== "string") {
+			throw new Error(`The shared diagram could not be worked out: ${evt.error ?? "no answer"}`);
+		}
+		return { xml: evt.xml, checksum: evt.checksum };
+	}
+
+	/** Tells the editor tools that a shared diagram is being put in place (see LiveLoadingAction), or that it is in. */
+	public liveLoading(on: boolean): void {
+		this.sendCustomAction({ action: "liveLoading", on });
+	}
+
 	public setNodeSelectionEnabled(enabled: boolean): void {
 		this.sendCustomAction({
 			action: "setNodeSelectionEnabled",
@@ -517,6 +556,8 @@ export class CustomizedDrawioClient extends DrawioClient<
 		} else if (evt.event === "invokeCommand") {
 			this.onInvokeCommandEmitter.emit({ command: evt.command });
 
+		} else if (evt.event === "livePage") {
+			this.onLivePageEmitter.emit({ page: String(evt.page ?? "") });
 		} else if (evt.event === "selectedRectangleChanged") {
 			this.onSelectedRectangleChangedEmitter.emit({
 				rectangle: evt.rect,

@@ -8,6 +8,13 @@ import {
 } from "./DrawioTypes";
 import { BufferImpl } from "../utils/buffer";
 
+/** draw.io's checksum of a diagram (a number, from its hash of the pages), as text. */
+function checksumText(value: unknown): string | undefined {
+	return typeof value === "number" || (typeof value === "string" && value !== "")
+		? String(value)
+		: undefined;
+}
+
 /**
  * Represents a connection to an drawio iframe.
  */
@@ -26,6 +33,17 @@ export class DrawioClient<
 
 	private readonly onSaveEmitter = new EventEmitter();
 	public readonly onSave = this.onSaveEmitter.asEvent();
+
+	/**
+	 * With diff sync on (see resetDiff): each change the user makes, as draw.io's own patch
+	 * (cells added, changed, removed, keyed by id) and the checksum of the diagram after it.
+	 * Changes applied with applyPatch are not reported back here.
+	 */
+	private readonly onPatchEmitter = new EventEmitter<{
+		patch: Record<string, unknown>;
+		checksum: string;
+	}>();
+	public readonly onPatch = this.onPatchEmitter.asEvent();
 
 	private readonly onUnknownMessageEmitter = new EventEmitter<{
 		message: TCustomEvent;
@@ -123,6 +141,14 @@ export class DrawioClient<
 		} else if (drawioEvt.event === "init") {
 			this.onInitEmitter.emit();
 		} else if (drawioEvt.event === "autosave") {
+			const patched = drawioEvt as { patch?: unknown; checksum?: unknown };
+			const sum = checksumText(patched.checksum);
+			if (patched.patch && typeof patched.patch === "object" && sum !== undefined) {
+				this.onPatchEmitter.emit({
+					patch: patched.patch as Record<string, unknown>,
+					checksum: sum,
+				});
+			}
 			const oldXml = this.currentXml;
 			if (oldXml !== drawioEvt.xml) {
 				this.currentXml = drawioEvt.xml;
@@ -193,6 +219,81 @@ export class DrawioClient<
 		} finally {
 			this.isMerging = false;
 		}
+	}
+
+	/**
+	 * Diff sync (draw.io's embed protocol): makes the diagram as it is now, or `xml` if given,
+	 * the state that changes are counted from, and answers with its checksum. Only when diff
+	 * sync is on in the editor (CustomizedDrawioClient.setDiffSync): otherwise draw.io does not
+	 * answer, and this rejects after `timeoutMs`.
+	 *
+	 * With `xml`, draw.io merges it into the open diagram: compare the checksum with the one
+	 * expected to know whether the result is that diagram.
+	 */
+	public async resetDiff(xml?: string, timeoutMs = 15000): Promise<string> {
+		const evt = (await this.answered(
+			this.sendActionWaitForResponse({
+				action: "resetDiff",
+				...(xml !== undefined ? { xml } : {}),
+			} as any),
+			timeoutMs,
+			"resetDiff"
+		)) as { event: string; checksum?: unknown; error?: unknown };
+		// (the diagram is no longer the one whose XML is remembered)
+		this.currentXml = undefined;
+		const sum = checksumText(evt.checksum);
+		if (evt.event !== "resetDiff" || evt.error || sum === undefined) {
+			throw new Error(
+				`The diagram could not be made the starting point: ${String(evt.error ?? "no checksum")}`
+			);
+		}
+		return sum;
+	}
+
+	/**
+	 * Diff sync: applies someone else's change. It is not reported back as a change of the
+	 * user's (no onPatch, no onChange) and is not in their undo history. Resolves with the
+	 * checksum of the diagram after it.
+	 */
+	public async applyPatch(patch: Record<string, unknown>, timeoutMs = 15000): Promise<string> {
+		const evt = (await this.answered(
+			this.sendActionWaitForResponse({ action: "patch", patch } as any),
+			timeoutMs,
+			"patch"
+		)) as { event: string; checksum?: unknown; error?: unknown };
+		this.currentXml = undefined;
+		const sum = checksumText(evt.checksum);
+		if (evt.event !== "patch" || evt.error || sum === undefined) {
+			throw new Error(`A change could not be applied: ${String(evt.error ?? "no checksum")}`);
+		}
+		return sum;
+	}
+
+	/** Diff sync: the checksum of the diagram as it is now. */
+	public async diffChecksum(timeoutMs = 15000): Promise<string> {
+		const evt = (await this.answered(
+			this.sendActionWaitForResponse({ action: "getDiff" } as any),
+			timeoutMs,
+			"getDiff"
+		)) as { event: string; checksum?: unknown };
+		const sum = checksumText(evt.checksum);
+		if (evt.event !== "getDiff" || sum === undefined) {
+			throw new Error("Diff sync is not on in this editor.");
+		}
+		return sum;
+	}
+
+	private answered<T>(promise: Promise<T>, timeoutMs: number, what: string): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			const timer = setTimeout(
+				() => reject(new Error(`draw.io did not answer "${what}" within ${timeoutMs / 1000}s.`)),
+				timeoutMs
+			);
+			promise.then(
+				(v) => (clearTimeout(timer), resolve(v)),
+				(e) => (clearTimeout(timer), reject(e))
+			);
+		});
 	}
 
 	/**

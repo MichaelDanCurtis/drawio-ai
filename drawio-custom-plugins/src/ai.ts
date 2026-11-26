@@ -2,6 +2,7 @@ import { sendEvent } from "./vscode";
 import { exportVsdx } from "./vsdx/VsdxExport";
 import { exportPdf } from "./pdf/PdfExport";
 import { importDiagram } from "./import/importDiagram";
+import { liveState } from "./liveState";
 
 const W = window as any;
 const ACCENT = "#a855f7";
@@ -1638,6 +1639,8 @@ Draw.loadPlugin((ui: any) => {
 	function refreshReview() {
 		clearTimeout(refreshTimer);
 		if (!reviewing) return;
+		// (a shared diagram is going in: what is pending is looked at again when it is, see liveState)
+		if (liveState.loading) return;
 		syncReviewPage();
 		recomputeReview();
 		settle();
@@ -2064,6 +2067,7 @@ Draw.loadPlugin((ui: any) => {
 		button("Accept all", "Keep every pending AI change, on every page", () => userResolves("accept"), true);
 	}
 
+	liveState.loaded.push(() => scheduleReviewRefresh());
 	ui.editor.undoManager.addListener(W.mxEvent.ADD, (_sender: any, evt: any) => {
 		if (aiEditing > 0) return;
 		const edit = evt.getProperty("edit");
