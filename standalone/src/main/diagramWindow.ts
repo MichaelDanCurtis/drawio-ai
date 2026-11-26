@@ -1009,39 +1009,55 @@ export class DiagramWindow {
 		return { text: JSON.stringify({ path: target, bytes: r.bytes, note: r.note }), summary: `Exported ${path.basename(target)}` };
 	}
 
+	/** Set when the app was asked to quit: a window that held its closing back to finish something lets the quitting go on afterwards. */
+	public static quitting = false;
+
 	private async onClose(e: Electron.Event): Promise<void> {
 		if (this.closing) return;
+		const live = this.live?.status === "live" ? this.live : undefined;
 		// What someone on a shared diagram changed last must have reached the board before the window
 		// goes: it is given a moment, and if it still has not, they are asked.
-		if (this.live?.status === "live" && this.live.session.unsent > 0 && !this.leftUnsent) {
+		if (live && live.session.unsent > 0 && !this.leftUnsent) {
 			e.preventDefault();
 			if (await this.sharedOrLetGo("Closing")) {
 				// (again, now through the ordinary questions)
 				this.leftUnsent = true;
 				this.win.close();
-			}
+			} else DiagramWindow.quitting = false;
 			return;
 		}
 		// A guest's window that is no file holds the board's diagram, which stays on the board: there is
 		// nothing to save. One they saved a copy from is a file like any other, and is asked about.
-		if (this.live?.role === "guest" && !this.file) return;
-		if (!this.dirty) return;
+		const toSave = this.dirty && !(live?.role === "guest" && !this.file);
+		if (!toSave && !live) return;
 		e.preventDefault();
-		const r = await dialog.showMessageBox(this.win, {
-			type: "warning",
-			message: `Save changes to ${this.fileName() ?? "Untitled"}?`,
-			detail: "Your changes will be lost if you don't save them.",
-			buttons: ["Save", "Don't Save", "Cancel"],
-			defaultId: 0,
-			cancelId: 2,
-		});
-		// (staying after all: the next time the window is closed, what is unsent then is waited for again)
-		if (r.response === 2 || (r.response === 0 && !(await this.save()))) {
-			this.leftUnsent = false;
-			return;
+		if (toSave) {
+			const r = await dialog.showMessageBox(this.win, {
+				type: "warning",
+				message: `Save changes to ${this.fileName() ?? "Untitled"}?`,
+				detail: "Your changes will be lost if you don't save them.",
+				buttons: ["Save", "Don't Save", "Cancel"],
+				defaultId: 0,
+				cancelId: 2,
+			});
+			// (staying after all: the next time the window is closed, what is unsent then is waited for again)
+			if (r.response === 2 || (r.response === 0 && !(await this.save()))) {
+				this.leftUnsent = false;
+				DiagramWindow.quitting = false;
+				return;
+			}
+		}
+		// The sharing is ended before the window goes, and waited for: a host's board is closed on the
+		// server (the link stops working, the guests are told) while the app is still there to do it.
+		if (this.live) {
+			const ending = this.live;
+			this.live = undefined;
+			await ending.stop();
 		}
 		this.closing = true;
 		this.win.close();
+		// (the app was quitting and this window held it up: it goes on)
+		if (live && DiagramWindow.quitting) setTimeout(() => app.quit(), 0);
 	}
 
 	private dispose(): void {

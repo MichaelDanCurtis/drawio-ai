@@ -167,7 +167,10 @@ applied the two the other way round, and has to catch up. The rules:
    apart: they touch different cells and nothing of a page itself (its name, order, settings),
    so either order gives the same diagram.
 5. **Reconciling** is `Resync`: the server answers with `Board`, and the client *replaces* its
-   diagram with the snapshot and applies the patches in order. Replacing means the result's
+   diagram with the snapshot and applies the patches in order. (A client may work that diagram
+   out first, off to one side, and put it in as one: OmniDraw does, with draw.io's own
+   functions, so that only what differs from the open diagram changes and shapes are not taken
+   out and made again.) Replacing means the result's
    checksum equals the snapshot's before the patches go on: a load that merges with what the
    client had is not enough, and a client that cannot get that checksum loads the snapshot
    from scratch. Changes the person makes between sending `Resync` and receiving `Board` are

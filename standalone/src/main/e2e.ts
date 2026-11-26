@@ -585,7 +585,11 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 		for (;;) {
 			const [pa, pb] = [await picture(a), await picture(b)];
 			if (pa === pb) return JSON.parse(pa).length;
-			if (Date.now() > end) throw new Error(`The two windows differ after ${what}: ${pa.slice(0, 300)} / ${pb.slice(0, 300)}`);
+			if (Date.now() > end) {
+				const [la, lb] = [JSON.parse(pa) as any[], JSON.parse(pb) as any[]].map((l) => new Map(l.map((r: any[]) => [r[0], JSON.stringify(r)])));
+				const ids = [...new Set([...la.keys(), ...lb.keys()])].filter((id) => la.get(id) !== lb.get(id));
+				throw new Error(`The two windows differ after ${what}: ${ids.slice(0, 4).map((id) => `${id}: ${la.get(id) ?? "(not there)"} / ${lb.get(id) ?? "(not there)"}`).join(" ; ")}`);
+			}
 			await new Promise((r) => setTimeout(r, 150));
 		}
 	};
@@ -664,11 +668,45 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await Promise.all([edit(w, [{ op: "update", id: hostShape, label: "host says" }]), edit(guest, [{ op: "update", id: hostShape, label: "guest says" }])]);
 	log("liveAfterBothSame", await same(w, guest, "changes to the same shape at once"));
 	log("liveLabelBothSee", (await cells(w)).find((c: any) => c.id === hostShape)?.label);
+	// An AI change under review on the host, and a collaborator's change meanwhile: the review is of the
+	// AI's change only, and rejecting it leaves what the collaborator did.
+	const labelOf = async (win: DiagramWindow, id: string) => (await cells(win)).find((c: any) => c.id === id)?.label;
+	const beforeAi = await labelOf(w, hostShape);
+	const quiet = async () => {
+		for (const end = Date.now() + 10_000; Date.now() < end && !(w.live?.session.settled && guest.live?.session.settled); ) await new Promise((r) => setTimeout(r, 50));
+	};
+	await quiet();
+	await w.client.aiApplyOps([{ op: "update", id: hostShape, label: "the AI's wording" }], { selectResult: false, flash: false, atomic: true, review: true });
+	await waitFor(() => w.client.pendingReview, 10_000);
+	// (the host's diagram is fetched from the board again while the review is open: the AI's change is
+	// taken out and put back, and must still be pending afterwards)
+	await quiet();
+	(w.live!.session as any).catchUp();
+	await new Promise((r) => setTimeout(r, 300));
+	await quiet();
+	await new Promise((r) => setTimeout(r, 300));
+	log("liveReviewAfterCatchUp", { pending: (w.client.pendingReview?.changes ?? []).length, label: await labelOf(w, hostShape) });
+	if ((w.client.pendingReview?.changes ?? []).length !== 1) throw new Error("The AI's change was no longer under review after the diagram was fetched again.");
+	await same(w, guest, "an AI change under review");
+	const guestMade = await edit(guest, [{ op: "addShape", tempId: "gr", label: "drawn during the review", x: 60, y: 420, width: 180, height: 40 }]);
+	await edit(guest, [{ op: "move", ids: [gm.idMap.g1], dx: 11, dy: 7 }]);
+	await same(w, guest, "a collaborator's changes during a review");
+	await new Promise((r) => setTimeout(r, 500));
+	const pending = (w.client.pendingReview?.changes ?? []).map((c: any) => c.id ?? c.cellId ?? JSON.stringify(c).slice(0, 60));
+	log("liveReviewPending", pending);
+	w.client.aiResolveReview("reject");
+	await waitFor(() => (w.client.pendingReview ? undefined : true), 10_000);
+	await same(w, guest, "rejecting the AI's change");
+	const afterReject = { aiShape: await labelOf(w, hostShape), wasBefore: beforeAi, collaboratorsShapeOnHost: (await cells(w)).some((c: any) => c.id === guestMade.idMap.gr), collaboratorsShapeOnGuest: (await cells(guest)).some((c: any) => c.id === guestMade.idMap.gr) };
+	log("liveReviewAfterReject", afterReject);
+	if (afterReject.aiShape !== beforeAi || !afterReject.collaboratorsShapeOnHost || !afterReject.collaboratorsShapeOnGuest || pending.length !== 1) throw new Error("Rejecting the AI's change did not leave exactly the collaborator's changes.");
 	// the guest deletes; undo on the host does not bring it back as its own change
 	await edit(guest, [{ op: "delete", ids: [gm.idMap.g1], includeEdges: true }]);
 	log("liveAfterDelete", await same(w, guest, "a deletion"));
 	log("livePeople", [w.live?.people().map((p) => p.name), guest.live?.people().map((p) => p.name)]);
 	log("liveDirty", { hostEdited: w.win.isDocumentEdited(), guestEdited: guest.win.isDocumentEdited() });
+	log("liveFullLoads", { host: w.live?.fullLoads, guest: guest.live?.fullLoads });
+	if (w.live?.fullLoads || guest.live?.fullLoads) throw new Error("A shared diagram had to be loaded from scratch: merging it in did not give it.");
 	log("liveSession", { host: { revision: w.live?.session.revision, settled: w.live?.session.settled }, guest: { revision: guest.live?.session.revision, settled: guest.live?.session.settled } });
 	fs.writeFileSync(path.join(config.out, "live-host.png"), (await w.editorView.webContents.capturePage()).toPNG());
 	fs.writeFileSync(path.join(config.out, "live-guest.png"), (await guest.editorView.webContents.capturePage()).toPNG());
@@ -687,6 +725,23 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await guest2.stopLive();
 	log("liveSecondGuestAfterLeaving", { edited: guest2.win.isDocumentEdited(), live: !!guest2.live, keeps: (await cells(guest2)).length, hostStillLive: w.live?.status });
 	await w.stopLive();
+	// The host closes its window while sharing: the board is ended on the server before the window is gone
+	// (and so before the app could be), and the guest is told.
+	const hostWin = await DiagramWindow.open(server, undefined, { xml: await w.client.getXml(), name: "A second diagram" });
+	await hostWin.whenLoaded();
+	const link3 = await hostWin.goLive(config.live!.relay, "Host");
+	const guest3 = await DiagramWindow.join(server, link3, "Third guest");
+	const id3 = link3.split("/b/")[1];
+	let ended3: string | undefined;
+	DiagramWindow.onLiveEnded = (win, why) => win === guest3 && (ended3 = why);
+	(hostWin as any).dirty = false; // (nothing to save: closing is not held up by a question)
+	let goneAtClose: number | undefined;
+	hostWin.win.once("closed", () => void fetch(`${config.live!.relay}/api/boards/${id3}`).then((r) => (goneAtClose = r.status)));
+	hostWin.win.close();
+	await waitFor(() => goneAtClose, 10_000);
+	await waitFor(() => ended3, 10_000);
+	log("liveHostClosedWindow", { boardWhenTheWindowWasGone: goneAtClose, guestTold: ended3 });
+	if (goneAtClose !== 404) throw new Error("The board outlived its host's window.");
 	// after that a change in one is not a change in the other
 	await edit(w, [{ op: "addShape", label: "after", x: 500, y: 40, width: 80, height: 40 }]);
 	await new Promise((r) => setTimeout(r, 800));

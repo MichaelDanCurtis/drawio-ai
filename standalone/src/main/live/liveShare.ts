@@ -41,6 +41,8 @@ export function hueOf(name: string): number {
 class DrawioEditor implements LiveEditor {
 	/** While a diagram is being put in place: what draw.io reports as changes then is that, not the user. */
 	public replacing = false;
+	/** How often a diagram had to be loaded from scratch because merging it in did not give it (it should not happen). */
+	public fullLoads = 0;
 
 	public constructor(private readonly client: CustomizedDrawioClient, private readonly remoteChanged: () => void) {}
 
@@ -66,6 +68,7 @@ class DrawioEditor implements LiveEditor {
 			// open one had drifted in a way a merge does not undo: then it is loaded from scratch.
 			let checksum = await this.client.resetDiff(xml);
 			if (expected !== undefined && checksum !== expected) {
+				this.fullLoads++;
 				await this.client.loadXmlLike(xml);
 				// (a diagram loaded from scratch can be changed again: locked once more until it is the starting point)
 				await this.client.liveLock(true);
@@ -77,6 +80,14 @@ class DrawioEditor implements LiveEditor {
 			this.replacing = false;
 			void this.client.liveLock(false);
 		}
+	}
+
+	public compose(xml: string, patches: DiagramPatch[]): Promise<{ xml: string; checksum: string }> {
+		return this.client.liveCompose(xml, patches);
+	}
+
+	public loading(on: boolean): void {
+		this.client.liveLoading(on);
 	}
 
 	public async apply(patch: DiagramPatch): Promise<string> {
@@ -157,6 +168,11 @@ export class LiveShare {
 
 	public people(): Person[] {
 		return this.session.others();
+	}
+
+	/** How often the board's diagram had to be loaded from scratch instead of merged in (tests watch that it is not). */
+	public get fullLoads(): number {
+		return this.editor.fullLoads;
 	}
 
 	/** Puts the window's diagram on the server as a board and joins it as its host. */

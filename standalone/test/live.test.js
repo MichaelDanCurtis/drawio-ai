@@ -448,6 +448,14 @@ function editorStub(diagram) {
 			return true;
 		},
 		setDiffSync() {},
+		async liveCompose(xml, patches) {
+			const d = new Diagram(JSON.parse(xml));
+			for (const p of patches) d.patch(p);
+			return { xml: d.xml(), checksum: d.checksum() };
+		},
+		liveLoading(on) {
+			client.calls.push(`loading:${on}`);
+		},
 		updateLiveshareViewState(state) {
 			client.shown.push(state);
 		},
@@ -501,7 +509,7 @@ test("what someone changes in the moment their diagram is being replaced is thei
 	assert.equal(bo.status, "live");
 	assert.equal(await bo.shared(3000), true);
 	await until(() => ann.session.revision === 1);
-	assert.deepEqual(client.calls.slice(0, 3), ["lock:true", "replace", "lock:false"]);
+	assert.deepEqual(client.calls.slice(0, 5), ["loading:true", "lock:true", "replace", "lock:false", "loading:false"], "the editor's tools are told for how long the diagram is not what it will be");
 	assert.equal(client.locked, false, "and it can be changed again afterwards");
 	assert.deepEqual(diagram.cells, { a: { label: "start" }, b: { label: "other", color: "red" } }, "the board's diagram, with what he drew on top");
 	assert.deepEqual(ann.diagram.cells, diagram.cells, "and the board has it");
@@ -556,6 +564,40 @@ test("what someone changes in the moment their diagram is being replaced is thei
 	await new Promise((r) => setTimeout(r, 60));
 	assert.equal(b.relay.stats(b.link.id).revision, revision);
 	assert.ok(changes > 0, "the window was told");
+});
+
+test("an editor that can work the board's diagram out first gets it as one diagram: only what differs changes, and nothing is made again", async () => {
+	const b = await board();
+	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });
+	for (const label of ["one", "two", "three"]) ann.change(update("a", { label }));
+	ann.change(insert("c", { label: "new" }));
+	await until(() => ann.session.settled && ann.session.revision === 4);
+	// Bo's editor can compose; it notes what it was asked to do
+	const diagram = new Diagram();
+	const asked = [];
+	diagram.compose = async (xml, patches) => {
+		const d = new Diagram(JSON.parse(xml));
+		for (const p of patches) d.patch(p);
+		asked.push(`compose:${patches.length}`);
+		return { xml: d.xml(), checksum: d.checksum() };
+	};
+	const apply = diagram.apply.bind(diagram);
+	diagram.apply = async (p) => (asked.push("apply"), apply(p));
+	const replace = diagram.replace.bind(diagram);
+	diagram.replace = async (xml, expected) => (asked.push("replace"), assert.equal(new Diagram(JSON.parse(xml)).checksum(), expected), replace(xml));
+	const sent = [];
+	let socket;
+	const session = new LiveSession(diagram, (m) => (sent.push(m), socket.send(m)), {}, { snapshotQuietMs: 60_000 });
+	await new Promise((resolve, reject) => (socket = openBoard(b.link, { onOpen: resolve, onMessage: (m) => session.receive(m), onEnd: reject })));
+	session.hello("Bo", 10, "test/1");
+	await until(() => session.ready);
+	assert.deepEqual(asked, ["compose:4", "replace"], "the snapshot and its four changes as one diagram, put in once");
+	assert.equal(diagram.checksum(), ann.diagram.checksum());
+	assert.equal(session.revision, 4);
+	// what he had made before it arrived still goes on top afterwards, by being applied
+	session.localPatch(update("b", { color: "red" }), "x");
+	await until(() => ann.diagram.cells.b.color === "red");
+	socket.close();
 });
 
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {

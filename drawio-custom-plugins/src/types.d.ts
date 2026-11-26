@@ -1,6 +1,6 @@
 
 declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | GetVerticesAction
-    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction | LiveLockAction
+    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction | LiveLockAction | LiveLoadingAction | LiveComposeAction
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
@@ -8,7 +8,7 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction
     | DesktopShapesAction | DesktopInsertShapeAction | DesktopReportShapeSetsAction | DesktopSetShapeSetAction | DesktopGalleryResultsAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
-    | UpdateLocalStorage | PluginLoaded | LiveLockEvent | LivePageEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
+    | UpdateLocalStorage | PluginLoaded | LiveLockEvent | LivePageEvent | LiveComposeEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
     | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
     | DesktopCommandEvent | DesktopStateEvent | DesktopShapeSetsEvent | DesktopGallerySearchEvent;
@@ -607,6 +607,35 @@ declare interface SetDiffSyncAction {
  * every change reported before it was the user's; what is reported between it and the end of
  * the replacing is the replacing itself.
  */
+/**
+ * A shared diagram is being put in place of the open one, this person's own changes going back
+ * on top (on), or that is over (off). While it is going on, the AI review does not look at the
+ * diagram: see liveState.ts.
+ */
+declare interface LiveLoadingAction {
+    action: "liveLoading";
+    on: boolean;
+}
+
+/**
+ * Works out a diagram from a whole one and the changes made to it since, with draw.io's own
+ * functions and without touching the diagram that is open: what a shared diagram is on its board
+ * (a snapshot and the patches after it), as one diagram to put in place.
+ */
+declare interface LiveComposeAction {
+    action: "liveCompose";
+    xml: string;
+    patches: Record<string, unknown>[];
+}
+
+declare interface LiveComposeEvent {
+    event: "liveCompose";
+    xml?: string;
+    checksum?: string;
+    error?: string;
+    message: LiveComposeAction;
+}
+
 declare interface LiveLockAction {
     action: "liveLock";
     on: boolean;

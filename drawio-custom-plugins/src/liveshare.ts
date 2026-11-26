@@ -1,4 +1,5 @@
 import { sendEvent } from "./vscode";
+import { liveState } from "./liveState";
 import * as m from "mithril";
 
 Draw.loadPlugin((ui) => {
@@ -72,10 +73,36 @@ Draw.loadPlugin((ui) => {
 			}
 
 			switch (data.action) {
+				case "liveCompose": {
+					const u = ui as any;
+					try {
+						const pages = u.applyPatches(u.getPagesForXml(data.xml), data.patches);
+						sendEvent({ event: "liveCompose", xml: u.getXmlForPages(pages), checksum: String(u.getHashValueForPages(pages)), message: data });
+					} catch (e: any) {
+						sendEvent({ event: "liveCompose", error: String(e?.message ?? e).slice(0, 300), message: data });
+					}
+					break;
+				}
+				case "liveLoading": {
+					liveState.loading = !!data.on;
+					if (!data.on) for (const f of liveState.loaded) f();
+					break;
+				}
 				case "liveLock": {
 					if (data.on) {
 						if (enabledBeforeLock === undefined) enabledBeforeLock = !!(graph as any).isEnabled();
 						(graph as any).setEnabled(false);
+						// The diagram that comes next is to take this one's place, not to be merged with it.
+						// draw.io merges what differs between the diagram it last took in and the new one, so
+						// anything changed since by other means would stay. Telling it that the diagram it
+						// last took in is this one, as it is now, makes the merge the whole difference: only
+						// what differs changes, and the result is the new diagram.
+						try {
+							const file = (ui as any).getCurrentFile?.();
+							if (file?.setShadowPages && (ui as any).pages) file.setShadowPages((ui as any).clonePages((ui as any).pages));
+						} catch {
+							// (then the app notices by the checksum, and loads the diagram from scratch)
+						}
 					} else if (enabledBeforeLock !== undefined) {
 						(graph as any).setEnabled(enabledBeforeLock);
 						enabledBeforeLock = undefined;

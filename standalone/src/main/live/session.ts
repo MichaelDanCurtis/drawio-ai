@@ -20,6 +20,18 @@ export interface LiveEditor {
 	apply(patch: DiagramPatch): Promise<string>;
 	/** The whole diagram and its checksum, now. */
 	snapshot(): Promise<{ xml: string; checksum: string }>;
+	/**
+	 * An editor that can work out a diagram from a whole one and the changes since, without
+	 * touching the one that is open. The board's diagram then goes in as one diagram, and only
+	 * what differs from the open one changes (rather than the snapshot going in and every change
+	 * since being made again, which takes shapes out and puts them back).
+	 */
+	compose?(xml: string, patches: DiagramPatch[]): Promise<{ xml: string; checksum: string }>;
+	/**
+	 * The board's diagram is about to be put in place, with this person's own changes going back
+	 * on top (true), or all of that is done (false). In between, the diagram is not what it will be.
+	 */
+	loading?(on: boolean): void;
 }
 
 export interface Person {
@@ -255,12 +267,32 @@ export class LiveSession {
 		// From here until everything held has gone out, this person's changes are held: one sent now
 		// would overtake those waiting, which were made before it.
 		this.awaitingBoard = true;
-		const loaded = await this.editor.replace(board.xml, board.checksum);
+		this.editor.loading?.(true);
+		try {
+			await this.put(board);
+		} finally {
+			this.editor.loading?.(false);
+		}
+		this.events.replaced?.(first ? "joined" : "caught-up");
+		if (this.snapshotWanted && this.settled) await this.sendSnapshot();
+		this.touch();
+	}
+
+	private async put(board: { revision: number; epoch?: number; xml: string; checksum: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
+		// The board's diagram: its snapshot with the patches since. Worked out first where the editor
+		// can, so that it goes in as one diagram.
+		let whole = { xml: board.xml, checksum: board.checksum };
+		let after = board.patches;
+		if (this.editor.compose && after.length) {
+			whole = await this.editor.compose(board.xml, after.map((p) => p.patch));
+			after = [];
+		}
+		const loaded = await this.editor.replace(whole.xml, whole.checksum);
 		// (what was held up to this moment was made on the diagram that has just been replaced)
 		const wiped = this.held.length;
-		if (loaded !== board.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
+		if (loaded !== whole.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
 		let revision = board.revision - board.patches.length;
-		for (const p of board.patches) {
+		for (const p of after) {
 			await this.editor.apply(p.patch);
 			revision = p.revision;
 		}
@@ -289,9 +321,6 @@ export class LiveSession {
 		}
 		this.held.length = 0;
 		this.awaitingBoard = false;
-		this.events.replaced?.(first ? "joined" : "caught-up");
-		if (this.snapshotWanted && this.settled) await this.sendSnapshot();
-		this.touch();
 	}
 
 	private async sendSnapshot(): Promise<void> {

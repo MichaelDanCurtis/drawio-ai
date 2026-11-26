@@ -41,7 +41,8 @@ export async function boardExists(link: BoardLink): Promise<boolean> {
 
 /** Ends a board: everyone on it is told. Only its maker can. */
 export async function closeBoard(link: BoardLink, ownerKey: string): Promise<void> {
-	await call(`${link.server}/api/boards/${link.id}`, { method: "DELETE", headers: { "x-board-owner": ownerKey } }, 10_000).catch(() => undefined);
+	// (waited for when a window closes: a server that does not answer must not hold that up for long)
+	await call(`${link.server}/api/boards/${link.id}`, { method: "DELETE", headers: { "x-board-owner": ownerKey } }, 4_000).catch(() => undefined);
 }
 
 export interface BoardSocket {

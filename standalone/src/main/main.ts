@@ -439,7 +439,10 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin" || process.env.DRAWAI_E2E) app.quit();
 });
 
-app.on("before-quit", () => flushDrawioStorage());
+app.on("before-quit", () => {
+	DiagramWindow.quitting = true;
+	flushDrawioStorage();
+});
 app.on("will-quit", () => {
 	flushDrawioStorage();
 	desktopMcp?.dispose();

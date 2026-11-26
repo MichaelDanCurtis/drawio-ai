@@ -443,6 +443,23 @@ export class CustomizedDrawioClient extends DrawioClient<
 		await withTimeout(this.sendCustomActionExpectResponse({ action: "liveLock", on }), timeoutMs, "").catch(() => undefined);
 	}
 
+	/**
+	 * Works out, without touching the open diagram, the diagram that `xml` becomes with `patches`
+	 * applied in order (draw.io's own patches, as onPatch reports them), and its checksum.
+	 */
+	public async liveCompose(xml: string, patches: Record<string, unknown>[], timeoutMs = 20000): Promise<{ xml: string; checksum: string }> {
+		const evt = (await withTimeout(this.sendCustomActionExpectResponse({ action: "liveCompose", xml, patches }), timeoutMs, "The editor did not work out the shared diagram in time.")) as { event: string; xml?: string; checksum?: string; error?: string };
+		if (evt.event !== "liveCompose" || evt.error || typeof evt.xml !== "string" || typeof evt.checksum !== "string") {
+			throw new Error(`The shared diagram could not be worked out: ${evt.error ?? "no answer"}`);
+		}
+		return { xml: evt.xml, checksum: evt.checksum };
+	}
+
+	/** Tells the editor tools that a shared diagram is being put in place (see LiveLoadingAction), or that it is in. */
+	public liveLoading(on: boolean): void {
+		this.sendCustomAction({ action: "liveLoading", on });
+	}
+
 	public setNodeSelectionEnabled(enabled: boolean): void {
 		this.sendCustomAction({
 			action: "setNodeSelectionEnabled",
