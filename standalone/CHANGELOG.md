@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0]
+
 - **Mapper: the API surface of a running API.** The API surface map takes an API's address
   beside (or in place of) a folder, and asks the API for its own description: the address
   itself, what its docs page and that page's scripts name, then the places frameworks serve
