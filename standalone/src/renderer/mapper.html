@@ -190,22 +190,23 @@
 		return v;
 	}
 
-	function loadOptions(r, f) {
+	/** Asks for a list. (Numbered: an answer to an earlier question, for a choice since changed, is not shown.) */
+	function askFor(r, f) {
 		const key = r.id + "/" + f.id;
 		state.loading[key] = true;
 		state.optionErrors[key] = undefined;
-		// (numbered: an answer to an earlier question, for a choice since changed, is not shown)
 		state.asked[key] = (state.asked[key] ?? 0) + 1;
 		host.post({ type: "loadOptions", recipeId: r.id, fieldId: f.id, input: { ...state.values }, seq: state.asked[key] });
+	}
+
+	/** ↻: the list again. */
+	function loadOptions(r, f) {
+		askFor(r, f);
 		renderForm();
 	}
 
-	/**
-	 * Selects other fields depend on (subscription → resource groups): the lists after a choice
-	 * are forgotten when it changes, and come again as the form is drawn, one after the other and
-	 * only the ones on show (a list nobody sees is not worth a call to a cloud).
-	 */
-	function reloadAfter(r, f) {
+	/** The lists after a choice are forgotten when it changes: they were listed for the old one (subscription → resource groups). */
+	function forgetAfter(r, f) {
 		for (const g of r.fields.slice(r.fields.indexOf(f) + 1)) {
 			if (!g.dynamic) continue;
 			const key = r.id + "/" + g.id;
@@ -213,20 +214,42 @@
 			state.loading[key] = false;
 			state.asked[key] = (state.asked[key] ?? 0) + 1;
 		}
-		renderForm();
 	}
 
-	/** Whether a list shown before this one is still to come. */
-	function waitsForEarlier(r, f) {
-		return r.fields.slice(0, r.fields.indexOf(f)).some((g) => g.dynamic && visible(r, g) && (state.loading[r.id + "/" + g.id] || state.options[r.id + "/" + g.id] === undefined));
+	/**
+	 * What the form's lists need next. It does not depend on the form being drawn (it is not
+	 * redrawn under someone's typing), and goes through the lists on show in their order:
+	 * - A list is asked for once the lists before it are there: it may depend on what they chose
+	 *   (a project's clusters). A list nobody sees is not asked for: it is not worth a call to a cloud.
+	 * - What is chosen is always something the list offers: the first of a list that has just come,
+	 *   or nothing when the list is empty (a cluster chosen under another subscription is not left
+	 *   behind, unseen, to be mapped). A choice made here forgets the lists after it, like one made by hand.
+	 */
+	function advance(r) {
+		for (const f of r.fields) {
+			if (f.type !== "select" || !visible(r, f)) continue;
+			const key = r.id + "/" + f.id;
+			if (f.dynamic && state.options[key] === undefined) {
+				if (!state.loading[key]) askFor(r, f);
+				return;
+			}
+			if (f.dynamic && state.loading[key]) return;
+			const opts = f.dynamic ? state.options[key] : f.options ?? [];
+			if (opts.some((o) => o.value === (state.values[f.id] ?? ""))) continue;
+			const to = opts.length ? opts[0].value : "";
+			if ((state.values[f.id] ?? "") === to) continue;
+			state.values[f.id] = to;
+			if (f.dynamic) forgetAfter(r, f);
+		}
 	}
 
 	function fieldEl(r, f) {
 		const key = r.id + "/" + f.id;
 		const set = (value) => {
 			state.values[f.id] = value;
-			if (f.type === "select" && r.fields.slice(r.fields.indexOf(f) + 1).some((g) => g.dynamic)) reloadAfter(r, f);
-			else if (r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
+			const lists = f.type === "select" && r.fields.slice(r.fields.indexOf(f) + 1).some((g) => g.dynamic);
+			if (lists) forgetAfter(r, f);
+			if (lists || r.fields.some((g) => g.showIf?.field === f.id)) renderForm();
 		};
 		let control;
 		switch (f.type) {
@@ -246,25 +269,10 @@
 				if (f.dynamic && (state.loading[key] || state.options[key] === undefined)) sel.append(el("option", { value: "", text: "Loading…" }));
 				else if (!opts.length) sel.append(el("option", { value: "", text: f.dynamic ? "(none found — refresh or type in settings)" : "" }));
 				for (const o of opts) sel.append(el("option", { value: o.value, text: o.label }));
-				// What is chosen is always something the list offers: the first of a list that has just
-				// come, or nothing when the list is empty (a cluster chosen under another subscription is
-				// not left behind, unseen, to be mapped). A list still on its way decides nothing.
-				const here = !f.dynamic || (state.options[key] !== undefined && !state.loading[key]);
-				if (here && !opts.some((o) => o.value === (state.values[f.id] ?? ""))) {
-					const to = opts.length ? opts[0].value : "";
-					if ((state.values[f.id] ?? "") !== to) {
-						state.values[f.id] = to;
-						// (the choice was made here, not by hand: what follows is listed for it)
-						if (f.dynamic) setTimeout(() => reloadAfter(r, f));
-					}
-				}
 				sel.value = state.values[f.id] ?? "";
 				control = f.dynamic
 					? el("div", { class: "row" }, sel, el("button", { class: "btn", title: "Reload", onclick: () => loadOptions(r, f), text: "↻" }))
 					: sel;
-				// A list is asked for once the lists before it are there: it may depend on what they chose
-				// (a project's clusters), and asking with nothing chosen yet would only be asked again.
-				if (f.dynamic && state.options[key] === undefined && !state.loading[key] && !waitsForEarlier(r, f)) setTimeout(() => state.options[key] === undefined && !state.loading[key] && loadOptions(r, f));
 				break;
 			}
 			case "folder":
@@ -305,9 +313,13 @@
 			box.replaceChildren(el("div", { class: "empty", text: "Choose a map on the left." }));
 			return;
 		}
+		// (the lists move on whether or not the form is redrawn just now)
+		advance(r);
 		const focus = document.activeElement;
 		const keepFocus = focus && box.contains(focus) && (focus.tagName === "INPUT" || focus.tagName === "TEXTAREA");
-		if (keepFocus) return; // don't re-render under the user's typing
+		// don't re-render under the user's typing: it is drawn when they leave the box
+		state.renderDue = !!keepFocus;
+		if (keepFocus) return;
 		box.classList.toggle("page", !!state.animateForm);
 		state.animateForm = false;
 		const describe = el("input", { type: "checkbox", id: "describe" });
@@ -370,6 +382,8 @@
 		renderRecipes();
 		renderForm();
 	}
+
+	$("form").addEventListener("focusout", () => setTimeout(() => state.renderDue && renderForm()));
 
 	function selectRecipe(id, quiet) {
 		if (id !== state.recipeId) state.animateForm = true;
