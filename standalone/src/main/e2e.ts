@@ -36,6 +36,8 @@ export interface E2eConfig {
 	present?: boolean;
 	/** Check map records, mapper_* tools, descriptions, health, recent changes, refresh, tours, Ask and the desktop endpoint. */
 	insights?: boolean;
+	/** Go live: a second window joins the first one's diagram through the relay at this address. */
+	live?: { relay: string };
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 	/** Check Settings, themes, icon styles, the toolbar, the chat's menus, sliding and docking, and shape folders. */
 	polish?: boolean;
@@ -123,6 +125,8 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 			await runPolish(w, server, config, log);
 		} else if (config.insights) {
 			await runInsights(w, config, log);
+		} else if (config.live) {
+			await runLive(w, server, config, log);
 		} else if (config.present) {
 			await runPresent(w, config, log);
 		} else if (config.map) {
@@ -566,6 +570,70 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 	log("apiChatNewChat", { ...emptied, kept, strip: await strip(), items: w.chat.items.length });
 	expect(kept === "Keep this for later." && !(await strip()).length && !(await has("Before a new chat")) && !w.chat.items.some((i: any) => /Keep this/.test(i.text ?? "")), "what was waiting when New Chat was pressed was sent, or lost.");
 	expect(w.chat.items.length === 0, "the new chat starts with what the request it ended said of its end.");
+}
+
+/**
+ * Go live between two windows: the first shares its diagram, the second joins by the link, and
+ * each sees what the other does. Fails (throws) when the two diagrams differ at any step.
+ */
+async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const cells = async (win: DiagramWindow) => (await win.client.aiGetModel({ scope: "page", includeStyles: true, maxCells: 5000 })).cells;
+	const picture = async (win: DiagramWindow) =>
+		JSON.stringify((await cells(win)).map((c: any) => [c.id, c.label ?? "", c.style ?? "", c.x, c.y, c.width, c.height, c.source ?? "", c.target ?? ""]).sort());
+	const same = async (a: DiagramWindow, b: DiagramWindow, what: string) => {
+		const end = Date.now() + 15_000;
+		for (;;) {
+			const [pa, pb] = [await picture(a), await picture(b)];
+			if (pa === pb) return JSON.parse(pa).length;
+			if (Date.now() > end) throw new Error(`The two windows differ after ${what}: ${pa.slice(0, 300)} / ${pb.slice(0, 300)}`);
+			await new Promise((r) => setTimeout(r, 150));
+		}
+	};
+	const edit = (win: DiagramWindow, ops: any[]) => win.client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: true, review: false, user: true });
+	const t0 = Date.now();
+	const link = await w.goLive(config.live!.relay, "Host");
+	log("liveLinkShape", /^http:\/\/127\.0\.0\.1:\d+\/b\/[A-Za-z0-9_-]{22}$/.test(link));
+	const guest = await DiagramWindow.join(server, link, "Guest");
+	log("liveJoinMs", Date.now() - t0);
+	log("liveCellsOnJoin", await same(w, guest, "joining"));
+	log("liveTitles", [w.win.getTitle(), guest.win.getTitle()]);
+
+	// the host draws; the guest sees it
+	const made = await edit(w, [{ op: "addShape", tempId: "h1", label: "from the host", x: 40, y: 40, width: 140, height: 50 }]);
+	const hostShape = Object.values(made.idMap)[0];
+	log("liveAfterHostEdit", await same(w, guest, "the host's change"));
+	// the guest draws and connects to the host's shape; the host sees it
+	const gm = await edit(guest, [
+		{ op: "addShape", tempId: "g1", label: "from the guest", x: 300, y: 160, width: 140, height: 50 },
+		{ op: "addEdge", source: hostShape, target: "g1", label: "together" },
+	]);
+	log("liveAfterGuestEdit", await same(w, guest, "the guest's change"));
+	// both at once, on different shapes and then on the same one
+	await Promise.all([edit(w, [{ op: "update", id: hostShape, label: "host renamed" }]), edit(guest, [{ op: "move", ids: [gm.idMap.g1], dx: 30, dy: 20 }])]);
+	log("liveAfterBothDifferent", await same(w, guest, "changes to different shapes at once"));
+	await Promise.all([edit(w, [{ op: "update", id: hostShape, label: "host says" }]), edit(guest, [{ op: "update", id: hostShape, label: "guest says" }])]);
+	log("liveAfterBothSame", await same(w, guest, "changes to the same shape at once"));
+	log("liveLabelBothSee", (await cells(w)).find((c: any) => c.id === hostShape)?.label);
+	// the guest deletes; undo on the host does not bring it back as its own change
+	await edit(guest, [{ op: "delete", ids: [gm.idMap.g1], includeEdges: true }]);
+	log("liveAfterDelete", await same(w, guest, "a deletion"));
+	log("livePeople", [w.live?.people().map((p) => p.name), guest.live?.people().map((p) => p.name)]);
+	log("liveDirty", { hostEdited: w.win.isDocumentEdited(), guestEdited: guest.win.isDocumentEdited() });
+	log("liveSession", { host: { revision: w.live?.session.revision, settled: w.live?.session.settled }, guest: { revision: guest.live?.session.revision, settled: guest.live?.session.settled } });
+	fs.writeFileSync(path.join(config.out, "live-host.png"), (await w.editorView.webContents.capturePage()).toPNG());
+	fs.writeFileSync(path.join(config.out, "live-guest.png"), (await guest.editorView.webContents.capturePage()).toPNG());
+
+	// the host stops: the guest is told, keeps the diagram, and is no longer live
+	let ended: string | undefined;
+	DiagramWindow.onLiveEnded = (_win, why) => (ended = why);
+	await w.stopLive();
+	await waitFor(() => ended, 10_000);
+	log("liveEndedForGuest", ended);
+	log("liveAfterStop", { hostLive: !!w.live, guestLive: !!guest.live, guestKeeps: (await cells(guest)).length, titles: [w.win.getTitle(), guest.win.getTitle()] });
+	// after that a change in one is not a change in the other
+	await edit(w, [{ op: "addShape", label: "after", x: 500, y: 40, width: 80, height: 40 }]);
+	await new Promise((r) => setTimeout(r, 800));
+	log("liveApartAfterStop", (await cells(w)).length - (await cells(guest)).length);
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {

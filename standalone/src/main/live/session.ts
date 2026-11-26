@@ -11,8 +11,11 @@ import { apart, type ClientMessage, type DiagramPatch, type PresenceState, type 
 
 /** The diagram this person has open, as the session needs it. */
 export interface LiveEditor {
-	/** Puts this diagram in place of the one that is there (not merged with it). Resolves with its checksum. */
-	replace(xml: string): Promise<string>;
+	/**
+	 * Puts this diagram in place of the one that is there (not merged with it). Resolves with its
+	 * checksum; `expected` is the checksum it should have, for an editor that can try harder.
+	 */
+	replace(xml: string, expected?: string): Promise<string>;
 	/** Applies someone's change. Resolves with the checksum of the diagram after it. */
 	apply(patch: DiagramPatch): Promise<string>;
 	/** The whole diagram and its checksum, now. */
@@ -204,7 +207,7 @@ export class LiveSession {
 	/** The board's diagram: the snapshot, and the changes since, in the server's order. */
 	private async load(board: { revision: number; epoch?: number; xml: string; checksum: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
 		const first = !this.ready;
-		const loaded = await this.editor.replace(board.xml);
+		const loaded = await this.editor.replace(board.xml, board.checksum);
 		if (loaded !== board.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
 		let revision = board.revision - board.patches.length;
 		for (const p of board.patches) {

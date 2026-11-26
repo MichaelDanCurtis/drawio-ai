@@ -64,9 +64,16 @@ Draw.loadPlugin((ui) => {
 			}
 
 			switch (data.action) {
+				case "setDiffSync": {
+					// draw.io's embed handler reads these each time the diagram changes
+					(ui as any).embedDiffSync = !!data.on;
+					(ui as any).embedDiffSyncPatchOnly = false;
+					break;
+				}
 				case "updateLiveshareViewState": {
-					for (const c of cursors) {
-						if (!data.cursors.some((c) => c.id === c.id)) {
+					// (someone who left, or took their pointer off the diagram, is no longer listed)
+					for (const c of [...cursors]) {
+						if (!data.cursors.some((listed) => listed.id === c.id)) {
 							cursors.delete(c);
 							c.dispose();
 						}
@@ -94,9 +101,9 @@ Draw.loadPlugin((ui) => {
 					}
 					hightlights.updateHighlights(highlightInfos);
 
-					for (const c of rectangles) {
+					for (const c of [...rectangles]) {
 						if (
-							!data.selectedRectangles.some((c) => c.id === c.id)
+							!data.selectedRectangles.some((listed) => listed.id === c.id)
 						) {
 							rectangles.delete(c);
 							c.dispose();

@@ -421,6 +421,14 @@ export class CustomizedDrawioClient extends DrawioClient<
 		return response.vertices;
 	}
 
+	/**
+	 * Turns draw.io's diff sync on or off for the open diagram (see DrawioClient.resetDiff, to
+	 * be called next when turning it on). While it is on, changes arrive on onPatch.
+	 */
+	public setDiffSync(on: boolean): void {
+		this.sendCustomAction({ action: "setDiffSync", on });
+	}
+
 	public setNodeSelectionEnabled(enabled: boolean): void {
 		this.sendCustomAction({
 			action: "setNodeSelectionEnabled",

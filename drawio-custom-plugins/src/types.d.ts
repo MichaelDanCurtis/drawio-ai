@@ -1,6 +1,6 @@
 
 declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | GetVerticesAction
-    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
+    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
@@ -588,6 +588,17 @@ declare interface UpdateLiveshareViewState {
     cursors: ParticipantCursorInfo[];
     selectedCells: ParticipantSelectedCellsInfo[];
     selectedRectangles: ParticipantSelectedRectangleInfo[];
+}
+
+/**
+ * Turns draw.io's diff sync on or off for the diagram that is open (its embed protocol only
+ * takes it when a diagram is loaded, which would lose the undo history and the view). On:
+ * follow it with draw.io's own `resetDiff` action, which makes the diagram as it is the state
+ * changes are counted from; each change is then reported with a patch and a checksum.
+ */
+declare interface SetDiffSyncAction {
+    action: "setDiffSync";
+    on: boolean;
 }
 
 declare interface ParticipantCursorInfo {

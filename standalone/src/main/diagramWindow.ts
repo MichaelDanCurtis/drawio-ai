@@ -27,6 +27,8 @@ import { galleryPalette } from "./workshop/palette";
 import { styleValue, webappPicture } from "./workshop/shifter";
 import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
+import { LiveShare } from "./live/liveShare";
+import { parseBoardLink, serverOrigin } from "./live/protocol";
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
 let nextId = 1;
@@ -159,6 +161,30 @@ export class DiagramWindow {
 		const w = new DiagramWindow(server, file);
 		w.initial = initial;
 		await w.start(server);
+		return w;
+	}
+
+	/** Called when a window's shared diagram ended other than by the window's own doing (the host stopped, the connection was lost). */
+	public static onLiveEnded: ((w: DiagramWindow, why: string) => void) | undefined;
+
+	/**
+	 * Opens a window on a diagram someone shared (Go live): the board's diagram, not a file.
+	 * `linkText` is the link as pasted.
+	 */
+	public static async join(server: StaticServer, linkText: string, name: string): Promise<DiagramWindow> {
+		const link = parseBoardLink(linkText);
+		if (!link) throw new Error("That is not a link to a shared diagram. It looks like https://…/b/… and comes from whoever pressed Go live.");
+		const w = await DiagramWindow.open(server, undefined, { xml: "", name: "Shared diagram" });
+		try {
+			await w.whenLoaded();
+			w.live = await LiveShare.join(w.liveWindow(), link, { name });
+			// (what is in the window now is the board's, not an unsaved diagram of this person's)
+			w.setDirty(false);
+		} catch (e) {
+			w.closing = true;
+			w.win.close();
+			throw e;
+		}
 		return w;
 	}
 
@@ -784,6 +810,56 @@ export class DiagramWindow {
 		this.layout();
 	}
 
+	// ----- Go live: the diagram shared through an OmniPad board (live/liveShare.ts) -----
+
+	/** The shared session this window is in, while it is. */
+	public live: LiveShare | undefined;
+
+	/**
+	 * Puts the diagram on the OmniPad server at `serverAddress` and joins it as its host. Returns
+	 * the link to give to others (a secret: whoever has it can edit). The file stays the master copy.
+	 */
+	public async goLive(serverAddress: string, name: string): Promise<string> {
+		if (this.live && this.live.status !== "ended") return this.live.url;
+		const server = serverOrigin(serverAddress);
+		if (!server) throw new Error("Give the OmniPad server's address first (Settings → Sharing). It must be https, or a server on this computer.");
+		await this.whenLoaded();
+		this.live = await LiveShare.host(this.liveWindow(), server, { name, title: this.fileName() ?? "Untitled" });
+		this.updateTitle();
+		return this.live.url;
+	}
+
+	/** Stops sharing (the host: for everyone), or leaves (a guest). */
+	public async stopLive(): Promise<void> {
+		const live = this.live;
+		this.live = undefined;
+		await live?.stop();
+		this.updateTitle();
+	}
+
+	private liveWindow() {
+		return {
+			client: this.client,
+			remoteChanged: () => {
+				// someone else's change is a change to the host's file; a guest has no file of their own to save
+				if (this.live?.role !== "guest") this.setDirty(true);
+				this.mapActions.refreshSummary();
+			},
+			changed: () => {
+				const live = this.live;
+				if (live?.status === "ended") {
+					// it ended by itself (the host stopped, the connection went): the diagram stays as it was
+					this.live = undefined;
+					if (live.role === "guest") this.setDirty(true);
+					DiagramWindow.onLiveEnded?.(this, live.ended ?? "The shared diagram ended.");
+				}
+				this.updateTitle();
+				DiagramWindow.onMenus?.(this);
+			},
+			log: (text: string) => console.warn(text),
+		};
+	}
+
 	// ----- document -----
 
 	private setDirty(dirty: boolean): void {
@@ -793,7 +869,8 @@ export class DiagramWindow {
 
 	private updateTitle(): void {
 		if (this.win.isDestroyed()) return;
-		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — OmniDraw`);
+		const live = this.live?.status === "live" ? ` — Live${this.live.people().length ? ` (${this.live.people().length + 1})` : ""}` : "";
+		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""}${live} — OmniDraw`);
 		this.win.setDocumentEdited(this.dirty);
 		if (this.file) this.win.setRepresentedFilename(this.file);
 	}
@@ -901,7 +978,8 @@ export class DiagramWindow {
 	}
 
 	private async onClose(e: Electron.Event): Promise<void> {
-		if (this.closing || !this.dirty) return;
+		// (a guest's window holds the board's diagram, which stays on the board: nothing of theirs is lost)
+		if (this.closing || !this.dirty || this.live?.role === "guest") return;
 		e.preventDefault();
 		const r = await dialog.showMessageBox(this.win, {
 			type: "warning",
@@ -918,6 +996,9 @@ export class DiagramWindow {
 	}
 
 	private dispose(): void {
+		// (the host's window closing ends the board for everyone; a guest's just leaves)
+		void this.live?.stop();
+		this.live = undefined;
 		setTimeout(() => DiagramWindow.onClosed?.(), 0);
 		clearTimeout(this.mappedTimer);
 		clearInterval(this.chatAnim);
