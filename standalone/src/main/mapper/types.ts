@@ -124,6 +124,11 @@ export interface CollectContext {
 	 * and gives the folder to map: see repository.ts. Not there in a program that keeps none.
 	 */
 	repository?(spec: import("./repository").RepositorySpec): Promise<import("./repository").Fetched>;
+	/**
+	 * For a folder a saved map was made from: if it is in a downloaded repository, makes sure the
+	 * download is still (or again) on this computer. See keepDownloaded in repository.ts.
+	 */
+	keepRepository?(folder: string): Promise<"elsewhere" | "there" | "restored">;
 }
 
 /** A problem the Mapper found, drawn as a badge on the shapes it concerns. */

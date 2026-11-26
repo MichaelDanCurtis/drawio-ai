@@ -209,8 +209,10 @@ export class MapperService {
 	/** Files changed in git since the map was made (committed and not), mapped to its shapes. */
 	public async recentChanges(record: MapRecord, opts: { draw?: boolean } = {}) {
 		if (!record.root) throw new MapperError("This map was not made from a folder, so it has no files to compare.");
-		const dir = fs.existsSync(record.root) && fs.statSync(record.root).isDirectory() ? record.root : path.dirname(record.root);
 		const ctx = this.host.context();
+		// (a map of a downloaded repository: its download may have been cleared away since)
+		await ctx.keepRepository?.(record.root);
+		const dir = fs.existsSync(record.root) && fs.statSync(record.root).isDirectory() ? record.root : path.dirname(record.root);
 		const git = async (args: string[]) => {
 			const r = await ctx.exec("git", args, { cwd: dir, timeoutMs: 30_000 });
 			if (r.code !== 0) throw new MapperError(`git ${args[0]} failed in ${dir}: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);

@@ -7,8 +7,8 @@ const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
 require("./helpers/ts");
-const { parseRepository, repositoryLabel, fetchRepository, hasProgram } = require("../src/main/mapper/repository");
-const { withRepositories, FOLDER_FIELD } = require("../src/main/mapper/recipes/common");
+const { parseRepository, repositoryLabel, fetchRepository, hasProgram, keepDownloaded, downloadOf } = require("../src/main/mapper/repository");
+const { withRepositories, mapRootsReady, FOLDER_FIELD } = require("../src/main/mapper/recipes/common");
 const { recipeById } = require("../src/main/mapper/registry");
 const { MapperError } = require("../src/main/mapper/types");
 
@@ -80,7 +80,7 @@ test("a repository is downloaded as it is now, into the app's folder, and nothin
 	assert.match(got.head, /^[0-9a-f]{40}$/);
 	assert.equal(got.head, git(origin, "rev-parse", "main").trim());
 	// (a folder of that one commit)
-	assert.equal(got.dir, path.join(repoDir, got.head.slice(0, 12)));
+	assert.equal(got.dir, path.join(repoDir, got.head));
 	assert.equal(got.root, got.dir);
 	assert.deepEqual(said, ["Downloading github.com/octo/Widgets…"]);
 	assert.equal(fs.readFileSync(path.join(got.dir, "README.md"), "utf8"), "main\n");
@@ -147,6 +147,68 @@ test("downloads of a repository: the newest few commits are kept, and one in use
 	const again = await fetchRepository(spec, o);
 	assert.equal(again.dir, dirs[3]);
 	assert.ok(Date.now() - fs.statSync(dirs[3]).mtimeMs < 60_000);
+});
+
+test("the same commit asked for many times at once: one folder, and it is never taken away from a map that is reading it", async () => {
+	const origin = remote();
+	const cacheDir = tmp("cache");
+	const o = { cacheDir, env: process.env, remotes: () => [{ url: origin, how: "a local copy" }] };
+	const spec = parseRepository("octo/widgets");
+	// each one, as soon as it has its folder, notes which folder that is on disk (and leaves a file in it, as a reader would find one)
+	const seen = [];
+	const all = await Promise.all(
+		Array.from({ length: 12 }, async (_, i) => {
+			const got = await fetchRepository(spec, o);
+			seen.push(fs.statSync(got.dir).ino);
+			assert.equal(fs.readFileSync(path.join(got.dir, "README.md"), "utf8"), "main\n");
+			fs.writeFileSync(path.join(got.dir, `.reader-${i}`), "");
+			return got.dir;
+		})
+	);
+	assert.equal(new Set(all).size, 1);
+	assert.equal(new Set(seen).size, 1, "the folder that was handed out first is the one all of them got");
+	assert.equal(fs.readdirSync(all[0]).filter((f) => f.startsWith(".reader-")).length, 12, "nothing a reader had was removed");
+	assert.deepEqual(fs.readdirSync(path.dirname(all[0])), [path.basename(all[0])], "and nothing half-made is left beside it");
+});
+
+test("a saved map's download: counted as used when the map is used, and downloaded again as that commit when it was cleared away", async () => {
+	const origin = remote();
+	// (GitHub hands out any commit that is asked for by its full name; a plain repository has to be told to)
+	git(origin, "config", "uploadpack.allowAnySHA1InWant", "true");
+	const cacheDir = tmp("cache");
+	const o = { cacheDir, env: process.env, remotes: () => [{ url: origin, how: "a local copy" }] };
+	const got = await fetchRepository({ ...parseRepository("octo/Widgets"), subpath: "services/api" }, o);
+	assert.deepEqual(downloadOf(cacheDir, got.root), { dir: got.dir, spec: { host: "github.com", owner: "octo", repo: "widgets", ref: got.head } });
+	// a folder of the user's own, the cache itself, and what only looks like a download
+	for (const other of [origin, cacheDir, path.join(cacheDir, "github.com", "octo"), path.join(cacheDir, "github.com", "octo", "widgets", "main"), path.join(cacheDir, "..", "elsewhere")]) assert.equal(await keepDownloaded(other, o), "elsewhere", other);
+
+	// there: used now, so it is not among the ones cleared away
+	const longAgo = new Date(Date.now() - 5 * 3600_000);
+	fs.utimesSync(got.dir, longAgo, longAgo);
+	assert.equal(await keepDownloaded(got.root, o), "there");
+	assert.ok(Date.now() - fs.statSync(got.dir).mtimeMs < 60_000);
+
+	// the repository moved on and the download was cleared away: the map still gets the commit it was made from
+	put(origin, "services/api/package.json", '{"name":"api","version":"2"}');
+	git(origin, "commit", "-q", "-am", "later");
+	fs.rmSync(got.dir, { recursive: true, force: true });
+	assert.equal(await keepDownloaded(got.root, o), "restored");
+	assert.equal(fs.readFileSync(path.join(got.root, "package.json"), "utf8"), '{"name":"api"}');
+	assert.equal(git(got.dir, "rev-parse", "HEAD").trim(), got.head);
+
+	// before an agent is sent to a map's folders: nothing to say when they are there (or the user's own)…
+	const ctx = { keepRepository: (folder) => keepDownloaded(folder, o) };
+	const shapes = [{ data: { mapRoot: got.root } }, { data: { mapRoot: got.root } }, { data: { mapRoot: origin } }, { data: {} }];
+	fs.rmSync(got.dir, { recursive: true, force: true });
+	assert.equal(await mapRootsReady(shapes, ctx), "");
+	assert.ok(fs.existsSync(got.root), "brought back for the agent to read");
+	assert.equal(await mapRootsReady(shapes, {}), "", "a program that keeps no repositories has none to bring back");
+	// …and when one cannot be brought back, the agent is told so instead of being sent to a folder that is not there
+	fs.rmSync(got.dir, { recursive: true, force: true });
+	const gone = { keepRepository: (folder) => keepDownloaded(folder, { ...o, remotes: () => [{ url: path.join(tmp("gone"), "nothing"), how: "git's saved sign-in" }] }) };
+	const note = await mapRootsReady(shapes, gone);
+	assert.match(note, /no longer on this computer and could not be downloaded again: ".*services.api" \(Could not download octo\/widgets from GitHub\.\)/);
+	assert.ok(!fs.existsSync(got.dir));
 });
 
 test("the GitHub CLI is found on Windows too, where a program has an ending", () => {
@@ -232,7 +294,7 @@ test("a map of a repository: the recipe reads the downloaded folder, a folder of
 	assert.match(FOLDER_FIELD.placeholder, /GitHub repository/);
 
 	const from = await withRepositories(recipe.fields, { folder: "https://github.com/octo/widgets/tree/main" }, ctx);
-	const copy = path.join(cacheDir, "github.com", "octo", "widgets", git(origin, "rev-parse", "main").trim().slice(0, 12));
+	const copy = path.join(cacheDir, "github.com", "octo", "widgets", git(origin, "rev-parse", "main").trim());
 	assert.deepEqual([from.source, from.root, from.input.folder], ["github.com/octo/widgets@main", copy, copy]);
 	const result = await recipe.collect(from.input, ctx);
 	assert.equal(result.summary, "1 workflow(s), 2 job(s)");

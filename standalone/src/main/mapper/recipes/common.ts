@@ -176,6 +176,25 @@ export function agentRequest(task: string, facts?: string, maxFacts = 60_000): s
 	return parts.join("\n");
 }
 
+/**
+ * Before an agent is sent to the folders some shapes were mapped from: a map of a downloaded
+ * repository points at its download, which may have been cleared away since, so it is brought
+ * back first. Returns what to add to the request when one could not be (the agent then knows the
+ * files are not there, and says so), or "".
+ */
+export async function mapRootsReady(shapes: { data: Record<string, string> }[], ctx: Pick<CollectContext, "keepRepository">): Promise<string> {
+	if (!ctx.keepRepository) return "";
+	const missing: string[] = [];
+	for (const root of new Set(shapes.map((s) => s.data.mapRoot).filter(Boolean))) {
+		try {
+			await ctx.keepRepository(root);
+		} catch (e: any) {
+			missing.push(`"${root}" (${String(e?.message ?? e).split("\n")[0].slice(0, 200)})`);
+		}
+	}
+	return missing.length ? `\n\nNote: the downloaded copy of the repository this map was made from is no longer on this computer and could not be downloaded again: ${missing.join("; ")}. Its files cannot be read: say so, and work from the shapes' data.` : "";
+}
+
 /** The usual "dig deeper" request: the selected shapes' data plus the user's question. */
 export function digDeeperRequest(what: string, shapes: { label: string; data: Record<string, string> }[], question: string): string {
 	const listed = shapes

@@ -11,8 +11,9 @@
   sign-in, the GitHub CLI's, or an SSH key) into the app's own folder and read there. It
   said "is not a folder" before. git runs no program for the repository's files while it does
   so (no hook, no filter of any name, no submodule), and nothing is ever sent to the
-  repository. Each download is of one commit, in a folder of its own, so an earlier map still
-  points at the files it was drawn from; the newest four of a repository are kept.
+  repository. Each download is of one commit, in a folder of its own that is never replaced,
+  so an earlier map still points at the files it was drawn from. The newest four of a
+  repository are kept, and an older one comes back, as that commit, when its map is used.
 
 ## [0.2.0]
 

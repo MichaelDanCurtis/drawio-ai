@@ -117,9 +117,14 @@ const SAFE = [
  */
 const NO_FILTERS = "* -filter -ident -text -working-tree-encoding\n";
 
-/** How many downloads of one repository are kept (a download is of one commit), beside those used in the last hour. */
+/**
+ * How many downloads of one repository are kept (a download is of one commit), beside those used
+ * in the last hour. One that was cleared away and is wanted again (a saved map points at it) is
+ * downloaded again: its folder's name is its commit. See keepDownloaded.
+ */
 const KEPT = 4;
 const IN_USE_MS = 60 * 60 * 1000;
+const COMMIT = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 
 function git(args: string[], o: { cwd?: string; env: NodeJS.ProcessEnv; signal?: AbortSignal; timeoutMs: number }): Promise<{ code: number; stdout: string; stderr: string }> {
 	return new Promise((resolve, reject) => {
@@ -153,13 +158,49 @@ export function hasProgram(name: string, env: NodeJS.ProcessEnv, platform: NodeJ
 	return dirs.some((dir) => dir && names.some((n) => fs.existsSync(path.join(dir, n))));
 }
 
+/** Whether a download is there; if it is, it counts as used now (which keeps it from being cleared away). */
+function used(dir: string): boolean {
+	if (!fs.existsSync(path.join(dir, ".git", "HEAD"))) return false;
+	try {
+		const now = new Date();
+		fs.utimesSync(dir, now, now);
+	} catch {
+		// read-only storage: it is there all the same
+	}
+	return true;
+}
+
+/** The download a folder is in (or is), if it is in one: `<cache>/github.com/<owner>/<repo>/<commit>[/…]`. */
+export function downloadOf(cacheDir: string, folder: string): { dir: string; spec: RepositorySpec } | undefined {
+	const rel = path.relative(path.resolve(cacheDir), path.resolve(folder));
+	if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
+	const [host, owner, repo, commit] = rel.split(path.sep);
+	if (host !== "github.com" || !owner || !repo || !COMMIT.test(commit ?? "") || !NAME.test(owner) || !NAME.test(repo)) return undefined;
+	return { dir: path.join(path.resolve(cacheDir), host, owner, repo, commit), spec: { host, owner, repo, ref: commit } };
+}
+
+/**
+ * For a folder a saved map was made from: if it is in a downloaded repository, makes sure that
+ * download is (again) on this computer, and counts it as used. Downloads are cleared away over
+ * time; a map still points at its own, and its folder's name is the commit to fetch.
+ * "elsewhere": the folder is not in a download (a folder of the user's own).
+ */
+export async function keepDownloaded(folder: string, o: FetchOptions): Promise<"elsewhere" | "there" | "restored"> {
+	const of = downloadOf(o.cacheDir, folder);
+	if (!of) return "elsewhere";
+	if (used(of.dir)) return "there";
+	const got = await fetchRepository(of.spec, o);
+	if (path.resolve(got.dir) !== of.dir) throw new MapperError("The repository was downloaded again, but not as the commit this map was made from.");
+	return "restored";
+}
+
 /** Removes the downloads of a repository that are neither among the newest nor used lately. */
 function prune(repoDir: string, keep: string): void {
 	try {
 		const now = Date.now();
 		const old = fs
 			.readdirSync(repoDir, { withFileTypes: true })
-			.filter((d) => d.isDirectory() && /^[0-9a-f]{12}$/.test(d.name) && path.join(repoDir, d.name) !== keep)
+			.filter((d) => d.isDirectory() && COMMIT.test(d.name) && path.join(repoDir, d.name) !== keep)
 			.map((d) => ({ dir: path.join(repoDir, d.name), used: fs.statSync(path.join(repoDir, d.name)).mtimeMs }))
 			.sort((a, b) => b.used - a.used);
 		for (const o of old.slice(KEPT - 1)) if (now - o.used > IN_USE_MS) fs.rmSync(o.dir, { recursive: true, force: true });
@@ -175,7 +216,8 @@ function prune(repoDir: string, keep: string): void {
  * folder of that one commit, `<cache>/github.com/<owner>/<repo>/<commit>`. A map of another
  * branch, or of the same branch later, gets another folder, so a map drawn before still points
  * at the files it was drawn from, and two maps being read at once do not take each other's files
- * away. The newest few are kept.
+ * away. A folder that is there is never replaced or written to again. The newest few are kept;
+ * an older one comes back when it is asked for (keepDownloaded).
  */
 export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promise<Fetched> {
 	const env: NodeJS.ProcessEnv = { ...o.env, GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1", GIT_OPTIONAL_LOCKS: "0", GCM_INTERACTIVE: "never", GIT_SSH_COMMAND: o.env.GIT_SSH_COMMAND ?? "ssh -oBatchMode=yes" };
@@ -222,21 +264,17 @@ export async function fetchRepository(s: RepositorySpec, o: FetchOptions): Promi
 			);
 		}
 		const head = (await run(["rev-parse", "--verify", "FETCH_HEAD^{commit}"], fresh, quiet)).stdout.trim();
-		if (!/^[0-9a-f]{40,64}$/.test(head)) throw new MapperError("The repository was downloaded but git could not say which commit it is.");
-		const final = path.join(home, head.slice(0, 12));
-		if (fs.existsSync(path.join(final, ".git", "HEAD"))) {
-			// this commit is here already (a map of it was drawn before, or is being drawn): it is used as it is
-			const now = new Date();
-			fs.utimesSync(final, now, now);
-		} else {
+		if (!COMMIT.test(head)) throw new MapperError("The repository was downloaded but git could not say which commit it is.");
+		const final = path.join(home, head);
+		if (!used(final)) {
 			const out = await run([...SAFE, "checkout", "-q", "--detach", "FETCH_HEAD"], fresh, quiet);
 			if (out.code !== 0) throw new MapperError(`The repository was downloaded but its files could not be written: ${said(out.stderr)}`);
-			fs.rmSync(final, { recursive: true, force: true });
 			try {
+				// (moved into place whole, and only where nothing is: a folder that is there is being read)
 				fs.renameSync(fresh, final);
 			} catch (e) {
-				// (another window downloaded the same commit in the meantime: its copy is as good)
-				if (!fs.existsSync(path.join(final, ".git", "HEAD"))) throw e;
+				// another window downloaded the same commit in the meantime: its copy is the one, and as good
+				if (!used(final)) throw new MapperError(`The repository was downloaded but could not be put in its place: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
 			}
 		}
 		prune(home, final);

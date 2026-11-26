@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { checkReadOnly } from "./readOnly";
-import { fetchRepository, type RepositorySpec } from "./repository";
+import { fetchRepository, keepDownloaded, type RepositorySpec } from "./repository";
 import type { CollectContext, ExecResult } from "./types";
 import { MapperError } from "./types";
 
@@ -34,7 +34,12 @@ export function createContext(options: ContextOptions): CollectContext {
 		cwd: options.cwd,
 		signal,
 		progress: options.progress ?? (() => undefined),
-		...(repoCache ? { repository: (spec: RepositorySpec) => fetchRepository(spec, { cacheDir: repoCache, env: options.env, signal, progress: options.progress }) } : {}),
+		...(repoCache
+			? {
+					repository: (spec: RepositorySpec) => fetchRepository(spec, { cacheDir: repoCache, env: options.env, signal, progress: options.progress }),
+					keepRepository: (folder: string) => keepDownloaded(folder, { cacheDir: repoCache, env: options.env, signal, progress: options.progress }),
+			  }
+			: {}),
 		exec(command, args, opts = {}): Promise<ExecResult> {
 			const refused = checkReadOnly(command, args);
 			if (refused) return Promise.reject(new MapperError(`Refused: ${refused}. The Mapper only reads.`));
