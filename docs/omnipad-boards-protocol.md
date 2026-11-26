@@ -6,8 +6,9 @@ proposes something OmniPad has not built, it says so: those parts are OmniPad's 
 change. Version 4 of this note, 2026-11-26. (Version 1 did not say how someone whose change crossed
 another's catches up with the server's order; version 2 let them vouch for a checksum
 meanwhile; version 3 lost a change that was on its way when the board sent everyone its
-diagram.) The rules under "How changes are ordered" are implemented and tested in
-`standalone/src/main/live/session.ts` and `standalone/test/live.test.js`.
+diagram.) Nothing in this note is code yet in this repository's main branch: OmniDraw's side of
+the rules under "How changes are ordered", with tests against a stand-in server, comes in the
+pull request that follows this note. Until then they are a proposal.
 
 ## What it is for
 
