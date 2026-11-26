@@ -839,6 +839,8 @@ export class DiagramWindow {
 		if (live?.status === "live" && live.session.unsent > 0 && !(await this.sharedOrLetGo(live.role === "host" ? "Stopping" : "Leaving"))) return;
 		this.live = undefined;
 		await live?.stop();
+		// (a guest who leaves keeps the diagram as it was: it is theirs now, and not saved anywhere)
+		if (live?.role === "guest" && !this.file) this.setDirty(true);
 		this.updateTitle();
 		DiagramWindow.onLive?.(this);
 	}

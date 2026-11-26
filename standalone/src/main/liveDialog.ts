@@ -78,7 +78,8 @@ export class LiveDialog {
 		const s = settings();
 		return {
 			type: "state",
-			mode: live ? "live" : LiveDialog.mode,
+			// (asked to join another: that form, also when the diagram in front is itself shared)
+			mode: LiveDialog.mode === "join" ? "join" : live ? "live" : "share",
 			diagram: t ? t.fileName() ?? "Untitled" : undefined,
 			server: s.sharing.server,
 			name: s.sharing.name,

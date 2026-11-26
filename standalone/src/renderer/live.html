@@ -130,8 +130,9 @@
 			: s.mode === "join"
 			? "Work on a diagram someone shared, with them, at the same time."
 			: `Share ${s.diagram ?? "this diagram"} by a link: whoever opens it works on it with you, in a browser or in OmniDraw.`;
-		$("tabs").hidden = !!live || !s.diagram;
-		$("tab-share").setAttribute("aria-pressed", String(s.mode === "share"));
+		$("tabs").hidden = !s.diagram;
+		$("tab-share").textContent = s.live ? "This diagram" : "Share this diagram";
+		$("tab-share").setAttribute("aria-pressed", String(s.mode !== "join"));
 		$("tab-join").setAttribute("aria-pressed", String(s.mode === "join"));
 		$("share").hidden = !!live || s.mode !== "share";
 		$("join").hidden = !!live || s.mode !== "join";

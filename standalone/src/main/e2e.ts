@@ -622,8 +622,10 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	const before = new Set(DiagramWindow.all);
 	await inDialog(`document.getElementById("close").click()`);
 	await new Promise((r) => setTimeout(r, 300));
-	LiveDialog.open(server, undefined, "join");
+	// (File → Join a Shared Diagram… with the shared diagram in front: the join form, not that diagram's sharing)
+	LiveDialog.open(server, w, "join");
 	await new Promise((r) => setTimeout(r, 1200));
+	log("liveDialogJoinWhileLive", await inDialog(`[document.getElementById("title").textContent, document.getElementById("join").hidden, document.getElementById("live").hidden, document.getElementById("tab-share").textContent]`));
 	await fill("link", "https://example.com/not-a-board");
 	await inDialog(`document.getElementById("go").click()`);
 	await new Promise((r) => setTimeout(r, 400));
@@ -678,6 +680,13 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await waitFor(() => ended, 10_000);
 	log("liveEndedForGuest", ended);
 	log("liveAfterStop", { hostLive: !!w.live, guestLive: !!guest.live, guestKeeps: (await cells(guest)).length, titles: [w.win.getTitle(), guest.win.getTitle()] });
+	// a guest who leaves by themselves keeps the diagram too, as an unsaved one
+	const link2 = await w.goLive(config.live!.relay, "Host");
+	const guest2 = await DiagramWindow.join(server, link2, "Second guest");
+	log("liveSecondGuestBeforeLeaving", { edited: guest2.win.isDocumentEdited(), live: guest2.live?.status });
+	await guest2.stopLive();
+	log("liveSecondGuestAfterLeaving", { edited: guest2.win.isDocumentEdited(), live: !!guest2.live, keeps: (await cells(guest2)).length, hostStillLive: w.live?.status });
+	await w.stopLive();
 	// after that a change in one is not a change in the other
 	await edit(w, [{ op: "addShape", label: "after", x: 500, y: 40, width: 80, height: 40 }]);
 	await new Promise((r) => setTimeout(r, 800));
