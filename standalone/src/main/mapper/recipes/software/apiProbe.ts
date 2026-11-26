@@ -153,6 +153,7 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 	const deadline = Date.now() + (o.deadlineMs ?? 45_000);
 	const asked: Asked[] = [];
 	const seen = new Set<string>();
+	const docs = new Set<string>();
 	const specs: ApiSpec[] = [];
 	const auth = o.authorization?.trim();
 	const cancelled = () => {
@@ -198,7 +199,9 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 				if (res.status >= 300 && res.status < 400 && res.headers.get("location")) {
 					const to = new URL(res.headers.get("location")!, at);
 					// (the same place, also when it only moves from http to https: nothing is asked of, or told to, another one)
-					if (!own(to) || init.method === "POST") {
+					// (a question, the one POST there is, goes on to where it was sent only as a question: 307 / 308,
+					// and 301 / 302 as servers use them for a missing slash; "see other" would make it a plain read)
+					if (!own(to) || (init.method === "POST" && res.status === 303)) {
 						entry.status = to.hostname !== start.hostname ? "sent elsewhere" : res.status;
 						return undefined;
 					}
@@ -231,7 +234,14 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 		const doc = asSpec(r.text);
 		if (doc) {
 			asked[asked.length - 1].found = "openapi";
-			specs.push({ file: display(r.url), doc });
+			// (two addresses can hand out the same document; and two documents can be at one address,
+			// told apart only by its query, which is not shown: each is then numbered, to be its own)
+			const text = JSON.stringify(doc);
+			if (docs.has(text)) return;
+			docs.add(text);
+			const name = display(r.url);
+			const others = specs.filter((s) => s.file === name || s.file.startsWith(`${name} #`)).length;
+			specs.push({ file: others ? `${name} #${others + 1}` : name, doc });
 			return;
 		}
 		if (depth >= 2) return;
@@ -262,7 +272,7 @@ export async function probeApi(typed: string, o: ProbeOptions = {}): Promise<Pro
 			}
 			if (sdl) {
 				asked[asked.length - 1].found = "graphql";
-				graphql = { sdl, url: display(new URL(end)) };
+				graphql = { sdl, url: display(r.url) };
 			}
 		}
 	}

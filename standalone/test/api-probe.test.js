@@ -136,12 +136,46 @@ test("GraphQL: an endpoint is asked for its schema with one read-only question, 
 	assert.equal(introspectionToSdl({ data: null }), undefined);
 	assert.equal(introspectionToSdl({ errors: [{ message: "introspection is disabled" }] }), undefined);
 
+	// the address moves the question on (a server that wants /graphql/): asked where it was sent to, in the same place
+	const moved = await api({
+		"/graphql": { status: 308, headers: { location: "/graphql/" } },
+		"/graphql/": (q) => (q.method === "POST" && /IntrospectionQuery/.test(q.body) ? { json: SCHEMA } : { status: 400, json: {} }),
+	});
+	const sent = await probeApi(`${moved.url}/graphql`);
+	assert.deepEqual(found(sent), [[], "/graphql/"]);
+	assert.deepEqual(moved.got.filter((g) => g.method === "POST").map((g) => g.path), ["/graphql", "/graphql/"]);
+	// (a question is not turned into a plain read: "see other" is where it stops)
+	const calls = [];
+	const seeOther = async (u, init) => {
+		calls.push(`${init.method} ${new URL(u).pathname}`);
+		return init.method === "POST" && new URL(u).pathname === "/graphql" ? new Response("", { status: 303, headers: { location: "/other" } }) : new Response("{}", { status: 404 });
+	};
+	await probeApi("https://api.example.com/graphql", { fetch: seeOther, deadlineMs: 4000 });
+	assert.ok(calls.includes("POST /graphql") && !calls.some((c) => c.endsWith(" /other")), calls.join(", "));
+
 	// only the host given: no description anywhere, so the usual GraphQL endpoints are asked last
 	const bare = await api({ "/api/graphql": (q) => (q.method === "POST" ? { json: SCHEMA } : undefined) });
 	const r = await probeApi(bare.url);
 	assert.deepEqual(found(r), [[], "/api/graphql"]);
 	assert.deepEqual(bare.got.filter((g) => g.method === "POST").map((g) => g.path), ["/graphql", "/api/graphql"]);
 	assert.ok(bare.got.length <= 40);
+});
+
+test("descriptions at one address that differ only by what is asked of it: each is drawn as its own, the same one once, and no query is shown", async () => {
+	const other = (title, path) => ({ ...SPEC, info: { title, version: "1" }, paths: { [path]: { get: { responses: { 200: { description: "ok" } } } } } });
+	const groups = await api({
+		"/": { text: `<script>SwaggerUIBundle({ urls: [{ url: "/spec?group=a&api_key=abc123" }, { url: "/spec?group=b" }, { url: "/spec?group=a&again=1" }] })</script>` },
+		"/spec": (q) => ({ json: /group=b/.test(q.path) ? other("Billing", "/invoices") : other("Shop", "/orders") }),
+	});
+	const r = await probeApi(groups.url);
+	assert.deepEqual(r.specs.map((s) => [s.file.replace(/^http:\/\/127\.0\.0\.1:\d+/, ""), s.doc.info.title]), [["/spec", "Shop"], ["/spec #2", "Billing"]]);
+	assert.ok(!JSON.stringify(r).includes("abc123") && !JSON.stringify(r).includes("group="));
+	// drawn: every shape has an id of its own
+	const ctx = { cwd: os.tmpdir(), progress: () => {}, signal: new AbortController().signal, exec: async () => assert.fail("no commands") };
+	const map = await apiRecipe.collect({ folder: "", url: groups.url }, ctx);
+	const ids = map.graph.nodes.map((n) => n.id);
+	assert.equal(new Set(ids).size, ids.length, "no two shapes share an id");
+	assert.match(map.summary, /^2 OpenAPI spec\(s\), 2 endpoint\(s\)/);
 });
 
 test("it stays on the host it was given: the Authorization header goes nowhere else, and a redirect away is not followed", async () => {
