@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Mapper: the API surface of a running API.** The API surface map takes an API's address beside (or in place of) a folder and asks the API for its own description: the address itself, what its docs page names, then the places frameworks serve an OpenAPI document from; a GraphQL endpoint is asked for its schema. An optional Authorization header goes to that host only and is not saved. It only reads, stays on the host it was given, and says what it asked when an API publishes no description.
+
 ## [0.5.0]
 
 The OmniDraw desktop app got the Workshop's **Shape Shifter** (find a shape by words across draw.io's own shapes and the galleries, recolour what is selected, import a Visio stencil) and **Shape Creator** (an agent draws an icon from a description). The extension has both too: its Shape Creator draws with a model VS Code offers. The desktop app can also use Anthropic's, OpenAI's, Gemini's, Grok's and Kimi's models, and those behind OpenRouter, with your own API key (Settings → Agents & models), in the chat and in the Shape Creator, listed beside the agents; the extension works with agents as before.

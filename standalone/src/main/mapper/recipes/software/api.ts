@@ -8,6 +8,7 @@ import * as path from "path";
 import { agentRequest, digDeeperRequest, FOLDER_FIELD, folderInput, readFiles, slug, type FoundFile, loadYaml } from "../common";
 import type { CheckCoverage, CollectResult, MapEdge, MapFinding, MapGraph, MapNode, MapRow, Recipe } from "../../types";
 import { keepOnMap } from "./health";
+import { nothingFound, probeApi } from "./apiProbe";
 import { isLocalHost, scrub, STYLE } from "./shared";
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options", "trace"];
@@ -444,16 +445,59 @@ export const apiRecipe: Recipe = {
 	id: "software.api",
 	category: "software",
 	title: "API surface (OpenAPI / GraphQL)",
-	description: "Endpoints from OpenAPI / Swagger specs (v2 and v3, YAML or JSON) grouped by tag, with parameters, request and response types and the schemas they use; GraphQL schemas (.graphql) with queries, mutations and types.",
+	description:
+		"Endpoints from OpenAPI / Swagger specs (v2 and v3, YAML or JSON) grouped by tag, with parameters, request and response types and the schemas they use; GraphQL schemas with queries, mutations and types. Read from a repository's files, or asked of a running API at its address.",
 	mode: "inventory",
-	fields: [FOLDER_FIELD],
+	fields: [
+		{ ...FOLDER_FIELD, required: false, help: `Its OpenAPI and GraphQL files are read. Left empty with no address below: the diagram's folder. ${FOLDER_FIELD.help}` },
+		{
+			id: "url",
+			label: "Or a running API's address",
+			type: "text",
+			placeholder: "https://api.example.com, or the address of its OpenAPI document or docs page",
+			help: "The API is asked for its own description: the address itself, what its docs page links to, then the places frameworks usually serve it from; a GraphQL endpoint is asked for its schema. Only reads (GET, and GraphQL's schema question), only on that host, at most 40 addresses. Not every API publishes one: you are told what was asked if none is found.",
+		},
+		{
+			id: "authorization",
+			label: "Authorization header, if the API needs one",
+			type: "password",
+			secret: true,
+			placeholder: "Bearer …",
+			help: "Sent with those requests to that host only. Not saved, not drawn, not given to the agent.",
+		},
+	],
 	async collect(input, ctx): Promise<CollectResult> {
-		const root = folderInput(input, ctx.cwd);
 		const started = Date.now();
-		ctx.progress("Looking for OpenAPI and GraphQL files…");
-		const { specs, graphql, warnings } = findApiFiles(root);
-		const name = path.basename(root);
-		if (!specs.length && !graphql.length) return { summary: `No OpenAPI / Swagger spec or GraphQL schema found in ${root}.`, warnings };
+		const address = (input.url ?? "").trim();
+		const warnings: string[] = [];
+		let specs: ApiSpec[] = [];
+		let graphql: FoundFile[] = [];
+		let name = "";
+		let where = "";
+		// a repository's files, unless only an address was given
+		if (!address || (input.folder ?? "").trim()) {
+			const root = folderInput(input, ctx.cwd);
+			ctx.progress("Looking for OpenAPI and GraphQL files…");
+			const found = findApiFiles(root);
+			({ specs, graphql } = found);
+			warnings.push(...found.warnings);
+			name = path.basename(root);
+			where = root;
+		}
+		// the API itself, at its address
+		if (address) {
+			const asked = await probeApi(address, { authorization: input.authorization, signal: ctx.signal, progress: (t) => ctx.progress(t) });
+			const host = asked.origin.replace(/^https?:\/\//, "");
+			if (!asked.specs.length && !asked.graphql) {
+				if (!specs.length && !graphql.length) return { summary: nothingFound(asked), warnings };
+				warnings.push(nothingFound(asked));
+			}
+			specs = [...specs, ...asked.specs];
+			if (asked.graphql) graphql = [...graphql, { rel: asked.graphql.url, abs: asked.graphql.url, text: asked.graphql.sdl }];
+			name = name ? `${name} + ${host}` : host;
+			where = where ? `${where} or on ${host}` : host;
+		}
+		if (!specs.length && !graphql.length) return { summary: `No OpenAPI / Swagger spec or GraphQL schema found in ${where}.`, warnings };
 		const graphs: MapGraph[] = [];
 		const facts: string[] = [`# API surface of ${name}`];
 		const summary: string[] = [];

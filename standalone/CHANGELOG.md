@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Mapper: the API surface of a running API.** The API surface map takes an API's address
+  beside (or in place of) a folder, and asks the API for its own description: the address
+  itself, what its docs page and that page's scripts name, then the places frameworks serve
+  an OpenAPI document from; a GraphQL endpoint is asked for its schema. An optional
+  Authorization header is sent to that host only and is not saved. It only reads, stays on
+  the host it was given, asks at most 40 addresses, and when an API publishes no description
+  it says what it asked and what answered.
+
 ## [0.2.0]
 
 - The dot drawing in an empty chat no longer has a red dot in it: it is all in ink.
