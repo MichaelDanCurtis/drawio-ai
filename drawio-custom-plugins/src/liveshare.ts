@@ -1,4 +1,5 @@
 import { sendEvent } from "./vscode";
+import { liveState } from "./liveState";
 import * as m from "mithril";
 
 Draw.loadPlugin((ui) => {
@@ -44,6 +45,14 @@ Draw.loadPlugin((ui) => {
 		);
 		*/
 
+		// Which page is shown: other people's pointers and selections are of a page, and are only drawn
+		// for the one this person is on.
+		const reportPage = () => sendEvent({ event: "livePage", page: String((ui as any).currentPage?.getId?.() ?? "") });
+		(ui.editor as any).addListener("pageSelected", reportPage);
+
+		/** While the diagram is locked for a shared one to go in: whether it could be changed before. */
+		let enabledBeforeLock: boolean | undefined;
+
 		const cursors = new Set<Cursor>();
 		const rectangles = new Set<SelectionRectangle>();
 		const hightlights = new Highlights(graph);
@@ -64,9 +73,54 @@ Draw.loadPlugin((ui) => {
 			}
 
 			switch (data.action) {
+				case "liveCompose": {
+					const u = ui as any;
+					try {
+						const pages = u.applyPatches(u.getPagesForXml(data.xml), data.patches);
+						sendEvent({ event: "liveCompose", xml: u.getXmlForPages(pages), checksum: String(u.getHashValueForPages(pages)), message: data });
+					} catch (e: any) {
+						sendEvent({ event: "liveCompose", error: String(e?.message ?? e).slice(0, 300), message: data });
+					}
+					break;
+				}
+				case "liveLoading": {
+					liveState.loading = !!data.on;
+					if (!data.on) for (const f of liveState.loaded) f();
+					break;
+				}
+				case "liveLock": {
+					if (data.on) {
+						if (enabledBeforeLock === undefined) enabledBeforeLock = !!(graph as any).isEnabled();
+						(graph as any).setEnabled(false);
+						// The diagram that comes next is to take this one's place, not to be merged with it.
+						// draw.io merges what differs between the diagram it last took in and the new one, so
+						// anything changed since by other means would stay. Telling it that the diagram it
+						// last took in is this one, as it is now, makes the merge the whole difference: only
+						// what differs changes, and the result is the new diagram.
+						try {
+							const file = (ui as any).getCurrentFile?.();
+							if (file?.setShadowPages && (ui as any).pages) file.setShadowPages((ui as any).clonePages((ui as any).pages));
+						} catch {
+							// (then the app notices by the checksum, and loads the diagram from scratch)
+						}
+					} else if (enabledBeforeLock !== undefined) {
+						(graph as any).setEnabled(enabledBeforeLock);
+						enabledBeforeLock = undefined;
+					}
+					sendEvent({ event: "liveLock", on: !!data.on, message: data });
+					break;
+				}
+				case "setDiffSync": {
+					// draw.io's embed handler reads these each time the diagram changes
+					(ui as any).embedDiffSync = !!data.on;
+					(ui as any).embedDiffSyncPatchOnly = false;
+					if (data.on) reportPage();
+					break;
+				}
 				case "updateLiveshareViewState": {
-					for (const c of cursors) {
-						if (!data.cursors.some((c) => c.id === c.id)) {
+					// (someone who left, or took their pointer off the diagram, is no longer listed)
+					for (const c of [...cursors]) {
+						if (!data.cursors.some((listed) => listed.id === c.id)) {
 							cursors.delete(c);
 							c.dispose();
 						}
@@ -89,14 +143,15 @@ Draw.loadPlugin((ui) => {
 					for (const s of data.selectedCells) {
 						for (const selectedCellId of s.selectedCellIds) {
 							const cell = graph.model.cells[selectedCellId];
-							highlightInfos.push({ cell, color: s.color });
+							// (a cell of another page, or one that is gone, is not on this page to outline)
+							if (cell) highlightInfos.push({ cell, color: s.color });
 						}
 					}
 					hightlights.updateHighlights(highlightInfos);
 
-					for (const c of rectangles) {
+					for (const c of [...rectangles]) {
 						if (
-							!data.selectedRectangles.some((c) => c.id === c.id)
+							!data.selectedRectangles.some((listed) => listed.id === c.id)
 						) {
 							rectangles.delete(c);
 							c.dispose();

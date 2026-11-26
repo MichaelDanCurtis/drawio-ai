@@ -4,6 +4,7 @@ import * as path from "path";
 import { adapterPackages, AGENTS } from "./agents";
 import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
 import { DiagramWindow, type DrawioMenuItem, flushDrawioStorage } from "./diagramWindow";
+import { LiveDialog } from "./liveDialog";
 import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
 import { EXPORT_FORMATS } from "./exporter";
@@ -226,6 +227,9 @@ function buildMenu(): void {
 					submenu: EXPORT_FORMATS.map((f) => ({ label: f.label, click: () => void w()?.exportInteractive(f.format) })),
 				},
 				{ label: "Open from Another Tool…", click: () => void w()?.importFromOtherTool() },
+				{ type: "separator" },
+				{ label: w()?.live ? "Sharing…" : "Go Live…", accelerator: "CmdOrCtrl+Shift+L", click: () => LiveDialog.open(server, w(), "share") },
+				{ label: "Join a Shared Diagram…", click: () => LiveDialog.open(server, w(), "join") },
 				...(dm ? pick("file", ["vscode.import"]) : []),
 				{ type: "separator" },
 				...(dm ? pick("file", ["properties", "pageSetup"]) : []),
@@ -405,6 +409,16 @@ app.whenReady().then(async () => {
 		if (w === DiagramWindow.focused()) scheduleMenu();
 	};
 	DiagramWindow.onClosed = () => scheduleMenu();
+	// A shared diagram that ended by someone else's doing: the person is told, and the window that
+	// shows who is here follows.
+	DiagramWindow.onLive = (win) => {
+		LiveDialog.refresh(win);
+		if (win === DiagramWindow.focused()) scheduleMenu();
+	};
+	DiagramWindow.onLiveEnded = (win, why) => {
+		LiveDialog.refresh(win);
+		if (!win.win.isDestroyed()) void dialog.showMessageBox(win.win, { type: "info", message: why, detail: "The diagram stays here as it was. Save it to keep a copy." });
+	};
 	ready = true;
 
 	if (process.env.DRAWAI_E2E) {
@@ -425,7 +439,10 @@ app.on("window-all-closed", () => {
 	if (process.platform !== "darwin" || process.env.DRAWAI_E2E) app.quit();
 });
 
-app.on("before-quit", () => flushDrawioStorage());
+app.on("before-quit", () => {
+	DiagramWindow.quitting = true;
+	flushDrawioStorage();
+});
 app.on("will-quit", () => {
 	flushDrawioStorage();
 	desktopMcp?.dispose();

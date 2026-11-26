@@ -12,7 +12,7 @@ import { onSettingsChanged, settings, settingsPath, ShapeLocation, updateSetting
 import type { StaticServer } from "./staticServer";
 
 /** Top-level settings keys the window may change (the rest are the app's own bookkeeping). */
-const EDITABLE: (keyof Settings)[] = ["appearance", "chat", "chatWidth", "models", "editor", "agents", "shapes", "workshop"];
+const EDITABLE: (keyof Settings)[] = ["appearance", "chat", "chatWidth", "models", "editor", "agents", "shapes", "workshop", "sharing"];
 
 /** OmniDraw → Settings…: one window for the whole app. */
 export class SettingsWindow {

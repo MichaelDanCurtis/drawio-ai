@@ -1,6 +1,6 @@
 
 declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | GetVerticesAction
-    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState
+    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction | LiveLockAction | LiveLoadingAction | LiveComposeAction
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
@@ -8,7 +8,7 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction
     | DesktopShapesAction | DesktopInsertShapeAction | DesktopReportShapeSetsAction | DesktopSetShapeSetAction | DesktopGalleryResultsAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
-    | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
+    | UpdateLocalStorage | PluginLoaded | LiveLockEvent | LivePageEvent | LiveComposeEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
     | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
     | DesktopCommandEvent | DesktopStateEvent | DesktopShapeSetsEvent | DesktopGallerySearchEvent;
@@ -588,6 +588,69 @@ declare interface UpdateLiveshareViewState {
     cursors: ParticipantCursorInfo[];
     selectedCells: ParticipantSelectedCellsInfo[];
     selectedRectangles: ParticipantSelectedRectangleInfo[];
+}
+
+/**
+ * Turns draw.io's diff sync on or off for the diagram that is open (its embed protocol only
+ * takes it when a diagram is loaded, which would lose the undo history and the view). On:
+ * follow it with draw.io's own `resetDiff` action, which makes the diagram as it is the state
+ * changes are counted from; each change is then reported with a patch and a checksum.
+ */
+declare interface SetDiffSyncAction {
+    action: "setDiffSync";
+    on: boolean;
+}
+
+/**
+ * Stops the user from changing the diagram (on) or lets them again (off), for the moment a
+ * shared diagram is put in place of the open one. The answer says the lock has taken hold:
+ * every change reported before it was the user's; what is reported between it and the end of
+ * the replacing is the replacing itself.
+ */
+/**
+ * A shared diagram is being put in place of the open one, this person's own changes going back
+ * on top (on), or that is over (off). While it is going on, the AI review does not look at the
+ * diagram: see liveState.ts.
+ */
+declare interface LiveLoadingAction {
+    action: "liveLoading";
+    on: boolean;
+}
+
+/**
+ * Works out a diagram from a whole one and the changes made to it since, with draw.io's own
+ * functions and without touching the diagram that is open: what a shared diagram is on its board
+ * (a snapshot and the patches after it), as one diagram to put in place.
+ */
+declare interface LiveComposeAction {
+    action: "liveCompose";
+    xml: string;
+    patches: Record<string, unknown>[];
+}
+
+declare interface LiveComposeEvent {
+    event: "liveCompose";
+    xml?: string;
+    checksum?: string;
+    error?: string;
+    message: LiveComposeAction;
+}
+
+declare interface LiveLockAction {
+    action: "liveLock";
+    on: boolean;
+}
+
+/** The page of the diagram that is shown (its id): sent when diff sync is turned on and whenever another page is shown. */
+declare interface LivePageEvent {
+    event: "livePage";
+    page: string;
+}
+
+declare interface LiveLockEvent {
+    event: "liveLock";
+    on: boolean;
+    message: LiveLockAction;
 }
 
 declare interface ParticipantCursorInfo {

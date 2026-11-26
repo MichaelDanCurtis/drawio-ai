@@ -27,6 +27,8 @@ import { galleryPalette } from "./workshop/palette";
 import { styleValue, webappPicture } from "./workshop/shifter";
 import type { Insertable } from "./workshop/galleries";
 import type { StaticServer } from "./staticServer";
+import { LiveShare } from "./live/liveShare";
+import { parseBoardLink, serverOrigin } from "./live/protocol";
 
 const DIAGRAM_EXTS = ["drawio", "dio", "drawio.svg", "drawio.png", "dio.svg", "dio.png", "xml", "svg", "png"];
 let nextId = 1;
@@ -159,6 +161,38 @@ export class DiagramWindow {
 		const w = new DiagramWindow(server, file);
 		w.initial = initial;
 		await w.start(server);
+		return w;
+	}
+
+	/** Called when a window's sharing changed: it went live, someone came or left, it ended. */
+	public static onLive: ((w: DiagramWindow) => void) | undefined;
+	/** Called when a window's shared diagram ended other than by the window's own doing (the host stopped, the connection was lost). */
+	public static onLiveEnded: ((w: DiagramWindow, why: string) => void) | undefined;
+
+	/**
+	 * Opens a window on a diagram someone shared (Go live): the board's diagram, not a file.
+	 * `linkText` is the link as pasted.
+	 */
+	public static async join(server: StaticServer, linkText: string, name: string): Promise<DiagramWindow> {
+		const link = parseBoardLink(linkText);
+		if (!link) throw new Error("That is not a link to a shared diagram. It looks like https://…/b/… and comes from whoever pressed Go live.");
+		const w = await DiagramWindow.open(server, undefined, { xml: "", name: "Shared diagram" });
+		try {
+			await w.whenLoaded();
+			const live = await LiveShare.join(w.liveWindow(), link, { name });
+			if (w.win.isDestroyed()) {
+				// (the window was closed while joining: nobody is left in it to be on the board)
+				await live.stop();
+				throw new Error("The window was closed before the shared diagram had arrived.");
+			}
+			w.live = live;
+			// (what is in the window now is the board's, not an unsaved diagram of this person's)
+			w.setDirty(false);
+		} catch (e) {
+			w.closing = true;
+			w.win.close();
+			throw e;
+		}
 		return w;
 	}
 
@@ -784,6 +818,105 @@ export class DiagramWindow {
 		this.layout();
 	}
 
+	// ----- Go live: the diagram shared through an OmniPad board (live/liveShare.ts) -----
+
+	/** The shared session this window is in, while it is. */
+	public live: LiveShare | undefined;
+
+	/**
+	 * Puts the diagram on the OmniPad server at `serverAddress` and joins it as its host. Returns
+	 * the link to give to others (a secret: whoever has it can edit). The file stays the master copy.
+	 */
+	public async goLive(serverAddress: string, name: string): Promise<string> {
+		if (this.live && this.live.status !== "ended") return this.live.url;
+		const server = serverOrigin(serverAddress);
+		if (!server) throw new Error("Give the OmniPad server's address. It must be https, or a server on this computer.");
+		await this.whenLoaded();
+		// (a window that is closed while this is under way waits for it, and then ends what was started)
+		const starting = LiveShare.host(this.liveWindow(), server, { name, title: this.fileName() ?? "Untitled" });
+		this.startingLive = starting.then(
+			() => undefined,
+			() => undefined
+		);
+		let live: LiveShare;
+		try {
+			live = await starting;
+		} finally {
+			this.startingLive = undefined;
+		}
+		if (this.win.isDestroyed()) {
+			await live.stop();
+			throw new Error("The window was closed before sharing had started.");
+		}
+		this.live = live;
+		this.updateTitle();
+		DiagramWindow.onLive?.(this);
+		return live.url;
+	}
+
+	/** While sharing is being started (the board made, the connection opened): settles when that is over, either way. */
+	private startingLive: Promise<void> | undefined;
+
+	/** Stops sharing (the host: for everyone), or leaves (a guest). */
+	public async stopLive(): Promise<void> {
+		const live = this.live;
+		// (what this person changed last goes to the others first; if it cannot, they decide)
+		if (live?.status === "live" && live.session.unsent > 0 && !(await this.sharedOrLetGo(live.role === "host" ? "Stopping" : "Leaving"))) return;
+		this.live = undefined;
+		await live?.stop();
+		// (a guest who leaves keeps the diagram as it was: it is theirs now, and not saved anywhere)
+		if (live?.role === "guest" && !this.file) this.setDirty(true);
+		this.updateTitle();
+		DiagramWindow.onLive?.(this);
+	}
+
+	/** Set once the person chose to go although the board had not got their last changes. */
+	private leftUnsent = false;
+
+	/**
+	 * Waits a moment for this person's last changes to reach the board. True when they have, when
+	 * the session ended meanwhile, or when the person says to go on without them; false when they
+	 * chose to stay.
+	 */
+	private async sharedOrLetGo(doing: string): Promise<boolean> {
+		const live = this.live;
+		if (!live || (await live.shared(4000)) || this.live !== live) return true;
+		if (this.win.isDestroyed()) return true;
+		const r = await dialog.showMessageBox(this.win, {
+			type: "warning",
+			message: "Your last changes have not reached the shared diagram yet",
+			detail: `${doing} now means the others do not get them. Wait a little longer, or go on anyway.`,
+			buttons: ["Wait", `${doing === "Closing" ? "Close" : doing === "Stopping" ? "Stop" : "Leave"} Anyway`],
+			defaultId: 0,
+			cancelId: 0,
+		});
+		return r.response === 1;
+	}
+
+	private liveWindow() {
+		return {
+			client: this.client,
+			remoteChanged: () => {
+				// someone else's change is a change to the host's file, and to the copy a guest saved; a guest
+				// without one has no file of their own to save
+				if (this.live?.role !== "guest" || this.file) this.setDirty(true);
+				this.mapActions.refreshSummary();
+			},
+			changed: () => {
+				const live = this.live;
+				if (live?.status === "ended") {
+					// it ended by itself (the host stopped, the connection went): the diagram stays as it was
+					this.live = undefined;
+					if (live.role === "guest") this.setDirty(true);
+					DiagramWindow.onLiveEnded?.(this, live.ended ?? "The shared diagram ended.");
+				}
+				this.updateTitle();
+				DiagramWindow.onLive?.(this);
+			},
+			log: (text: string) => console.warn(text),
+		};
+	}
+
 	// ----- document -----
 
 	private setDirty(dirty: boolean): void {
@@ -793,7 +926,8 @@ export class DiagramWindow {
 
 	private updateTitle(): void {
 		if (this.win.isDestroyed()) return;
-		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""} — OmniDraw`);
+		const live = this.live?.status === "live" ? ` — Live${this.live.people().length ? ` (${this.live.people().length + 1})` : ""}` : "";
+		this.win.setTitle(`${this.fileName() ?? "Untitled"}${this.dirty ? " •" : ""}${live} — OmniDraw`);
 		this.win.setDocumentEdited(this.dirty);
 		if (this.file) this.win.setRepresentedFilename(this.file);
 	}
@@ -900,24 +1034,69 @@ export class DiagramWindow {
 		return { text: JSON.stringify({ path: target, bytes: r.bytes, note: r.note }), summary: `Exported ${path.basename(target)}` };
 	}
 
+	/** Set when the app was asked to quit: a window that held its closing back to finish something lets the quitting go on afterwards. */
+	public static quitting = false;
+
 	private async onClose(e: Electron.Event): Promise<void> {
-		if (this.closing || !this.dirty) return;
+		if (this.closing) return;
+		// Sharing is still being started: the board may be made on the server at any moment. The window
+		// waits for that, so that there is a session to end (and a board to close) when it goes.
+		if (this.startingLive) {
+			e.preventDefault();
+			await this.startingLive;
+			this.win.close();
+			return;
+		}
+		const live = this.live?.status === "live" ? this.live : undefined;
+		// What someone on a shared diagram changed last must have reached the board before the window
+		// goes: it is given a moment, and if it still has not, they are asked.
+		if (live && live.session.unsent > 0 && !this.leftUnsent) {
+			e.preventDefault();
+			if (await this.sharedOrLetGo("Closing")) {
+				// (again, now through the ordinary questions)
+				this.leftUnsent = true;
+				this.win.close();
+			} else DiagramWindow.quitting = false;
+			return;
+		}
+		// A guest's window that is no file holds the board's diagram, which stays on the board: there is
+		// nothing to save. One they saved a copy from is a file like any other, and is asked about.
+		const toSave = this.dirty && !(live?.role === "guest" && !this.file);
+		if (!toSave && !live) return;
 		e.preventDefault();
-		const r = await dialog.showMessageBox(this.win, {
-			type: "warning",
-			message: `Save changes to ${this.fileName() ?? "Untitled"}?`,
-			detail: "Your changes will be lost if you don't save them.",
-			buttons: ["Save", "Don't Save", "Cancel"],
-			defaultId: 0,
-			cancelId: 2,
-		});
-		if (r.response === 2) return;
-		if (r.response === 0 && !(await this.save())) return;
+		if (toSave) {
+			const r = await dialog.showMessageBox(this.win, {
+				type: "warning",
+				message: `Save changes to ${this.fileName() ?? "Untitled"}?`,
+				detail: "Your changes will be lost if you don't save them.",
+				buttons: ["Save", "Don't Save", "Cancel"],
+				defaultId: 0,
+				cancelId: 2,
+			});
+			// (staying after all: the next time the window is closed, what is unsent then is waited for again)
+			if (r.response === 2 || (r.response === 0 && !(await this.save()))) {
+				this.leftUnsent = false;
+				DiagramWindow.quitting = false;
+				return;
+			}
+		}
+		// The sharing is ended before the window goes, and waited for: a host's board is closed on the
+		// server (the link stops working, the guests are told) while the app is still there to do it.
+		if (this.live) {
+			const ending = this.live;
+			this.live = undefined;
+			await ending.stop();
+		}
 		this.closing = true;
 		this.win.close();
+		// (the app was quitting and this window held it up: it goes on)
+		if (live && DiagramWindow.quitting) setTimeout(() => app.quit(), 0);
 	}
 
 	private dispose(): void {
+		// (the host's window closing ends the board for everyone; a guest's just leaves)
+		void this.live?.stop();
+		this.live = undefined;
 		setTimeout(() => DiagramWindow.onClosed?.(), 0);
 		clearTimeout(this.mappedTimer);
 		clearInterval(this.chatAnim);

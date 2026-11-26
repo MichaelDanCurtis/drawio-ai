@@ -36,6 +36,8 @@ export interface E2eConfig {
 	present?: boolean;
 	/** Check map records, mapper_* tools, descriptions, health, recent changes, refresh, tours, Ask and the desktop endpoint. */
 	insights?: boolean;
+	/** Go live: a second window joins the first one's diagram through the relay at this address. */
+	live?: { relay: string };
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 	/** Check Settings, themes, icon styles, the toolbar, the chat's menus, sliding and docking, and shape folders. */
 	polish?: boolean;
@@ -123,6 +125,8 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 			await runPolish(w, server, config, log);
 		} else if (config.insights) {
 			await runInsights(w, config, log);
+		} else if (config.live) {
+			await runLive(w, server, config, log);
 		} else if (config.present) {
 			await runPresent(w, config, log);
 		} else if (config.map) {
@@ -566,6 +570,200 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
 	log("apiChatNewChat", { ...emptied, kept, strip: await strip(), items: w.chat.items.length });
 	expect(kept === "Keep this for later." && !(await strip()).length && !(await has("Before a new chat")) && !w.chat.items.some((i: any) => /Keep this/.test(i.text ?? "")), "what was waiting when New Chat was pressed was sent, or lost.");
 	expect(w.chat.items.length === 0, "the new chat starts with what the request it ended said of its end.");
+}
+
+/**
+ * Go live between two windows: the first shares its diagram, the second joins by the link, and
+ * each sees what the other does. Fails (throws) when the two diagrams differ at any step.
+ */
+async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	const cells = async (win: DiagramWindow) => (await win.client.aiGetModel({ scope: "page", includeStyles: true, maxCells: 5000 })).cells;
+	const picture = async (win: DiagramWindow) =>
+		JSON.stringify((await cells(win)).map((c: any) => [c.id, c.label ?? "", c.style ?? "", c.x, c.y, c.width, c.height, c.source ?? "", c.target ?? ""]).sort());
+	const same = async (a: DiagramWindow, b: DiagramWindow, what: string) => {
+		const end = Date.now() + 15_000;
+		for (;;) {
+			const [pa, pb] = [await picture(a), await picture(b)];
+			if (pa === pb) return JSON.parse(pa).length;
+			if (Date.now() > end) {
+				const [la, lb] = [JSON.parse(pa) as any[], JSON.parse(pb) as any[]].map((l) => new Map(l.map((r: any[]) => [r[0], JSON.stringify(r)])));
+				const ids = [...new Set([...la.keys(), ...lb.keys()])].filter((id) => la.get(id) !== lb.get(id));
+				throw new Error(`The two windows differ after ${what}: ${ids.slice(0, 4).map((id) => `${id}: ${la.get(id) ?? "(not there)"} / ${lb.get(id) ?? "(not there)"}`).join(" ; ")}`);
+			}
+			await new Promise((r) => setTimeout(r, 150));
+		}
+	};
+	const edit = (win: DiagramWindow, ops: any[]) => win.client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: true, review: false, user: true });
+	// Through the Go live window, as a person does it: the server and a name, Go live, the link; then Join with that link.
+	const { LiveDialog } = await import("./liveDialog");
+	const dialogPage = async () => (await waitFor(() => LiveDialog.window, 10_000)).webContents;
+	const inDialog = async (js: string) => (await dialogPage()).executeJavaScript(js);
+	const fill = (id: string, value: string) => inDialog(`(() => { const i = document.getElementById(${JSON.stringify(id)}); i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event("input", { bubbles: true })); })()`);
+	const shot = async (name: string) => fs.writeFileSync(path.join(config.out, name), (await (await dialogPage()).capturePage()).toPNG());
+	LiveDialog.open(server, w, "share");
+	await new Promise((r) => setTimeout(r, 1200));
+	log("liveDialogBefore", await inDialog(`[document.getElementById("title").textContent, document.getElementById("go").textContent, document.getElementById("live").hidden]`));
+	// (an address that is not one is refused in words, and nothing is shared)
+	await fill("server", "not an address");
+	await inDialog(`document.getElementById("go").click()`);
+	await new Promise((r) => setTimeout(r, 400));
+	log("liveDialogBadServer", await inDialog(`document.getElementById("error").textContent`));
+	await fill("server", config.live!.relay);
+	await fill("name", "Host");
+	await shot("live-dialog-share.png");
+	const t0 = Date.now();
+	await inDialog(`document.getElementById("go").click()`);
+	// while sharing is still starting (the server takes a moment to make the board), the host draws: it must not be lost
+	await new Promise((r) => setTimeout(r, 350));
+	await edit(w, [{ op: "addShape", label: "drawn while starting", x: 620, y: 300, width: 160, height: 40 }]);
+	log("liveStartedBeforeEditLanded", w.live?.status === "live");
+	await waitFor(() => (w.live?.status === "live" ? w.live : undefined), 20_000);
+	const link = w.live!.url;
+	log("liveLinkShape", /^http:\/\/127\.0\.0\.1:\d+\/b\/[A-Za-z0-9_-]{22}$/.test(link));
+	await new Promise((r) => setTimeout(r, 300));
+	log("liveDialogLive", await inDialog(`[document.getElementById("title").textContent, document.getElementById("url").value === ${JSON.stringify(link)}, document.getElementById("stop").textContent, document.querySelectorAll("#people li").length]`));
+	// someone else: Join, with the link
+	const before = new Set(DiagramWindow.all);
+	await inDialog(`document.getElementById("close").click()`);
+	await new Promise((r) => setTimeout(r, 300));
+	// (File → Join a Shared Diagram… with the shared diagram in front: the join form, not that diagram's sharing)
+	LiveDialog.open(server, w, "join");
+	await new Promise((r) => setTimeout(r, 1200));
+	log("liveDialogJoinWhileLive", await inDialog(`[document.getElementById("title").textContent, document.getElementById("join").hidden, document.getElementById("live").hidden, document.getElementById("tab-share").textContent]`));
+	await fill("link", "https://example.com/not-a-board");
+	await inDialog(`document.getElementById("go").click()`);
+	await new Promise((r) => setTimeout(r, 400));
+	log("liveDialogBadLink", await inDialog(`document.getElementById("error").textContent`));
+	await fill("link", link);
+	await fill("name2", "Guest");
+	await inDialog(`document.getElementById("go").click()`);
+	const guest = await waitFor(() => [...DiagramWindow.all].find((x) => !before.has(x) && x.live?.status === "live"), 20_000);
+	log("liveJoinMs", Date.now() - t0);
+	await new Promise((r) => setTimeout(r, 400));
+	log("liveDialogGuest", await inDialog(`[document.getElementById("title").textContent, document.getElementById("stop").textContent, Array.from(document.querySelectorAll("#people li")).map((li) => li.textContent)]`));
+	// the host's own window lists the guest
+	LiveDialog.open(server, w, "share");
+	await new Promise((r) => setTimeout(r, 500));
+	log("liveDialogHostPeople", await inDialog(`Array.from(document.querySelectorAll("#people li")).map((li) => li.textContent)`));
+	await shot("live-dialog-live.png");
+	log("liveCellsOnJoin", await same(w, guest, "joining"));
+	const drawnEarly = [(await cells(w)).some((c: any) => c.label === "drawn while starting"), (await cells(guest)).some((c: any) => c.label === "drawn while starting")];
+	log("liveDrawnWhileStarting", { host: drawnEarly[0], guest: drawnEarly[1] });
+	if (!drawnEarly[0] || !drawnEarly[1]) throw new Error("What the host drew while sharing was starting was lost.");
+	log("liveTitles", [w.win.getTitle(), guest.win.getTitle()]);
+
+	// the host draws; the guest sees it
+	const made = await edit(w, [{ op: "addShape", tempId: "h1", label: "from the host", x: 40, y: 40, width: 140, height: 50 }]);
+	const hostShape = Object.values(made.idMap)[0];
+	log("liveAfterHostEdit", await same(w, guest, "the host's change"));
+	// the guest draws and connects to the host's shape; the host sees it
+	const gm = await edit(guest, [
+		{ op: "addShape", tempId: "g1", label: "from the guest", x: 300, y: 160, width: 140, height: 50 },
+		{ op: "addEdge", source: hostShape, target: "g1", label: "together" },
+	]);
+	log("liveAfterGuestEdit", await same(w, guest, "the guest's change"));
+	// both at once, on different shapes and then on the same one
+	await Promise.all([edit(w, [{ op: "update", id: hostShape, label: "host renamed" }]), edit(guest, [{ op: "move", ids: [gm.idMap.g1], dx: 30, dy: 20 }])]);
+	log("liveAfterBothDifferent", await same(w, guest, "changes to different shapes at once"));
+	await Promise.all([edit(w, [{ op: "update", id: hostShape, label: "host says" }]), edit(guest, [{ op: "update", id: hostShape, label: "guest says" }])]);
+	log("liveAfterBothSame", await same(w, guest, "changes to the same shape at once"));
+	log("liveLabelBothSee", (await cells(w)).find((c: any) => c.id === hostShape)?.label);
+	// An AI change under review on the host, and a collaborator's change meanwhile: the review is of the
+	// AI's change only, and rejecting it leaves what the collaborator did.
+	const labelOf = async (win: DiagramWindow, id: string) => (await cells(win)).find((c: any) => c.id === id)?.label;
+	const quiet = async () => {
+		for (const end = Date.now() + 10_000; Date.now() < end && !(w.live?.session.settled && guest.live?.session.settled); ) await new Promise((r) => setTimeout(r, 50));
+	};
+	// (the two changes to one shape just before may still be settling: whose label it ends with is read once they have)
+	await quiet();
+	await same(w, guest, "settling");
+	const beforeAi = await labelOf(w, hostShape);
+	await w.client.aiApplyOps([{ op: "update", id: hostShape, label: "the AI's wording" }], { selectResult: false, flash: false, atomic: true, review: true });
+	await waitFor(() => w.client.pendingReview, 10_000);
+	// (the host's diagram is fetched from the board again while the review is open: the AI's change is
+	// taken out and put back, and must still be pending afterwards)
+	await quiet();
+	(w.live!.session as any).catchUp();
+	await new Promise((r) => setTimeout(r, 300));
+	await quiet();
+	await new Promise((r) => setTimeout(r, 300));
+	log("liveReviewAfterCatchUp", { pending: (w.client.pendingReview?.changes ?? []).length, label: await labelOf(w, hostShape) });
+	if ((w.client.pendingReview?.changes ?? []).length !== 1) throw new Error("The AI's change was no longer under review after the diagram was fetched again.");
+	await same(w, guest, "an AI change under review");
+	const guestMade = await edit(guest, [{ op: "addShape", tempId: "gr", label: "drawn during the review", x: 60, y: 420, width: 180, height: 40 }]);
+	await edit(guest, [{ op: "move", ids: [gm.idMap.g1], dx: 11, dy: 7 }]);
+	await same(w, guest, "a collaborator's changes during a review");
+	await new Promise((r) => setTimeout(r, 500));
+	const pending = (w.client.pendingReview?.changes ?? []).map((c: any) => c.id ?? c.cellId ?? JSON.stringify(c).slice(0, 60));
+	log("liveReviewPending", pending);
+	w.client.aiResolveReview("reject");
+	await waitFor(() => (w.client.pendingReview ? undefined : true), 10_000);
+	await same(w, guest, "rejecting the AI's change");
+	const afterReject = { aiShape: await labelOf(w, hostShape), wasBefore: beforeAi, collaboratorsShapeOnHost: (await cells(w)).some((c: any) => c.id === guestMade.idMap.gr), collaboratorsShapeOnGuest: (await cells(guest)).some((c: any) => c.id === guestMade.idMap.gr) };
+	log("liveReviewAfterReject", afterReject);
+	if (afterReject.aiShape !== beforeAi || !afterReject.collaboratorsShapeOnHost || !afterReject.collaboratorsShapeOnGuest || pending.length !== 1) throw new Error("Rejecting the AI's change did not leave exactly the collaborator's changes.");
+	// the guest deletes; undo on the host does not bring it back as its own change
+	await edit(guest, [{ op: "delete", ids: [gm.idMap.g1], includeEdges: true }]);
+	log("liveAfterDelete", await same(w, guest, "a deletion"));
+	log("livePeople", [w.live?.people().map((p) => p.name), guest.live?.people().map((p) => p.name)]);
+	log("liveDirty", { hostEdited: w.win.isDocumentEdited(), guestEdited: guest.win.isDocumentEdited() });
+	log("liveFullLoads", { host: w.live?.fullLoads, guest: guest.live?.fullLoads });
+	if (w.live?.fullLoads || guest.live?.fullLoads) throw new Error("A shared diagram had to be loaded from scratch: merging it in did not give it.");
+	log("liveSession", { host: { revision: w.live?.session.revision, settled: w.live?.session.settled }, guest: { revision: guest.live?.session.revision, settled: guest.live?.session.settled } });
+	fs.writeFileSync(path.join(config.out, "live-host.png"), (await w.editorView.webContents.capturePage()).toPNG());
+	fs.writeFileSync(path.join(config.out, "live-guest.png"), (await guest.editorView.webContents.capturePage()).toPNG());
+
+	// the host stops: the guest is told, keeps the diagram, and is no longer live
+	let ended: string | undefined;
+	DiagramWindow.onLiveEnded = (_win, why) => (ended = why);
+	await w.stopLive();
+	await waitFor(() => ended, 10_000);
+	log("liveEndedForGuest", ended);
+	log("liveAfterStop", { hostLive: !!w.live, guestLive: !!guest.live, guestKeeps: (await cells(guest)).length, titles: [w.win.getTitle(), guest.win.getTitle()] });
+	// a guest who leaves by themselves keeps the diagram too, as an unsaved one
+	const link2 = await w.goLive(config.live!.relay, "Host");
+	const guest2 = await DiagramWindow.join(server, link2, "Second guest");
+	log("liveSecondGuestBeforeLeaving", { edited: guest2.win.isDocumentEdited(), live: guest2.live?.status });
+	await guest2.stopLive();
+	log("liveSecondGuestAfterLeaving", { edited: guest2.win.isDocumentEdited(), live: !!guest2.live, keeps: (await cells(guest2)).length, hostStillLive: w.live?.status });
+	await w.stopLive();
+	// The host closes its window while sharing: the board is ended on the server before the window is gone
+	// (and so before the app could be), and the guest is told.
+	const hostWin = await DiagramWindow.open(server, undefined, { xml: await w.client.getXml(), name: "A second diagram" });
+	await hostWin.whenLoaded();
+	const link3 = await hostWin.goLive(config.live!.relay, "Host");
+	const guest3 = await DiagramWindow.join(server, link3, "Third guest");
+	const id3 = link3.split("/b/")[1];
+	let ended3: string | undefined;
+	DiagramWindow.onLiveEnded = (win, why) => win === guest3 && (ended3 = why);
+	(hostWin as any).dirty = false; // (nothing to save: closing is not held up by a question)
+	let goneAtClose: number | undefined;
+	hostWin.win.once("closed", () => void fetch(`${config.live!.relay}/api/boards/${id3}`).then((r) => (goneAtClose = r.status)));
+	hostWin.win.close();
+	await waitFor(() => goneAtClose, 10_000);
+	await waitFor(() => ended3, 10_000);
+	log("liveHostClosedWindow", { boardWhenTheWindowWasGone: goneAtClose, guestTold: ended3 });
+	if (goneAtClose !== 404) throw new Error("The board outlived its host's window.");
+	// A window closed while sharing is still starting (the server is making the board): it waits, and
+	// the board that was made is closed with it rather than left behind.
+	const early = await DiagramWindow.open(server, undefined, { xml: await w.client.getXml(), name: "A third diagram" });
+	await early.whenLoaded();
+	(early as any).dirty = false;
+	const startingEarly = early.goLive(config.live!.relay, "Host").then(
+		(url) => url,
+		(e) => `failed: ${e?.message ?? e}`
+	);
+	await new Promise((r) => setTimeout(r, 300));
+	let earlyGone: number | undefined;
+	early.win.once("closed", () => void startingEarly.then((url) => (url.startsWith("http") ? fetch(`${config.live!.relay}/api/boards/${url.split("/b/")[1]}`).then((r) => (earlyGone = r.status)) : (earlyGone = -1))));
+	early.win.close();
+	await waitFor(() => earlyGone, 15_000);
+	log("liveClosedWhileStarting", { started: (await startingEarly).startsWith("http") ? "yes" : await startingEarly, boardWhenTheWindowWasGone: earlyGone });
+	if (earlyGone !== 404 && earlyGone !== -1) throw new Error("A board made while its window was closing was left behind.");
+	// after that a change in one is not a change in the other
+	await edit(w, [{ op: "addShape", label: "after", x: 500, y: 40, width: 80, height: 40 }]);
+	await new Promise((r) => setTimeout(r, 800));
+	log("liveApartAfterStop", (await cells(w)).length - (await cells(guest)).length);
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {
