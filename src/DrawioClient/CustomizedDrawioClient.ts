@@ -429,6 +429,16 @@ export class CustomizedDrawioClient extends DrawioClient<
 		this.sendCustomAction({ action: "setDiffSync", on });
 	}
 
+	/**
+	 * Stops the user from changing the diagram, or lets them again, for the moment a shared
+	 * diagram is put in place of the open one. Resolves when the editor says the lock has taken
+	 * hold (or been lifted): changes reported on onPatch before that were the user's. An editor
+	 * that does not answer (an old page) is not waited for beyond `timeoutMs`.
+	 */
+	public async liveLock(on: boolean, timeoutMs = 3000): Promise<void> {
+		await withTimeout(this.sendCustomActionExpectResponse({ action: "liveLock", on }), timeoutMs, "").catch(() => undefined);
+	}
+
 	public setNodeSelectionEnabled(enabled: boolean): void {
 		this.sendCustomAction({
 			action: "setNodeSelectionEnabled",

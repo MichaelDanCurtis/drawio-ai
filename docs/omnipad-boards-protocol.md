@@ -175,7 +175,9 @@ applied the two the other way round, and has to catch up. The rules:
    in the order they were made and without a checksum. A change made while all that is going
    in (the snapshot, the patches, the held changes) is sent after them, in its turn; where it
    landed among them in the client's own diagram need not be where the board puts it, so the
-   client reconciles once more when these are acknowledged. The same holds for a host's first
+   client reconciles once more when these are acknowledged. (OmniDraw locks its editor for the
+   moment the diagram is replaced, so that what draw.io reports of the replacing itself is not
+   mistaken for a change of the person's, and nothing of theirs is mistaken for it.) The same holds for a host's first
    moments: what it changes between reading the diagram to send and receiving the first
    `Board` is held and sent then.
    A `Board` can also arrive unasked (rule 7) while changes of the client's own are still

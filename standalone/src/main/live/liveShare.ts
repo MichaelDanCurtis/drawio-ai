@@ -56,6 +56,10 @@ class DrawioEditor implements LiveEditor {
 	}
 
 	public async replace(xml: string, expected?: string): Promise<string> {
+		// The diagram is locked while another takes its place. What draw.io reports as changes until
+		// the lock has taken hold is still the user's (it is passed on, and put on top again by the
+		// session); what it reports from then until the new diagram is in is the replacing itself.
+		await this.client.liveLock(true);
 		this.replacing = true;
 		try {
 			// draw.io merges the diagram into the open one, which gives exactly that diagram unless the
@@ -63,12 +67,15 @@ class DrawioEditor implements LiveEditor {
 			let checksum = await this.client.resetDiff(xml);
 			if (expected !== undefined && checksum !== expected) {
 				await this.client.loadXmlLike(xml);
+				// (a diagram loaded from scratch can be changed again: locked once more until it is the starting point)
+				await this.client.liveLock(true);
 				checksum = await this.start();
 			}
 			this.remoteChanged();
 			return checksum;
 		} finally {
 			this.replacing = false;
+			void this.client.liveLock(false);
 		}
 	}
 

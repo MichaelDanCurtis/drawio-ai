@@ -44,6 +44,9 @@ Draw.loadPlugin((ui) => {
 		);
 		*/
 
+		/** While the diagram is locked for a shared one to go in: whether it could be changed before. */
+		let enabledBeforeLock: boolean | undefined;
+
 		const cursors = new Set<Cursor>();
 		const rectangles = new Set<SelectionRectangle>();
 		const hightlights = new Highlights(graph);
@@ -64,6 +67,17 @@ Draw.loadPlugin((ui) => {
 			}
 
 			switch (data.action) {
+				case "liveLock": {
+					if (data.on) {
+						if (enabledBeforeLock === undefined) enabledBeforeLock = !!(graph as any).isEnabled();
+						(graph as any).setEnabled(false);
+					} else if (enabledBeforeLock !== undefined) {
+						(graph as any).setEnabled(enabledBeforeLock);
+						enabledBeforeLock = undefined;
+					}
+					sendEvent({ event: "liveLock", on: !!data.on, message: data });
+					break;
+				}
 				case "setDiffSync": {
 					// draw.io's embed handler reads these each time the diagram changes
 					(ui as any).embedDiffSync = !!data.on;

@@ -9,6 +9,7 @@ require("./helpers/ts");
 const { LiveSession } = require("../src/main/live/session");
 const { createBoard, boardExists, closeBoard, openBoard, BoardError } = require("../src/main/live/connection");
 const { parseBoardLink, boardLink, serverOrigin, socketUrl, touched, apart } = require("../src/main/live/protocol");
+const { LiveShare } = require("../src/main/live/liveShare");
 const { startBoardRelay } = require("./helpers/boardRelay");
 
 const until = async (what, ms = 4000) => {
@@ -419,6 +420,96 @@ test("a board's diagram that cannot be put in place ends the session; a change t
 	assert.equal(bo.diagram.cells.a.label, "from Ann");
 	assert.ok(same(ann, bo));
 	assert.equal(bo.session.closed, undefined, "still on the board");
+});
+
+/** A stand-in for the editor bridge (CustomizedDrawioClient), over the small diagram model: what LiveShare uses of it. */
+function editorStub(diagram) {
+	const event = () => {
+		const subs = new Set();
+		return { sub: (f) => (subs.add(f), { dispose: () => subs.delete(f) }), emit: (v) => subs.forEach((f) => f(v)) };
+	};
+	const wait = (ms) => (ms ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
+	const client = {
+		onPatch: event(),
+		onCursorChanged: event(),
+		onSelectedCellsChanged: event(),
+		onSelectedRectangleChanged: event(),
+		onFocusChanged: event(),
+		calls: [],
+		locked: false,
+		/** The user changes the diagram: refused while it is locked, as the editor refuses. */
+		userEdit(patch) {
+			if (client.locked) return false;
+			diagram.patch(patch);
+			client.onPatch.emit({ patch, checksum: diagram.checksum() });
+			return true;
+		},
+		setDiffSync() {},
+		updateLiveshareViewState() {},
+		async liveLock(on) {
+			client.calls.push(`lock:${on}`);
+			client.beforeLock?.(on);
+			await wait(client.lockMs);
+			client.locked = on;
+		},
+		async resetDiff(xml) {
+			if (xml === undefined) return diagram.checksum();
+			client.calls.push("replace");
+			const before = diagram.checksum();
+			await wait(client.replaceMs);
+			diagram.cells = JSON.parse(xml);
+			// (the editor reports the replacing as if it were a change, as draw.io does)
+			if (diagram.checksum() !== before) client.onPatch.emit({ patch: update("a", { label: "reported by the replacing" }), checksum: diagram.checksum() });
+			return diagram.checksum();
+		},
+		async loadXmlLike(xml) {
+			diagram.cells = JSON.parse(xml);
+		},
+		async applyPatch(p) {
+			diagram.patch(p);
+			return diagram.checksum();
+		},
+		getXml: async () => diagram.xml(),
+		diffChecksum: async () => diagram.checksum(),
+	};
+	return client;
+}
+
+test("what someone changes in the moment their diagram is being replaced is theirs and is kept; what the editor reports of the replacing is not sent", async () => {
+	const b = await board();
+	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });
+	// Bo joins through the app's own wiring, with an editor that takes a moment to lock and to replace
+	const diagram = new Diagram({ x: { label: "what was in his window" } });
+	const client = editorStub(diagram);
+	client.lockMs = 30;
+	client.replaceMs = 30;
+	const log = [];
+	// he draws in the moment between the board's diagram arriving and the lock taking hold
+	let drew = false;
+	client.beforeLock = (on) => {
+		if (on && !drew) {
+			drew = true;
+			setTimeout(() => assert.equal(client.userEdit(update("b", { color: "red" })), true), 5);
+		}
+	};
+	const bo = await LiveShare.join({ client, remoteChanged() {}, changed() {}, log: (t) => log.push(t) }, b.link, { name: "Bo" });
+	assert.equal(bo.status, "live");
+	assert.equal(await bo.shared(3000), true);
+	await until(() => ann.session.revision === 1);
+	assert.deepEqual(client.calls.slice(0, 3), ["lock:true", "replace", "lock:false"]);
+	assert.equal(client.locked, false, "and it can be changed again afterwards");
+	assert.deepEqual(diagram.cells, { a: { label: "start" }, b: { label: "other", color: "red" } }, "the board's diagram, with what he drew on top");
+	assert.deepEqual(ann.diagram.cells, diagram.cells, "and the board has it");
+	assert.equal(b.relay.stats(b.link.id).revision, 1, "one change reached the board: his, not the replacing reported as one");
+	// while it is locked the editor takes no change at all
+	client.locked = true;
+	assert.equal(client.userEdit(update("a", { label: "no" })), false);
+	client.locked = false;
+	// from here on what he does goes straight out
+	client.userEdit(update("a", { label: "after" }));
+	await until(() => ann.diagram.cells.a.label === "after");
+	await bo.stop();
+	assert.deepEqual(log, []);
 });
 
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {

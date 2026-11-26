@@ -1,6 +1,6 @@
 
 declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | GetVerticesAction
-    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction
+    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction | LiveLockAction
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
@@ -8,7 +8,7 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction
     | DesktopShapesAction | DesktopInsertShapeAction | DesktopReportShapeSetsAction | DesktopSetShapeSetAction | DesktopGalleryResultsAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
-    | UpdateLocalStorage | PluginLoaded | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
+    | UpdateLocalStorage | PluginLoaded | LiveLockEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
     | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
     | DesktopCommandEvent | DesktopStateEvent | DesktopShapeSetsEvent | DesktopGallerySearchEvent;
@@ -599,6 +599,23 @@ declare interface UpdateLiveshareViewState {
 declare interface SetDiffSyncAction {
     action: "setDiffSync";
     on: boolean;
+}
+
+/**
+ * Stops the user from changing the diagram (on) or lets them again (off), for the moment a
+ * shared diagram is put in place of the open one. The answer says the lock has taken hold:
+ * every change reported before it was the user's; what is reported between it and the end of
+ * the replacing is the replacing itself.
+ */
+declare interface LiveLockAction {
+    action: "liveLock";
+    on: boolean;
+}
+
+declare interface LiveLockEvent {
+    event: "liveLock";
+    on: boolean;
+    message: LiveLockAction;
 }
 
 declare interface ParticipantCursorInfo {
