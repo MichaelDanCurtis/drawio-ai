@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- A new app icon: the dot mark the app already carries inside (a square of white dots on black,
+  one of them red) in place of the orange one. Its drawing is `build/icon.svg`.
+
 ## [0.3.0]
 
 - **Mapper: the API surface of a running API.** The API surface map takes an API's address
