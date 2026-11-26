@@ -835,18 +835,44 @@ export class DiagramWindow {
 	/** Stops sharing (the host: for everyone), or leaves (a guest). */
 	public async stopLive(): Promise<void> {
 		const live = this.live;
+		// (what this person changed last goes to the others first; if it cannot, they decide)
+		if (live?.status === "live" && live.session.unsent > 0 && !(await this.sharedOrLetGo(live.role === "host" ? "Stopping" : "Leaving"))) return;
 		this.live = undefined;
 		await live?.stop();
 		this.updateTitle();
 		DiagramWindow.onLive?.(this);
 	}
 
+	/** Set once the person chose to go although the board had not got their last changes. */
+	private leftUnsent = false;
+
+	/**
+	 * Waits a moment for this person's last changes to reach the board. True when they have, when
+	 * the session ended meanwhile, or when the person says to go on without them; false when they
+	 * chose to stay.
+	 */
+	private async sharedOrLetGo(doing: string): Promise<boolean> {
+		const live = this.live;
+		if (!live || (await live.shared(4000)) || this.live !== live) return true;
+		if (this.win.isDestroyed()) return true;
+		const r = await dialog.showMessageBox(this.win, {
+			type: "warning",
+			message: "Your last changes have not reached the shared diagram yet",
+			detail: `${doing} now means the others do not get them. Wait a little longer, or go on anyway.`,
+			buttons: ["Wait", `${doing === "Closing" ? "Close" : doing === "Stopping" ? "Stop" : "Leave"} Anyway`],
+			defaultId: 0,
+			cancelId: 0,
+		});
+		return r.response === 1;
+	}
+
 	private liveWindow() {
 		return {
 			client: this.client,
 			remoteChanged: () => {
-				// someone else's change is a change to the host's file; a guest has no file of their own to save
-				if (this.live?.role !== "guest") this.setDirty(true);
+				// someone else's change is a change to the host's file, and to the copy a guest saved; a guest
+				// without one has no file of their own to save
+				if (this.live?.role !== "guest" || this.file) this.setDirty(true);
 				this.mapActions.refreshSummary();
 			},
 			changed: () => {
@@ -983,30 +1009,20 @@ export class DiagramWindow {
 
 	private async onClose(e: Electron.Event): Promise<void> {
 		if (this.closing) return;
-		// A guest's window holds the board's diagram, which stays on the board: there is nothing to save.
-		// But what they changed last must have reached the board first: it is given a moment, and if it
-		// still has not (a slow connection, the diagram being fetched again), they are asked.
-		if (this.live?.role === "guest") {
-			if (this.live.session.unsent === 0) return;
+		// What someone on a shared diagram changed last must have reached the board before the window
+		// goes: it is given a moment, and if it still has not, they are asked.
+		if (this.live?.status === "live" && this.live.session.unsent > 0 && !this.leftUnsent) {
 			e.preventDefault();
-			const live = this.live;
-			if (!(await live.shared(4000)) && this.live === live) {
-				const r = await dialog.showMessageBox(this.win, {
-					type: "warning",
-					message: "Your last changes have not reached the shared diagram yet",
-					detail: "Closing now loses them. Keep the window open a little longer, or close anyway.",
-					buttons: ["Keep Open", "Close Anyway"],
-					defaultId: 0,
-					cancelId: 0,
-				});
-				if (r.response === 0) return;
+			if (await this.sharedOrLetGo("Closing")) {
+				// (again, now through the ordinary questions)
+				this.leftUnsent = true;
+				this.win.close();
 			}
-			// (the session may have ended meanwhile: the diagram is then theirs to save or not, and they are asked that)
-			if (this.live !== live && this.dirty) return void this.win.close();
-			this.closing = true;
-			this.win.close();
 			return;
 		}
+		// A guest's window that is no file holds the board's diagram, which stays on the board: there is
+		// nothing to save. One they saved a copy from is a file like any other, and is asked about.
+		if (this.live?.role === "guest" && !this.file) return;
 		if (!this.dirty) return;
 		e.preventDefault();
 		const r = await dialog.showMessageBox(this.win, {
@@ -1017,8 +1033,11 @@ export class DiagramWindow {
 			defaultId: 0,
 			cancelId: 2,
 		});
-		if (r.response === 2) return;
-		if (r.response === 0 && !(await this.save())) return;
+		// (staying after all: the next time the window is closed, what is unsent then is waited for again)
+		if (r.response === 2 || (r.response === 0 && !(await this.save()))) {
+			this.leftUnsent = false;
+			return;
+		}
 		this.closing = true;
 		this.win.close();
 	}
