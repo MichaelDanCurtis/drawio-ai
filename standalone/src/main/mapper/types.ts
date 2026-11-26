@@ -94,6 +94,8 @@ export interface FieldDef {
 	dynamic?: boolean;
 	/** Never stored or shown to the agent (passwords, connection strings). */
 	secret?: boolean;
+	/** A folder field that also takes a GitHub repository (its address, or owner/name), which is downloaded and read as a folder. */
+	repository?: boolean;
 	/** Only shown when another field has one of these values, e.g. { field: "engine", values: ["postgres"] }. */
 	showIf?: { field: string; values: string[] };
 }
@@ -117,6 +119,16 @@ export interface CollectContext {
 	signal: AbortSignal;
 	/** The diagram's folder (default folder for file and folder fields). */
 	cwd: string;
+	/**
+	 * Downloads a repository (its newest state, read-only towards it) into the app's own folder
+	 * and gives the folder to map: see repository.ts. Not there in a program that keeps none.
+	 */
+	repository?(spec: import("./repository").RepositorySpec): Promise<import("./repository").Fetched>;
+	/**
+	 * For a folder a saved map was made from: if it is in a downloaded repository, makes sure the
+	 * download is still (or again) on this computer. See keepDownloaded in repository.ts.
+	 */
+	keepRepository?(folder: string): Promise<"elsewhere" | "there" | "restored">;
 }
 
 /** A problem the Mapper found, drawn as a badge on the shapes it concerns. */
@@ -153,6 +165,12 @@ export interface CollectResult {
 	/** One line for the user, e.g. "42 resources in 3 resource groups". */
 	summary: string;
 	warnings?: string[];
+	/**
+	 * The folder that was read, when it is not the one typed: a repository was downloaded, and
+	 * this is where it is (the agent reads its files there). `source` names what it is a copy of.
+	 */
+	root?: string;
+	source?: string;
 	/**
 	 * Other folders the same map could be made of, where this one held little or nothing (the
 	 * working copies of a repository whose main checkout is nearly empty). The dialog offers them.
