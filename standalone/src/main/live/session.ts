@@ -146,7 +146,24 @@ export class LiveSession {
 
 	/** A message from the board. */
 	public receive(msg: ServerMessage): void {
-		this.work = this.work.then(() => this.handle(msg)).catch((e) => this.events.problem?.(`A message from the board could not be dealt with: ${String(e?.message ?? e).slice(0, 200)}`));
+		this.work = this.work
+			.then(() => this.handle(msg))
+			.catch((e) => {
+				this.events.problem?.(`A message from the board could not be dealt with: ${String(e?.message ?? e).slice(0, 200)}`);
+				if (this.closed) return;
+				if ("Board" in msg) {
+					// The board's diagram did not go in: this window has neither that nor a diagram it can
+					// vouch for. Carrying on would hold every change back for good.
+					this.closed = "failed";
+					if (this.quiet) clearTimeout(this.quiet);
+					this.events.closed?.(this.closed);
+				} else if ("Patch" in msg) {
+					// someone's change did not go in: this diagram lacks it, so the board's is fetched
+					this.revision = Math.max(this.revision, msg.Patch.revision);
+					this.mustCatchUp = this.mustCatchUpWhatever = true;
+					if (this.pending.length === 0) this.catchUp();
+				}
+			});
 	}
 
 	public dispose(): void {

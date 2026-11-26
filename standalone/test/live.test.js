@@ -379,6 +379,45 @@ test("what someone did before the board's diagram was read is in it; only what c
 	session.dispose();
 });
 
+test("a board's diagram that cannot be put in place ends the session; a change that cannot be applied makes it fetch the board's", async () => {
+	// the first diagram does not load: not live, and nothing is held for a day that never comes
+	const broken = new Diagram();
+	broken.replace = async () => {
+		throw new Error("the editor did not answer");
+	};
+	const events = { closed: undefined, problems: [] };
+	const sent = [];
+	const session = new LiveSession(broken, (m) => sent.push(m), { closed: (r) => (events.closed = r), problem: (t) => events.problems.push(t) }, { snapshotQuietMs: 60_000 });
+	session.receive({ Identity: { id: 2, role: "editor", owner: false } });
+	session.receive({ Board: { revision: 0, epoch: 0, xml: "{}", checksum: "x", patches: [] } });
+	await session.idle();
+	assert.deepEqual([session.ready, session.closed, events.closed], [false, "failed", "failed"]);
+	assert.match(events.problems[0], /could not be dealt with: the editor did not answer/);
+	session.localPatch(update("a", { label: "x" }), "sum");
+	assert.equal(session.heldCount, 0, "a change after that is not kept waiting");
+	assert.equal(sent.length, 0);
+
+	// later on: one of someone's changes does not go in. This diagram now lacks it: the board's is fetched
+	const b = await board();
+	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });
+	const bo = await join(b.link, "Bo");
+	const apply = bo.diagram.apply.bind(bo.diagram);
+	let failOnce = true;
+	bo.diagram.apply = async (p) => {
+		if (failOnce) {
+			failOnce = false;
+			throw new Error("draw.io refused the change");
+		}
+		return apply(p);
+	};
+	ann.change(update("a", { label: "from Ann" }));
+	await until(() => bo.events.replaced.length === 2 && bo.session.settled);
+	assert.equal(bo.sent.filter((m) => m.Resync).length, 1);
+	assert.equal(bo.diagram.cells.a.label, "from Ann");
+	assert.ok(same(ann, bo));
+	assert.equal(bo.session.closed, undefined, "still on the board");
+});
+
 test("the board asks its host for the whole diagram when the list of changes is long; a later joiner starts from that", async () => {
 	const b = await board(undefined, { maxPatches: 3 });
 	const ann = await join(b.link, "Ann", { ownerKey: b.ownerKey });

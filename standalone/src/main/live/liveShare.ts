@@ -106,7 +106,18 @@ export class LiveShare {
 		this.editor = new DrawioEditor(win.client, () => win.remoteChanged());
 		this.session = new LiveSession(this.editor, (m) => this.socket?.send(m), {
 			people: () => this.showPeople(),
-			closed: (reason) => this.end(reason === "host" ? "The host stopped sharing." : reason === "expired" ? "The shared diagram expired." : reason === "removed" ? "You were removed from the shared diagram." : "The shared diagram was closed."),
+			closed: (reason) =>
+				this.end(
+					reason === "host"
+						? "The host stopped sharing."
+						: reason === "expired"
+						? "The shared diagram expired."
+						: reason === "removed"
+						? "You were removed from the shared diagram."
+						: reason === "failed"
+						? "The shared diagram could not be loaded into this window, so sharing stopped here."
+						: "The shared diagram was closed."
+				),
 			replaced: () => win.changed(),
 			problem: (text) => win.log(`live: ${text}`),
 		});
@@ -224,6 +235,8 @@ export class LiveShare {
 						// (the diagram is in once the session has dealt with it)
 						void this.session.idle().then(() => {
 							if (settled) return;
+							// (it arrived and could not be put in place: that is not being live)
+							if (!this.session.ready) return fail(new BoardError("The shared diagram arrived but could not be loaded into this window."));
 							settled = true;
 							clearTimeout(timer);
 							this.status = "live";
