@@ -630,10 +630,11 @@ Draw.loadPlugin((ui: any) => {
 			}
 			return [...routed];
 		}
-		// (every other layout moves the shapes it arranges and re-draws the connectors between them, whether or not they were named)
+		// Every other layout moves the shapes it arranges, whether or not they were named. A grid
+		// changes nothing else; the others also re-draw the connectors between those shapes.
 		refuseHeld(
 			"This layout",
-			(model.getChildren(parent) || []).filter((c: any) => !cellFilter || cellFilter(c))
+			op.type === "grid" ? vertices : (model.getChildren(parent) || []).filter((c: any) => !cellFilter || cellFilter(c))
 		);
 		if (op.type === "grid") {
 			const cols = Math.ceil(Math.sqrt(vertices.length));
