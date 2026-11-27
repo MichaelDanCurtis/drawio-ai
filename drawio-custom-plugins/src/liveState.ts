@@ -10,4 +10,10 @@ export const liveState = {
 	loading: false,
 	/** Called when a loading is over. */
 	loaded: [] as (() => void)[],
+	/**
+	 * `locked`: the cells on the page shown that someone else on the shared diagram holds (they
+	 * have them selected). The server refuses a change that touches one, whole, so nothing here
+	 * should make one: they cannot be selected, and the AI's edits leave them be.
+	 */
+	locked: new Set<string>(),
 };

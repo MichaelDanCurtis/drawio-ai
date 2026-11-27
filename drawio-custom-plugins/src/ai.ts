@@ -536,6 +536,26 @@ Draw.loadPlugin((ui: any) => {
 		return new Promise((resolve) => ui.executeLayout(exec, false, resolve));
 	}
 
+	/**
+	 * On a shared diagram (Go live): refuses when an operation would change a shape someone else
+	 * has selected, which it was not handed by id (the resolver in applyOpsInner turns those
+	 * down): the shapes a layout arranges, what goes with a shape that is deleted. The server
+	 * would refuse the whole edit; saying so here fails this one operation, in words.
+	 * `deep`: what is inside the cells counts too.
+	 */
+	function refuseHeld(what: string, cellsToChange: any[], deep = false): void {
+		if (liveState.locked.size === 0) return;
+		const stack = [...cellsToChange];
+		while (stack.length > 0) {
+			const cell = stack.pop();
+			if (!cell) continue;
+			if (liveState.locked.has(cell.id)) {
+				throw new Error(`${what} would change "${cell.id}", which someone else on the shared diagram has selected right now. Leave it out, or try again once they have let go of it.`);
+			}
+			if (deep) stack.push(...(model.getChildren(cell) || []));
+		}
+	}
+
 	/** draw.io >= 32 lays out with ELK, which computes asynchronously and then applies in one model update. */
 	async function layoutCells(op: Extract<AiOp, { op: "layout" }>, resolve: Resolver): Promise<string[]> {
 		// ELK computes asynchronously: never apply its result to a page the user switched to meanwhile.
@@ -575,7 +595,9 @@ Draw.loadPlugin((ui: any) => {
 			// along the same stretch are set apart. Only right-angled connectors are routed (the
 			// router makes every connector it touches one): crow's-foot, curved and straight
 			// ones keep their look. So does draw.io's "Curved" connector, which is a right-angled
-			// one drawn round (`curved=1`). Connectors of a locked or hidden layer are left alone.
+			// one drawn round (`curved=1`). Connectors of a locked or hidden layer are left alone,
+			// and so is one that someone else on a shared diagram has selected (the shapes they
+			// hold stay where they are, as every shape does, and are gone round like the rest).
 			if (typeof W.LibavoidRouting === "undefined" || typeof ui.resolveLayoutList !== "function") {
 				throw new Error("The connector router is not available in this version of draw.io");
 			}
@@ -588,7 +610,7 @@ Draw.loadPlugin((ui: any) => {
 				if (!model.isEdge(c)) return false;
 				const style = graph.getCellStyle(c) || {};
 				if (style.edgeStyle !== "orthogonalEdgeStyle" || String(style.curved ?? "0") === "1") return false;
-				if (graph.isCellLocked(c)) return false;
+				if (graph.isCellLocked(c) || liveState.locked.has(c.id)) return false;
 				for (let p = c; p != null; p = model.getParent(p)) if (!model.isVisible(p)) return false;
 				const source = model.getTerminal(c, true);
 				const target = model.getTerminal(c, false);
@@ -607,6 +629,12 @@ Draw.loadPlugin((ui: any) => {
 			}
 			return [...routed];
 		}
+		// Every other layout moves the shapes it arranges, whether or not they were named. A grid
+		// changes nothing else; the others also re-draw the connectors between those shapes.
+		refuseHeld(
+			"This layout",
+			op.type === "grid" ? vertices : (model.getChildren(parent) || []).filter((c: any) => !cellFilter || cellFilter(c))
+		);
 		if (op.type === "grid") {
 			const cols = Math.ceil(Math.sqrt(vertices.length));
 			const cw = Math.max(...vertices.map((v: any) => model.getGeometry(v).width), 0) + spacing;
@@ -768,6 +796,9 @@ Draw.loadPlugin((ui: any) => {
 				if (layers().every((l) => cs.includes(l))) {
 					throw new Error("A page needs at least one layer: keep one, or delete the cells on it instead.");
 				}
+				// (what is inside a deleted shape goes with it, and so do its connectors)
+				refuseHeld("Deleting this", cs, true);
+				if (op.includeEdges ?? true) refuseHeld("Deleting this", graph.getAllEdges?.(cs) ?? []);
 				const removed = graph.removeCells(cs, op.includeEdges ?? true) || [];
 				// The layer the user draws on may have gone.
 				graph.checkDefaultParent?.();
@@ -821,7 +852,10 @@ Draw.loadPlugin((ui: any) => {
 				return [register(group, op.tempId)];
 			}
 			case "ungroup": {
-				const result = graph.ungroupCells(cells(op.ids)) || [];
+				const groups = cells(op.ids);
+				// (the shapes in a group are moved out of it)
+				refuseHeld("Ungrouping this", groups, true);
+				const result = graph.ungroupCells(groups) || [];
 				result.forEach((c: any) => touched.add(c));
 				return result.map((c: any) => c.id);
 			}
@@ -853,6 +887,7 @@ Draw.loadPlugin((ui: any) => {
 			case "replaceAll": {
 				const existing: any[] = [];
 				for (const layer of layers()) existing.push(...(model.getChildren(layer) || []));
+				refuseHeld("Replacing the page", existing, true);
 				if (existing.length > 0) graph.removeCells(existing, true);
 				const added = insertXml(op.xml, graph.getDefaultParent(), resolve, idMap);
 				added.forEach((c) => touched.add(c));
@@ -970,6 +1005,12 @@ Draw.loadPlugin((ui: any) => {
 			const cell = model.getCell(idMap[ref] ?? ref);
 			if (!cell) {
 				throw new Error(`Unknown cell ${what} "${ref}". Use ids from drawio_get_diagram or tempIds defined earlier in this batch.`);
+			}
+			// On a shared diagram (Go live) the server refuses a change that touches a shape someone else
+			// has selected, and the whole edit with it. Saying so here keeps the rest of the batch. (A
+			// shape that is only pointed at, as an end of a connector or a parent, is not changed.)
+			if (what === "id" && liveState.locked.has(cell.id)) {
+				throw new Error(`"${ref}" is selected by someone else on the shared diagram right now, so it cannot be changed. Leave it as it is, or try again once they have let go of it.`);
 			}
 			return cell;
 		};

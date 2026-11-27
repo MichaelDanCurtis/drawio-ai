@@ -509,10 +509,18 @@ one someone shared. Everyone sees the others' changes as they are made, with the
 selections. The host's file stays the master copy and is saved as always; a guest's window
 holds the shared diagram, not a file.
 
-It goes through an OmniPad server with diagram boards. OmniPad does not have boards yet:
-[`docs/omnipad-boards-protocol.md`](../docs/omnipad-boards-protocol.md) is the protocol both
-sides build to. Until it has them, a small stand-in server in this repository speaks the same
-protocol, which is enough to share between OmniDraw windows:
+It goes through an OmniPad server, whose address you give: the diagram becomes a *board* there,
+in a pad of its own, and the link (`https://<omnipad>/b/<pad>/<board>`) opens it in OmniDraw or
+in OmniPad in a browser. The protocol is OmniPad's;
+[`docs/omnipad-boards-protocol.md`](../docs/omnipad-boards-protocol.md) says what OmniDraw does
+with it.
+
+What a person has selected is theirs for as long as it is: it is outlined in their colour for
+everyone else, who cannot select it, and the AI's edits leave it be. The server refuses a change
+that touches it all the same; such a change is undone, with a line that says whose shape it was.
+
+Without an OmniPad server, a small stand-in in this repository speaks the part of the protocol
+Go live uses, which is enough to share between OmniDraw windows:
 
 ```bash
 node standalone/test/helpers/boardRelay.js
@@ -523,16 +531,18 @@ and give the address it prints as the OmniPad server in the Go live window.
 How it works (`src/main/live/`):
 
 - `session.ts` is one person's side of a board: what is sent when the diagram changes, what
-  is done with what arrives, and how someone whose change crossed another's catches up with
-  the order the server put them in. It knows nothing of draw.io or of sockets.
+  is done with what arrives, how someone whose change crossed another's catches up with the
+  order the server put them in, and what happens when the server refuses a change. It knows
+  nothing of draw.io or of sockets.
 - `liveShare.ts` gives it draw.io: diff sync (draw.io's embed protocol) is turned on for the
   open diagram, each change goes out as draw.io's own patch, and others' come in through its
-  `patch` action, outside your undo history. Pointers and selections use the presence plugin
-  (`drawio-custom-plugins/src/liveshare.ts`).
+  `patch` action, outside your undo history. Pointers, held shapes and the line that explains
+  a refusal use the presence plugin (`drawio-custom-plugins/src/liveshare.ts`).
 - The link is the permission (anyone who has it can edit), so it is treated as a secret: shown
   and copied when you ask, never logged, never sent to an agent.
 
-`yarn e2e --live` runs two windows through the stand-in server.
+`yarn e2e --live` runs two windows through the stand-in server; with
+`--omnipad http://127.0.0.1:<port>` through an OmniPad server started by hand on this computer.
 
 ## Presentation mode
 

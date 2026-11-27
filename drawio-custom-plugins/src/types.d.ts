@@ -1,6 +1,6 @@
 
 declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | GetVerticesAction
-    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction | LiveLockAction | LiveLoadingAction | LiveComposeAction
+    | LinkSelectedNodeWithDataAction | NodeSelectionEnabledAction | UpdateLiveshareViewState | SetDiffSyncAction | LiveLockAction | LiveLoadingAction | LiveComposeAction | LiveNoticeAction
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
@@ -588,6 +588,14 @@ declare interface UpdateLiveshareViewState {
     cursors: ParticipantCursorInfo[];
     selectedCells: ParticipantSelectedCellsInfo[];
     selectedRectangles: ParticipantSelectedRectangleInfo[];
+    /** Cells on the page shown that someone else holds (Go live): they cannot be selected here. */
+    lockedCells?: string[];
+}
+
+/** Go live: a line for the person, shown in the editor for a few seconds. */
+declare interface LiveNoticeAction {
+    action: "liveNotice";
+    text: string;
 }
 
 /**

@@ -1,9 +1,10 @@
-import { apart, type ClientMessage, type DiagramPatch, type PresenceState, type ServerMessage } from "./protocol";
+import { apart, wireChecksum, type ClientMessage, type DiagramPatch, type PresenceState, type ServerMessage } from "./protocol";
 
 /**
  * One person's side of a shared diagram: what goes to the board when they change something,
- * and what is done with what arrives. docs/omnipad-boards-protocol.md has the rules; the
- * section "How changes are ordered" is what most of this file is.
+ * and what is done with what arrives. The protocol is OmniPad's (its
+ * packages/board-sync/PROTOCOL.md); docs/omnipad-boards-protocol.md says what OmniDraw does
+ * with it, and "How changes are ordered" there is what most of this file is.
  *
  * It knows nothing of draw.io or of sockets: the diagram is behind `LiveEditor`, the board
  * behind `send`. That is what lets it be tested without either.
@@ -38,7 +39,7 @@ export interface Person {
 	id: number;
 	name: string;
 	hue: number;
-	presence?: PresenceState;
+	presence?: Partial<PresenceState>;
 }
 
 export interface LiveSessionEvents {
@@ -48,32 +49,45 @@ export interface LiveSessionEvents {
 	closed?(reason: string): void;
 	/** This person's diagram was replaced by the board's (they joined, or had to catch up). */
 	replaced?(why: "joined" | "caught-up"): void;
+	/**
+	 * The board refused a change of this person's: it, and whatever they did in the moment after
+	 * it, is undone by the board's diagram that follows. `keys`: the shapes someone else holds.
+	 */
+	refused?(reason: string, keys: string[]): void;
+	/** Who holds which shape (`<page>/<cell>` to their id) changed. */
+	locks?(locks: Record<string, number>): void;
 	/** Something that should not happen did; the session carries on. For the log, never holding a diagram's content. */
 	problem?(text: string): void;
 }
 
-const SNAPSHOT_QUIET_MS = 20_000;
+const SNAPSHOT_QUIET_MS = 3_000;
 
 export class LiveSession {
+	/** The board this is a session on (its id in the pad), once `hello` has said. */
+	public board = "";
 	/** The last revision this person's diagram has applied (or, for their own, been told of). */
 	public revision = 0;
-	/** Counts the times the board sent everyone its diagram to settle a disagreement. A change says which it was made in. */
+	/**
+	 * This connection's count of the times it started over on the board (opening it, a refusal).
+	 * A change says which it was made in; the server drops those from an earlier one.
+	 */
 	public epoch = 0;
 	public id: number | undefined;
 	public role: "editor" | "viewer" = "editor";
-	public owner = false;
-	/** Whether the board's diagram is in the editor (true once the first `Board` has been loaded). */
+	/** Whether the board's diagram is in the editor (true once the first one has been loaded). */
 	public ready = false;
 	public closed: string | undefined;
+	/** Who holds which shape, as the board last said. */
+	public locks: Record<string, number> = {};
 
-	/** Own changes sent and not yet acknowledged, oldest first. */
-	private pending: DiagramPatch[] = [];
+	/** Own changes sent and not yet numbered by the board, oldest first. `crossed`: someone else's change arrived since, so the board put that one first. */
+	private pending: { patch: DiagramPatch; crossed: boolean }[] = [];
 	/** Since the last time nothing was pending: own changes the server put after someone else's, and those others. */
 	private crossedMine: DiagramPatch[] = [];
 	private crossedTheirs: DiagramPatch[] = [];
-	/** Others' changes that arrived while own ones were unacknowledged (they cross, if the acknowledgement says so). */
+	/** Others' changes that arrived while own ones were unnumbered. */
 	private arrivedWhilePending: DiagramPatch[] = [];
-	/** Waiting for the board's diagram (`Board`): after joining, or after asking to catch up. */
+	/** Waiting for the board's diagram: after opening the board, asking to catch up, or a refusal. */
 	private awaitingBoard = true;
 	private mustCatchUp = false;
 	/** With mustCatchUp: whatever the crossed changes touched (this person changed something while the board's diagram was going in). */
@@ -86,6 +100,7 @@ export class LiveSession {
 	private held: DiagramPatch[] = [];
 	private snapshotWanted = false;
 	private lastSnapshot = 0;
+	private lockSeq = -1;
 	private quiet: ReturnType<typeof setTimeout> | undefined;
 	private readonly people = new Map<number, Person>();
 	/** What arrives is dealt with one message at a time, in order: the editor's answers take a moment. */
@@ -98,22 +113,26 @@ export class LiveSession {
 		private readonly options: { snapshotQuietMs?: number } = {}
 	) {}
 
-	/** First words on a new connection. */
-	public hello(name: string, hue: number, client: string, ownerKey?: string): void {
-		this.send({ Hello: { name: name.slice(0, 60), hue: Math.round(hue) % 360, client, ...(ownerKey ? { owner: ownerKey } : {}) } });
+	/** First words on a new connection to the pad: who this is, and which of its boards is wanted. */
+	public hello(board: string, name: string, hue: number): void {
+		this.board = board;
+		this.send({ ClientInfo: { name: name.slice(0, 60), hue: ((Math.round(hue) % 360) + 360) % 360 } });
+		// (the list comes back even when it is empty: a board that is not in it is not there to open)
+		this.send({ BoardList: {} });
+		this.open();
 	}
 
-	/** The people on the board other than this one. */
+	/** The people on the pad other than this one. */
 	public others(): Person[] {
 		return [...this.people.values()].filter((p) => p.id !== this.id);
 	}
 
-	/** Nothing of this person's is unacknowledged, held back or waiting to be put right: their diagram is in the server's order. */
+	/** Nothing of this person's is unnumbered, held back or waiting to be put right: their diagram is in the server's order. */
 	public get settled(): boolean {
 		return this.ready && !this.awaitingBoard && !this.mustCatchUp && this.pending.length === 0 && this.held.length === 0;
 	}
 
-	/** How many of this person's changes the board has not confirmed: held back here, or sent and not yet acknowledged. */
+	/** How many of this person's changes the board has not confirmed: held back here, or sent and not yet numbered. */
 	public get unsent(): number {
 		return this.closed ? 0 : this.held.length + this.pending.length;
 	}
@@ -145,38 +164,38 @@ export class LiveSession {
 			return;
 		}
 		// (no checksum while this diagram may not be in the server's order: someone else's change arrived
-		// while one of this person's was unacknowledged, and that is not put right yet)
+		// while one of this person's was unnumbered, and that is not put right yet)
 		const sure = this.arrivedWhilePending.length === 0 && !this.mustCatchUp;
 		this.sendPatch(patch, sure ? checksum : null);
 	}
 
 	private sendPatch(patch: DiagramPatch, checksum: string | null): void {
-		this.send({ Patch: { base: this.revision + this.pending.length, epoch: this.epoch, patch, checksum } });
-		this.pending.push(patch);
+		// (the revision this diagram will be at once everything sent so far is in)
+		const base = this.revision + this.pending.length;
+		this.send({ BoardPatch: { board: this.board, base, epoch: this.epoch, patch, ...(checksum === null ? {} : { checksum: wireChecksum(checksum) }) } });
+		this.pending.push({ patch, crossed: false });
 		this.touch();
 	}
 
-	/** Where this person is. (The caller keeps it to 30 a second.) */
+	/** Where this person is, and what they have selected. (The caller keeps it to 30 a second.) */
 	public localPresence(p: PresenceState): void {
-		if (!this.closed) this.send({ Presence: p });
+		if (!this.closed && this.ready) this.send({ BoardPresence: { board: this.board, presence: p } });
 	}
 
-	/** A message from the board. */
+	/** A message from the pad. */
 	public receive(msg: ServerMessage): void {
 		this.work = this.work
 			.then(() => this.handle(msg))
 			.catch((e) => {
 				this.events.problem?.(`A message from the board could not be dealt with: ${String(e?.message ?? e).slice(0, 200)}`);
 				if (this.closed) return;
-				if ("Board" in msg) {
+				if ("BoardState" in msg) {
 					// The board's diagram did not go in: this window has neither that nor a diagram it can
 					// vouch for. Carrying on would hold every change back for good.
-					this.closed = "failed";
-					if (this.quiet) clearTimeout(this.quiet);
-					this.events.closed?.(this.closed);
-				} else if ("Patch" in msg) {
+					this.end("failed");
+				} else if ("BoardPatch" in msg) {
 					// someone's change did not go in: this diagram lacks it, so the board's is fetched
-					this.revision = Math.max(this.revision, msg.Patch.revision);
+					this.revision = Math.max(this.revision, Number(msg.BoardPatch.revision) || 0);
 					this.mustCatchUp = this.mustCatchUpWhatever = true;
 					if (this.pending.length === 0) this.catchUp();
 				}
@@ -188,35 +207,101 @@ export class LiveSession {
 		this.closed ??= "left";
 	}
 
+	private end(reason: string): void {
+		this.closed = reason;
+		if (this.quiet) clearTimeout(this.quiet);
+		this.events.closed?.(reason);
+	}
+
 	private async handle(msg: ServerMessage): Promise<void> {
-		if (this.closed) return;
+		if (this.closed || !msg || typeof msg !== "object") return;
+		// the pad's own
 		if ("Identity" in msg) {
-			this.id = msg.Identity.id;
-			this.role = msg.Identity.role;
-			this.owner = msg.Identity.owner;
-		} else if ("Board" in msg) {
-			await this.load(msg.Board);
-		} else if ("Patch" in msg) {
-			const p = msg.Patch;
-			// (a change from before the diagram that is on its way: that diagram has it already)
-			if (this.awaitingBoard) return;
-			const checksum = await this.editor.apply(p.patch);
-			this.revision = p.revision;
-			if (this.pending.length > 0) {
-				// made at the same moment as something of this person's that the server has not numbered yet
-				this.arrivedWhilePending.push(p.patch);
-			} else if (p.clean && !this.mustCatchUp && checksum !== p.checksum) {
-				// this diagram is not what everyone else's is
-				this.events.problem?.(`This diagram differs from the board's at revision ${p.revision}: getting the board's.`);
-				this.catchUp();
+			if (typeof msg.Identity === "number") this.id = msg.Identity;
+			return;
+		}
+		if ("UserInfo" in msg) {
+			const { id, info } = msg.UserInfo;
+			if (info) this.people.set(id, { ...(this.people.get(id) ?? {}), id, name: String(info.name ?? "").slice(0, 60) || "Someone", hue: Number(info.hue) || 0 });
+			else this.people.delete(id);
+			this.events.people?.(this.others());
+			return;
+		}
+		if ("Boards" in msg) {
+			// The pad's boards, sent when asked for and whenever the list changes. This one no longer
+			// being in it is how its end is told: whoever shared it stopped, or the server cleared it.
+			if (this.board && Array.isArray(msg.Boards) && !msg.Boards.some((b) => b?.id === this.board)) this.end("gone");
+			return;
+		}
+		if ("Idle" in msg) return this.end("idle");
+		if ("BoardError" in msg) {
+			this.events.problem?.(`The board could not do something that was asked of it: ${String(msg.BoardError?.message ?? "").slice(0, 200)}`);
+			return;
+		}
+		// this board's (a pad can hold others; and the pad's text is not this session's business)
+		const about = (m: { board?: string } | undefined) => !!m && m.board === this.board;
+		if ("BoardState" in msg) {
+			if (about(msg.BoardState)) await this.load(msg.BoardState);
+		} else if ("BoardPatch" in msg) {
+			if (about(msg.BoardPatch)) await this.numbered(msg.BoardPatch);
+		} else if ("BoardRejected" in msg) {
+			if (!about(msg.BoardRejected)) return;
+			const reason = String(msg.BoardRejected.reason ?? "");
+			// The refused change, and everything sent since, was made in an epoch the server has closed:
+			// it drops them without a word, and its diagram follows. What this person does until that
+			// is in is held, and goes on top of it.
+			this.epoch += 1;
+			this.pending.length = 0;
+			this.arrivedWhilePending.length = 0;
+			this.crossedMine.length = 0;
+			this.crossedTheirs.length = 0;
+			this.mustCatchUp = this.mustCatchUpWhatever = false;
+			this.awaitingBoard = true;
+			if (reason === "read-only") this.role = "viewer";
+			// (too many changes since the board last had the whole diagram: it wants one)
+			if (reason === "busy") this.snapshotWanted = true;
+			const keys = Array.isArray(msg.BoardRejected.keys) ? msg.BoardRejected.keys.filter((k) => typeof k === "string").slice(0, 500) : [];
+			this.events.refused?.(reason, keys);
+		} else if ("BoardLocks" in msg) {
+			if (!about(msg.BoardLocks)) return;
+			const { seq, locks } = msg.BoardLocks;
+			// (an answer can overtake an older list sent to everyone: the newest counts)
+			if (typeof seq === "number" && seq < this.lockSeq) return;
+			this.lockSeq = Number(seq) || 0;
+			this.locks = locks && typeof locks === "object" ? locks : {};
+			this.events.locks?.(this.locks);
+		} else if ("BoardWantSnapshot" in msg) {
+			if (!about(msg.BoardWantSnapshot)) return;
+			if (this.settled) await this.sendSnapshot();
+			else this.snapshotWanted = true;
+		} else if ("BoardPresence" in msg) {
+			if (!about(msg.BoardPresence)) return;
+			const { from, presence } = msg.BoardPresence;
+			if (from === this.id) return;
+			let who = this.people.get(from);
+			if (!presence) {
+				// (they closed the board, or left)
+				if (who) delete who.presence;
+			} else {
+				// (someone the pad has not introduced yet says who they are with where they are)
+				if (!who) this.people.set(from, (who = { id: from, name: String(presence.name ?? "").slice(0, 60) || "Someone", hue: Number(presence.hue) || 0 }));
+				who.presence = presence;
 			}
-			this.touch();
-		} else if ("Ack" in msg) {
+			this.events.people?.(this.others());
+		}
+	}
+
+	/** A change the board has numbered: someone else's, or this person's own coming back as its receipt. */
+	private async numbered(p: { revision: number; from: number; patch: DiagramPatch; checksum?: number | string | null }): Promise<void> {
+		if (p.from === this.id) {
 			const mine = this.pending.shift();
-			this.revision = msg.Ack.revision;
-			if (mine && !msg.Ack.clean) {
+			// (a receipt for something sent before the board's diagram was asked for: that diagram has it)
+			if (this.awaitingBoard) return;
+			if (p.revision !== this.revision + 1) return this.missed(p.revision);
+			this.revision = p.revision;
+			if (mine?.crossed) {
 				// the server put someone else's change before this one; here it was the other way round
-				this.crossedMine.push(mine);
+				this.crossedMine.push(mine.patch);
 				this.crossedTheirs.push(...this.arrivedWhilePending.splice(0));
 				this.mustCatchUp = true;
 			}
@@ -231,38 +316,50 @@ export class LiveSession {
 				}
 				if (this.snapshotWanted && this.settled) await this.sendSnapshot();
 			}
-		} else if ("NeedSnapshot" in msg) {
-			if (this.settled) await this.sendSnapshot();
-			else this.snapshotWanted = true;
-		} else if ("UserInfo" in msg) {
-			const { id, info } = msg.UserInfo;
-			if (info) this.people.set(id, { ...(this.people.get(id) ?? {}), id, name: String(info.name).slice(0, 60), hue: Number(info.hue) || 0 });
-			else this.people.delete(id);
-			this.events.people?.(this.others());
-		} else if ("Presence" in msg) {
-			const { id, ...presence } = msg.Presence;
-			const who = this.people.get(id);
-			if (who && id !== this.id) {
-				who.presence = presence;
-				this.events.people?.(this.others());
-			}
-		} else if ("Closed" in msg) {
-			this.closed = msg.Closed.reason || "closed";
-			if (this.quiet) clearTimeout(this.quiet);
-			this.events.closed?.(this.closed);
+			this.touch();
+			return;
 		}
+		// (a change from before the diagram that is on its way: that diagram has it already)
+		if (this.awaitingBoard || p.revision <= this.revision) return;
+		if (p.revision !== this.revision + 1) return this.missed(p.revision);
+		const checksum = await this.editor.apply(p.patch);
+		this.revision = p.revision;
+		if (this.pending.length > 0) {
+			// Made at the same moment as something of this person's that the server has not numbered
+			// yet: it comes before all of that in the server's order, and after it here. No checksum
+			// is compared: this diagram also holds what is still unnumbered.
+			for (const mine of this.pending) mine.crossed = true;
+			this.arrivedWhilePending.push(p.patch);
+		} else if (p.checksum !== undefined && p.checksum !== null && !this.mustCatchUp && checksum !== String(p.checksum)) {
+			// this diagram is not what everyone else's is
+			this.events.problem?.(`This diagram differs from the board's at revision ${p.revision}: getting the board's.`);
+			this.catchUp();
+		}
+		this.touch();
+	}
+
+	/** A revision went by that never arrived here. */
+	private missed(revision: number): void {
+		this.events.problem?.(`Revision ${this.revision + 1} of the board never arrived (the next was ${revision}): getting the board's diagram.`);
+		this.catchUp();
+	}
+
+	/** (Re)opens the board: its diagram comes back, to take this one's place. A new epoch starts with it. */
+	private open(): void {
+		this.awaitingBoard = true;
+		this.mustCatchUp = this.mustCatchUpWhatever = false;
+		this.epoch += 1;
+		this.send({ BoardOpen: { board: this.board, epoch: this.epoch } });
 	}
 
 	/** Asks for the board's diagram, to put it in place of this one. */
 	private catchUp(): void {
 		if (this.awaitingBoard) return;
-		this.awaitingBoard = true;
-		this.mustCatchUp = this.mustCatchUpWhatever = false;
-		this.send({ Resync: {} });
+		this.open();
 	}
 
-	/** The board's diagram: the snapshot, and the changes since, in the server's order. */
-	private async load(board: { revision: number; epoch?: number; xml: string; checksum: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
+	/** The board's diagram: the whole one it keeps, and the changes since, in the server's order. */
+	private async load(board: { revision: number; content: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
 		const first = !this.ready;
 		// From here until everything held has gone out, this person's changes are held: one sent now
 		// would overtake those waiting, which were made before it.
@@ -279,13 +376,14 @@ export class LiveSession {
 		this.touch();
 	}
 
-	private async put(board: { revision: number; epoch?: number; xml: string; checksum: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
-		// The board's diagram: its snapshot with the patches since. Worked out first where the editor
-		// can, so that it goes in as one diagram.
-		let whole = { xml: board.xml, checksum: board.checksum };
-		let after = board.patches;
-		if (this.editor.compose && after.length) {
-			whole = await this.editor.compose(board.xml, after.map((p) => p.patch));
+	private async put(board: { revision: number; content: string; patches: { revision: number; patch: DiagramPatch }[] }): Promise<void> {
+		const patches = Array.isArray(board.patches) ? board.patches : [];
+		// The board's diagram: its whole one with the changes since. Worked out first where the editor
+		// can, so that it goes in as one diagram, and so that what it should come to is known.
+		let whole: { xml: string; checksum?: string } = { xml: String(board.content ?? "") };
+		let after = patches;
+		if (this.editor.compose) {
+			whole = await this.editor.compose(whole.xml, after.map((p) => p.patch));
 			after = [];
 		}
 		// (the session ended while that was being worked out: the editor is no longer its to change)
@@ -294,21 +392,20 @@ export class LiveSession {
 		if (this.closed) return;
 		// (what was held up to this moment was made on the diagram that has just been replaced)
 		const wiped = this.held.length;
-		if (loaded !== whole.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
-		let revision = board.revision - board.patches.length;
+		if (whole.checksum !== undefined && loaded !== whole.checksum) this.events.problem?.("The board's diagram did not load as the board has it.");
 		for (const p of after) {
 			if (this.closed) return;
 			await this.editor.apply(p.patch);
-			revision = p.revision;
 		}
 		if (this.closed) return;
-		this.revision = Math.max(revision, board.revision);
-		this.epoch = Number(board.epoch) || 0;
-		// Own changes still unacknowledged when the board's diagram arrives (it was not asked for: the
-		// board sent it to everyone) are not in it: the board numbers them after it. They go on top again.
-		for (const patch of this.pending) {
+		this.revision = Number(board.revision) || 0;
+		// Own changes still unnumbered when a board's diagram arrives (a second one, sent because this
+		// connection's opening of the board crossed the server's answer to a refusal) are not in it:
+		// the board numbers them after it. They go on top again.
+		for (const mine of this.pending) {
 			if (this.closed) return;
-			await this.editor.apply(patch);
+			await this.editor.apply(mine.patch);
+			mine.crossed = false;
 		}
 		this.arrivedWhilePending.length = 0;
 		this.crossedMine.length = 0;
@@ -321,13 +418,13 @@ export class LiveSession {
 		//
 		// A change made while all this was going in sits somewhere among what was applied around it,
 		// which need not be where the board puts it (last). Rather than work out where, the board's
-		// diagram is fetched once more when these have been acknowledged.
+		// diagram is fetched once more when these have been numbered.
 		for (let i = 0; i < this.held.length; i++) {
 			const patch = this.held[i];
 			if (this.closed) return;
 			if (i < wiped) await this.editor.apply(patch);
 			else this.mustCatchUp = this.mustCatchUpWhatever = true;
-			this.sendPatch(patch, null);
+			if (this.role !== "viewer") this.sendPatch(patch, null);
 		}
 		this.held.length = 0;
 		this.awaitingBoard = false;
@@ -335,31 +432,37 @@ export class LiveSession {
 
 	private async sendSnapshot(): Promise<void> {
 		this.snapshotWanted = false;
-		const revision = this.revision;
+		if (this.role === "viewer") return;
+		const { revision, epoch } = this;
 		let xml: string;
-		let checksum: string;
 		try {
-			({ xml, checksum } = await this.editor.snapshot());
+			({ xml } = await this.editor.snapshot());
 		} catch (e: any) {
 			// The editor did not give the diagram this time. Nothing else depends on it: the board goes
-			// on with the snapshot it has, and it is tried again when things are next quiet or settled.
+			// on with the whole diagram it has, and it is tried again when things are next quiet or settled.
 			this.events.problem?.(`The diagram could not be read for the board: ${String(e?.message ?? e).slice(0, 200)}`);
 			this.snapshotWanted = true;
 			return;
 		}
 		// (something happened while the editor answered: this is no longer the diagram at that revision)
-		if (!this.settled || this.revision !== revision || this.closed) {
+		if (!this.settled || this.revision !== revision || this.epoch !== epoch || this.closed) {
 			this.snapshotWanted = true;
 			return;
 		}
 		this.lastSnapshot = revision;
-		this.send({ Snapshot: { revision, xml, checksum } });
+		this.send({ BoardSnapshot: { board: this.board, revision, content: xml, epoch } });
 	}
 
-	/** Something changed: the host sends the whole diagram once things have been quiet for a while. */
+	/**
+	 * Something changed: once things have been quiet for a moment, whoever is in step sends the whole
+	 * diagram, so that the board's own copy (what a newcomer starts from, and what is downloaded
+	 * from it) is not far behind. The board takes it from whom it can.
+	 */
 	private touch(): void {
-		if (!this.owner || this.closed) return;
+		if (this.closed || this.role === "viewer") return;
 		if (this.quiet) clearTimeout(this.quiet);
+		// (not everyone at the same instant)
+		const wait = this.options.snapshotQuietMs ?? SNAPSHOT_QUIET_MS + Math.random() * 1000;
 		this.quiet = setTimeout(() => {
 			// (whatever goes wrong in here stays in here: the messages queued behind it are dealt with all the same)
 			this.work = this.work
@@ -367,7 +470,7 @@ export class LiveSession {
 					if (this.settled && this.revision > this.lastSnapshot) await this.sendSnapshot();
 				})
 				.catch((e) => this.events.problem?.(`The diagram could not be sent to the board: ${String(e?.message ?? e).slice(0, 200)}`));
-		}, this.options.snapshotQuietMs ?? SNAPSHOT_QUIET_MS);
+		}, wait);
 		(this.quiet as any).unref?.();
 	}
 }
