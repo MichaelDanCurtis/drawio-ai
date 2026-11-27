@@ -485,11 +485,18 @@ export class CustomizedDrawioClient extends DrawioClient<
 		cursors: ParticipantCursorInfo[];
 		selectedCells: ParticipantSelectedCellsInfo[];
 		selectedRectangles: ParticipantSelectedRectangleInfo[];
+		/** Cells on the page shown that someone else holds: they cannot be selected here. */
+		lockedCells?: string[];
 	}) {
 		this.sendCustomAction({
 			action: "updateLiveshareViewState",
 			...update,
 		});
+	}
+
+	/** Go live: a line for the person, shown in the editor for a few seconds. */
+	public liveNotice(text: string): void {
+		this.sendCustomAction({ action: "liveNotice", text: text.slice(0, 300) });
 	}
 
 	protected async handleEvent(evt: CustomDrawioEvent): Promise<void> {

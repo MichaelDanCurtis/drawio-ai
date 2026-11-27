@@ -971,6 +971,12 @@ Draw.loadPlugin((ui: any) => {
 			if (!cell) {
 				throw new Error(`Unknown cell ${what} "${ref}". Use ids from drawio_get_diagram or tempIds defined earlier in this batch.`);
 			}
+			// On a shared diagram (Go live) the server refuses a change that touches a shape someone else
+			// has selected, and the whole edit with it. Saying so here keeps the rest of the batch. (A
+			// shape that is only pointed at, as an end of a connector or a parent, is not changed.)
+			if (what === "id" && liveState.locked.has(cell.id)) {
+				throw new Error(`"${ref}" is selected by someone else on the shared diagram right now, so it cannot be changed. Leave it as it is, or try again once they have let go of it.`);
+			}
 			return cell;
 		};
 

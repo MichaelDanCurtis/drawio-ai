@@ -1,6 +1,6 @@
 import type { CustomizedDrawioClient } from "../../../../src/DrawioClient";
 import { BoardError, closeBoard, createBoard, openBoard, type BoardSocket } from "./connection";
-import { boardLink, type BoardLink, type DiagramPatch, type PresenceState } from "./protocol";
+import { boardLink, cellOn, lockKey, type BoardLink, type DiagramPatch, type PresenceState } from "./protocol";
 import { LiveSession, type LiveEditor, type Person } from "./session";
 
 /**
@@ -22,7 +22,6 @@ export interface LiveWindow {
 
 export type LiveStatus = "connecting" | "live" | "ended";
 
-const CLIENT = "omnidraw/1";
 const PRESENCE_MS = 34;
 
 /** A colour for a person, from the hue they came with: readable on paper and on black. */
@@ -59,7 +58,7 @@ class DrawioEditor implements LiveEditor {
 		if (this.released) return;
 		this.released = true;
 		this.client.setDiffSync(false);
-		this.client.updateLiveshareViewState({ cursors: [], selectedCells: [], selectedRectangles: [] });
+		this.client.updateLiveshareViewState({ cursors: [], selectedCells: [], selectedRectangles: [], lockedCells: [] });
 	}
 
 	/** Refuses to go on once the editor has been let go of: a diagram on its way in is not put in. */
@@ -127,11 +126,16 @@ export class LiveShare {
 	private readonly editor: DrawioEditor;
 	private socket: BoardSocket | undefined;
 	private readonly subscriptions: { dispose(): void }[] = [];
-	private presence: PresenceState = { cursor: null, selection: [], rect: null };
+	private presence: PresenceState = { cursor: null, selected: [], rect: null };
 	/** The page this person has in front of them (its id), once the editor has said. */
 	private page: string | undefined;
+	/** The cells this person has selected on that page. */
+	private selection: string[] = [];
+	private hue = 0;
 	private presenceTimer: ReturnType<typeof setTimeout> | undefined;
 	private stopped = false;
+	/** While the connection is being made: ends the wait with why it will not be. */
+	private failConnect: ((e: Error) => void) | undefined;
 
 	/** Where the board is. (A host's is known once the server has made it.) */
 	public link!: BoardLink;
@@ -146,17 +150,21 @@ export class LiveShare {
 			people: () => this.showPeople(),
 			closed: (reason) =>
 				this.end(
-					reason === "host"
-						? "The host stopped sharing."
-						: reason === "expired"
-						? "The shared diagram expired."
-						: reason === "removed"
-						? "You were removed from the shared diagram."
+					reason === "gone"
+						? this.status === "connecting"
+							? "That link leads to no shared diagram: sharing was stopped, or the link is not whole."
+							: this.role === "host"
+							? "The OmniPad server ended the shared diagram."
+							: "Sharing was stopped: the diagram is no longer on the server."
+						: reason === "idle"
+						? "The OmniPad server disconnected the shared diagram: nobody had used it for a long time."
 						: reason === "failed"
 						? "The shared diagram could not be loaded into this window, so sharing stopped here."
 						: "The shared diagram was closed."
 				),
 			replaced: () => win.changed(),
+			refused: (reason, keys) => this.refused(reason, keys),
+			locks: () => this.showPeople(),
 			problem: (text) => win.log(`live: ${text}`),
 		});
 		// The user's changes go to the session from the first moment: what they do while sharing is
@@ -169,6 +177,8 @@ export class LiveShare {
 			}),
 			// Which page this person is on: sent with where they are, and others are only drawn on theirs.
 			win.client.onLivePage.sub(({ page }) => {
+				// (a selection is of a page: what was selected on the last one is let go of)
+				if ((page || undefined) !== this.page) this.selection = [];
 				this.page = page || undefined;
 				this.present({ page: this.page });
 				this.showPeople();
@@ -216,7 +226,7 @@ export class LiveShare {
 					break;
 				}
 			}
-			const made = await createBoard(server, { title: who.title.slice(0, 200), xml: snap.xml, checksum: snap.checksum });
+			const made = await createBoard(server, { title: who.title.slice(0, 80), xml: snap.xml });
 			if (live.stopped) {
 				// (sharing was stopped while the server was making the board, the editor reloaded say:
 				// the board is not left behind with nobody on it)
@@ -287,6 +297,8 @@ export class LiveShare {
 	private end(why: string): void {
 		if (this.stopped) return;
 		this.ended = why;
+		// (it ended before it had begun: whoever is waiting to be live is told now, not when the wait runs out)
+		this.failConnect?.(new BoardError(why));
 		void this.stop();
 	}
 
@@ -301,11 +313,13 @@ export class LiveShare {
 				clearTimeout(timer);
 				reject(e);
 			};
+			this.failConnect = fail;
+			this.hue = hueOf(name || String(Math.random()));
 			this.socket = openBoard(this.link, {
-				onOpen: () => this.session.hello(name || "Someone", hueOf(name || String(Math.random())), CLIENT, this.ownerKey),
+				onOpen: () => this.session.hello(this.link.board, this.me, this.hue),
 				onMessage: (msg) => {
 					this.session.receive(msg);
-					if (!settled && "Board" in msg) {
+					if (!settled && "BoardState" in msg && msg.BoardState?.board === this.link.board) {
 						// (the diagram is in once the session has dealt with it)
 						void this.session.idle().then(() => {
 							if (settled) return;
@@ -333,14 +347,20 @@ export class LiveShare {
 		const c = this.win.client;
 		this.subscriptions.push(
 			c.onCursorChanged.sub(({ newPosition }) => this.present({ cursor: newPosition ?? null })),
-			c.onSelectedCellsChanged.sub(({ selectedCellIds }) => this.present({ selection: selectedCellIds.slice(0, 500) })),
+			c.onSelectedCellsChanged.sub(({ selectedCellIds }) => {
+				this.selection = selectedCellIds.slice(0, 500);
+				this.present({});
+			}),
 			c.onSelectedRectangleChanged.sub(({ rectangle }) => this.present({ rect: rectangle ?? null })),
 			c.onFocusChanged.sub(({ hasFocus }) => !hasFocus && this.present({ cursor: null, rect: null }))
 		);
 	}
 
 	private present(change: Partial<PresenceState>): void {
-		this.presence = { ...this.presence, ...change };
+		// What is selected is said as the server knows shapes, `<page>/<cell>`: it holds them for this
+		// person for as long as they are. (Without a page there is no saying which shapes they are.)
+		const selected = this.page ? this.selection.map((id) => lockKey(this.page!, id)) : [];
+		this.presence = { ...this.presence, ...change, name: this.me, hue: this.hue, selected };
 		if (this.presenceTimer) return;
 		this.presenceTimer = setTimeout(() => {
 			this.presenceTimer = undefined;
@@ -348,15 +368,41 @@ export class LiveShare {
 		}, PRESENCE_MS);
 	}
 
+	/** The board would not take a change (it has been undone by now, or is about to be): the person is told why. */
+	private refused(reason: string, keys: string[]): void {
+		if (reason === "locked") {
+			const names = [...new Set(keys.map((k) => this.session.locks[k]).filter((id) => id !== undefined))].map((id) => this.session.others().find((p) => p.id === id)?.name ?? "someone else");
+			const who = names.length === 0 ? "Someone else" : names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+			this.win.client.liveNotice(`${who} ${names.length > 1 ? "have" : "has"} ${keys.length > 1 ? "shapes" : "a shape"} selected that your change touched, so it was undone.`);
+		} else if (reason === "read-only") {
+			this.win.client.liveNotice("You can look at this shared diagram but not change it.");
+		} else if (reason === "invalid") {
+			this.win.client.liveNotice("The server would not take that change (it may be too large), so it was undone.");
+		}
+		this.win.log(`live: the board refused a change (${reason.slice(0, 20)})`);
+	}
+
 	/** Draws the others' pointers, selections and selection rectangles in the editor. */
 	private showPeople(): void {
 		// (someone on another page of the diagram is here, but not on what this person is looking at)
-		const people = this.session.others().filter((p) => !p.presence?.page || !this.page || p.presence.page === this.page);
+		const everyone = this.session.others();
+		const people = everyone.filter((p) => !p.presence?.page || !this.page || p.presence.page === this.page);
 		const id = (p: Person) => String(p.id);
+		// The shapes others hold, as the board says (not as each of them says of themselves: of two who
+		// select the same shape, only the first has it). On this page they are outlined in their
+		// holder's colour and cannot be selected here.
+		const held = new Map<number, string[]>();
+		const me = this.session.id;
+		for (const [key, holder] of Object.entries(this.session.locks)) {
+			const cell = this.page ? cellOn(this.page, key) : undefined;
+			if (cell === undefined || holder === me) continue;
+			held.set(holder, [...(held.get(holder) ?? []), cell]);
+		}
 		this.win.client.updateLiveshareViewState({
 			cursors: people.filter((p) => p.presence?.cursor).map((p) => ({ id: id(p), position: p.presence!.cursor!, label: p.name, color: personColor(p.hue) })),
-			selectedCells: people.filter((p) => p.presence?.selection?.length).map((p) => ({ id: id(p), color: personColor(p.hue), selectedCellIds: p.presence!.selection })),
+			selectedCells: [...held].map(([holder, cells]) => ({ id: String(holder), color: personColor(everyone.find((p) => p.id === holder)?.hue ?? 0), selectedCellIds: cells })),
 			selectedRectangles: people.filter((p) => p.presence?.rect).map((p) => ({ id: id(p), color: personColor(p.hue), rectangle: p.presence!.rect! })),
+			lockedCells: [...held.values()].flat(),
 		});
 		this.win.changed();
 	}

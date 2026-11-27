@@ -57,6 +57,32 @@ Draw.loadPlugin((ui) => {
 		const rectangles = new Set<SelectionRectangle>();
 		const hightlights = new Highlights(graph);
 
+		// A shape someone else on the shared diagram holds cannot be selected here: what cannot be
+		// selected is not moved, restyled or deleted by hand. (The server is what enforces it: it
+		// refuses a change that touches one. This keeps people from making such a change.)
+		const selectable = (graph as any).isCellSelectable;
+		(graph as any).isCellSelectable = function (cell: any) {
+			return !(cell && liveState.locked.has(cell.id)) && selectable.apply(this, arguments);
+		};
+
+		let notice: HTMLElement | undefined;
+		let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+		/** A line for the person at the bottom of the editor, gone after a few seconds. */
+		const showNotice = (text: string) => {
+			notice?.remove();
+			if (noticeTimer) clearTimeout(noticeTimer);
+			notice = document.createElement("div");
+			notice.id = "omnidraw-live-notice";
+			notice.setAttribute("role", "status");
+			notice.textContent = text;
+			notice.style.cssText =
+				"position:fixed;right:24px;bottom:24px;z-index:10000;max-width:380px;padding:12px 16px;border-radius:12px;" +
+				"background:var(--ink,#141414);color:var(--bg,#f3f2ef);font:14px/1.4 var(--font-ui,system-ui,sans-serif);" +
+				"box-shadow:0 18px 48px rgb(20 20 20 / 12%),0 2px 6px rgb(20 20 20 / 6%);pointer-events:none;";
+			document.body.appendChild(notice);
+			noticeTimer = setTimeout(() => notice?.remove(), 6000);
+		};
+
 		window.addEventListener("message", (evt) => {
 			if (evt.source !== window.opener) {
 				return;
@@ -73,6 +99,10 @@ Draw.loadPlugin((ui) => {
 			}
 
 			switch (data.action) {
+				case "liveNotice": {
+					showNotice(String(data.text ?? ""));
+					break;
+				}
 				case "liveCompose": {
 					const u = ui as any;
 					try {
@@ -118,6 +148,10 @@ Draw.loadPlugin((ui) => {
 					break;
 				}
 				case "updateLiveshareViewState": {
+					liveState.locked = new Set(data.lockedCells ?? []);
+					// (two people selected the same shape at the same moment and the other one got it)
+					const lost = selectionModel.cells.filter((c: any) => liveState.locked.has(c.id));
+					if (lost.length) (graph as any).removeSelectionCells(lost);
 					// (someone who left, or took their pointer off the diagram, is no longer listed)
 					for (const c of [...cursors]) {
 						if (!data.cursors.some((listed) => listed.id === c.id)) {

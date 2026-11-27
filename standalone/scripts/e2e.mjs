@@ -33,7 +33,9 @@ const config = {
 	clickPermissions: process.argv.includes("--click-permissions"),
 	present: process.argv.includes("--present"),
 	insights: process.argv.includes("--insights"),
-	// yarn e2e --live: two windows share a diagram through a stand-in for OmniPad's boards
+	// yarn e2e --live: two windows share a diagram through a stand-in for an OmniPad server's boards.
+	// With --omnipad http://127.0.0.1:<port>: through an OmniPad server started by hand on this
+	// computer instead (a check of the two against each other, not part of any test run).
 	live: process.argv.includes("--live") ? {} : undefined,
 	workshop: process.argv.includes("--workshop"),
 	polish: process.argv.includes("--polish"),
@@ -72,9 +74,15 @@ const mirrorUrl = `http://127.0.0.1:${mirror.address().port}`;
 // Go live's server: the stand-in for OmniPad's boards (test runs reach nothing beyond this computer).
 let relay;
 if (config.live) {
-	// (making a board takes a moment, as on a real server: time for the run to draw something meanwhile)
-	relay = await createRequire(import.meta.url)("../test/helpers/boardRelay.js").startBoardRelay({ createDelayMs: 900 });
-	config.live.relay = relay.url;
+	const omnipad = arg("omnipad");
+	if (omnipad) {
+		if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(omnipad)) throw new Error("--omnipad takes the address of a server on this computer, http://127.0.0.1:<port>");
+		config.live.relay = omnipad;
+	} else {
+		// (making a board takes a moment, as on a real server: time for the run to draw something meanwhile)
+		relay = await createRequire(import.meta.url)("../test/helpers/boardRelay.js").startBoardRelay({ createDelayMs: 900 });
+		config.live.relay = relay.url;
+	}
 }
 const r = await new Promise((done) => {
 	const child = spawn(electron, packaged ? [] : [appDir], { stdio: "inherit", env: { ...process.env, DRAWAI_E2E: JSON.stringify(config), OMNIDRAW_GALLERY_MIRROR: mirrorUrl } });

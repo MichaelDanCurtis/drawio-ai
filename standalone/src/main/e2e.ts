@@ -685,6 +685,41 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	// (the two changes to one shape just before may still be settling: whose label it ends with is read once they have)
 	await quiet();
 	await same(w, guest, "settling");
+	// The guest selects the host's shape: it is the guest's for as long as it is. The host cannot
+	// select it, the host's AI leaves it be, and a change to it made all the same is refused by the
+	// board, undone, and explained.
+	const lockKeys = () => Object.keys(w.live?.session.locks ?? {});
+	await guest.client.aiSetSelection([hostShape], false);
+	await waitFor(() => (lockKeys().length === 1 ? true : undefined), 10_000);
+	await new Promise((r) => setTimeout(r, 300));
+	let hostSelection: string[] = [];
+	const watching = w.client.onSelectedCellsChanged.sub(({ selectedCellIds }) => (hostSelection = selectedCellIds));
+	await w.client.aiSetSelection([hostShape], false);
+	await new Promise((r) => setTimeout(r, 200));
+	watching.dispose();
+	const hostCouldSelect = hostSelection.length;
+	const aiSays = (await w.client.aiApplyOps([{ op: "update", id: hostShape, label: "the AI on a held shape" }], { selectResult: false, flash: false, atomic: true, review: false })).results.map((r) => r.error ?? "ok");
+	const labelHeld = await labelOf(w, hostShape);
+	// (by other means: the editor is told nothing is held, as if the news had not reached it yet)
+	w.client.updateLiveshareViewState({ cursors: [], selectedCells: [], selectedRectangles: [], lockedCells: [] });
+	await edit(w, [{ op: "update", id: hostShape, label: "changed although held" }]);
+	let notice = "";
+	for (const end = Date.now() + 10_000; Date.now() < end && !notice; ) {
+		notice = String((await w.editorView.webContents.executeJavaScript(`document.getElementById("omnidraw-live-notice")?.textContent ?? ""`)) ?? "");
+		if (!notice) await new Promise((r) => setTimeout(r, 100));
+	}
+	await quiet();
+	await same(w, guest, "a refused change");
+	const held = { lockedFor: lockKeys().length, hostCouldSelect, aiSays, labelWhileHeld: labelHeld, labelAfterRefusal: await labelOf(w, hostShape), guestsLabel: await labelOf(guest, hostShape), notice };
+	log("liveHeldShape", held);
+	if (hostCouldSelect !== 0 || !/selected by someone else/.test(aiSays[0] ?? "") || held.labelAfterRefusal !== labelHeld || held.guestsLabel !== labelHeld || !/Guest has a shape selected/.test(notice)) throw new Error("A shape the guest held could be changed by the host, or the host was not told why not.");
+	// the guest lets go: now the host can change it
+	await guest.client.aiSetSelection([], false);
+	await waitFor(() => (lockKeys().length === 0 ? true : undefined), 10_000);
+	await new Promise((r) => setTimeout(r, 300));
+	await edit(w, [{ op: "update", id: hostShape, label: "host again" }]);
+	await same(w, guest, "a change after the shape was let go of");
+	log("liveAfterLetGo", await labelOf(guest, hostShape));
 	const beforeAi = await labelOf(w, hostShape);
 	await w.client.aiApplyOps([{ op: "update", id: hostShape, label: "the AI's wording" }], { selectResult: false, flash: false, atomic: true, review: true });
 	await waitFor(() => w.client.pendingReview, 10_000);
@@ -741,12 +776,13 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await hostWin.whenLoaded();
 	const link3 = await hostWin.goLive(config.live!.relay, "Host");
 	const guest3 = await DiagramWindow.join(server, link3, "Third guest");
-	const id3 = link3.split("/b/")[1];
+	// (the pad the shared diagram was given: once sharing has ended nothing of it answers)
+	const pad3 = link3.split("/b/")[1].split("/")[0];
 	let ended3: string | undefined;
 	DiagramWindow.onLiveEnded = (win, why) => win === guest3 && (ended3 = why);
 	(hostWin as any).dirty = false; // (nothing to save: closing is not held up by a question)
 	let goneAtClose: number | undefined;
-	hostWin.win.once("closed", () => void fetch(`${config.live!.relay}/api/boards/${id3}`).then((r) => (goneAtClose = r.status)));
+	hostWin.win.once("closed", () => void fetch(`${config.live!.relay}/api/pads/${pad3}/boards`).then((r) => (goneAtClose = r.status)));
 	hostWin.win.close();
 	await waitFor(() => goneAtClose, 10_000);
 	await waitFor(() => ended3, 10_000);
@@ -763,7 +799,7 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	);
 	await new Promise((r) => setTimeout(r, 300));
 	let earlyGone: number | undefined;
-	early.win.once("closed", () => void startingEarly.then((url) => (url.startsWith("http") ? fetch(`${config.live!.relay}/api/boards/${url.split("/b/")[1]}`).then((r) => (earlyGone = r.status)) : (earlyGone = -1))));
+	early.win.once("closed", () => void startingEarly.then((url) => (url.startsWith("http") ? fetch(`${config.live!.relay}/api/pads/${url.split("/b/")[1].split("/")[0]}/boards`).then((r) => (earlyGone = r.status)) : (earlyGone = -1))));
 	early.win.close();
 	await waitFor(() => earlyGone, 15_000);
 	log("liveClosedWhileStarting", { started: (await startingEarly).startsWith("http") ? "yes" : await startingEarly, boardWhenTheWindowWasGone: earlyGone });
