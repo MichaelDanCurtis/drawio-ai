@@ -1,0 +1,196 @@
+// Excalidraw drawings on disk: which files are one, what is in them, and what may be written.
+// Nothing of Electron here: the tests load this file as it is.
+//
+// A drawing is Excalidraw's JSON ({ type: "excalidraw", version, source, elements, appState, files }),
+// in a `.excalidraw` file, or carried inside a PNG or SVG that Excalidraw exported with its scene
+// embedded (those open as drawings too, and are saved back as the picture they are).
+import * as zlib from "zlib";
+
+export type ExcalidrawFormat = "json" | "png" | "svg";
+
+export const EXCALIDRAW_MIME: Record<ExcalidrawFormat, string> = {
+	json: "application/vnd.excalidraw+json",
+	png: "image/png",
+	svg: "image/svg+xml",
+};
+
+/** What a drawing saved by this app names as where it came from (Excalidraw's `source`). */
+export const EXCALIDRAW_SOURCE = "https://github.com/MichaelDanCurtis/drawio-ai";
+
+/** The name of a scene inside a PNG's text chunk and an SVG's payload comment. */
+const SCENE_TYPE = "application/vnd.excalidraw+json";
+/** A scene, unpacked, is never larger than this (a guard against a few bytes that unpack without end). */
+const MAX_SCENE_BYTES = 512 * 1024 * 1024;
+
+/** Something that is not an Excalidraw drawing, said so that it can be shown to the user as it is. */
+export class ExcalidrawFileError extends Error {}
+
+export interface ExcalidrawScene {
+	type: "excalidraw";
+	version: number;
+	source?: string;
+	elements: unknown[];
+	appState: Record<string, unknown>;
+	files: Record<string, unknown>;
+}
+
+/** The format a file of this name is written in; undefined for a name that is no drawing's. */
+export function formatForPath(file: string): ExcalidrawFormat | undefined {
+	const name = file.toLowerCase();
+	if (name.endsWith(".excalidraw")) return "json";
+	if (name.endsWith(".png")) return "png";
+	if (name.endsWith(".svg")) return "svg";
+	return undefined;
+}
+
+/** The file's name without what marks it as a drawing or a picture ("a.excalidraw.png" → "a"). */
+export function baseName(name: string): string {
+	return name.replace(/(\.excalidraw)?\.(png|svg)$/i, "").replace(/\.excalidraw$/i, "");
+}
+
+/**
+ * Whether a file is an Excalidraw drawing, and in which format: by its name for `.excalidraw`,
+ * by what it carries for a picture (`read` is only called for a PNG or SVG). draw.io's own
+ * editable pictures (`.drawio.png`, `.drawio.svg`) are never Excalidraw's.
+ */
+export function sniffExcalidraw(file: string, read: () => Buffer): ExcalidrawFormat | undefined {
+	const format = formatForPath(file);
+	if (!format || format === "json") return format;
+	if (/\.(drawio|dio)\.(png|svg)$/i.test(file)) return undefined;
+	let bytes: Buffer;
+	try {
+		bytes = read();
+	} catch {
+		return undefined;
+	}
+	if (format === "png") return pngText(bytes) === undefined ? undefined : "png";
+	return SVG_PAYLOAD.test(bytes.toString("utf8")) ? "svg" : undefined;
+}
+
+/** The scene in a file's bytes. Throws ExcalidrawFileError (with `name` in the message) when there is none. */
+export function readScene(format: ExcalidrawFormat, bytes: Buffer, name = "The file"): ExcalidrawScene {
+	if (format === "json") return parseScene(bytes.toString("utf8"), name);
+	let text: string | undefined;
+	try {
+		text = format === "png" ? embeddedInPng(bytes) : embeddedInSvg(bytes.toString("utf8"));
+	} catch (e) {
+		if (e instanceof ExcalidrawFileError) throw e;
+		throw new ExcalidrawFileError(`${name} carries an Excalidraw drawing that cannot be read (${(e as Error).message}).`);
+	}
+	if (text === undefined) throw new ExcalidrawFileError(`${name} is a picture without an Excalidraw drawing in it. Export from Excalidraw with the scene embedded to get one that opens for editing.`);
+	return parseScene(text, name);
+}
+
+/** Excalidraw's JSON, checked. Throws ExcalidrawFileError for anything else. */
+export function parseScene(text: string, name = "The file"): ExcalidrawScene {
+	const data = parseRaw(text, name);
+	return {
+		type: "excalidraw",
+		version: typeof data.version === "number" ? data.version : 1,
+		...(typeof data.source === "string" ? { source: data.source } : {}),
+		elements: data.elements ?? [],
+		appState: data.appState ?? {},
+		files: data.files ?? {},
+	};
+}
+
+/** The JSON as it is in the file, once it is known to be a drawing (what Excalidraw itself takes for one, and no less). */
+function parseRaw(text: string, name: string): { version?: unknown; source?: unknown; elements?: unknown[] | null; appState?: Record<string, unknown> | null; files?: Record<string, unknown> | null } {
+	let data: any;
+	try {
+		data = JSON.parse(text.replace(/^\uFEFF/, ""));
+	} catch {
+		throw new ExcalidrawFileError(`${name} is not an Excalidraw drawing: it is ${text.trim() ? "not JSON" : "empty"}.`);
+	}
+	if (!data || typeof data !== "object" || Array.isArray(data)) throw new ExcalidrawFileError(`${name} is not an Excalidraw drawing.`);
+	if (data.type === "excalidrawlib") throw new ExcalidrawFileError(`${name} is an Excalidraw library, not a drawing.`);
+	if (data.type !== "excalidraw") throw new ExcalidrawFileError(`${name} is not an Excalidraw drawing${typeof data.type === "string" ? ` (it says it is "${data.type.slice(0, 40)}")` : ""}.`);
+	const isObject = (v: unknown) => !!v && typeof v === "object" && !Array.isArray(v);
+	if (data.elements !== undefined && data.elements !== null && !Array.isArray(data.elements)) throw new ExcalidrawFileError(`${name} is damaged: its elements are not a list.`);
+	if (data.appState !== undefined && data.appState !== null && !isObject(data.appState)) throw new ExcalidrawFileError(`${name} is damaged: its settings are not an object.`);
+	if (data.files !== undefined && data.files !== null && !isObject(data.files)) throw new ExcalidrawFileError(`${name} is damaged: its pictures are not an object.`);
+	return data;
+}
+
+/**
+ * What the editor serialized for a `.excalidraw` file, checked before it replaces the user's file:
+ * Excalidraw's JSON in full (type, version, source, elements, appState, files). Returns the text
+ * to write, as Excalidraw wrote it.
+ */
+export function sceneTextToWrite(serialized: unknown): string {
+	if (typeof serialized !== "string") throw new ExcalidrawFileError("The editor did not hand over the drawing.");
+	const data = parseRaw(serialized, "What the editor handed over");
+	if (typeof data.version !== "number" || typeof data.source !== "string" || !data.elements || !data.appState || !data.files) throw new ExcalidrawFileError("What the editor handed over is not a whole drawing.");
+	return serialized;
+}
+
+/**
+ * A picture the editor exported, checked before it is written: it must be a picture of that format
+ * and carry the drawing. `elements` is how many elements the editor says the drawing holds: the
+ * picture may carry fewer (Excalidraw leaves out elements too small to see when it writes an SVG),
+ * never more, and never none of a drawing that has some. Returns the bytes to write.
+ */
+export function pictureToWrite(format: "png" | "svg", data: unknown, elements: number): Buffer {
+	const bytes = data instanceof Uint8Array ? Buffer.from(data.buffer, data.byteOffset, data.byteLength) : typeof data === "string" ? Buffer.from(data, "utf8") : undefined;
+	if (!bytes || bytes.length === 0) throw new ExcalidrawFileError("The editor did not hand over the picture.");
+	if (format === "svg" && !/<svg[\s>]/i.test(bytes.subarray(0, 4096).toString("utf8"))) throw new ExcalidrawFileError("What the editor handed over is not an SVG picture.");
+	const scene = readScene(format, bytes, "The exported picture");
+	if (scene.elements.length > elements || (elements > 0 && scene.elements.length === 0)) throw new ExcalidrawFileError(`The exported picture carries ${scene.elements.length} elements, the drawing has ${elements}.`);
+	return bytes;
+}
+
+// ----- a scene inside a picture (as Excalidraw's data/image.ts and data/encode.ts write it) -----
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** The text of the PNG's chunk that holds an Excalidraw scene; undefined when it has none (or is no PNG). */
+function pngText(bytes: Buffer): string | undefined {
+	if (bytes.length < 8 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return undefined;
+	let at = 8;
+	while (at + 12 <= bytes.length) {
+		const length = bytes.readUInt32BE(at);
+		const type = bytes.toString("latin1", at + 4, at + 8);
+		const end = at + 8 + length;
+		if (end + 4 > bytes.length) return undefined;
+		if (type === "tEXt") {
+			const data = bytes.subarray(at + 8, end);
+			const zero = data.indexOf(0);
+			if (zero > 0 && data.toString("latin1", 0, zero) === SCENE_TYPE) return data.toString("latin1", zero + 1);
+		}
+		if (type === "IEND") return undefined;
+		at = end + 4;
+	}
+	return undefined;
+}
+
+function embeddedInPng(bytes: Buffer): string | undefined {
+	const text = pngText(bytes);
+	return text === undefined ? undefined : unpack(text);
+}
+
+const SVG_PAYLOAD = /<!-- payload-type:application\/vnd\.excalidraw\+json -->/;
+
+function embeddedInSvg(svg: string): string | undefined {
+	if (!SVG_PAYLOAD.test(svg)) return undefined;
+	const payload = /<!-- payload-start -->\s*([\s\S]+?)\s*<!-- payload-end -->/.exec(svg);
+	if (!payload) throw new ExcalidrawFileError("The drawing inside the SVG is cut off.");
+	const version = /<!-- payload-version:(\d+) -->/.exec(svg)?.[1] ?? "1";
+	const decoded = Buffer.from(payload[1], "base64");
+	// (version 1 held the text as UTF-8; since then it is a string of bytes, one character each)
+	return unpack(version === "1" ? decoded.toString("utf8") : decoded.toString("latin1"));
+}
+
+/** A scene as it is packed into a picture: `{ encoded, encoding: "bstring", compressed }`, or (long ago) the scene itself. */
+function unpack(text: string): string {
+	let data: any;
+	try {
+		data = JSON.parse(text);
+	} catch {
+		throw new ExcalidrawFileError("The drawing inside the picture is damaged.");
+	}
+	if (!data || typeof data !== "object" || !("encoded" in data)) return text;
+	if (data.encoding !== "bstring" || typeof data.encoded !== "string") throw new ExcalidrawFileError("The drawing inside the picture is packed in a way this version does not read.");
+	const packed = Buffer.from(data.encoded, "latin1");
+	if (!data.compressed) return packed.toString("utf8");
+	return zlib.inflateSync(packed, { maxOutputLength: MAX_SCENE_BYTES }).toString("utf8");
+}

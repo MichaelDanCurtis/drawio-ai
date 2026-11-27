@@ -51,7 +51,8 @@ installed and look signed in; when one is not, the chat says what to run (and of
 ## What it does
 
 - **Files**: opens and saves `.drawio`, `.dio`, `.drawio.svg` and `.drawio.png`
-  (one window per diagram), with unsaved-change prompts.
+  (one window per diagram), with unsaved-change prompts. Excalidraw drawings
+  (`.excalidraw`) are a second kind of document: see [Excalidraw drawings](#excalidraw-drawings).
 - **Editor**: the same bundled draw.io webapp and Draw.AI plugin as the VS Code
   extension (lasso, inline prompt with Alt+K, markup, review highlights), offline:
   the editor may only load from the app's own 127.0.0.1 server.
@@ -85,6 +86,67 @@ installed and look signed in; when one is not, the chat says what to run (and of
   Miro: converted by draw.io into a new window), and Print (every page, fitted to the
   paper, through the system print dialog). draw.io's in-editor File menu is replaced by
   `src/renderer/desktop-menu.js`, a draw.io plugin loaded after the Draw.AI one.
+
+## Excalidraw drawings
+
+The app also opens, edits and saves [Excalidraw](https://github.com/excalidraw/excalidraw)
+drawings, in the real Excalidraw editor (the `@excalidraw/excalidraw` package, MIT, used as
+it is), offline. **File → New Excalidraw Drawing** (Cmd/Ctrl+Alt+N) starts one; **File →
+Open…**, a double-click on a `.excalidraw` file, or a `.excalidraw` file dropped on a drawing's
+window opens one. A drawing has a window of its own in the same shell as a diagram's: the editor
+on one side and the chat on the other, the file's name in the title with a dot while there are
+unsaved changes, Save and Save As, and the question before a window with unsaved changes closes.
+
+- **Files.** A `.excalidraw` file is Excalidraw's own JSON (`type: "excalidraw"`,
+  `version: 2`, `source`, `elements`, `appState`, `files`), written as Excalidraw writes it,
+  so it opens in excalidraw.com and in every other tool that reads the format. A PNG or SVG
+  that carries a drawing (an export with the scene embedded) opens as a drawing too, and is
+  saved back as the picture it is: **Save As** offers **Editable PNG** (`.excalidraw.png`) and
+  **Editable SVG** (`.excalidraw.svg`) beside `.excalidraw`. A picture without a drawing in it
+  opens as before, in draw.io. What is not a drawing (an Excalidraw library, other JSON, a
+  damaged file) is refused with a sentence that says what it is, and no window opens.
+- **Export.** **File → Export as PNG…** (Cmd/Ctrl+Shift+E) and **Export as SVG…**, or **PNG**
+  and **SVG** in the bar above the canvas. Both carry the drawing inside
+  (`appState.exportEmbedScene`), so an export opens again for editing, here or in Excalidraw.
+  The PNG is twice the drawing's size, for sharp lines; the SVG holds its fonts, cut down to the
+  letters the drawing uses. Before a file is written the app checks what the editor handed
+  over: a `.excalidraw` file must be a whole drawing, and a picture must carry the drawing.
+- **Offline.** Nothing is loaded from a CDN. Excalidraw's fonts (the hand-drawn ones and its
+  UI's) are copied into the app and served by it (`window.EXCALIDRAW_ASSET_PATH`). Excalidraw
+  also names a CDN as a second address for every font; that address is taken out before the
+  browser sees it. A web page cannot be embedded in a drawing, and Excalidraw's own
+  text-to-diagram features (which call a service) are off. The Mermaid import works: it is part
+  of the package.
+- **Look.** Light and dark follow **Settings → Appearance**. The bar above the canvas (the
+  drawing's name, the unsaved dot, Export, Save, and the chat's button when the chat is closed)
+  is in the app's look; Excalidraw's own UI is not restyled. The first entries of Excalidraw's
+  menu (☰) are the app's: New drawing, Open, Save, Save as, Export.
+- **Menu bar.** While a drawing is in front the menu bar is the drawing's: File, Edit (Undo, Redo
+  and Select All are Excalidraw's on the canvas and the system's in a text field), View, Window.
+  draw.io's menus, Shapes, Agent and Map are not there: they work on diagrams.
+- **Chat.** The panel stays in the window, and says that AI editing of Excalidraw drawings is
+  not there yet: the agents' drawing tools are draw.io's. No agent is started for a drawing and
+  the chat offers no tools; it still closes (Cmd/Ctrl+J), resizes and opens Settings.
+
+Not there yet: AI tools for drawings, a home with preview cards and version history, sharing a
+drawing through Go live, and converting between draw.io and Excalidraw. Excalidraw's shape
+library is kept while a window is open, not between runs.
+
+The Excalidraw page has a Content-Security-Policy of its own (`src/renderer/excalidraw.html`):
+scripts from the app only, as on the app's other pages, and styles inline too, because
+Excalidraw and its Mermaid import write them. `'wasm-unsafe-eval'` is not in it and is not
+needed. Excalidraw uses WebAssembly for one thing, cutting a font down to the letters a drawing
+uses for an SVG export, and does that in a worker; a worker is bound by the policy its own
+script is served with, not the page's, and the app serves it with none. On the page itself
+WebAssembly is refused, and the end-to-end check confirms both: the refusal, and an SVG whose
+fonts are a few kilobytes. (Were the worker ever missing, Excalidraw would put the whole font
+files in the SVG instead; the export would still work.)
+
+It adds 21.7 MB to the app (15.9 MB compressed): 13.1 MB of fonts, 12.7 MB of them the
+hand-drawn Chinese, Japanese and Korean font in 209 pieces of which a drawing loads only those
+it uses; 7.6 MB of parts that load when they are used (Excalidraw's languages, the Mermaid
+import, font subsetting); under 1 MB for the editor page itself. Excalidraw's licence (MIT)
+is in the app beside it (`src/renderer/excalidraw/NOTICE.txt`).
 
 ## Mapper
 
@@ -603,6 +665,18 @@ Electron main process                          agent subprocess (cwd = diagram f
   in the way of mouse events such as hover.
 - Shared code is imported read-only from `../src`; `vscode` imports resolve to a
   small shim (`src/main/vscode-shim.ts`).
+- An Excalidraw drawing has a window class of its own, `ExcalidrawWindow`
+  (`src/main/excalidrawWindow.ts`), rather than a second kind of document inside
+  `DiagramWindow`: no draw.io client, no agent, no MCP server. What the two share is in
+  `src/main/documentShell.ts`: where a new window goes, which document is in front (the menu
+  bar follows it), and the chat beside the editor (sliding, docking left or right, its edge
+  dragged to resize). The editor page is `src/renderer/excalidraw/app.tsx`, bundled with
+  React by `build.mjs` into `out/excalidraw/` (an ES module with its lazily loaded parts
+  beside it, and Excalidraw's fonts copied from the package). The page hands the app the
+  drawing when asked (`serializeAsJSON`, `exportToBlob`, `exportToSvg`) and tells it when
+  there are unsaved changes; `src/main/excalidrawFile.ts` (no Electron in it, so the tests
+  load it) decides which files are drawings, reads the drawing inside a PNG or SVG, and
+  checks what is about to be written.
 
 ## Build a release
 
@@ -670,4 +744,11 @@ the window), for example:
   `--ask-agent`, `--dig "question"`); `--present` checks presentation mode.
   `--click-permissions` answers them by clicking the permission card
   in the chat instead. `--prompt "…"` and `--file path` pick the request and diagram.
+  `--excalidraw` checks Excalidraw drawings instead (`src/main/e2eExcalidraw.ts`): it opens
+  `test/fixtures/excalidraw/sample.excalidraw`, adds an element through Excalidraw's API, runs
+  Undo, Redo and Save from the menu bar, reads the saved file, reopens it, exports PNG and SVG
+  and edits and saves those, answers the question before closing, checks what is refused, and
+  screenshots the window in light and dark (`window-light.png`, `window-dark.png`). It fails if
+  the page asked for anything outside the app or reported a refused load.
+  `DRAWAI_E2E_CONSOLE=1` prints what the page's console says.
 - View → Editor/Chat Developer Tools for the two web views.

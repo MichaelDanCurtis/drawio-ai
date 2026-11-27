@@ -39,3 +39,14 @@ function keyName(raw: string): string | undefined {
 	if (/^[a-z0-9]$/i.test(raw)) return raw.toUpperCase();
 	return undefined;
 }
+
+/** The document command a key press stands for in an Excalidraw window (Cmd on macOS, Ctrl elsewhere), if any. */
+export function documentKey(input: { type: string; key: string; meta: boolean; control: boolean; alt: boolean; shift: boolean; isAutoRepeat?: boolean }, darwin = process.platform === "darwin"): "save" | "saveAs" | "open" | "exportPng" | undefined {
+	if (input.type !== "keyDown" || input.isAutoRepeat || input.alt) return undefined;
+	if (darwin ? !input.meta || input.control : !input.control || input.meta) return undefined;
+	const key = input.key.toLowerCase();
+	if (key === "s") return input.shift ? "saveAs" : "save";
+	if (key === "o" && !input.shift) return "open";
+	if (key === "e" && input.shift) return "exportPng";
+	return undefined;
+}
