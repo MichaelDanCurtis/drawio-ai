@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Run from source (`yarn start`), the app shows OmniDraw's icon in the Dock, not Electron's.
+
 ## [0.4.0]
 
 - **Go live** (File → Go Live…): share the open diagram by a link, and work on it with others at
