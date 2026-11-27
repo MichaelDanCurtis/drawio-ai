@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- A new app icon: a letter D drawn in dots, white on black with one red dot. (The square of
+  dots it had since 0.4.0 is the mark of all the Omni products, not this one's.) Its drawing is
+  `build/icon.svg`.
+- Run from source (`yarn start`), the app shows OmniDraw's icon in the Dock, not Electron's.
+
 ## [0.4.0]
 
 - **Go live** (File → Go Live…): share the open diagram by a link, and work on it with others at

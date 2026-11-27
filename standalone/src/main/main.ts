@@ -428,6 +428,13 @@ function blockRemoteRequests(): void {
 }
 
 app.whenReady().then(async () => {
+	// Run from source (yarn start), the app is Electron's own bundle and shows Electron's icon in
+	// the Dock. The packaged app has OmniDraw's from its bundle; here it is set by hand, from the
+	// same picture the packaging uses.
+	if (!app.isPackaged && process.platform === "darwin") {
+		const icon = path.join(__dirname, "..", "build", "icon.png");
+		if (fs.existsSync(icon)) app.dock?.setIcon(icon);
+	}
 	applyTheme();
 	onSettingsChanged((_s, patch) => {
 		if ("appearance" in patch) applyTheme();
