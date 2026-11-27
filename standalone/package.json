@@ -1,7 +1,7 @@
 {
 	"name": "omnidraw-desktop",
 	"productName": "OmniDraw",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"private": true,
 	"description": "OmniDraw: the draw.io editor with a chat that drives your own coding agents (Claude Code, Codex, Gemini, GitHub Copilot, Kimi) over the Agent Client Protocol, plus the Mapper.",
 	"license": "GPL-3.0",
