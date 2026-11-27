@@ -38,7 +38,7 @@ export interface E2eConfig {
 	/** Check map records, mapper_* tools, descriptions, health, recent changes, refresh, tours, Ask and the desktop endpoint. */
 	insights?: boolean;
 	/** Go live: a second window joins the first one's diagram through the relay at this address. */
-	live?: { relay: string };
+	live?: { relay: string; /** By hand: a shared diagram that is open elsewhere (OmniPad's page in a browser), to join by its link. */ join?: string };
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 	/** Check Settings, themes, icon styles, the toolbar, the chat's menus, sliding and docking, and shape folders. */
 	polish?: boolean;
@@ -134,7 +134,8 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		} else if (config.insights) {
 			await runInsights(w, config, log);
 		} else if (config.live) {
-			await runLive(w, server, config, log);
+			if (config.live.join) await runLiveJoin(server, config.live.join, log);
+			else await runLive(w, server, config, log);
 		} else if (config.present) {
 			await runPresent(w, config, log);
 		} else if (config.map) {
@@ -584,6 +585,48 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
  * Go live between two windows: the first shares its diagram, the second joins by the link, and
  * each sees what the other does. Fails (throws) when the two diagrams differ at any step.
  */
+/**
+ * A check by hand, of OmniDraw against another client of the same board (OmniPad's page in a
+ * browser): joins the shared diagram by its link, draws a shape, waits for one labelled "from
+ * OmniPad" to be drawn on the other side and renames it, waits for its own to be renamed "OmniPad
+ * renamed" there, and says how its session fared (a diagram that had to be fetched again, or
+ * loaded from scratch, means the two clients did not agree on a checksum).
+ */
+async function runLiveJoin(server: StaticServer, link: string, log: (k: string, v: unknown) => void): Promise<void> {
+	const said: string[] = [];
+	const warn = console.warn;
+	console.warn = (...a: unknown[]) => {
+		said.push(a.map(String).join(" ").slice(0, 200));
+		warn(...a);
+	};
+	try {
+		const guest = await DiagramWindow.join(server, link, "OmniDraw");
+		const cells = async () => (await guest.client.aiGetModel({ scope: "page", includeStyles: false, maxCells: 5000 })).cells as any[];
+		const edit = (ops: any[]) => guest.client.aiApplyOps(ops, { selectResult: false, flash: false, atomic: true, review: false, user: true });
+		const seen = async (label: string, ms: number) => {
+			for (const end = Date.now() + ms; Date.now() < end; ) {
+				const cell = (await cells()).find((c) => c.label === label);
+				if (cell) return cell;
+				await new Promise((r) => setTimeout(r, 500));
+			}
+			throw new Error(`No shape labelled "${label}" arrived from the other side.`);
+		};
+		log("joinCells", (await cells()).map((c) => c.label ?? c.id));
+		const made = await edit([{ op: "addShape", tempId: "o1", label: "from OmniDraw", x: 60, y: 60, width: 160, height: 60 }]);
+		log("joinDrew", { id: Object.values(made.idMap)[0], reachedTheBoard: await guest.live!.shared(10_000), revision: guest.live?.session.revision });
+		const theirs = await seen("from OmniPad", 240_000);
+		log("joinSawTheirs", theirs.id);
+		const renamed = await edit([{ op: "update", id: theirs.id, label: "OmniDraw renamed" }]);
+		log("joinRenamedTheirs", { result: renamed.results.map((r) => r.error ?? "ok"), reachedTheBoard: await guest.live!.shared(10_000) });
+		await seen("OmniPad renamed", 240_000);
+		await new Promise((r) => setTimeout(r, 4000));
+		log("joinEnd", { status: guest.live?.status, revision: guest.live?.session.revision, settled: guest.live?.session.settled, fullLoads: guest.live?.fullLoads, people: guest.live?.people().map((p) => p.name), labels: (await cells()).map((c) => c.label ?? c.id), said });
+		await guest.stopLive();
+	} finally {
+		console.warn = warn;
+	}
+}
+
 async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
 	const cells = async (win: DiagramWindow) => (await win.client.aiGetModel({ scope: "page", includeStyles: true, maxCells: 5000 })).cells;
 	const picture = async (win: DiagramWindow) =>
