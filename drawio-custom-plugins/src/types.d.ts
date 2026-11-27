@@ -4,13 +4,13 @@ declare type CustomDrawioAction = UpdateVerticesAction | AddVerticesAction | Get
     | AiGetModelAction | AiApplyOpsAction | AiSetSelectionAction | AiSetLassoModeAction
     | AiSetStatusAction | AiOpenPromptAction | AiExportImageAction | AiSearchShapesAction
     | AiResolveReviewAction | AiSetMarkupModeAction | AiSetBadgesAction | AiExportVsdxAction | AiImportDiagramAction
-    | AiPagesAction | AiExportPdfAction
+    | AiPagesAction | AiExportPdfAction | AiPrintPdfAction
     | DesktopPrefsAction | DesktopPresentationAction | DesktopPresentationToursAction | DesktopReportStateAction
     | DesktopShapesAction | DesktopInsertShapeAction | DesktopReportShapeSetsAction | DesktopSetShapeSetAction | DesktopGalleryResultsAction;
 declare type CustomDrawioEvent = NodeSelectedEvent | GetVerticesResultEvent
     | UpdateLocalStorage | PluginLoaded | LiveLockEvent | LivePageEvent | LiveComposeEvent | CursorChangedEvent | SelectionChangedEvent | FocusChangedEvent | InvokeCommandEvent | SelectionRectangleChangedEvent
     | AiModelEvent | AiApplyOpsResultEvent | AiAckEvent | AiAskEvent | AiLassoEvent | AiExportImageEvent | AiSearchShapesEvent
-    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent
+    | AiReviewEvent | AiMarkupEvent | AiBadgeClickEvent | AiExportVsdxEvent | AiImportDiagramEvent | AiPagesEvent | AiExportPdfEvent | AiPrintPdfEvent
     | DesktopCommandEvent | DesktopStateEvent | DesktopShapeSetsEvent | DesktopGallerySearchEvent;
 
 // The editor tools shared with the desktop app (standalone/src/renderer/desktop-toolbar.js and
@@ -377,6 +377,26 @@ declare interface AiExportPdfAction {
     currentPageOnly: boolean;
     /** Document title stored in the PDF. */
     title?: string;
+}
+
+/**
+ * For a host in a browser: every page (or the one shown) goes to the browser's print dialog as
+ * draw.io's SVG, one to a sheet of the drawing's size, so that "Save as PDF" there gives a PDF
+ * whose text stays text. Answered once the dialog has been asked for.
+ */
+declare interface AiPrintPdfAction {
+    action: "aiPrintPdf";
+    currentPageOnly: boolean;
+    /** The name the browser offers for the file. */
+    title?: string;
+}
+
+declare interface AiPrintPdfEvent {
+    event: "aiPrintPdf";
+    message: AiPrintPdfAction;
+    pages: number;
+    warnings: string[];
+    error?: string;
 }
 
 declare interface AiExportPdfEvent {

@@ -3,7 +3,7 @@
 // (read-only); `vscode` resolves to a small shim (src/main/vscode-shim.ts).
 import { build } from "esbuild";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { basename, dirname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -143,6 +143,24 @@ for (const [pkg, files] of Object.entries({
 	doto: ["latin-700-normal"],
 }))
 	for (const f of files) copyFileSync(join(here, "node_modules/@fontsource", pkg, "files", `${pkg}-${f}.woff2`), join(out, "ui/fonts", `${pkg}-${f}.woff2`));
+// The editor add-ons as one script for another host to load into a framed draw.io (OmniPad
+// does): src/renderer/frame/README.md says how. GPL-3.0 like the rest; it ships as a file of
+// its own with each release (yarn dist:frame), so that a host under another licence fetches
+// it rather than carrying its source.
+{
+	const frame = join(out, "frame");
+	mkdirSync(join(frame, "ui/fonts"), { recursive: true });
+	const version = JSON.parse(readFileSync(join(here, "package.json"), "utf8")).version;
+	// (in the order the desktop app loads them, without the two that serve its native menu)
+	const parts = [join(here, "src/renderer/frame/host.js"), join(out, "ui/icons.js"), join(out, "ui/brandmark.js"), join(out, "ui/tips.js"), join(out, "theme.js"), join(out, "drawio-plugin.js"), join(out, "desktop-toolbar.js"), join(out, "presentation.js")];
+	const banner = `/* omnidraw-frame ${version}: OmniDraw's editor add-ons for draw.io. GPL-3.0; source: the drawio-ai repository. See README.md. */\n`;
+	writeFileSync(join(frame, "omnidraw-frame.js"), banner + parts.map((f) => `\n;/* ${basename(f)} */\n${readFileSync(f, "utf8")}`).join("\n"));
+	for (const f of readdirSync(join(out, "ui"))) if (f.endsWith(".js")) copyFileSync(join(out, "ui", f), join(frame, "ui", f));
+	for (const f of readdirSync(join(out, "ui/fonts"))) copyFileSync(join(out, "ui/fonts", f), join(frame, "ui/fonts", f));
+	copyFileSync(join(repo, "LICENSE.md"), join(frame, "LICENSE.md"));
+	copyFileSync(join(here, "src/renderer/frame/README.md"), join(frame, "README.md"));
+	writeFileSync(join(frame, "VERSION"), `${version}\n`);
+}
 // (a build elsewhere is an app folder of its own for Electron to start: same name and version, its main beside it)
 if (out !== join(here, "out")) {
 	const pkg = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));

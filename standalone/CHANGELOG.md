@@ -21,6 +21,16 @@
     copied when you ask, and is not written to the log or sent to an agent.
   - Not yet: private pads (invites, signing in to OmniPad), opening a link by clicking it, and
     reconnecting by itself when the connection drops.
+- **The editor's add-ons for another host.** A build now also writes `out/frame/`: the look,
+  the AI's editing tools, Visio and PDF export, the importers and presentation mode as one
+  script (`omnidraw-frame.js`, with its fonts and a README) that a page framing a plain draw.io
+  can load. OmniPad uses it for its Structured boards. `yarn dist:frame` packs it as
+  `omnidraw-frame-<version>.zip`, to go up with a release. GPL-3.0, like the app.
+  - In a frame the add-ons answer to the page that frames them, at the frame's own origin
+    unless told another.
+  - New for such a host: `aiPrintPdf` hands every page to the browser's print dialog as an SVG,
+    one to a sheet of the drawing's size, for a PDF whose text stays text; and
+    `presence: false` leaves the showing of other people to a host that does it itself.
 - **Excalidraw drawings.** The app opens, edits and saves `.excalidraw` files in the real
   Excalidraw editor (the `@excalidraw/excalidraw` package, 0.18.1, MIT), offline, as a second
   kind of document beside draw.io diagrams. **File → New Excalidraw Drawing**

@@ -544,6 +544,26 @@ How it works (`src/main/live/`):
 `yarn e2e --live` runs two windows through the stand-in server; with
 `--omnipad http://127.0.0.1:<port>` through an OmniPad server started by hand on this computer.
 
+## The editor add-ons for another host (`omnidraw-frame`)
+
+A build also writes `out/frame/`: the editor's add-ons (the look, the AI's editing tools, Visio
+and PDF export, the importers, presentation mode, the pieces that put a shared diagram in place)
+as one script, `omnidraw-frame.js`, with its fonts, for a page that frames a plain draw.io and
+wants it to be OmniDraw's. OmniPad runs its Structured boards that way.
+
+- [`src/renderer/frame/README.md`](src/renderer/frame/README.md) ships in the folder and says
+  how to load it (`window.omnidrawConfig`, then the script, before the editor starts) and
+  which messages it takes and sends.
+- In a frame the add-ons answer to the page that frames them, at the frame's own origin unless
+  `omnidrawConfig.hostOrigin` names another. (In the desktop app and in VS Code they answer to
+  the stand-in those hosts put at `window.opener`, as before.)
+- `yarn dist:frame` packs it as `dist/omnidraw-frame-<version>.zip`, to go up with a release
+  beside the app. It is GPL-3.0 like the rest of this repository: a host under another licence
+  fetches the file and talks to it with messages, and does not carry its source.
+- `aiPrintPdf` is for such a host: every page goes to the browser's print dialog as an SVG, one
+  to a sheet of the drawing's size, so that "Save as PDF" there gives a PDF whose text stays
+  text. (The desktop app prints the same sheets to a file itself.)
+
 ## Presentation mode
 
 **View → Presentation Mode** (F5, Cmd/Ctrl+Shift+Enter, or the screen button in the

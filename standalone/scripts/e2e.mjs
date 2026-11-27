@@ -36,7 +36,9 @@ const config = {
 	// yarn e2e --live: two windows share a diagram through a stand-in for an OmniPad server's boards.
 	// With --omnipad http://127.0.0.1:<port>: through an OmniPad server started by hand on this
 	// computer instead (a check of the two against each other, not part of any test run).
-	live: process.argv.includes("--live") ? {} : undefined,
+	// With --live-join <link>: joins a shared diagram that is open elsewhere (OmniPad's page in a
+	// browser) and takes turns with it, see runLiveJoin. Also by hand, also this computer only.
+	live: process.argv.includes("--live") || arg("live-join") ? {} : undefined,
 	workshop: process.argv.includes("--workshop"),
 	polish: process.argv.includes("--polish"),
 	apiChat: process.argv.includes("--api-chat"),
@@ -75,7 +77,13 @@ const mirrorUrl = `http://127.0.0.1:${mirror.address().port}`;
 let relay;
 if (config.live) {
 	const omnipad = arg("omnipad");
-	if (omnipad) {
+	const join = arg("live-join");
+	if (join) {
+		if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(join)) throw new Error("--live-join takes a link to a shared diagram on this computer, http://localhost:<port>/b/<pad>/<board>");
+		config.live.join = join;
+		// (--live-solo: it makes two changes of its own and leaves, for the other side to count what arrives)
+		config.live.solo = process.argv.includes("--live-solo");
+	} else if (omnipad) {
 		if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(omnipad)) throw new Error("--omnipad takes the address of a server on this computer, http://127.0.0.1:<port>");
 		config.live.relay = omnipad;
 	} else {

@@ -110,6 +110,11 @@ right).
   what the tests run against.
 - `yarn e2e --live` runs two windows through the stand-in. `--omnipad http://127.0.0.1:<port>`
   runs the same through an OmniPad server started by hand on this computer.
+- `yarn e2e --live-join http://localhost:<port>/b/<pad>/<board>` joins a board that is open in
+  OmniPad's page in a browser on this computer and takes turns with it: it draws a shape,
+  waits for one labelled "from OmniPad" and renames it, waits for its own to be renamed
+  "OmniPad renamed", and says whether its diagram ever had to be fetched again (which is what
+  the two clients disagreeing on a checksum looks like).
 
 Both sides run the same draw.io version (32.4.1): a checksum is draw.io's hash of its own
 pages, and two versions that write a shape differently would disagree on every change. Raise

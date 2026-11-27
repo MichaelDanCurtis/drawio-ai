@@ -1,4 +1,4 @@
-import { sendEvent } from "./vscode";
+import { fromHost, sendEvent } from "./vscode";
 import { liveState } from "./liveState";
 import * as m from "mithril";
 
@@ -8,8 +8,14 @@ Draw.loadPlugin((ui) => {
 
 		const graph = ui.editor.graph;
 		const selectionModel = graph.getSelectionModel();
+		// A host that shows the others itself (OmniPad draws their pointers and holds their shapes)
+		// turns this plugin's showing of them off, `omnidrawConfig.presence: false`: nothing is
+		// reported of this person's pointer and selection, nothing of the others' is drawn, and no
+		// shape is kept from being selected here. Putting a shared diagram in place stays.
+		const presence = (window as any).omnidrawConfig?.presence !== false;
 
 		selectionModel.addListener(mxEvent.CHANGE, () => {
+			if (!presence) return;
 			const cells = selectionModel.cells;
 			sendEvent({
 				event: "selectedCellsChanged",
@@ -61,9 +67,11 @@ Draw.loadPlugin((ui) => {
 		// selected is not moved, restyled or deleted by hand. (The server is what enforces it: it
 		// refuses a change that touches one. This keeps people from making such a change.)
 		const selectable = (graph as any).isCellSelectable;
-		(graph as any).isCellSelectable = function (cell: any) {
-			return !(cell && liveState.locked.has(cell.id)) && selectable.apply(this, arguments);
-		};
+		if (presence) {
+			(graph as any).isCellSelectable = function (cell: any) {
+				return !(cell && liveState.locked.has(cell.id)) && selectable.apply(this, arguments);
+			};
+		}
 
 		let notice: HTMLElement | undefined;
 		let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -84,7 +92,7 @@ Draw.loadPlugin((ui) => {
 		};
 
 		window.addEventListener("message", (evt) => {
-			if (evt.source !== window.opener) {
+			if (!fromHost(evt)) {
 				return;
 			}
 			let data: CustomDrawioAction;
@@ -148,6 +156,7 @@ Draw.loadPlugin((ui) => {
 					break;
 				}
 				case "updateLiveshareViewState": {
+					if (!presence) break;
 					liveState.locked = new Set(data.lockedCells ?? []);
 					// (two people selected the same shape at the same moment and the other one got it)
 					const lost = selectionModel.cells.filter((c: any) => liveState.locked.has(c.id));
@@ -227,6 +236,7 @@ Draw.loadPlugin((ui) => {
 
 		graph.addMouseListener({
 			mouseMove: (graph: DrawioGraph, event: mxMouseEvent) => {
+				if (!presence) return;
 				const pos = { x: event.graphX, y: event.graphY };
 				const graphPos = transformBack(pos);
 				sendEvent({ event: "cursorChanged", position: graphPos });
@@ -238,7 +248,7 @@ Draw.loadPlugin((ui) => {
 		// Listen for rubberband events
 		const rubberband = graph.getRubberband();
 
-		if (rubberband != null) {
+		if (rubberband != null && presence) {
 			rubberband.addListener(mxEvent.UPDATE, (sender: any, evt: any) => {
 				const x = evt.getProperty("x");
 				const y = evt.getProperty("y");

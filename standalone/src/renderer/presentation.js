@@ -501,6 +501,8 @@
 		});
 
 		window.addEventListener("message", function (evt) {
+			// (in another host's page, see frame/host.js: only what the page that frames the editor says)
+			if (window.omnidrawFromHost && !window.omnidrawFromHost(evt)) return;
 			var data = evt.data;
 			if (typeof data === "string") {
 				if (data.indexOf("desktopPresentation") < 0) return;
