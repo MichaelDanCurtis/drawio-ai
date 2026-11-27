@@ -588,11 +588,6 @@ Draw.loadPlugin((ui: any) => {
 		const vertices = (model.getChildren(parent) || []).filter(
 			(c: any) => model.isVertex(c) && (!cellFilter || cellFilter(c))
 		);
-		// (a layout moves the shapes it arranges and re-draws the connectors between them, whether or not they were named)
-		refuseHeld(
-			"This layout",
-			(model.getChildren(parent) || []).filter((c: any) => !cellFilter || cellFilter(c))
-		);
 
 		if (op.type === "route") {
 			// draw.io's obstacle-avoiding router (libavoid): no shape moves. Each connector gets
@@ -600,7 +595,9 @@ Draw.loadPlugin((ui: any) => {
 			// along the same stretch are set apart. Only right-angled connectors are routed (the
 			// router makes every connector it touches one): crow's-foot, curved and straight
 			// ones keep their look. So does draw.io's "Curved" connector, which is a right-angled
-			// one drawn round (`curved=1`). Connectors of a locked or hidden layer are left alone.
+			// one drawn round (`curved=1`). Connectors of a locked or hidden layer are left alone,
+			// and so is one that someone else on a shared diagram has selected (the shapes they
+			// hold stay where they are, as every shape does, and are gone round like the rest).
 			if (typeof W.LibavoidRouting === "undefined" || typeof ui.resolveLayoutList !== "function") {
 				throw new Error("The connector router is not available in this version of draw.io");
 			}
@@ -613,7 +610,7 @@ Draw.loadPlugin((ui: any) => {
 				if (!model.isEdge(c)) return false;
 				const style = graph.getCellStyle(c) || {};
 				if (style.edgeStyle !== "orthogonalEdgeStyle" || String(style.curved ?? "0") === "1") return false;
-				if (graph.isCellLocked(c)) return false;
+				if (graph.isCellLocked(c) || liveState.locked.has(c.id)) return false;
 				for (let p = c; p != null; p = model.getParent(p)) if (!model.isVisible(p)) return false;
 				const source = model.getTerminal(c, true);
 				const target = model.getTerminal(c, false);
@@ -632,6 +629,11 @@ Draw.loadPlugin((ui: any) => {
 			}
 			return [...routed];
 		}
+		// (every other layout moves the shapes it arranges and re-draws the connectors between them, whether or not they were named)
+		refuseHeld(
+			"This layout",
+			(model.getChildren(parent) || []).filter((c: any) => !cellFilter || cellFilter(c))
+		);
 		if (op.type === "grid") {
 			const cols = Math.ceil(Math.sqrt(vertices.length));
 			const cw = Math.max(...vertices.map((v: any) => model.getGeometry(v).width), 0) + spacing;

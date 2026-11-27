@@ -701,6 +701,9 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	const aiSays = (await w.client.aiApplyOps([{ op: "update", id: hostShape, label: "the AI on a held shape" }], { selectResult: false, flash: false, atomic: true, review: false })).results.map((r) => r.error ?? "ok");
 	// (also what it was not handed by name: a layout of the whole page would move the held shape)
 	const layoutSays = (await w.client.aiApplyOps([{ op: "layout", type: "grid" } as any], { selectResult: false, flash: false, atomic: true, review: false })).results.map((r) => r.error ?? "ok");
+	// (routing the connectors moves no shape: it goes ahead, round the held shape like any other)
+	const routeSays = (await w.client.aiApplyOps([{ op: "layout", type: "route" } as any], { selectResult: false, flash: false, atomic: true, review: false })).results.map((r) => r.error ?? "ok");
+	await quiet();
 	const labelHeld = await labelOf(w, hostShape);
 	// (by other means: the editor is told nothing is held, as if the news had not reached it yet)
 	w.client.updateLiveshareViewState({ cursors: [], selectedCells: [], selectedRectangles: [], lockedCells: [] });
@@ -712,9 +715,9 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	}
 	await quiet();
 	await same(w, guest, "a refused change");
-	const held = { lockedFor: lockKeys().length, hostCouldSelect, aiSays, layoutSays, labelWhileHeld: labelHeld, labelAfterRefusal: await labelOf(w, hostShape), guestsLabel: await labelOf(guest, hostShape), notice };
+	const held = { lockedFor: lockKeys().length, hostCouldSelect, aiSays, layoutSays, routeSays, labelWhileHeld: labelHeld, labelAfterRefusal: await labelOf(w, hostShape), guestsLabel: await labelOf(guest, hostShape), notice };
 	log("liveHeldShape", held);
-	if (hostCouldSelect !== 0 || !/selected by someone else/.test(aiSays[0] ?? "") || !/This layout would change/.test(layoutSays[0] ?? "") || held.labelAfterRefusal !== labelHeld || held.guestsLabel !== labelHeld || !/Guest has a shape selected/.test(notice)) throw new Error("A shape the guest held could be changed by the host, or the host was not told why not.");
+	if (hostCouldSelect !== 0 || !/selected by someone else/.test(aiSays[0] ?? "") || !/This layout would change/.test(layoutSays[0] ?? "") || routeSays[0] !== "ok" || held.labelAfterRefusal !== labelHeld || held.guestsLabel !== labelHeld || !/Guest has a shape selected/.test(notice)) throw new Error("A shape the guest held could be changed by the host, or the host was not told why not.");
 	// the guest lets go: now the host can change it
 	await guest.client.aiSetSelection([], false);
 	await waitFor(() => (lockKeys().length === 0 ? true : undefined), 10_000);
