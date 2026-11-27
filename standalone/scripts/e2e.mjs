@@ -81,6 +81,8 @@ if (config.live) {
 	if (join) {
 		if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(join)) throw new Error("--live-join takes a link to a shared diagram on this computer, http://localhost:<port>/b/<pad>/<board>");
 		config.live.join = join;
+		// (--live-solo: it makes two changes of its own and leaves, for the other side to count what arrives)
+		config.live.solo = process.argv.includes("--live-solo");
 	} else if (omnipad) {
 		if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(omnipad)) throw new Error("--omnipad takes the address of a server on this computer, http://127.0.0.1:<port>");
 		config.live.relay = omnipad;

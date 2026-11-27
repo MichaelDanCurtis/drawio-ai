@@ -38,7 +38,7 @@ export interface E2eConfig {
 	/** Check map records, mapper_* tools, descriptions, health, recent changes, refresh, tours, Ask and the desktop endpoint. */
 	insights?: boolean;
 	/** Go live: a second window joins the first one's diagram through the relay at this address. */
-	live?: { relay: string; /** By hand: a shared diagram that is open elsewhere (OmniPad's page in a browser), to join by its link. */ join?: string };
+	live?: { relay: string; /** By hand: a shared diagram that is open elsewhere (OmniPad's page in a browser), to join by its link. */ join?: string; /** With join: makes two changes of its own and leaves, without waiting for the other side. */ solo?: boolean };
 	map?: { recipe: string; input?: Record<string, string>; dialog?: boolean; askAgent?: boolean; digDeeper?: string };
 	/** Check Settings, themes, icon styles, the toolbar, the chat's menus, sliding and docking, and shape folders. */
 	polish?: boolean;
@@ -134,7 +134,7 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		} else if (config.insights) {
 			await runInsights(w, config, log);
 		} else if (config.live) {
-			if (config.live.join) await runLiveJoin(server, config.live.join, log);
+			if (config.live.join) await runLiveJoin(server, config.live.join, log, !!config.live.solo);
 			else await runLive(w, server, config, log);
 		} else if (config.present) {
 			await runPresent(w, config, log);
@@ -592,7 +592,7 @@ async function runApiChat(w: DiagramWindow, server: StaticServer, config: E2eCon
  * renamed" there, and says how its session fared (a diagram that had to be fetched again, or
  * loaded from scratch, means the two clients did not agree on a checksum).
  */
-async function runLiveJoin(server: StaticServer, link: string, log: (k: string, v: unknown) => void): Promise<void> {
+async function runLiveJoin(server: StaticServer, link: string, log: (k: string, v: unknown) => void, solo = false): Promise<void> {
 	const said: string[] = [];
 	const warn = console.warn;
 	console.warn = (...a: unknown[]) => {
@@ -612,6 +612,20 @@ async function runLiveJoin(server: StaticServer, link: string, log: (k: string, 
 			throw new Error(`No shape labelled "${label}" arrived from the other side.`);
 		};
 		log("joinCells", (await cells()).map((c) => c.label ?? c.id));
+		if (solo) {
+			// (for the other side to count what arrives: a change to a shape that is there, then a new shape, nothing selected)
+			const first = (await cells()).find((c) => c.kind === "vertex" || c.width !== undefined);
+			const sent = () => (guest.live!.session as any).pending.length;
+			const one = first ? await edit([{ op: "update", id: first.id, label: `renamed by OmniDraw ${new Date().toISOString().slice(11, 19)}` }]) : undefined;
+			log("joinSoloRenamed", { id: first?.id, result: one?.results.map((r) => r.error ?? "ok"), reachedTheBoard: await guest.live!.shared(10_000), inFlight: sent() });
+			await new Promise((r) => setTimeout(r, 4000));
+			const two = await edit([{ op: "addShape", label: "a second from OmniDraw", x: 420, y: 60, width: 180, height: 60 }]);
+			log("joinSoloDrew", { result: two.results.map((r) => r.error ?? "ok"), reachedTheBoard: await guest.live!.shared(10_000) });
+			await new Promise((r) => setTimeout(r, 4000));
+			log("joinEnd", { status: guest.live?.status, revision: guest.live?.session.revision, settled: guest.live?.session.settled, fullLoads: guest.live?.fullLoads, people: guest.live?.people().map((p) => p.name), labels: (await cells()).map((c) => c.label ?? c.id), said });
+			await guest.stopLive();
+			return;
+		}
 		const made = await edit([{ op: "addShape", tempId: "o1", label: "from OmniDraw", x: 60, y: 60, width: 160, height: 60 }]);
 		log("joinDrew", { id: Object.values(made.idMap)[0], reachedTheBoard: await guest.live!.shared(10_000), revision: guest.live?.session.revision });
 		const theirs = await seen("from OmniPad", 240_000);
