@@ -526,6 +526,8 @@ function editorStub(diagram) {
 		onInit: event(),
 		onLivePage: event(),
 		shown: [],
+		/** What is selected in the editor (the bridge keeps it from the editor's reports). */
+		currentSelection: [],
 		notices: [],
 		liveNotice(text) {
 			client.notices.push(text);
@@ -721,7 +723,11 @@ test("sharing a diagram again while the last sharing is still being closed on th
 	const diagram = new Diagram({ a: { label: "start" } });
 	const client = editorStub(diagram);
 	const win = { client, remoteChanged() {}, changed() {}, log() {} };
+	// (a shape the host had selected before sharing is held for them from the start, though nothing says the selection changed)
+	client.currentSelection = ["a"];
 	const first = await LiveShare.host(win, relay.url, { name: "Host", title: "T" });
+	client.onLivePage.emit({ page: "p1" });
+	await until(() => relay.stats(first.link)?.locks["p1/a"] === first.session.id);
 	const stopping = first.stop();
 	assert.equal(client.calls.at(-1), "sync:false", "the editor is let go of at once, not when the server has answered");
 	// shared again before the server has closed the first board

@@ -177,8 +177,9 @@ export class LiveShare {
 			}),
 			// Which page this person is on: sent with where they are, and others are only drawn on theirs.
 			win.client.onLivePage.sub(({ page }) => {
-				// (a selection is of a page: what was selected on the last one is let go of)
-				if ((page || undefined) !== this.page) this.selection = [];
+				// (a selection is of a page: what was selected on the last one is let go of. The first word
+				// of which page this is changes nothing of what is selected on it.)
+				if (this.page !== undefined && (page || undefined) !== this.page) this.selection = [];
 				this.page = page || undefined;
 				this.present({ page: this.page });
 				this.showPeople();
@@ -345,6 +346,10 @@ export class LiveShare {
 	/** The user's pointer and selection go to the board from here on. */
 	private wire(): void {
 		const c = this.win.client;
+		// What was selected before sharing began is still selected (putting the board's diagram in
+		// place keeps it), and no change of selection will say so: it is held from the start.
+		this.selection = [...(c.currentSelection ?? [])].slice(0, 500);
+		this.present({});
 		this.subscriptions.push(
 			c.onCursorChanged.sub(({ newPosition }) => this.present({ cursor: newPosition ?? null })),
 			c.onSelectedCellsChanged.sub(({ selectedCellIds }) => {
