@@ -266,7 +266,8 @@ test("someone who keeps working after a crossed change does not vouch for their 
 	bo.change(update("a", { label: "B" })); // numbered 1
 	await until(() => b.relay.stats(b.link).revision === 1);
 	ann.change(update("a", { label: "A" })); // made without Bo's: numbered 2, after his
-	await until(() => b.relay.stats(b.link).revision === 2);
+	// (both are on their way to her: his, and her own coming back numbered after it)
+	await until(() => ann.kept().length === 2);
 	await ann.release(1); // Bo's change reaches Ann while hers is unacknowledged
 	assert.deepEqual(ann.kept(), ["Receipt"]);
 	assert.equal(ann.diagram.cells.a.label, "B", "on her side his went on top of hers: the other way round from the board");

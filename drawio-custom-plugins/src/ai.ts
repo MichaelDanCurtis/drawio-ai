@@ -536,6 +536,26 @@ Draw.loadPlugin((ui: any) => {
 		return new Promise((resolve) => ui.executeLayout(exec, false, resolve));
 	}
 
+	/**
+	 * On a shared diagram (Go live): refuses when an operation would change a shape someone else
+	 * has selected, which it was not handed by id (the resolver in applyOpsInner turns those
+	 * down): the shapes a layout arranges, what goes with a shape that is deleted. The server
+	 * would refuse the whole edit; saying so here fails this one operation, in words.
+	 * `deep`: what is inside the cells counts too.
+	 */
+	function refuseHeld(what: string, cellsToChange: any[], deep = false): void {
+		if (liveState.locked.size === 0) return;
+		const stack = [...cellsToChange];
+		while (stack.length > 0) {
+			const cell = stack.pop();
+			if (!cell) continue;
+			if (liveState.locked.has(cell.id)) {
+				throw new Error(`${what} would change "${cell.id}", which someone else on the shared diagram has selected right now. Leave it out, or try again once they have let go of it.`);
+			}
+			if (deep) stack.push(...(model.getChildren(cell) || []));
+		}
+	}
+
 	/** draw.io >= 32 lays out with ELK, which computes asynchronously and then applies in one model update. */
 	async function layoutCells(op: Extract<AiOp, { op: "layout" }>, resolve: Resolver): Promise<string[]> {
 		// ELK computes asynchronously: never apply its result to a page the user switched to meanwhile.
@@ -567,6 +587,11 @@ Draw.loadPlugin((ui: any) => {
 		const spacing = op.spacing ?? 50;
 		const vertices = (model.getChildren(parent) || []).filter(
 			(c: any) => model.isVertex(c) && (!cellFilter || cellFilter(c))
+		);
+		// (a layout moves the shapes it arranges and re-draws the connectors between them, whether or not they were named)
+		refuseHeld(
+			"This layout",
+			(model.getChildren(parent) || []).filter((c: any) => !cellFilter || cellFilter(c))
 		);
 
 		if (op.type === "route") {
@@ -768,6 +793,9 @@ Draw.loadPlugin((ui: any) => {
 				if (layers().every((l) => cs.includes(l))) {
 					throw new Error("A page needs at least one layer: keep one, or delete the cells on it instead.");
 				}
+				// (what is inside a deleted shape goes with it, and so do its connectors)
+				refuseHeld("Deleting this", cs, true);
+				if (op.includeEdges ?? true) refuseHeld("Deleting this", graph.getAllEdges?.(cs) ?? []);
 				const removed = graph.removeCells(cs, op.includeEdges ?? true) || [];
 				// The layer the user draws on may have gone.
 				graph.checkDefaultParent?.();
@@ -821,7 +849,10 @@ Draw.loadPlugin((ui: any) => {
 				return [register(group, op.tempId)];
 			}
 			case "ungroup": {
-				const result = graph.ungroupCells(cells(op.ids)) || [];
+				const groups = cells(op.ids);
+				// (the shapes in a group are moved out of it)
+				refuseHeld("Ungrouping this", groups, true);
+				const result = graph.ungroupCells(groups) || [];
 				result.forEach((c: any) => touched.add(c));
 				return result.map((c: any) => c.id);
 			}
@@ -853,6 +884,7 @@ Draw.loadPlugin((ui: any) => {
 			case "replaceAll": {
 				const existing: any[] = [];
 				for (const layer of layers()) existing.push(...(model.getChildren(layer) || []));
+				refuseHeld("Replacing the page", existing, true);
 				if (existing.length > 0) graph.removeCells(existing, true);
 				const added = insertXml(op.xml, graph.getDefaultParent(), resolve, idMap);
 				added.forEach((c) => touched.add(c));
