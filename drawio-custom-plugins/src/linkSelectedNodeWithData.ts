@@ -3,7 +3,7 @@ import {
 	FlattenToDictionary,
 	JSONValue,
 } from "@hediet/json-to-dictionary";
-import { sendEvent } from "./vscode";
+import { sendEvent, fromHost } from "./vscode";
 
 Draw.loadPlugin((ui) => {
 	sendEvent({ event: "pluginLoaded", pluginId: "linkSelectedNodeWithData" });
@@ -109,7 +109,7 @@ Draw.loadPlugin((ui) => {
 	}
 
 	window.addEventListener("message", (evt) => {
-		if (evt.source !== window.opener) {
+		if (!fromHost(evt)) {
 			return;
 		}
 

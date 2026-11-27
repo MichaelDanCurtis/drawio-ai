@@ -1,6 +1,7 @@
-import { sendEvent } from "./vscode";
+import { fromHost, sendEvent } from "./vscode";
 import { exportVsdx } from "./vsdx/VsdxExport";
 import { exportPdf } from "./pdf/PdfExport";
+import { printPdf } from "./pdf/PrintPdf";
 import { importDiagram } from "./import/importDiagram";
 import { liveState } from "./liveState";
 
@@ -2328,6 +2329,16 @@ Draw.loadPlugin((ui: any) => {
 		}
 	}
 
+	/** Hands every page to the browser's print dialog, for a PDF whose text stays text (a host in a browser). */
+	async function printPdfPages(action: AiPrintPdfAction): Promise<AiPrintPdfEvent> {
+		try {
+			const result = await printPdf(ui, { currentPageOnly: action.currentPageOnly, title: action.title });
+			return { event: "aiPrintPdf", message: action, pages: result.pages, warnings: result.warnings };
+		} catch (e: any) {
+			return { event: "aiPrintPdf", message: action, pages: 0, warnings: [], error: String(e?.message ?? e) };
+		}
+	}
+
 	// ---------------------------------------------------------------------
 	// Importing files from other tools (Visio, Gliffy, GraphML, Lucidchart)
 	// ---------------------------------------------------------------------
@@ -3226,7 +3237,7 @@ Draw.loadPlugin((ui: any) => {
 	// ---------------------------------------------------------------------
 
 	window.addEventListener("message", async (evt) => {
-		if (evt.source !== window.opener) {
+		if (!fromHost(evt)) {
 			return;
 		}
 		let data: CustomDrawioAction;
@@ -3285,6 +3296,9 @@ Draw.loadPlugin((ui: any) => {
 				break;
 			case "aiExportPdf":
 				sendEvent(await exportPdfFile(data));
+				break;
+			case "aiPrintPdf":
+				sendEvent(await printPdfPages(data));
 				break;
 			case "aiImportDiagram":
 				sendEvent(await importFile(data));
