@@ -575,6 +575,8 @@
 		}
 
 		window.addEventListener("message", function (evt) {
+			// (in another host's page, see frame/host.js: only what the page that frames the editor says)
+			if (window.omnidrawFromHost && !window.omnidrawFromHost(evt)) return;
 			var data = evt.data;
 			if (typeof data === "string") {
 				if (data.indexOf('"desktopPrefs"') < 0 && data.indexOf('"desktopShapes"') < 0 && data.indexOf('"desktopInsertShape"') < 0 && data.indexOf('"desktopGalleryResults"') < 0 && data.indexOf('"desktopSetShapeSet"') < 0 && data.indexOf('"desktopStorage"') < 0 && data.indexOf('"desktopReportShapeSets"') < 0 && data.indexOf('"desktopReportState"') < 0) return;

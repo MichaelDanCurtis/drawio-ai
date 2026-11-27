@@ -71,12 +71,34 @@ test("the first script of the bundle gives the toolbar's scripts someone to post
 	run(w);
 	w.win.VsCodeApi.postMessage("x");
 	assert.equal(w.posted[0].origin, "*");
-	// the desktop app's and VS Code's editor pages have one already
+	// what the toolbar's scripts are told is taken from the framing page only, at that origin
+	w = fakeWindow();
+	run(w);
+	assert.equal(w.win.omnidrawFromHost({ source: w.parent, origin: "https://pad.example" }), true);
+	assert.equal(w.win.omnidrawFromHost({ source: w.parent, origin: "https://elsewhere.example" }), false);
+	assert.equal(w.win.omnidrawFromHost({ source: {}, origin: "https://pad.example" }), false, "another frame or window that can reach the editor is not the host");
+	w = fakeWindow({ config: { hostOrigin: "https://app.example" } });
+	run(w);
+	assert.equal(w.win.omnidrawFromHost({ source: w.parent, origin: "https://app.example" }), true);
+	assert.equal(w.win.omnidrawFromHost({ source: w.parent, origin: "https://pad.example" }), false);
+	// every script of the bundle that listens for messages puts them to that test first
+	const bundled = ["desktop-toolbar.js", "presentation.js", "theme.js", "ui/icons.js", "ui/brandmark.js", "ui/tips.js"];
+	let listeners = 0;
+	for (const f of bundled) {
+		const text = fs.readFileSync(path.join(__dirname, "../src/renderer", f), "utf8");
+		for (const part of text.split('addEventListener("message"').slice(1)) {
+			listeners++;
+			assert.match(part.slice(0, 400), /if \(window\.omnidrawFromHost && !window\.omnidrawFromHost\(evt\)\) return;/, `${f}: a message listener that does not ask who is speaking`);
+		}
+	}
+	assert.equal(listeners, 2);
+	// the desktop app's and VS Code's editor pages have an api of their own already: nothing is added there
 	w = fakeWindow();
 	const own = { postMessage() {} };
 	w.win.VsCodeApi = own;
 	run(w);
 	assert.equal(w.win.VsCodeApi, own);
+	assert.equal(w.win.omnidrawFromHost, undefined);
 	// nobody frames it: nothing is posted, and nothing throws
 	w = fakeWindow({ framed: false });
 	run(w);
