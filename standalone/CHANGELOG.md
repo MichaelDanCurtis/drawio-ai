@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0]
+
 - **Go live** (File → Go Live…): share the open diagram by a link, and work on it with others at
   the same time. Whoever joins (File → Join a Shared Diagram…, with the link) sees your changes
   as you make them and you see theirs, with their pointers and what they have selected. Two
