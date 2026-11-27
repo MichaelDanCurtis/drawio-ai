@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.1]
+
 - A new app icon: a letter D drawn in dots, white on black with one red dot. (The square of
   dots it had since 0.4.0 is the mark of all the Omni products, not this one's.) Its drawing is
   `build/icon.svg`.
