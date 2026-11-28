@@ -544,7 +544,8 @@ export class DiagramWindow implements DocumentWindow {
 		this.file = file;
 		// (the maps' records follow the diagram, as they do when it is saved under another name)
 		try {
-			this.maps.adoptRecords(from, { cwd: this.cwd(), diagram: file });
+			// (moved, not copied: the records it has now go with it, and none stay behind to be found stale later)
+			if (from.diagram) this.maps.moveRecords({ cwd: from.cwd, diagram: from.diagram }, { cwd: this.cwd(), diagram: file });
 		} catch (e) {
 			console.warn("Could not carry the map records over:", e);
 		}

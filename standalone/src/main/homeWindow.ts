@@ -7,7 +7,7 @@ import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
 import { canonicalPath, docType, Library, LibraryError, type DocKind } from "./library/library";
 import { readRecent, RecentFileError, Recents } from "./library/recents";
 import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
-import { adoptRecords } from "./mapper/store";
+import { moveRecords } from "./mapper/store";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
@@ -369,7 +369,7 @@ export class HomeWindow {
 			if (!open.length) {
 				const was = windows.get(from)?.was ?? lib.pathOf(from);
 				try {
-					adoptRecords({ cwd: path.dirname(was), diagram: was }, { cwd: path.dirname(now), diagram: now });
+					moveRecords({ cwd: path.dirname(was), diagram: was }, { cwd: path.dirname(now), diagram: now });
 				} catch {
 					// (the diagram is where it should be; its maps can be drawn again)
 				}

@@ -237,7 +237,13 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 		await until("the closed diagram to be in the collection", () => fs.existsSync(lib().pathOf("Maps/Mapped.drawio")));
 		const carried = loadRecord(path.join(lib().root, "Maps"), "e2e-map");
 		log("homeMapsCarried", carried ? { diagram: carried.diagram } : null);
-		expect(carried?.diagram === "Mapped.drawio", "a closed diagram's map records go with it to its new folder");
+		expect(carried?.diagram === "Mapped.drawio" && !loadRecord(lib().root, "e2e-map"), "a closed diagram's map records go with it to its new folder, and none stay behind");
+		// changed where it is now, then moved back: what it has now comes back with it, not what was left before
+		saveRecord(path.join(lib().root, "Maps"), { ...carried, note: "changed in Maps" } as any);
+		await send({ type: "move", id: "Maps/Mapped.drawio", collection: "" });
+		await until("the diagram to be back at the top", () => fs.existsSync(lib().pathOf("Mapped.drawio")));
+		const back = loadRecord(lib().root, "e2e-map") as any;
+		expect(back?.note === "changed in Maps" && !loadRecord(path.join(lib().root, "Maps"), "e2e-map"), "moved back, it has its records as they are now");
 	}
 
 	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----

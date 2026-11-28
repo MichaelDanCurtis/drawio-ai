@@ -159,6 +159,33 @@ export function diffRecords(before: MapRecord, after: MapRecord): { added: strin
  * another folder they are copied there (the old file keeps its own); in the same
  * folder they are re-associated with the new name.
  */
+/**
+ * A diagram's records go with it to its new folder or name (the diagram was moved or renamed, not
+ * copied): the ones it has now take the place of any left at the new place by an earlier move,
+ * and none stay behind, where they would be stale the next time the diagram came back.
+ */
+export function moveRecords(from: { cwd: string; diagram: string }, to: { cwd: string; diagram: string }): number {
+	const oldName = path.basename(from.diagram);
+	const newName = path.basename(to.diagram);
+	const sameFolder = path.resolve(from.cwd) === path.resolve(to.cwd);
+	let names: string[] = [];
+	try {
+		names = fs.readdirSync(mapsDir(from.cwd)).filter((n) => n.endsWith(".json"));
+	} catch {
+		return 0;
+	}
+	let n = 0;
+	for (const name of names) {
+		const r = loadRecord(from.cwd, name.replace(/\.json$/, ""));
+		if (!r || (r.diagram ?? undefined) !== oldName) continue;
+		r.diagram = newName;
+		saveRecord(to.cwd, r);
+		if (!sameFolder) fs.rmSync(path.join(mapsDir(from.cwd), name), { force: true });
+		n++;
+	}
+	return n;
+}
+
 export function adoptRecords(from: { cwd: string; diagram?: string }, to: { cwd: string; diagram: string }): number {
 	const oldName = from.diagram ? path.basename(from.diagram) : undefined;
 	const newName = path.basename(to.diagram);
