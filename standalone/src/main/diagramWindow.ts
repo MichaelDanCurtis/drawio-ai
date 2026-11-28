@@ -8,7 +8,8 @@ import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
 import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
-import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram } from "./exporter";
+import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram, renderDiagram } from "./exporter";
+import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
 import { mappedSelection } from "./mapper/draw";
 import { diagramContent } from "./xmlContent";
@@ -959,14 +960,21 @@ export class DiagramWindow implements DocumentWindow {
 		const dir = this.file ? path.dirname(this.file) : app.getPath("documents");
 		const base = (this.file ? path.basename(this.file) : "Untitled.drawio").replace(/\.(drawio|dio)(\.(svg|png))?$|\.(xml|svg|png)$/i, "");
 		const target = request.path ? path.resolve(dir, request.path) : path.join(dir, `${base}.${f.ext}`);
-		if (this.file && path.resolve(target) === path.resolve(this.file)) throw new Error("That would replace the diagram itself.");
-		if (fs.existsSync(target)) {
+		// (a folder the agent names is made, as before; a file in a folder that is new cannot be in anyone's way)
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		// Where it really lands (exportTarget.ts): a name that is a link to another file is refused here, and
+		// the folders' own links are followed, so that what is compared, asked about and written is one place.
+		const where = exportTarget(target);
+		if (this.file && where.real === realPath(this.file)) throw new Error("That would replace the diagram itself.");
+		if (where.exists) {
 			if (!request.overwrite) throw new Error(`${target} exists. Pass overwrite: true to replace it (the user is asked).`);
-			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
+			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, detail: where.real, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
 			if (r.response !== 0) throw new Error("The user chose not to replace the file.");
 		}
-		const r = await exportDiagram(this.client, format, target, { currentPageOnly: request.currentPageOnly });
-		return { text: JSON.stringify({ path: target, bytes: r.bytes, note: r.note }), summary: `Exported ${path.basename(target)}` };
+		const r = await renderDiagram(this.client, format, { currentPageOnly: request.currentPageOnly });
+		// (never through a link, and never over a file that was not there when the user was asked)
+		writeExport(where.real, r.data, where.exists);
+		return { text: JSON.stringify({ path: target, bytes: r.data.length, note: r.note }), summary: `Exported ${path.basename(target)}` };
 	}
 
 	/** Set when the app was asked to quit: a window that held its closing back to finish something lets the quitting go on afterwards. */
