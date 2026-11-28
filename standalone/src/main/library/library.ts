@@ -142,6 +142,40 @@ export function canonicalPath(file: string): string {
 }
 
 /**
+ * The bytes of the plain file at `file`, read from one descriptor that was opened without
+ * following a link, and only if that descriptor is still the file under that name (the same
+ * device and number). What a path leads to can change between one look at it and the next: a
+ * check and a read of the same path at two moments are two different files to someone who can
+ * swap them. Undefined when it is not such a file (gone, a link, a folder, swapped meanwhile).
+ */
+export function readPlainFile(file: string, limit = Infinity): Buffer | undefined {
+	let fd: number;
+	try {
+		fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+	} catch {
+		return undefined;
+	}
+	try {
+		const open = fs.fstatSync(fd);
+		const named = fs.lstatSync(file, { throwIfNoEntry: false });
+		if (!open.isFile() || !named || named.isSymbolicLink() || named.dev !== open.dev || named.ino !== open.ino) return undefined;
+		if (open.size > limit) return undefined;
+		const bytes = Buffer.alloc(open.size);
+		let at = 0;
+		while (at < bytes.length) {
+			const n = fs.readSync(fd, bytes, at, bytes.length - at, at);
+			if (n === 0) break;
+			at += n;
+		}
+		return bytes.subarray(0, at);
+	} catch {
+		return undefined;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/**
  * Moves what the app keeps of a document (`a`) to where it belongs now (`b`), in place of
  * anything that is there. The two can be one and the same thing under two spellings (a name
  * whose capitals changed, on a disk that does not tell capitals apart): then there is nothing
@@ -397,8 +431,22 @@ export class Library {
 		};
 	}
 
-	public read(id: string): Buffer {
-		return fs.readFileSync(this.existing(id).file);
+	/**
+	 * A document's bytes, as they are now: read from a descriptor of the file that is under its
+	 * name in the library (no link followed, neither the file nor a folder on the way to it).
+	 */
+	public read(id: string, limit = Infinity): Buffer {
+		const { file, stat } = this.existing(id);
+		const bytes = readPlainFile(file, limit);
+		// (and still the document that was found, in its place: a folder swapped for a link meanwhile would be another file's)
+		const again = this.existing(id).stat;
+		if (!bytes || again.dev !== stat.dev || again.ino !== stat.ino) throw new LibraryError(`${path.basename(file)} could not be read as the library's document. Open it again from the library.`);
+		return bytes;
+	}
+
+	/** Notes the document as it is now as a version of it (see `snapshot`): read here, through `read`, never from what a caller read by its path. */
+	public snapshotNow(id: string, options: { kept?: boolean; now?: number } = {}): boolean {
+		return this.snapshot(id, this.read(id), options);
 	}
 
 	// ----- documents -----
@@ -594,11 +642,12 @@ export class Library {
 			.sort((a, b) => b.at - a.at);
 	}
 
-	/** The file of something in the trash (for its picture). */
-	public trashFile(trashId: string): string {
+	/** What is in the trash under that id, as bytes and the ending it had (for its picture); undefined when it cannot be read as a plain file. */
+	public trashBytes(trashId: string, limit = Infinity): { bytes: Buffer; ending: string } | undefined {
 		const entry = this.trashEntry(trashId);
-		if (!entry) throw new LibraryError("That is not in the trash any more.");
-		return entry.file;
+		if (!entry) return undefined;
+		const bytes = readPlainFile(entry.file, limit);
+		return bytes && { bytes, ending: entry.item.ending };
 	}
 
 	/** Puts a document back where it was, under its name if that is still free. Returns its id. */
@@ -615,14 +664,27 @@ export class Library {
 			if (!s) fs.mkdirSync(dir);
 		}
 		const fileName = this.free(dir, entry.item.name, entry.item.ending);
-		fs.renameSync(entry.file, path.join(dir, fileName));
 		const id = [...parts.slice(0, -1), fileName].join("/");
-		for (const [a, place] of [[path.join(entry.dir, "versions"), () => this.versionsFolder(id)], [path.join(entry.dir, "thumb.png"), () => this.thumbFile(id)]] as const) {
+		const target = path.join(dir, fileName);
+		// The document's history goes back with it, or the document stays in the trash with its
+		// history: the trash's folder is taken away below, and with it whatever is still in it.
+		// (where it goes is asked first: a place the app does not keep its files in refuses here, before anything moves)
+		const history = path.join(entry.dir, "versions");
+		const hasHistory = !!fs.lstatSync(history, { throwIfNoEntry: false });
+		const versionsTo = hasHistory ? this.versionsFolder(id) : undefined;
+		fs.renameSync(entry.file, target);
+		if (versionsTo) {
 			try {
-				moveOver(a, place());
-			} catch {
-				// (as in carry)
+				moveOver(history, versionsTo);
+			} catch (e: any) {
+				fs.renameSync(target, entry.file);
+				throw new LibraryError(`${entry.item.name}${entry.item.ending} was left in the trash: its earlier versions could not be put back with it (${e?.message ?? e}).`);
 			}
+		}
+		try {
+			moveOver(path.join(entry.dir, "thumb.png"), this.thumbFile(id));
+		} catch {
+			// (a picture is made again; it is not worth leaving the document in the trash for)
 		}
 		fs.rmSync(entry.dir, { recursive: true, force: true });
 		return id;
@@ -711,9 +773,9 @@ export class Library {
 
 	public versionBytes(id: string, key: string): Buffer {
 		if (!this.versionFiles(id).includes(key)) throw new LibraryError("That version is not kept any more.");
-		const file = path.join(this.versionsFolder(id), key);
-		if (!fs.lstatSync(file).isFile()) throw new LibraryError("That version is not kept any more.");
-		return fs.readFileSync(file);
+		const bytes = readPlainFile(path.join(this.versionsFolder(id), key));
+		if (!bytes) throw new LibraryError("That version is not kept any more.");
+		return bytes;
 	}
 
 	/**
@@ -722,13 +784,22 @@ export class Library {
 	 */
 	public restoreVersion(id: string, key: string, now = Date.now()): void {
 		const bytes = this.versionBytes(id, key);
-		const { file } = this.existing(id);
-		this.snapshot(id, fs.readFileSync(file), { kept: true, now });
+		const { file, stat } = this.existing(id);
+		this.snapshot(id, this.read(id), { kept: true, now });
 		// (the picture kept is of what the document was until now: it goes, whatever the clocks say of the two files)
 		fs.rmSync(this.thumbFile(id), { force: true });
-		// (into the file that is there, which `existing` has seen to be a plain file and no link)
-		fs.writeFileSync(file, bytes, { flag: "r+" });
-		fs.truncateSync(file, bytes.length);
+		// Into the file that is there, through a descriptor opened without following a link, and
+		// only if it is the document that was found.
+		const fd = fs.openSync(file, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW ?? 0));
+		try {
+			const open = fs.fstatSync(fd);
+			if (!open.isFile() || open.dev !== stat.dev || open.ino !== stat.ino) throw new LibraryError(`${path.basename(file)} changed while it was being put back. Nothing was written into it.`);
+			fs.ftruncateSync(fd, 0);
+			let at = 0;
+			while (at < bytes.length) at += fs.writeSync(fd, bytes, at, bytes.length - at, at);
+		} finally {
+			fs.closeSync(fd);
+		}
 	}
 
 	// ----- pictures -----

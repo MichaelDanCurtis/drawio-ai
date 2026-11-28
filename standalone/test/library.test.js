@@ -8,7 +8,7 @@ const os = require("os");
 const path = require("path");
 const zlib = require("zlib");
 require("./helpers/ts");
-const { Library, LibraryError, canonicalPath, cleanName, docType, VERSION_WINDOW, MAX_VERSIONS } = require("../src/main/library/library");
+const { Library, LibraryError, canonicalPath, cleanName, docType, readPlainFile, VERSION_WINDOW, MAX_VERSIONS } = require("../src/main/library/library");
 const { Recents, readRecent, RecentFileError } = require("../src/main/library/recents");
 const { sketchExcalidraw, sketchDrawio, firstPage, safeColour } = require("../src/main/library/sketch");
 
@@ -211,6 +211,59 @@ test("the app's own folder in the library is never reached through a link, at it
 	}
 });
 
+test("a document comes back from the trash with its history, or stays there with it", () => {
+	const root = temp();
+	const lib = new Library(root);
+	const doc = lib.create("Team", "Plan", ".drawio", B("v1"));
+	lib.snapshot(doc, B("v1"), { kept: true });
+	const t = lib.trash(doc);
+	// where the history would go is a link now (a library from somewhere else): it cannot go back
+	const outside = temp("outside");
+	fs.rmSync(path.join(root, ".omnidraw", "versions"), { recursive: true, force: true });
+	fs.symlinkSync(outside, path.join(root, ".omnidraw", "versions"));
+	refused(() => lib.restore(t), /is a link|left in the trash/);
+	assert.deepEqual(ids(lib), []);
+	const [item] = lib.contents().trash;
+	assert.equal(item.id, t);
+	assert.ok(fs.readdirSync(path.join(root, ".omnidraw", "trash", t, "versions")).length === 1, "its history is still in the trash with it");
+	assert.deepEqual(fs.readdirSync(outside), []);
+	// once the place is the app's again, it comes back with its history
+	fs.rmSync(path.join(root, ".omnidraw", "versions"));
+	assert.equal(lib.restore(t), doc);
+	assert.equal(lib.versions(doc).length, 1);
+});
+
+test("a file is read through one descriptor, and only as the plain file under its name", () => {
+	const dir = temp("plain");
+	const file = path.join(dir, "Plan.drawio");
+	fs.writeFileSync(file, "plan");
+	assert.equal(readPlainFile(file).toString(), "plan");
+	assert.equal(readPlainFile(file, 2), undefined);
+	assert.equal(readPlainFile(path.join(dir, "missing")), undefined);
+	assert.equal(readPlainFile(dir), undefined);
+	const secret = path.join(temp("private"), "id_rsa");
+	fs.writeFileSync(secret, "a private key");
+	fs.symlinkSync(secret, path.join(dir, "Link.drawio"));
+	assert.equal(readPlainFile(path.join(dir, "Link.drawio")), undefined);
+	// in the library: a document whose name is a link now is not read, and so not kept as a version either
+	const root = temp();
+	const lib = new Library(root);
+	const doc = lib.create("", "Shared", ".drawio", B("ours"));
+	assert.equal(lib.snapshotNow(doc, { kept: true }), true);
+	assert.equal(lib.versionBytes(doc, lib.versions(doc)[0].key).toString(), "ours");
+	fs.rmSync(lib.pathOf(doc));
+	fs.symlinkSync(secret, lib.pathOf(doc));
+	refused(() => lib.read(doc), /not in the library|could not be read/);
+	refused(() => lib.snapshotNow(doc), /not in the library|could not be read/);
+	assert.ok(lib.versions(doc).every((v) => !lib.versionBytes(doc, v.key).toString().includes("private")));
+	// a version swapped for a link is no version
+	const v = lib.versions(doc)[0].key;
+	const vfile = path.join(root, ".omnidraw", "versions", doc, v);
+	fs.rmSync(vfile);
+	fs.symlinkSync(secret, vfile);
+	refused(() => lib.versionBytes(doc, v), /not kept/);
+});
+
 test("a collection that is there is taken by its name as it is spelled", () => {
 	// two folders made outside the app, their names apart only by a second space
 	const root = temp();
@@ -249,7 +302,7 @@ test("the trash: there with its versions, back where it was, or gone for good", 
 	assert.deepEqual(ids(lib), []);
 	const [item] = lib.contents().trash;
 	assert.deepEqual([item.id, item.from, item.name, item.kind, item.collection, item.at], [t, doc, "Plan", "excalidraw", "Team", Date.UTC(2026, 10, 28, 10, 0, 0)]);
-	assert.equal(fs.readFileSync(lib.trashFile(t), "utf8"), "plan");
+	assert.deepEqual([lib.trashBytes(t).bytes.toString(), lib.trashBytes(t).ending], ["plan", ".excalidraw"]);
 	assert.equal(lib.trashThumb(t).toString(), "png");
 	// (the collection is still one, with nothing in it)
 	assert.deepEqual(lib.contents().collections, [{ name: "Team", count: 0 }]);

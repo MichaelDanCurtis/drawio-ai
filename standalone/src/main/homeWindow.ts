@@ -185,7 +185,7 @@ export class HomeWindow {
 			HomeWindow.recents().add(file);
 			const lib = HomeWindow.libraryIfThere();
 			const id = lib?.idOf(file);
-			if (lib && id && lib.versions(id).length === 0) lib.snapshot(id, fs.readFileSync(file), { kept: true });
+			if (lib && id && lib.versions(id).length === 0) lib.snapshotNow(id, { kept: true });
 		} catch (e) {
 			console.warn("OmniDraw: the home screen could not note an opened document:", e);
 		}
@@ -199,7 +199,7 @@ export class HomeWindow {
 			const lib = HomeWindow.libraryIfThere();
 			const id = lib?.idOf(file);
 			if (lib && id) {
-				lib.snapshot(id, fs.readFileSync(file));
+				lib.snapshotNow(id);
 				// (the picture a moment later, and once for a row of saves: it is the editor's work to make)
 				clearTimeout(HomeWindow.pictureTimers.get(w));
 				HomeWindow.pictureTimers.set(w, setTimeout(() => void HomeWindow.picture(w), 400));
@@ -322,6 +322,8 @@ export class HomeWindow {
 		const windows = documentWindows.allOf(lib.pathOf(id));
 		if (!windows.length) return true;
 		const name = path.basename(lib.pathOf(id));
+		// (a save under way ends first: whether the window has unsaved changes is known then)
+		await HomeWindow.savesDone(windows);
 		const unsaved = windows.find((w) => w.isDirty);
 		if (unsaved) {
 			unsaved.win.focus();
@@ -341,13 +343,21 @@ export class HomeWindow {
 		return true;
 	}
 
+	/** Waits until none of these windows has a save under way (a save that starts meanwhile is waited for too). */
+	private static async savesDone(windows: DocumentWindow[]): Promise<void> {
+		await Promise.all(windows.map((w) => w.whenSaved()));
+	}
+
 	/**
 	 * Gives documents another name or place (`change` does it, and says where each one went), and
 	 * has their windows follow. The windows are looked up before anything moves: afterwards the
 	 * path a window holds leads nowhere, and could not be told to be the same file's.
 	 */
-	private static moving(lib: Library, ids: string[], change: () => { from: string; to: string }[]): void {
+	private static async moving(lib: Library, ids: string[], change: () => { from: string; to: string }[]): Promise<void> {
 		const windows = new Map(ids.map((id) => [id, { all: documentWindows.allOf(lib.pathOf(id)), was: lib.pathOf(id) }]));
+		// A save under way writes where the file was when it started: it ends before the file moves.
+		// (from here to the windows taking the new name nothing waits, so no save can start in between)
+		await HomeWindow.savesDone([...windows.values()].flatMap((x) => x.all));
 		for (const { from, to } of change()) {
 			if (from === to) continue;
 			const now = lib.pathOf(to);
@@ -408,10 +418,10 @@ export class HomeWindow {
 					break;
 				}
 				case "rename":
-					HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.rename(text(msg.id), text(msg.name)) }]);
+					await HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.rename(text(msg.id), text(msg.name)) }]);
 					break;
 				case "move":
-					HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.move(text(msg.id), text(msg.collection)) }]);
+					await HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.move(text(msg.id), text(msg.collection)) }]);
 					break;
 				case "duplicate":
 					lib.duplicate(text(msg.id));
@@ -436,7 +446,7 @@ export class HomeWindow {
 					const from = text(msg.name);
 					const inside = lib.contents().docs.filter((d) => d.collection === from).map((d) => d.id);
 					let to = from;
-					HomeWindow.moving(lib, inside, () => {
+					await HomeWindow.moving(lib, inside, () => {
 						to = lib.renameCollection(from, text(msg.to));
 						return inside.map((id) => ({ from: id, to: [to, ...id.split("/").slice(1)].join("/") }));
 					});
@@ -445,7 +455,7 @@ export class HomeWindow {
 				}
 				case "removeCollection": {
 					let kept = false;
-					HomeWindow.moving(lib, lib.contents().docs.filter((d) => d.collection === text(msg.name)).map((d) => d.id), () => {
+					await HomeWindow.moving(lib, lib.contents().docs.filter((d) => d.collection === text(msg.name)).map((d) => d.id), () => {
 						const r = lib.removeCollection(text(msg.name));
 						kept = r.kept;
 						return r.moved;
@@ -518,14 +528,14 @@ export class HomeWindow {
 			if (typeof msg.trashId === "string") {
 				const thumb = lib.trashThumb(msg.trashId);
 				if (thumb) return pngUrl(thumb);
-				const file = lib.trashFile(msg.trashId);
-				// (in the trash a document's file is "item" with the document's ending)
-				return fs.statSync(file).size <= PREVIEW_LIMIT ? previewOf(fs.readFileSync(file), path.basename(file).slice("item".length)) : undefined;
+				const item = lib.trashBytes(msg.trashId, PREVIEW_LIMIT);
+				return item && previewOf(item.bytes, item.ending);
 			}
 			if (typeof msg.path === "string") {
 				const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
 				const type = recent && docType(path.basename(recent.path));
-				return recent && type && fs.statSync(recent.path).size <= PREVIEW_LIMIT ? previewOf(fs.readFileSync(recent.path), type.ending) : undefined;
+				// (as for a copy: only the very file that was opened, never what a link put there since leads to)
+				return recent && type ? previewOf(readRecent(recent, PREVIEW_LIMIT), type.ending) : undefined;
 			}
 			const id = String(msg.id ?? "");
 			const type = docType(id.split("/").pop() ?? "");
@@ -533,7 +543,7 @@ export class HomeWindow {
 			if (typeof msg.version === "string") return previewOf(lib.versionBytes(id, msg.version), type.ending);
 			const thumb = lib.thumb(id);
 			if (thumb) return pngUrl(thumb);
-			return fs.statSync(lib.pathOf(id)).size <= PREVIEW_LIMIT ? previewOf(lib.read(id), type.ending) : undefined;
+			return previewOf(lib.read(id, PREVIEW_LIMIT), type.ending);
 		} catch {
 			return undefined;
 		}

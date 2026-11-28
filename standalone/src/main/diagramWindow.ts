@@ -930,7 +930,21 @@ export class DiagramWindow implements DocumentWindow {
 		return ok;
 	}
 
-	private async writeTo(file: string): Promise<boolean> {
+	/** The saves under way (see DocumentWindow.whenSaved). */
+	private writing = new Set<Promise<boolean>>();
+
+	public async whenSaved(): Promise<void> {
+		while (this.writing.size) await Promise.allSettled([...this.writing]);
+	}
+
+	private writeTo(file: string): Promise<boolean> {
+		const run = this.writeNow(file);
+		this.writing.add(run);
+		void run.finally(() => this.writing.delete(run));
+		return run;
+	}
+
+	private async writeNow(file: string): Promise<boolean> {
 		try {
 			const ext = /\.(png|svg)$/i.test(file) ? file : file.replace(/\.(xml|dio)$/i, ".drawio");
 			const buffer = await this.client.export(ext.endsWith(".png") || ext.endsWith(".svg") ? ext : ".drawio");

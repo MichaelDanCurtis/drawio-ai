@@ -553,7 +553,21 @@ export class ExcalidrawWindow implements DocumentWindow {
 		return true;
 	}
 
-	private async writeTo(file: string, format: ExcalidrawFormat): Promise<boolean> {
+	/** The saves under way (see DocumentWindow.whenSaved). */
+	private writing = new Set<Promise<boolean>>();
+
+	public async whenSaved(): Promise<void> {
+		while (this.writing.size) await Promise.allSettled([...this.writing]);
+	}
+
+	private writeTo(file: string, format: ExcalidrawFormat): Promise<boolean> {
+		const run = this.writeNow(file, format);
+		this.writing.add(run);
+		void run.finally(() => this.writing.delete(run));
+		return run;
+	}
+
+	private async writeNow(file: string, format: ExcalidrawFormat): Promise<boolean> {
 		try {
 			const { bytes, stamp } = await this.contents(format);
 			fs.writeFileSync(file, bytes);

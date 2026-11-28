@@ -18,6 +18,12 @@ export interface DocumentWindow {
 	/** The app gave its file another name or place (the home screen did): the window is that file's from now on. */
 	movedTo(file: string): void;
 	/**
+	 * Settles when no save of this window is under way. A save takes its file's name when it
+	 * starts and writes there when the editor has handed the document over: what moves the file
+	 * waits for this first, or the save would make the file again where it was.
+	 */
+	whenSaved(): Promise<void>;
+	/**
 	 * A picture of the document as it was last saved (a PNG), for its card on the home screen.
 	 * Undefined when what the editor shows is not that any more: a picture of changes that may
 	 * never be saved is not the file's.

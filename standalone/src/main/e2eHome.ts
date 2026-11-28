@@ -102,8 +102,14 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 	log("homeSaved", { versions: lib().versions("Untitled.excalidraw").map((v) => [v.kept, v.size]), picture: lib().thumb("Untitled.excalidraw")!.length });
 
 	// ----- renamed and moved from the home screen while it is open: the window follows -----
+	// (renamed while a save is still under way: the save ends first, and what it wrote is in the renamed file)
+	await addElement(w, "home-pending", "diamond", { x: 100, y: 400 });
+	const saving = w.save();
 	await send({ type: "rename", id: "Untitled.excalidraw", name: "Roadmap" });
+	expect(await saving, "the save that was under way ended");
 	await until("the window to be the renamed file's", () => w.file === path.join(lib().root, "Roadmap.excalidraw"));
+	await pause(300);
+	expect(!fs.existsSync(path.join(folder, "Untitled.excalidraw")) && fs.readFileSync(w.file!, "utf8").includes("home-pending") && !w.isDirty, "a save under way is not written where the file was: the renamed file has it, and nothing is made again under the old name");
 	expect(/^Roadmap\.excalidraw/.test(w.win.getTitle()) && fs.existsSync(w.file!) && !fs.existsSync(path.join(folder, "Untitled.excalidraw")), "renaming a document renames its file, and the open window is the new file's");
 	await send({ type: "newCollection", name: "Clients" });
 	await until("the new collection", async () => (await nav()).some((n) => n.startsWith("Clients")));
