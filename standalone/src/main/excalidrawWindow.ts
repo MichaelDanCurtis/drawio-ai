@@ -3,7 +3,8 @@ import * as fs from "fs";
 import * as path from "path";
 import { ChatController, type ChatEditor } from "./chatController";
 import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
-import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, exportTarget, formatForPath, pictureToWrite, readScene, realPath, sceneTextToWrite, writeExport, type ExcalidrawFormat } from "./excalidrawFile";
+import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, formatForPath, pictureToWrite, readScene, sceneTextToWrite, type ExcalidrawFormat } from "./excalidrawFile";
+import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError } from "./excalidrawTools";
 import { paths } from "./paths";
 import { documentKey } from "./shortcuts";
@@ -601,7 +602,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 		const dir = this.cwd();
 		const target = request.path ? path.resolve(dir, request.path) : path.join(dir, `${baseName(this.fileName() ?? "Untitled")}.${ending === "excalidraw" ? "copy.excalidraw" : ending}`);
 		if (formatForPath(target) !== format) throw new Error(`The path must end in .${ending} for this format.`);
-		// (where it really lands: a name that is a link to another file is refused here, and the folders' own links are followed,
+		// (where it really lands, see exportTarget.ts: a name that is a link to another file is refused here, and the folders' own links are followed,
 		// so that what is compared, asked about and written is one and the same place)
 		const where = exportTarget(target);
 		if (this.file && where.real === realPath(this.file)) throw new Error("That would replace the drawing itself.");
