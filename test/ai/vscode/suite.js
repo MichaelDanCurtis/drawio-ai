@@ -283,6 +283,37 @@ async function runSteps() {
 		assert.ok(commands.includes("drawio-ai.exportVisio"));
 	});
 
+	// (making a link needs a special right on Windows)
+	if (process.platform !== "win32") {
+		await step("drawio_export is not written through a link: to a file elsewhere, to nothing, or a linked folder", async () => {
+			const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "drawio-ai-it-elsewhere-"));
+			const mine = path.join(elsewhere, "notes.txt");
+			fs.writeFileSync(mine, "the user's own file");
+			const links = [path.join(dir, "test.pdf"), path.join(dir, "test.svg"), path.join(dir, "linked")];
+			try {
+				fs.symlinkSync(mine, links[0]);
+				fs.symlinkSync(path.join(elsewhere, "not-there.svg"), links[1]);
+				fs.symlinkSync(elsewhere, links[2]);
+				// (refused before the user would be asked about replacing: nothing here waits for a dialog)
+				const refused = /symbolic link|is a link to another file/;
+				assert.match(await invoke("drawio_export", { format: "pdf" }), refused);
+				assert.match(await invoke("drawio_export", { format: "pdf", overwrite: true }), refused);
+				assert.match(await invoke("drawio_export", { format: "svg" }), refused);
+				assert.match(await invoke("drawio_export", { format: "svg", overwrite: true }), refused);
+				assert.match(await invoke("drawio_export", { format: "png", path: "linked/a" }), refused);
+				assert.equal(fs.readFileSync(mine, "utf8"), "the user's own file");
+				assert.deepEqual(fs.readdirSync(elsewhere), ["notes.txt"]);
+				// an ordinary name in a folder still to be made is written
+				const made = JSON.parse(await invoke("drawio_export", { format: "png", path: "out/deep/a" }));
+				assert.equal(made.path.split(/[\\/]/).pop(), "a.png");
+				assert.equal(fs.readFileSync(path.join(dir, "out", "deep", "a.png")).readUInt32BE(0), 0x89504e47, "not a PNG");
+			} finally {
+				for (const link of links) fs.rmSync(link, { force: true });
+				fs.rmSync(elsewhere, { recursive: true, force: true });
+			}
+		});
+	}
+
 	await step("drawio_import converts Gliffy, Lucidchart, Miro and CSV files next to the open diagram without switching to them", async () => {
 		const gliffy = JSON.parse(await invoke("drawio_import", { path: "flow.gliffy", open: false }));
 		assert.equal(path.basename(gliffy.path), "flow.drawio");

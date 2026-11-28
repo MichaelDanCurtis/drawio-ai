@@ -2658,7 +2658,7 @@
 		"set-publisher": "node scripts/set-publisher.js",
 		"release": "node scripts/release.js",
 		"update-drawio": "node scripts/update-drawio.js",
-		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js test/ai/look.test.js test/ai/mapper.test.js test/ai/workshop.test.js",
+		"test:ai": "node scripts/sync-lm-tools.js --check && node scripts/generate-agent-plugin.js --check && node --test test/ai/agent.test.js test/ai/v2.test.js test/ai/v3.test.js test/ai/vsdx.test.js test/ai/exportLinks.test.js test/ai/pdf.test.js test/ai/import.test.js test/ai/chat.test.js test/ai/bridge.test.js test/ai/pages.test.js test/ai/conflicts.test.js test/ai/look.test.js test/ai/mapper.test.js test/ai/workshop.test.js",
 		"test:ai-e2e": "node --test --test-timeout=180000 test/ai/plugin.e2e.test.js test/ai/chatView.e2e.test.js test/ai/look.e2e.test.js test/ai/mapper.e2e.test.js test/ai/workshop.e2e.test.js test/ai/settings.e2e.test.js",
 		"test:ai-vscode": "node test/ai/vscode/runVsCodeTests.js",
 		"generate-agent-plugin": "node scripts/generate-agent-plugin.js"

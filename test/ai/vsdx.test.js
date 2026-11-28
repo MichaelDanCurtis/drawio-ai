@@ -13,10 +13,12 @@ require("ts-node").register({
 	compilerOptions: { module: "commonjs", target: "es2020" },
 });
 
+// A made-up file system that is not this computer's disk (as a virtual or remote workspace is):
+// the export goes through VS Code's own file API here. On a disk: exportLinks.test.js.
 class Uri {
 	constructor(p) {
 		this.path = p;
-		this.scheme = "file";
+		this.scheme = "memfs";
 		this.authority = "";
 	}
 	static file(p) {
@@ -29,7 +31,7 @@ class Uri {
 		return new Uri(p ?? this.path);
 	}
 	toString() {
-		return `file://${this.path}`;
+		return `memfs://${this.path}`;
 	}
 }
 let workspaceFolder;
