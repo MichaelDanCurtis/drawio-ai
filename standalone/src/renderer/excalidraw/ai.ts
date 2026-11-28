@@ -10,7 +10,7 @@
 // this file adds is what that function leaves to its caller: where a line between two elements
 // runs, and keeping labels and attached lines in place when something is moved or resized.
 import { describeScene, FONT_CODES } from "../../excalidraw/describe";
-import { absolutePoints, boxAround, boxOf, freePlace, isLine, routeBetween, routeThrough, round, type El, type Point } from "../../excalidraw/geometry";
+import { absolutePoints, boxAround, boxOf, distanceOutside, freePlace, isLine, routeBetween, routeThrough, round, type El, type Point } from "../../excalidraw/geometry";
 import { boundTo, ReviewLedger, type Change, type Summary } from "../../excalidraw/review";
 import type { AddOp, Operation, SceneQuery, Style, UpdateOp } from "../../excalidraw/tools";
 
@@ -692,7 +692,36 @@ export class DrawingAi {
 			if (JSON.stringify(have.map((b) => b.id)) === JSON.stringify(want.map((b) => b.id))) return e;
 			return back.has(e.id) || gone.has(e.id) ? { ...e, boundElements: want.length ? want : null } : next(e, { boundElements: want.length ? want : null });
 		});
-		this.editor.api.updateScene({ elements, captureUpdate: this.editor.captureNow });
+		// An arrow and the shape it is attached to are put back each on its own, and one of the two may
+		// not have been the AI's to put back: then they no longer meet. An arrow the review never held
+		// (the user's drag took it along with a shape that now goes back to where it was) is routed to
+		// that shape again; so is an arrow that came back, to a shape the user has moved since.
+		const draft = new Draft(elements);
+		const outline = (e: El) => [e.x, e.y, e.width, e.height, e.angle ?? 0].join(" ");
+		const apart = new Set<string>();
+		for (const line of draft.live()) {
+			// (an elbow arrow keeps the route Excalidraw gave it, here as everywhere)
+			if (line.type !== "arrow" || line.elbowed) continue;
+			const points = absolutePoints(line);
+			const ends: [string | undefined, Point | undefined][] = [[line.startBinding?.elementId, points[0]], [line.endBinding?.elementId, points[points.length - 1]]];
+			for (const [id, point] of ends) {
+				const shape = id ? draft.get(id) : undefined;
+				if (!shape || !point) continue;
+				const before = byId.get(shape.id);
+				if (back.has(line.id) ? !back.has(shape.id) && distanceOutside(shape, point) > LOOSE : back.has(shape.id) && !!before && outline(before) !== outline(shape)) apart.add(line.id);
+			}
+		}
+		for (const id of apart) {
+			try {
+				this.rebuildLine(draft, draft.get(id)!);
+			} catch {
+				// (it stays as it is, then: attached, and routed again by the editor when either end is moved)
+			}
+		}
+		this.editor.api.updateScene({ elements: apart.size ? draft.all() : elements, captureUpdate: this.editor.captureNow });
 		this.report();
 	}
 }
+
+/** Further than this from the shape it is attached to, an arrow's end is not at it any more (the editor itself attaches up to 32 away). */
+const LOOSE = 40;

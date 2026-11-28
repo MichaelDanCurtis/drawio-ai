@@ -7,7 +7,7 @@ const { test, after } = require("node:test");
 const assert = require("node:assert/strict");
 require("./helpers/ts");
 const { EXCALIDRAW_TOOLS, ToolInputError, idList, inputObject, parseMermaid, parseOperations, parseSceneQuery, MAX_OPERATIONS } = require("../src/excalidraw/tools");
-const { boxOf, boxAround, centerOf, edgePoint, freePlace, routeBetween, routeThrough, absolutePoints, LINE_GAP } = require("../src/excalidraw/geometry");
+const { boxOf, boxAround, centerOf, distanceOutside, edgePoint, freePlace, routeBetween, routeThrough, absolutePoints, LINE_GAP } = require("../src/excalidraw/geometry");
 const { describeScene } = require("../src/excalidraw/describe");
 const { ReviewLedger, boundTo, contentKey, differs } = require("../src/excalidraw/review");
 const { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError, excalidrawContext, excalidrawInstructions, excalidrawSystemPrompt } = require("../src/main/excalidrawTools");
@@ -183,6 +183,22 @@ test("where a line meets a shape: on its outline, a little off it", () => {
 	// and a line that starts at one leaves from that outline
 	const fromTurned = routeBetween(upright, el("far", "rectangle", 300, 0, 100, 80));
 	near([fromTurned.x, fromTurned.y], [126, 40]);
+});
+
+test("how far a point is from a shape: nothing inside it, the shortest way outside, turned with it", () => {
+	const box = { id: "b", type: "rectangle", x: 100, y: 100, width: 200, height: 100 };
+	assert.equal(distanceOutside(box, [150, 150]), 0);
+	assert.equal(distanceOutside(box, [300, 200]), 0);
+	assert.equal(distanceOutside(box, [340, 150]), 40);
+	assert.equal(distanceOutside(box, [150, 60]), 40);
+	// off a corner: the straight way to it
+	assert.equal(distanceOutside(box, [303, 204]), 5);
+	// a quarter turn: the box is 100 wide and 200 high about the same centre (200, 150)
+	const turnedBox = { ...box, angle: Math.PI / 2 };
+	assert.ok(Math.abs(distanceOutside(turnedBox, [200, 260]) - 10) < 1e-9);
+	assert.ok(Math.abs(distanceOutside(turnedBox, [290, 150]) - 40) < 1e-9);
+	// a shape drawn right to left
+	assert.equal(distanceOutside({ id: "n", type: "rectangle", x: 300, y: 100, width: -200, height: 100 }, [90, 150]), 10);
 });
 
 test("a line between two elements stops short of both, and keeps the points it bends at", () => {

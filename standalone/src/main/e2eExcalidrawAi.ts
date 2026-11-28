@@ -296,6 +296,42 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	menuItem("Agent", "Keep AI Changes").click();
 	await settled();
 
+	// ----- Reject puts an arrow and its shape back each on its own, and they still meet -----
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: "rj-a", x: 1000, y: 2400, width: 160, height: 80 }, { op: "add", type: "rectangle", id: "rj-b", x: 1500, y: 2400, width: 160, height: 80 }, { op: "add", type: "arrow", id: "rj-link", start: "rj-a", end: "rj-b" }] });
+	menuItem("Agent", "Keep AI Changes").click();
+	await settled();
+	const ends = `const all = x.api.getSceneElements(); const e = (id) => all.find((el) => el.id === id); const l = e("rj-link"), a = e("rj-a"), b = e("rj-b"); const last = l.points[l.points.length - 1];
+		const off = (s, p) => Math.round(Math.hypot(Math.max(Math.abs(p[0] - (s.x + s.width / 2)) - s.width / 2, 0), Math.max(Math.abs(p[1] - (s.y + s.height / 2)) - s.height / 2, 0)));
+		return { a: [a.x, a.y], b: [b.x, b.y], fill: a.backgroundColor, stroke: l.strokeColor, startOff: off(a, [l.x, l.y]), endOff: off(b, [l.x + last[0], l.y + last[1]]), bound: [l.startBinding && l.startBinding.elementId, l.endBinding && l.endBinding.elementId] };`;
+	const drag = (shape: string, end: 0 | 1) =>
+		inEditor(w, `x.api.updateScene({ elements: x.api.getSceneElementsIncludingDeleted().map((e) => {
+			if (e.id === ${JSON.stringify(shape)}) return { ...e, y: e.y + 300, version: e.version + 1, versionNonce: e.versionNonce + 1 };
+			if (e.id !== "rj-link") return e;
+			// (as the editor does when a shape is dragged: the arrow's end at it goes along, the other stays)
+			const last = e.points[e.points.length - 1];
+			return ${end === 0} ? { ...e, y: e.y + 300, points: [[0, 0], [last[0], last[1] - 300]], version: e.version + 1, versionNonce: e.versionNonce + 1 } : { ...e, points: [[0, 0], [last[0], last[1] + 300]], version: e.version + 1, versionNonce: e.versionNonce + 1 };
+		}) });`);
+	const meetsAtFirst = await inEditor<any>(w, ends);
+	// the AI only restyles a shape; the user then drags it, and its arrow with it: the arrow is not the review's
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "rj-a", backgroundColor: "#ffec99" }] });
+	await drag("rj-a", 0);
+	await pause(300);
+	const dragged = await inEditor<any>(w, ends);
+	menuItem("Agent", "Revert AI Changes").click();
+	await settled();
+	const shapeBack = await inEditor<any>(w, ends);
+	// the AI only restyles the arrow; the user then drags the shape it ends at: the shape is not the review's
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "rj-link", strokeColor: "#e03131" }] });
+	await drag("rj-b", 1);
+	await pause(300);
+	menuItem("Agent", "Revert AI Changes").click();
+	await settled();
+	const arrowBack = await inEditor<any>(w, ends);
+	log("aiRejectMeets", { meetsAtFirst, dragged, shapeBack, arrowBack });
+	expect(dragged.a[1] === 2700 && dragged.startOff <= 10, "the drag is as the editor leaves it: the shape lower, the arrow's start at it");
+	expect(shapeBack.a[1] === 2400 && shapeBack.fill === meetsAtFirst.fill && shapeBack.startOff <= 10 && shapeBack.endOff <= 10 && shapeBack.bound.join() === "rj-a,rj-b", "a shape that is put back where it was has its arrow at it again");
+	expect(arrowBack.b[1] === 2700 && arrowBack.stroke === meetsAtFirst.stroke && arrowBack.startOff <= 10 && arrowBack.endOff <= 10 && arrowBack.bound.join() === "rj-a,rj-b", "an arrow that is put back is at the shape the user moved since");
+
 	// ----- export: a file beside the drawing, never over one that is there unasked -----
 	const exported = await call("excalidraw_export", { format: "png" });
 	log("aiExport", exported.data ?? exported.text);

@@ -76,6 +76,18 @@ export function edgePoint(el: El, from: Point, gap = 0): Point {
 	return angle ? turned(point, [cx, cy], angle) : point;
 }
 
+/**
+ * How far outside an element's box a point is (0 when it is in it), the box turned as the
+ * element is. For telling whether a line's end is still at the element it is attached to.
+ */
+export function distanceOutside(el: El, point: Point): number {
+	const b = boxOf(el);
+	const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+	const angle = !isLine(el) && typeof el.angle === "number" && isFinite(el.angle) ? el.angle : 0;
+	const p = angle ? turned(point, [cx, cy], -angle) : point;
+	return Math.hypot(Math.max(Math.abs(p[0] - cx) - b.width / 2, 0), Math.max(Math.abs(p[1] - cy) - b.height / 2, 0));
+}
+
 /** A point turned about another by an angle (in radians, clockwise on the drawing, where y grows downwards). */
 export function turned(p: Point, about: Point, angle: number): Point {
 	const cos = Math.cos(angle), sin = Math.sin(angle);
