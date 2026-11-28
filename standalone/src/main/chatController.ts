@@ -3,19 +3,35 @@ import { clipboard, dialog, shell, WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import type { ToolResult } from "../../../src/features/ai/DiagramToolbox";
-import { describeContext, SelectionContext } from "../../../src/features/ai/systemPrompt";
+import type { SelectionContext } from "../../../src/features/ai/systemPrompt";
 import { AcpAgentSession, AuthRequiredError, ChatSession, SessionInfo } from "./acpSession";
 import { adaptersSettled, noteAdapterFailure } from "./adapterVersions";
 import { agentDef, AgentId, agentStatuses, AgentStatus, launchSpec } from "./agents";
 import { apiAccess } from "./api/catalog";
 import { apiChatAgents, ApiChatSession, ApiSetupError } from "./api/chatSession";
 import type { ApiProvider } from "./api/chat";
-import { ADDITIONS_NOTE, chatSystemPrompt, type WindowMcpServer } from "./mcpServer";
+import type { ToolEndpoint } from "./mcpServer";
 import { paths } from "./paths";
 import { ChatAgent, KnownModel, settings, settingsPath, updateSettings } from "./settings";
 import { modelsFromSession } from "./modelNames";
 import { rememberModels } from "./modelProbe";
-import type { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDrawioClient";
+/**
+ * What the chat needs of the editor of the window's document. A draw.io diagram's client
+ * (CustomizedDrawioClient) is one; an Excalidraw drawing's window has its own. What only
+ * draw.io has (the lasso, the prompt in the diagram, markup) is optional.
+ */
+export interface ChatEditor {
+	/** The ids of what is selected. */
+	readonly currentSelection: readonly string[];
+	/** The AI's changes the user has not kept or reverted yet. */
+	readonly pendingReview: { pending: boolean; summary: { added: number; changed: number; removed: number; pages?: number } } | undefined;
+	/** Shows in the editor that someone is at work on the document, or no longer. */
+	aiSetStatus(working: boolean, text?: string): unknown;
+	aiResolveReview(decision: "accept" | "reject"): unknown;
+	aiSetLassoMode?(on: boolean): unknown;
+	aiOpenPrompt?(): unknown;
+	aiSetMarkupMode?(on: boolean): unknown;
+}
 
 type TranscriptItem =
 	| { kind: "user"; text: string; scope?: string; attachments?: string[] }
@@ -43,7 +59,7 @@ interface ImageData {
 
 /** What the window gives the chat. */
 export interface ChatHost {
-	client(): CustomizedDrawioClient | undefined;
+	client(): ChatEditor | undefined;
 	fileName(): string | undefined;
 	/** Folder the agent works in: the diagram's folder. */
 	cwd(): string;
@@ -95,8 +111,8 @@ type Waiting = {
 	 */
 	own?: { origin?: SelectionContext; shown?: string };
 };
-/** What a diagram that has no file yet is called for the model. */
-const UNSAVED = "Untitled (a new diagram, not saved to a file yet)";
+/** What a document that has no file yet is called for the model. */
+const unsaved = (noun: string) => `Untitled (a new ${noun}, not saved to a file yet)`;
 let versionCounter = 0;
 
 /**
@@ -148,7 +164,7 @@ export class ChatController {
 	/** Tests: called whenever a prompt turn ends. */
 	public onTurnEnd: ((stop: string | undefined, error?: string) => void) | undefined;
 
-	constructor(private readonly host: ChatHost, private readonly mcp: WindowMcpServer) {
+	constructor(private readonly host: ChatHost, private readonly mcp: ToolEndpoint) {
 		mcp.onToolResult = (name, result) => {
 			this.toolSummaries.push({ name, result });
 			if (this.toolSummaries.length > 50) this.toolSummaries.shift();
@@ -204,7 +220,7 @@ export class ChatController {
 				break;
 			case "send":
 				if (typeof msg.text === "string" && (msg.text.trim() || msg.images?.length)) {
-					const text = msg.text.trim() || "Recreate the attached sketch/screenshot as an editable diagram.";
+					const text = msg.text.trim() || `Recreate the attached sketch/screenshot as an editable ${this.mcp.noun}.`;
 					// (sent while a request is under way: it joins that request, or follows it)
 					const images = sanitizeImages(msg.images);
 					// (the page emptied its box as it sent: what cannot wait goes back into it)
@@ -226,10 +242,10 @@ export class ChatController {
 				this.newChat();
 				break;
 			case "lasso":
-				this.host.client()?.aiSetLassoMode(!this.lassoActive);
+				this.host.client()?.aiSetLassoMode?.(!this.lassoActive);
 				break;
 			case "askInDiagram":
-				this.host.client()?.aiOpenPrompt();
+				this.host.client()?.aiOpenPrompt?.();
 				break;
 			case "review":
 				if (msg.decision === "accept" || msg.decision === "reject") this.host.client()?.aiResolveReview(msg.decision);
@@ -291,7 +307,7 @@ export class ChatController {
 	private async command(command: string): Promise<void> {
 		switch (command) {
 			case "drawio-ai.markup":
-				this.host.client()?.aiSetMarkupMode(true);
+				this.host.client()?.aiSetMarkupMode?.(true);
 				break;
 			case "drawio-ai.reviewDiagram":
 				await this.send(
@@ -395,7 +411,7 @@ export class ChatController {
 		const session: ApiChatSession = new ApiChatSession({
 			access: apiAccess(),
 			provider,
-			system: () => chatSystemPrompt(this.mcp.maps),
+			system: () => this.mcp.chatSystemPrompt(),
 			tools: { list: () => this.mcp.chatTools(), call: (name, args, signal) => this.mcp.call(name, args, { signal, chat: true }) },
 			handlers: {
 				onUpdate: (u) => {
@@ -615,7 +631,7 @@ export class ChatController {
 				: undefined;
 		this.push({ kind: "user", text: shown ?? text, scope, attachments: images.length ? [`🖼 ${images.length} image${images.length === 1 ? "" : "s"}`] : undefined });
 		if (!client || !this.host.ready()) {
-			this.push({ kind: "error", text: "The diagram is still loading. Try again in a moment." });
+			this.push({ kind: "error", text: `The ${this.mcp.noun} is still loading. Try again in a moment.` });
 			return;
 		}
 
@@ -644,11 +660,11 @@ export class ChatController {
 				return;
 			}
 			client.aiSetStatus(true, `${session.label} is editing…`);
-			// (a window always has its diagram: one that is not saved yet has no file name, which must not read as "none open")
-			const context = describeContext(this.host.fileName() ?? UNSAVED, selection);
+			// (a window always has its document: one that is not saved yet has no file name, which must not read as "none open")
+			const context = this.mcp.describeContext(this.host.fileName() ?? unsaved(this.mcp.noun), selection);
 			// (an agent program is told where it is and which tools to use; a model used through its API has only these tools, and is told so with every request)
 			const viaApi = session instanceof ApiChatSession;
-			const preamble = this.firstPrompt && !viaApi ? `${firstPromptNote(this.host.fileName())}\n\n` : "";
+			const preamble = this.firstPrompt && !viaApi ? `${this.mcp.firstPromptNote(this.host.fileName())}\n\n` : "";
 			this.firstPrompt = false;
 			const blocks: acp.ContentBlock[] = [{ type: "text", text: `${preamble}<context>\n${context}\n</context>\n\n${text}` }];
 			if (images.length) {
@@ -716,7 +732,7 @@ export class ChatController {
 		if (!taken.length) return undefined;
 		for (const w of taken) this.push({ kind: "user", text: w.text, scope: `↪ added while it works${w.selected.length ? ` · ◉ ${w.selected.length} selected` : ""}` });
 		this.postState();
-		return taken.map((w) => (w.selected.length ? `${w.text}\n(Selected in the diagram as this was sent: ${w.selected.length} item(s) with ids ${w.selected.slice(0, 80).join(", ")}${w.selected.length > 80 ? ", ..." : ""}.)` : w.text)).join("\n\n");
+		return taken.map((w) => (w.selected.length ? `${w.text}\n(Selected in the ${this.mcp.noun} as this was sent: ${w.selected.length} item(s) with ids ${w.selected.slice(0, 80).join(", ")}${w.selected.length > 80 ? ", ..." : ""}.)` : w.text)).join("\n\n");
 	}
 
 	/**
@@ -953,7 +969,9 @@ export class ChatController {
 		this.post({
 			type: "state",
 			state: {
-				file: this.host.fileName() ?? "Untitled diagram",
+				file: this.host.fileName() ?? `Untitled ${this.mcp.noun}`,
+				// (which kind of document this chat is beside: the page offers what that kind has)
+				kind: this.mcp.noun === "drawing" ? "excalidraw" : "drawio",
 				selectionCount: client?.currentSelection.length ?? 0,
 				mappedSelection: this.host.mappedSelectionCount?.() ?? 0,
 				pageMaps: this.host.pageMaps?.().maps ?? 0,
@@ -990,14 +1008,7 @@ export class ChatController {
 	}
 }
 
-function firstPromptNote(fileName: string | undefined): string {
-	return [
-		`You are working inside the OmniDraw app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
-		"Read and change it ONLY with the drawio_* tools of the \"omnidraw\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
-		ADDITIONS_NOTE,
-		"Reply with a brief summary of what you changed.",
-	].join("\n");
-}
+
 
 /** The option that allows this one request (not the agent's own "always" rules), else any allow. */
 function allowOption(options: acp.PermissionOption[]): acp.PermissionOption | undefined {
@@ -1034,6 +1045,12 @@ const TOOL_LABELS: Record<string, string> = {
 	mapper_refresh: "Refreshing the map…",
 	mapper_set_tour: "Saving a tour…",
 	mapper_answer: "Drawing the answer…",
+	excalidraw_get_scene: "Reading the drawing…",
+	excalidraw_apply_operations: "Editing the drawing…",
+	excalidraw_select: "Selecting…",
+	excalidraw_render_image: "Rendering preview…",
+	excalidraw_from_mermaid: "Drawing from Mermaid…",
+	excalidraw_export: "Exporting…",
 };
 
 /**
@@ -1042,7 +1059,7 @@ const TOOL_LABELS: Record<string, string> = {
  * holds something like it ("cat mapper_notes.txt") is shown as the agent gave it.
  */
 function ownTool(title: string): string | undefined {
-	const name = /(?:drawio|mapper)_[a-z_]+/.exec(title)?.[0];
+	const name = /(?:drawio|mapper|excalidraw)_[a-z_]+/.exec(title)?.[0];
 	return name && Object.hasOwn(TOOL_LABELS, name) ? name : undefined;
 }
 

@@ -122,15 +122,52 @@ unsaved changes, Save and Save As, and the question before a window with unsaved
   is in the app's look; Excalidraw's own UI is not restyled. The first entries of Excalidraw's
   menu (☰) are the app's: New drawing, Open, Save, Save as, Export.
 - **Menu bar.** While a drawing is in front the menu bar is the drawing's: File, Edit (Undo, Redo
-  and Select All are Excalidraw's on the canvas and the system's in a text field), View, Window.
-  draw.io's menus, Shapes, Agent and Map are not there: they work on diagrams.
-- **Chat.** The panel stays in the window, and says that AI editing of Excalidraw drawings is
-  not there yet: the agents' drawing tools are draw.io's. No agent is started for a drawing and
-  the chat offers no tools; it still closes (Cmd/Ctrl+J), resizes and opens Settings.
+  and Select All are Excalidraw's on the canvas and the system's in a text field), View, Agent,
+  Window. draw.io's menus, Shapes and Map are not there: they work on diagrams.
+- **Chat and AI.** The chat beside a drawing works as it does beside a diagram: pick an agent
+  or a model you have an API key for, and describe a change. See [AI in a drawing](#ai-in-a-drawing).
 
-Not there yet: AI tools for drawings, a home with preview cards and version history, sharing a
-drawing through Go live, and converting between draw.io and Excalidraw. Excalidraw's shape
-library is kept while a window is open, not between runs.
+Not there yet: a home with preview cards and version history, sharing a drawing through Go
+live, and converting between draw.io and Excalidraw. Excalidraw's shape library is kept while a
+window is open, not between runs.
+
+### AI in a drawing
+
+The agent (or the model used with your API key) edits the open drawing live through six tools
+of its own, which the window offers it the way a diagram's window offers draw.io's: over MCP on
+127.0.0.1 behind the window's token for an agent program, and run by the app for an API model.
+
+| Tool | What it does |
+| --- | --- |
+| `excalidraw_get_scene` | Reads the drawing: each element with id, type, place, size, text and what a line is attached to. A shape's label is given with the shape. All of it, the selection, some ids, or what matches a word. |
+| `excalidraw_apply_operations` | Changes it with a list of `add`, `update` and `delete` operations, applied as one step: all of them, or (when one cannot be done) none, with what to fix. |
+| `excalidraw_select` | Selects elements for you and brings them into view. |
+| `excalidraw_render_image` | Renders the drawing, or some elements, to a PNG for the model to look at (models that take pictures only). |
+| `excalidraw_from_mermaid` | Adds a diagram written in Mermaid as editable shapes: a flowchart becomes shapes and arrows, laid out. |
+| `excalidraw_export` | Writes a PNG, an SVG (both with the drawing inside) or a `.excalidraw` file. An existing file is only replaced when the agent says so, and you are asked. |
+
+- **Elements are Excalidraw's own.** A shape, its label and an arrow are made by Excalidraw
+  itself (it measures the text, fits a label into its shape and attaches an arrow to what it ends
+  at), so what the agent draws is what you would have drawn. The app adds what Excalidraw leaves
+  to the hand: an arrow that names two shapes is routed between their outlines, and when the
+  agent moves or resizes a shape its label and its arrows follow.
+- **Pending changes.** What the agent changes is in the drawing at once, and pending until you
+  keep or revert it, as in a diagram: what it added is outlined in green on the canvas, what it
+  changed in amber, and where something it removed was, dashed. The bar above the canvas counts
+  them and holds **Reject** and **Accept**; so do the chat (**Pending changes**) and **Agent →
+  Keep AI Changes / Revert AI Changes**. Reject gives every element back the state it had before
+  the agent first touched it. What you draw yourself meanwhile is yours and is not part of the
+  review, unless it is on something pending, which then stays pending. A change you undo
+  (Cmd/Ctrl+Z) is no longer pending. Keeping or reverting is everything at once; a part of it
+  cannot be picked yet.
+- **Selection.** A request is about what you have selected, when something is: the chat shows
+  how many elements that is, and the agent is told their ids.
+- **Asking first.** An agent program asks permission the way it does for any tool. A model used
+  with an API key is asked about by the app before `excalidraw_apply_operations`,
+  `excalidraw_from_mermaid` and `excalidraw_export`; reading, selecting and rendering ask nothing.
+- **What only a diagram has** is not offered beside a drawing: the lasso, the prompt and the
+  markup in the diagram, the check (lint), draw.io's shape search and the Mapper. Claude Code and
+  Codex connected from outside (**Agent → Connect…**) reach diagrams, not drawings, for now.
 
 The Excalidraw page has a Content-Security-Policy of its own (`src/renderer/excalidraw.html`):
 scripts from the app only, as on the app's other pages, and styles inline too, because
@@ -697,7 +734,7 @@ Electron main process                          agent subprocess (cwd = diagram f
   small shim (`src/main/vscode-shim.ts`).
 - An Excalidraw drawing has a window class of its own, `ExcalidrawWindow`
   (`src/main/excalidrawWindow.ts`), rather than a second kind of document inside
-  `DiagramWindow`: no draw.io client, no agent, no MCP server. What the two share is in
+  `DiagramWindow`: no draw.io client. What the two share is in
   `src/main/documentShell.ts`: where a new window goes, which document is in front (the menu
   bar follows it), and the chat beside the editor (sliding, docking left or right, its edge
   dragged to resize). The editor page is `src/renderer/excalidraw/app.tsx`, bundled with
@@ -707,6 +744,18 @@ Electron main process                          agent subprocess (cwd = diagram f
   there are unsaved changes; `src/main/excalidrawFile.ts` (no Electron in it, so the tests
   load it) decides which files are drawings, reads the drawing inside a PNG or SVG, and
   checks what is about to be written.
+- The chat is the same `ChatController` for both kinds of window. It knows the document's editor
+  as a `ChatEditor` (the selection, the pending review, a status line: a draw.io client is one,
+  an Excalidraw window has its own) and the document's tools as a `ToolEndpoint`
+  (`src/main/mcpServer.ts`: the MCP endpoint, what a model is told, and how the document is
+  called): `WindowMcpServer` for a diagram, `ExcalidrawEndpoint` (`src/main/excalidrawTools.ts`)
+  for a drawing.
+- A drawing's tools are in three places. `src/excalidraw/` has what needs neither Electron nor
+  the page, so the app, the page and the tests all load it: the tools and the check of what a
+  model sent (`tools.ts`), where a line runs (`geometry.ts`), how a drawing reads for a model
+  (`describe.ts`), and the bookkeeping of the review (`review.ts`). The app checks a call and
+  hands it to the editor page (`excalidrawTools.ts`); the page carries it out against
+  Excalidraw's API and draws the outlines of what is pending (`src/renderer/excalidraw/ai.ts`).
 
 ## Build a release
 
@@ -780,5 +829,10 @@ the window), for example:
   and edits and saves those, answers the question before closing, checks what is refused, and
   screenshots the window in light and dark (`window-light.png`, `window-dark.png`). It fails if
   the page asked for anything outside the app or reported a refused load.
-  `DRAWAI_E2E_CONSOLE=1` prints what the page's console says.
+  It then checks the AI tools (`src/main/e2eExcalidrawAi.ts`): the window's endpoint as an agent
+  reaches it, each tool against the real editor, the outlines and counts of pending changes,
+  Reject, Accept, undo and the user's own edits, and a request in the chat answered by a stand-in
+  for a provider's API and by a stand-in agent over ACP (no real agent, key or network).
+  `DRAWAI_E2E_CONSOLE=1` prints what the page's console says; `DRAWAI_E2E_PAGE_SCRIPT=<file>`
+  runs a script in the editor page and prints what it returns.
 - View → Editor/Chat Developer Tools for the two web views.

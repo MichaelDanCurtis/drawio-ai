@@ -150,10 +150,12 @@
 	body.orb-docked #context { padding-right: 56px; }
 	#empty h2 { margin: 0; font-size: var(--text-heading); font-weight: 500; letter-spacing: -0.01em; }
 	#empty p { margin: 0; color: var(--muted); font-size: 12.5px; }
-	/* A kind of document the agents have no tools for yet (an Excalidraw drawing): the chat says so, and
-	   offers nothing that would fail. It still closes, resizes and opens Settings. */
-	body.unavailable #context, body.unavailable footer, body.unavailable #providerBtn, body.unavailable #modelBtn, body.unavailable #status, body.unavailable #newChat, body.unavailable #allowAllChip, body.unavailable #empty h2, body.unavailable #empty .suggestions { display: none; }
-	body.unavailable #empty p { color: var(--ink-2); font-size: var(--text-sm); }
+	/* Beside an Excalidraw drawing: what only a draw.io diagram has (the lasso, the prompt and the markup in the
+	   diagram, the check, the Mapper) is not offered. The row those buttons stand in shows only while something is selected. */
+	body.kind-excalidraw #lasso, body.kind-excalidraw #askInDiagram, body.kind-excalidraw #markup, body.kind-excalidraw #lint, body.kind-excalidraw #map, body.kind-excalidraw #digDeeper, body.kind-excalidraw #mapActions { display: none; }
+	body.kind-excalidraw #context:not(.has-selection) { display: none; }
+	body.kind-excalidraw .top { border-bottom: 1px solid var(--border); }
+	body.kind-excalidraw #context { border-bottom: 0; }
 	.suggestions { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); overflow: hidden; }
 	.suggestions button { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left; background: transparent; border: 0; border-top: 1px solid var(--border); color: var(--ink); font: inherit; font-size: var(--text-sm); padding: 10px 14px; cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
 	.suggestions button:first-child { border-top: 0; }
@@ -250,7 +252,7 @@
 				<button id="reviewAccept" class="btn btn-sm btn-primary" title="Keep every pending AI change">Accept</button>
 			</span>
 		</div>
-		<div id="working" class="hidden" role="status"><span class="dot-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="label">Working · watch the diagram</span></div>
+		<div id="working" class="hidden" role="status"><span class="dot-loader" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span><span class="label" id="workingLabel">Working · watch the diagram</span></div>
 		<div id="queued" class="hidden" aria-label="Waiting to be sent"></div>
 		<div id="attachments"></div>
 		<textarea id="input" rows="2" placeholder="Describe a change, or paste a sketch…"></textarea>
@@ -598,10 +600,42 @@
 		}
 	}
 
+	// What the chat says of the document it is beside, where that differs: a draw.io diagram's words are the page's
+	// own; these are an Excalidraw drawing's.
+	const DRAWING = {
+		empty: "Pick one of your coding agents above, or a model you have an API key for, and describe a change: it edits the drawing live, and you keep or revert what it did. Select elements to change only those. Paste or drop a sketch to turn it into an editable drawing.",
+		working: "Working · watch the drawing",
+		suggestions: [
+			["Explain this drawing", "Explain what this drawing shows."],
+			["Tidy up the layout", "Tidy up the layout: remove overlaps, align the shapes and space them evenly. Keep all content."],
+			["Make it look consistent", "Restyle the drawing so it looks consistent: one colour per kind of thing, the same font sizes and line styles. Do not change structure."],
+			["Draw an example flowchart", "Draw a flowchart of a user signing up for a web app: enter details, validate them, send a confirmation e-mail, confirm, and the paths for what can go wrong."],
+		],
+	};
+	let kind = "drawio";
+	function renderKind() {
+		const next = state.kind === "excalidraw" ? "excalidraw" : "drawio";
+		if (next === kind) return;
+		// (a chat panel is one window's, and a window's document does not change its kind: this happens once, if at all)
+		kind = next;
+		document.body.classList.toggle("kind-excalidraw", kind === "excalidraw");
+		if (kind !== "excalidraw") return;
+		$("emptyText").textContent = DRAWING.empty;
+		$("workingLabel").textContent = DRAWING.working;
+		document.querySelectorAll(".suggestions button").forEach((b, i) => {
+			const [label, prompt] = DRAWING.suggestions[i] || [];
+			b.classList.toggle("hidden", !label);
+			if (label) {
+				b.textContent = label;
+				b.dataset.prompt = prompt;
+			}
+		});
+	}
+
 	function renderChrome() {
 		renderLook();
-		document.body.classList.toggle("unavailable", !!state.unavailable);
-		if (state.unavailable) $("emptyText").textContent = state.unavailable;
+		renderKind();
+		$("context").classList.toggle("has-selection", !!state.selectionCount);
 		const prov = (state.providers || []).find((p) => p.id === state.providerId);
 		$("providerLabel").textContent = prov ? prov.label.replace(/ — .*$/, "") : "Agent";
 		const cur = (state.models || []).find((m) => m.id === state.modelId);

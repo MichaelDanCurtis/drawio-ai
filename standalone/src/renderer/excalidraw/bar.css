@@ -23,6 +23,10 @@
 /* Unsaved changes: a dot of ink beside the name (the title bar shows the same). */
 .bar .unsaved { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink); }
 .bar .kind { flex: none; margin-left: 4px; }
+/* An agent at work, and its pending changes: they take the place of Export (which is in the menus too). */
+.bar .working, .bar .review { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.bar .working .dot-loader i { width: 4px; height: 4px; }
+.bar.busy .export, .bar.busy .kind { display: none; }
 .bar .chat { color: var(--ink); }
 .bar .chat svg { width: 17px; height: 17px; }
 .bar.side-left .chat { order: -1; margin-left: -6px; }

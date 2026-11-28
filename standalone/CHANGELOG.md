@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+- **AI in an Excalidraw drawing.** The chat beside a drawing now works as it does beside a
+  diagram: an agent (Claude Code, Gemini, Codex, GitHub Copilot, Kimi) or a model used with your
+  API key edits the open drawing live.
+  - Six tools of its own: it reads the drawing, changes it with a list of add, update and delete
+    operations applied as one step, selects, renders a picture to look at, adds a Mermaid
+    flowchart as editable shapes, and exports. Shapes, labels and arrows are made by Excalidraw
+    itself; an arrow between two shapes is routed between them, and follows them when the agent
+    moves them.
+  - What it changes is pending until you keep or revert it, as in a diagram: outlined on the
+    canvas (added, changed, removed), counted in the bar above it and in the chat, with **Reject**
+    and **Accept** in both and under **Agent**. Reject gives each element back what it was before
+    the agent touched it; what you draw yourself meanwhile is not part of the review; a change you
+    undo is no longer pending.
+  - A request is about the selection when there is one. A model used with an API key is asked
+    about before it changes the drawing or writes a file.
+  - Not yet: keeping or reverting part of a review, and reaching a drawing from Claude Code or
+    Codex connected from outside the app.
+
 ## [0.4.1]
 
 - A new app icon: a letter D drawn in dots, white on black with one red dot. (The square of

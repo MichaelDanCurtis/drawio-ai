@@ -9,6 +9,7 @@ import { KeyStore } from "./keyStore";
  * answers a request the way a model would, through the tools it is offered: it reads the
  * diagram, adds a shape with the label the request names, and says what it did. When a tool's
  * answer carries something the user added meanwhile (`<user_update>`), it adds that shape too.
+ * Beside an Excalidraw drawing it is offered that drawing's tools, and does the same with those.
  */
 export const STAND_IN_ID = "stand-in" as ApiProviderId;
 /** (made up: nothing a provider issued) */
@@ -24,6 +25,17 @@ function chat(o: ApiChatOptions): ApiChat {
 				await o.callTool(/Call the tool (\w+)/.exec(text)?.[1] ?? "drawio_lint", {});
 				if (signal.aborted) return "cancelled";
 				o.onText("OK");
+				return "end_turn";
+			}
+			if (o.tools.some((t) => t.name === "excalidraw_get_scene")) {
+				o.onText("Reading the drawing. ");
+				const scene = await o.callTool("excalidraw_get_scene", {});
+				if (signal.aborted) return "cancelled";
+				const words = /labelled '([^']+)'/.exec(text)?.[1] ?? "Hello from the API";
+				const drawn = await o.callTool("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: `stand-in-${held + 1}`, x: 60, y: 360 + held * 110, width: 220, height: 70, label: words }] });
+				if (signal.aborted) return "cancelled";
+				held++;
+				o.onText(scene.isError ? `I could not read it: ${scene.text}` : drawn.isError ? `I left the shape out: ${drawn.text}` : `Added a shape labelled '${words}' with ${o.model} (request ${held} of this conversation).`);
 				return "end_turn";
 			}
 			o.onText("Reading the diagram. ");

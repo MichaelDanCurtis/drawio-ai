@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { adapterPackages, AGENTS } from "./agents";
 import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
+import type { ChatController } from "./chatController";
 import { DiagramWindow, type DrawioMenuItem, flushDrawioStorage } from "./diagramWindow";
 import { documentWindows } from "./documentShell";
 import { sniffExcalidraw } from "./excalidrawFile";
@@ -237,6 +238,35 @@ function chatAndToolsItems(): MenuItemConstructorOptions[] {
 
 const HELP_MENU: MenuItemConstructorOptions = { role: "help", submenu: [{ label: "Agent Client Protocol", click: () => void shell.openExternal("https://agentclientprotocol.com") }] };
 
+/**
+ * The Agent menu, for the chat of the document in front (a diagram's or a drawing's): who
+ * answers, the request under way, and what is pending of the AI's changes.
+ */
+function agentMenu(chat: () => ChatController | undefined, resolveReview: (decision: "accept" | "reject") => void): MenuItemConstructorOptions {
+	return {
+		label: "Agent",
+		submenu: [
+			...AGENTS.map((a) => ({
+				label: `Use ${a.label}`,
+				click: () => void chat()?.onMessage({ type: "pickProvider", providerId: a.id }),
+			})),
+			{ type: "separator" },
+			{ label: "New Chat", accelerator: "CmdOrCtrl+Shift+N", click: () => chat()?.newChat() },
+			{ label: "Stop", accelerator: "CmdOrCtrl+.", click: () => chat()?.stop() },
+			{ label: "Restart Agent", click: () => void chat()?.onMessage({ type: "command", command: "drawai.retry" }) },
+			{ type: "separator" },
+			{ label: "Connect Claude Code / Codex to OmniDraw…", click: () => void connectExternalAgents(true) },
+			{ label: "Disconnect Claude Code / Codex", click: () => void connectExternalAgents(false) },
+			{ type: "separator" },
+			{ label: "Allow All Requests in This Chat", click: () => chat()?.setAllowAll(true) },
+			{ label: "Ask Before Each Request", click: () => chat()?.setAllowAll(false) },
+			{ type: "separator" },
+			{ label: "Keep AI Changes", click: () => resolveReview("accept") },
+			{ label: "Revert AI Changes", click: () => resolveReview("reject") },
+		],
+	};
+}
+
 /** Undo, redo and select all in an Excalidraw window: Excalidraw's own on the canvas, the system's in text. */
 async function excalidrawEdit(key: "undo" | "redo" | "selectAll"): Promise<void> {
 	const front = doc();
@@ -248,8 +278,8 @@ async function excalidrawEdit(key: "undo" | "redo" | "selectAll"): Promise<void>
 }
 
 /**
- * The menu bar while an Excalidraw drawing is in front: the document's commands, and none of
- * draw.io's (its menus, Shapes, the agents and the Mapper work on diagrams).
+ * The menu bar while an Excalidraw drawing is in front: the document's commands and the chat's
+ * (Agent), and none of draw.io's (its menus, Shapes and the Mapper work on diagrams).
  */
 function excalidrawMenu(): MenuItemConstructorOptions[] {
 	const x = () => {
@@ -289,6 +319,7 @@ function excalidrawMenu(): MenuItemConstructorOptions[] {
 			],
 		},
 		{ label: "View", submenu: chatAndToolsItems() },
+		agentMenu(() => x()?.chat, (decision) => x()?.resolveReview(decision)),
 		{ role: "windowMenu" },
 		HELP_MENU,
 	];
@@ -357,28 +388,7 @@ function buildMenu(): void {
 				{ label: "Your Shape Folders…", click: () => openSettings("shapes") },
 			],
 		},
-		{
-			label: "Agent",
-			submenu: [
-				...AGENTS.map((a) => ({
-					label: `Use ${a.label}`,
-					click: () => void w()?.chat.onMessage({ type: "pickProvider", providerId: a.id }),
-				})),
-				{ type: "separator" },
-				{ label: "New Chat", accelerator: "CmdOrCtrl+Shift+N", click: () => w()?.chat.newChat() },
-				{ label: "Stop", accelerator: "CmdOrCtrl+.", click: () => w()?.chat.stop() },
-				{ label: "Restart Agent", click: () => void w()?.chat.onMessage({ type: "command", command: "drawai.retry" }) },
-				{ type: "separator" },
-				{ label: "Connect Claude Code / Codex to OmniDraw…", click: () => void connectExternalAgents(true) },
-				{ label: "Disconnect Claude Code / Codex", click: () => void connectExternalAgents(false) },
-				{ type: "separator" },
-				{ label: "Allow All Requests in This Chat", click: () => w()?.chat.setAllowAll(true) },
-				{ label: "Ask Before Each Request", click: () => w()?.chat.setAllowAll(false) },
-				{ type: "separator" },
-				{ label: "Keep AI Changes", click: () => w()?.client.aiResolveReview("accept") },
-				{ label: "Revert AI Changes", click: () => w()?.client.aiResolveReview("reject") },
-			],
-		},
+		agentMenu(() => w()?.chat, (decision) => w()?.client.aiResolveReview(decision)),
 		{
 			label: "Map",
 			submenu: [

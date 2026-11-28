@@ -4,18 +4,20 @@
 // element, PNG and SVG exports carry the drawing and open again for editing, what is not a
 // drawing is refused, and the window is screenshot in light and dark.
 // Nothing leaves the machine: the page's requests that the app refused are counted, and must be none.
-import { dialog, Menu, nativeTheme, session, shell, type WebContents } from "electron";
+import { dialog, Menu, nativeTheme, session, shell, webContents, type WebContents } from "electron";
 import * as fs from "fs";
 import * as path from "path";
 import { DiagramWindow } from "./diagramWindow";
 import type { E2eConfig } from "./e2e";
 import { EXCALIDRAW_SOURCE, parseScene, readScene, sniffExcalidraw } from "./excalidrawFile";
-import { ExcalidrawWindow, NO_AI_YET } from "./excalidrawWindow";
+import { runDrawingAi } from "./e2eExcalidrawAi";
+import { ExcalidrawWindow } from "./excalidrawWindow";
+import { updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
 
-const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function until(what: string, check: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> {
+export async function until(what: string, check: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> {
 	const end = Date.now() + ms;
 	while (Date.now() < end) {
 		if (await check()) return;
@@ -24,26 +26,26 @@ async function until(what: string, check: () => boolean | Promise<boolean>, ms =
 	throw new Error(`Timed out waiting for: ${what}`);
 }
 
-function expect(condition: unknown, message: string): asserts condition {
+export function expect(condition: unknown, message: string): asserts condition {
 	if (!condition) throw new Error(`Check failed: ${message}`);
 }
 
 /** Runs in the editor page, with `x` as what the page offers the app (Excalidraw's API among it). */
-function inEditor<T>(w: ExcalidrawWindow, body: string): Promise<T> {
+export function inEditor<T>(w: ExcalidrawWindow, body: string): Promise<T> {
 	return w.editorView.webContents.executeJavaScript(`(async () => { const x = window.omnidrawExcalidraw; const bar = document.getElementById("bar").shadowRoot; ${body} })()`);
 }
 
-const elementIds = (w: ExcalidrawWindow) => inEditor<string[]>(w, `return x.api.getSceneElements().map((e) => e.id);`);
+export const elementIds = (w: ExcalidrawWindow) => inEditor<string[]>(w, `return x.api.getSceneElements().map((e) => e.id);`);
 
 /** Adds one element through Excalidraw's API, as an edit of the user's (it can be undone). */
-const addElement = (w: ExcalidrawWindow, id: string, type: string, at: { x: number; y: number }) =>
+export const addElement = (w: ExcalidrawWindow, id: string, type: string, at: { x: number; y: number }) =>
 	inEditor<void>(
 		w,
 		`const [el] = x.convertToExcalidrawElements([{ type: ${JSON.stringify(type)}, id: ${JSON.stringify(id)}, x: ${at.x}, y: ${at.y}, width: 170, height: 110, backgroundColor: "#b2f2bb", fillStyle: "solid" }], { regenerateIds: false });
 		x.api.updateScene({ elements: [...x.api.getSceneElementsIncludingDeleted(), el], captureUpdate: x.CaptureUpdateAction.IMMEDIATELY });`
 	);
 
-function menuItem(...labels: string[]): Electron.MenuItem {
+export function menuItem(...labels: string[]): Electron.MenuItem {
 	let items = Menu.getApplicationMenu()?.items ?? [];
 	let found: Electron.MenuItem | undefined;
 	for (const label of labels) {
@@ -54,11 +56,37 @@ function menuItem(...labels: string[]): Electron.MenuItem {
 	return found!;
 }
 
-async function closed(w: ExcalidrawWindow): Promise<void> {
+export async function closed(w: ExcalidrawWindow): Promise<void> {
 	await until("the window to close", () => w.win.isDestroyed());
 }
 
+/** Screenshots a window: its two views, and both side by side as the window shows them. */
+export async function shot(config: E2eConfig, name: string, w: ExcalidrawWindow): Promise<void> {
+	// (a view that is not being looked at starts its fade-ins at the frame the picture is taken of: they are switched off for it)
+	const still = "*, *::before, *::after { animation: none !important; transition: none !important; }";
+	const keys = await Promise.all([w.editorView.webContents.insertCSS(still), w.chatView.webContents.insertCSS(still)]);
+	await pause(150);
+	const a = await w.editorView.webContents.capturePage(), b = await w.chatView.webContents.capturePage();
+	await Promise.all([w.editorView.webContents.removeInsertedCSS(keys[0]), w.chatView.webContents.removeInsertedCSS(keys[1])]);
+	fs.writeFileSync(path.join(config.out, `${name}-editor.png`), a.toPNG());
+	fs.writeFileSync(path.join(config.out, `${name}-chat.png`), b.toPNG());
+	const whole = await inEditor<string>(
+		w,
+		`const load = (u) => new Promise((r, no) => { const i = new Image(); i.onload = () => r(i); i.onerror = no; i.src = u; });
+		const [a, b] = await Promise.all([load(${JSON.stringify(a.toDataURL())}), load(${JSON.stringify(b.toDataURL())})]);
+		const c = document.createElement("canvas"); c.width = a.width + b.width; c.height = Math.max(a.height, b.height);
+		const g = c.getContext("2d"); g.drawImage(a, 0, 0); g.drawImage(b, a.width, 0);
+		return c.toDataURL("image/png");`
+	);
+	fs.writeFileSync(path.join(config.out, `${name}.png`), Buffer.from(whole.split(",")[1], "base64"));
+}
+
 export async function runExcalidraw(server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void): Promise<void> {
+	// The chats of this run are answered by a stand-in for a provider's API (api/standIn.ts): no agent
+	// program is started for a window, nothing is sent anywhere, and the keychain is not asked.
+	// (written to the run's own settings file, so that it holds whatever else the run saves there)
+	process.env.DRAWAI_E2E_API = "1";
+	updateSettings({ agent: "api:stand-in" });
 	const shown: string[] = [];
 	ExcalidrawWindow.showError = (title, message) => shown.push(`${title}: ${message}`);
 	// what the page asked for and the app refused (anything that is not the app's own server)
@@ -77,12 +105,20 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	};
 
 	// ----- open -----
+	// (the drawing as the run was given it: the AI checks further down start from it again)
+	const sample = fs.readFileSync(config.file);
 	const t0 = Date.now();
 	const first = await ExcalidrawWindow.open(server, config.file);
 	expect(first, "the drawing opens");
 	watch(first.editorView.webContents);
 	await Promise.race([first.whenLoaded(), pause(30_000).then(() => Promise.reject(new Error(`The drawing did not load. The page said: ${consoleProblems.join(" | ") || "nothing"}; shown: ${shown.join(" | ") || "nothing"}`)))]);
 	log("loadedMs", Date.now() - t0);
+	// DRAWAI_E2E_PAGE_SCRIPT=<file>: run that script in the editor page (with `x`, as the checks below have it), print
+	// what it returns and end the run. For trying something against the real editor while working on it.
+	if (process.env.DRAWAI_E2E_PAGE_SCRIPT) {
+		log("pageScript", await inEditor(first, fs.readFileSync(process.env.DRAWAI_E2E_PAGE_SCRIPT, "utf8")).catch((e) => `failed: ${e?.stack ?? e}`));
+		return;
+	}
 	const before = await elementIds(first);
 	log("elementsBefore", before.length);
 	expect(before.length === 5, `the sample has 5 elements, the editor shows ${before.length}`);
@@ -109,40 +145,27 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	log("bar", await bar());
 	expect((await bar()).name === path.basename(config.file) && (await bar()).saveDisabled && !(await bar()).unsaved, "the bar names the drawing, with nothing to save");
 	const chat = first.chatView.webContents;
-	await until("the chat to say what it cannot do", () => chat.executeJavaScript(`document.body.classList.contains("unavailable")`));
-	const chatState = await chat.executeJavaScript(`({ text: document.getElementById("emptyText").textContent, composer: getComputedStyle(document.querySelector("footer")).display, tools: getComputedStyle(document.getElementById("context")).display, pickers: getComputedStyle(document.getElementById("providerBtn")).display })`);
+	await until("the chat to know it is beside a drawing", () => chat.executeJavaScript(`document.body.classList.contains("kind-excalidraw")`));
+	// (it offers what a drawing has: the box to ask in, and none of what only a draw.io diagram has)
+	const shownIn = (id: string) => `getComputedStyle(document.getElementById(${JSON.stringify(id)})).display !== "none"`;
+	const chatState = await chat.executeJavaScript(`({ text: document.getElementById("emptyText").textContent, composer: getComputedStyle(document.querySelector("footer")).display !== "none", input: ${shownIn("input")}, lasso: ${shownIn("lasso")}, markup: ${shownIn("markup")}, map: ${shownIn("map")}, check: ${shownIn("lint")}, suggestions: Array.from(document.querySelectorAll(".suggestions button:not(.hidden)")).map((b) => b.textContent) })`);
 	log("chat", chatState);
-	expect(chatState.text === NO_AI_YET && chatState.composer === "none" && chatState.tools === "none" && chatState.pickers === "none", "the chat says AI editing is not there yet, and offers no tools");
+	expect(/edits the drawing live/.test(chatState.text) && chatState.composer && chatState.input && !chatState.lasso && !chatState.markup && !chatState.map && !chatState.check, "the chat beside a drawing takes requests, and offers nothing that only a draw.io diagram has");
 
 	// ----- the menu bar is the drawing's -----
 	await until("the menu bar to follow the drawing", () => !!Menu.getApplicationMenu()?.items.some((i) => i.label === "File" && i.submenu?.items.some((s) => s.label === "Export as PNG…")));
 	const menus = Menu.getApplicationMenu()!.items.map((i) => i.label);
 	log("menus", menus);
-	expect(!menus.includes("Agent") && !menus.includes("Map") && !menus.includes("Shapes") && !menus.includes("Arrange"), "none of draw.io's menus while a drawing is in front");
+	expect(menus.includes("Agent") && !menus.includes("Map") && !menus.includes("Shapes") && !menus.includes("Arrange"), "the chat's menu, and none of draw.io's, while a drawing is in front");
 
 	// ----- screenshots, light and dark -----
-	const shot = async (name: string, w: ExcalidrawWindow) => {
-		const a = await w.editorView.webContents.capturePage(), b = await w.chatView.webContents.capturePage();
-		fs.writeFileSync(path.join(config.out, `${name}-editor.png`), a.toPNG());
-		fs.writeFileSync(path.join(config.out, `${name}-chat.png`), b.toPNG());
-		// the two views side by side, as the window shows them
-		const whole = await inEditor<string>(
-			w,
-			`const load = (u) => new Promise((r, no) => { const i = new Image(); i.onload = () => r(i); i.onerror = no; i.src = u; });
-			const [a, b] = await Promise.all([load(${JSON.stringify(a.toDataURL())}), load(${JSON.stringify(b.toDataURL())})]);
-			const c = document.createElement("canvas"); c.width = a.width + b.width; c.height = Math.max(a.height, b.height);
-			const g = c.getContext("2d"); g.drawImage(a, 0, 0); g.drawImage(b, a.width, 0);
-			return c.toDataURL("image/png");`
-		);
-		fs.writeFileSync(path.join(config.out, `${name}.png`), Buffer.from(whole.split(",")[1], "base64"));
-	};
 	const themes: Record<string, unknown> = {};
 	for (const theme of ["light", "dark"] as const) {
 		nativeTheme.themeSource = theme;
 		await until(`Excalidraw's ${theme} theme`, () => inEditor<boolean>(first, `return document.querySelector(".excalidraw").classList.contains("theme--dark") === ${theme === "dark"};`));
 		await pause(600);
 		themes[theme] = await inEditor(first, `return { bar: getComputedStyle(bar.querySelector(".bar")).backgroundColor, ink: getComputedStyle(bar.querySelector(".bar")).color, canvas: x.api.getAppState().theme };`);
-		await shot(`window-${theme}`, first);
+		await shot(config, `window-${theme}`, first);
 	}
 	log("themes", themes);
 	nativeTheme.themeSource = "light";
@@ -153,6 +176,10 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	await until("the drawing to have unsaved changes", () => first.isDirty);
 	expect(first.win.getTitle() === `${path.basename(config.file)} • — OmniDraw`, `the title marks unsaved changes: ${first.win.getTitle()}`);
 	await until("the bar's unsaved dot", async () => (await bar()).unsaved && !(await bar()).saveDisabled);
+	// (Undo from the menu bar is the drawing's while the canvas has the keyboard, as after a click on it)
+	const focusedBefore = webContents.getFocusedWebContents();
+	log("focusBeforeMenuEdits", focusedBefore === first.editorView.webContents ? "editor" : focusedBefore === first.chatView.webContents ? "chat" : focusedBefore ? "another page" : "none");
+	first.editorView.webContents.focus();
 	menuItem("Edit", "Undo").click();
 	await until("Edit → Undo to take the element away", async () => !(await elementIds(first)).includes("e2e-diamond"));
 	menuItem("Edit", "Redo").click();
@@ -164,7 +191,7 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	const saveButton = await inEditor<{ primary: boolean; background: string }>(first, `const b = bar.getElementById("save"); await new Promise((r) => setTimeout(r, 400)); return { primary: b.classList.contains("btn-primary"), background: getComputedStyle(b).backgroundColor };`);
 	log("saveButtonWhenUnsaved", saveButton);
 	expect(saveButton.primary, "Save is the primary button while there are unsaved changes");
-	await shot("window-edited", first);
+	await shot(config, "window-edited", first);
 
 	// ----- the chat closes and opens again (View → Toggle Chat, and the button in the bar) -----
 	const chatWidth = () => first.chatView.getBounds().width, editorWidth = () => first.editorView.getBounds().width, windowWidth = () => first.win.getContentBounds().width;
@@ -422,6 +449,9 @@ export async function runExcalidraw(server: StaticServer, config: E2eConfig, log
 	}
 	log("refused", refusals);
 	expect(sniffExcalidraw(path.join(config.out, "plain.png"), () => fs.readFileSync(path.join(config.out, "plain.png"))) === undefined, "a picture without a drawing is not taken for one (it opens as before, in draw.io)");
+
+	// ----- the agents' tools for a drawing, the review of their changes, and the chat -----
+	await runDrawingAi(server, config, log, watch, sample);
 
 	// ----- nothing was asked of the network, and the pages had nothing to complain about -----
 	log("refusedRequests", refused);
