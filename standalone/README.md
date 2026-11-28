@@ -133,6 +133,18 @@ is a new document to the app, without the old one's versions. Hidden folders and
 `node_modules` are not read, links are not followed (a linked folder could be anywhere), and
 documents are looked for five folders deep, up to 4000 of them.
 
+**What the library is built for.** The library folder is yours: you, and programs you run for
+yourself (Finder, git, a sync service), are what put files in it. The app is built to keep
+your documents and their history safe through everything that comes with that: files added,
+pulled, synced or renamed outside the app, folders spelled in any way, a disk that does not
+tell capitals apart, a link someone committed or left in it (never followed, at the top or
+inside `.omnidraw`), a save still running when you rename, its own failures half-way. What it
+is not built for is a library that someone else can write into at the same time as you, with
+the aim of making OmniDraw read or write a file outside it: swapping a file for a link at the
+moment the app opens it, say. Some such swaps are refused anyway, as a side effect of the
+checks above, but none is promised. Keep the library somewhere only you can write to; to work
+on a diagram with other people, use **Go live**, or a repository you pull from.
+
 **Pictures.** A document saved here gets its picture from its editor. One that came another
 way gets a sketch drawn from the file alone (`src/main/library/sketch.ts`): the shapes where
 they are, in their colours, with their words, and the lines between them; for a diagram, its

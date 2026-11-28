@@ -16,6 +16,14 @@
 // Everything asked of the library stays in it. A name is a name, never a path; an id is taken
 // apart and checked before it is used; and a link is never followed: not when the library is
 // read (a linked folder could be anywhere), and not when a file is written.
+//
+// What this is built for (decided with the owner, 2026-11-28; the README says it too): the
+// library is the user's own folder. What is in it, however it got there (by hand, git, sync,
+// another program of theirs), is handled safely: links, odd names, case-insensitive disks,
+// files that change between two looks in the ordinary way. Someone else writing into the
+// folder at the same time, to make this code read or write elsewhere (a file swapped for a
+// link between a check and a use), is not something it promises to withstand. The checks
+// against that which are here stay, as they cost nothing; new ones are not added for it.
 import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
