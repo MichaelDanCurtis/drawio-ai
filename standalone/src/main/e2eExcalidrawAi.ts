@@ -180,6 +180,46 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	log("aiUndoAndOwnEdits", afterRevert);
 	expect(afterRevert.byHand && afterRevert.kept === "transparent", "Agent → Revert AI Changes reverts the agent's change and leaves what the user drew");
 
+	// ----- the agent changes a shape's words, the user moves the shape, Reject: the old words are back, in the shape where it is now -----
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "kept", label: "Renamed" }] });
+	await until("the pending relabel", async () => (await review()).pending === "1 changed");
+	// (as when the shape is dragged: it and its label move together)
+	await inEditor(w, `x.api.updateScene({ elements: x.api.getSceneElementsIncludingDeleted().map((e) => (e.id === "kept" || e.containerId === "kept" ? { ...e, x: e.x + 40, y: e.y + 260, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)), captureUpdate: x.CaptureUpdateAction.IMMEDIATELY });`);
+	await pause(300);
+	menuItem("Agent", "Revert AI Changes").click();
+	await settled();
+	const relabelled = await inEditor<any>(w, `const all = x.api.getSceneElements(); const c = all.find((e) => e.id === "kept"), labels = all.filter((e) => e.containerId === "kept"), l = labels[0];
+		return { labels: labels.length, text: l && l.text, shapeY: c.y, inside: !!l && l.x >= c.x && l.x + l.width <= c.x + c.width && l.y >= c.y && l.y + l.height <= c.y + c.height };`);
+	log("aiRelabelReverted", relabelled);
+	expect(relabelled.labels === 1 && relabelled.text === "Kept" && relabelled.inside, "the old words are back, inside the shape where the user moved it");
+
+	// ----- a call whose request is stopped while it waits (for Mermaid, for fonts) changes nothing afterwards -----
+	const countBeforeStop = (await elementIds(w)).length;
+	const stopMermaid = new AbortController();
+	const stoppedMermaid = (w as any).mcp.call("excalidraw_from_mermaid", { definition: "flowchart LR\n  S1[Stopped one] --> S2[Stopped two]" }, { signal: stopMermaid.signal });
+	stopMermaid.abort();
+	const stopApply = new AbortController();
+	const stoppedApply = (w as any).mcp.call("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: "too-late", x: 0, y: 900, label: "Too late" }] }, { signal: stopApply.signal });
+	stopApply.abort();
+	const stoppedResults = [await stoppedMermaid, await stoppedApply];
+	await pause(1500);
+	log("aiStopped", { answers: stoppedResults.map((r: any) => r.text), elements: [countBeforeStop, (await elementIds(w)).length], pending: (await review()).pending });
+	expect(stoppedResults.every((r: any) => r.isError && /Stopped/.test(r.text)), "a stopped call says so");
+	expect((await elementIds(w)).length === countBeforeStop && !(await elementIds(w)).includes("too-late") && (await review()).pending === null, "and changes nothing after it was stopped");
+
+	// ----- a freehand stroke is moved and restyled, not resized (it is its points) -----
+	await inEditor(w, `const base = x.api.getSceneElements().find((e) => e.id === "by-hand");
+		const stroke = { ...base, id: "scribble", type: "freedraw", x: 900, y: 600, width: 100, height: 50, points: [[0, 0], [60, 40], [100, 50]], pressures: [], simulatePressure: true, lastCommittedPoint: null, boundElements: null, index: null, version: 1, versionNonce: 77 };
+		x.api.updateScene({ elements: [...x.api.getSceneElementsIncludingDeleted(), stroke], captureUpdate: x.CaptureUpdateAction.IMMEDIATELY });`);
+	const stretched = await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "scribble", width: 200, height: 100 }] });
+	const carried = await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "scribble", x: 950, strokeColor: "#1971c2" }] });
+	const scribble = (await call("excalidraw_get_scene", { ids: ["scribble"], includeStyles: true })).data.elements[0];
+	log("aiFreehand", { stretched: stretched.text, scribble });
+	expect(stretched.isError && /freehand stroke cannot be resized/.test(stretched.text), "resizing a freehand stroke is refused, not half done");
+	expect(!carried.isError && scribble.x === 950 && scribble.width === 100 && scribble.height === 50 && scribble.strokeColor === "#1971c2", "it is moved and restyled, the size its points give it");
+	menuItem("Agent", "Keep AI Changes").click();
+	await settled();
+
 	// ----- a Mermaid flowchart becomes shapes -----
 	const mermaid = await call("excalidraw_from_mermaid", { definition: "flowchart LR\n  A[Start] --> B{Ready?}\n  B -- yes --> C[Go]\n  B -- no --> A" });
 	log("aiMermaid", mermaid.data ?? mermaid.text);

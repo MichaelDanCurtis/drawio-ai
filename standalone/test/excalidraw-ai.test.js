@@ -168,6 +168,21 @@ test("where a line meets a shape: on its outline, a little off it", () => {
 	near(edgePoint(box, [50, 30]), [100, 30]);
 	// the gap never carries the point past where the line comes from
 	near(edgePoint(box, [102, 30], 6), [102, 30]);
+	// a turned shape's outline is turned with it: 160x80 turned a quarter stands 80 wide and 160 high about its centre (80, 40)
+	const upright = el("t", "rectangle", 0, 0, 160, 80, { angle: Math.PI / 2 });
+	near(edgePoint(upright, [500, 40]), [120, 40]);
+	near(edgePoint(upright, [500, 40], 6), [126, 40]);
+	near(edgePoint(upright, [80, 500]), [80, 120]);
+	near(edgePoint(upright, [-500, 40]), [40, 40]);
+	// an eighth of a turn: a square's corner points right, where its edge used to be
+	const tilted = el("q", "rectangle", 0, 0, 100, 100, { angle: Math.PI / 4 });
+	near(edgePoint(tilted, [500, 50]), [50 + Math.SQRT2 * 50, 50]);
+	// (a turned ellipse and diamond likewise)
+	near(edgePoint(el("e2", "ellipse", 0, 0, 160, 80, { angle: Math.PI / 2 }), [500, 40]), [120, 40]);
+	near(edgePoint(el("d2", "diamond", 0, 0, 160, 80, { angle: Math.PI / 2 }), [80, 500]), [80, 120]);
+	// and a line that starts at one leaves from that outline
+	const fromTurned = routeBetween(upright, el("far", "rectangle", 300, 0, 100, 80));
+	near([fromTurned.x, fromTurned.y], [126, 40]);
 });
 
 test("a line between two elements stops short of both, and keeps the points it bends at", () => {

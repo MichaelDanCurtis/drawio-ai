@@ -49,12 +49,16 @@ export function centerOf(el: El): Point {
 /**
  * Where a line coming from `from` meets the outline of `el`, stepped back by `gap`: on the
  * ellipse of an ellipse, the edges of a diamond, and the box of anything else. When `from` is
- * inside the element (or on its centre) the point is on its right-hand edge.
+ * inside the element (or on its centre) the point is on its right-hand edge. A turned element's
+ * outline is turned with it: the line is looked at from the element's own side (turned back
+ * about its centre), met with the outline there, and the point turned forth again.
  */
 export function edgePoint(el: El, from: Point, gap = 0): Point {
 	const b = boxOf(el);
 	const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
 	const rx = Math.max(b.width / 2, 0.5), ry = Math.max(b.height / 2, 0.5);
+	const angle = !isLine(el) && typeof el.angle === "number" && isFinite(el.angle) ? el.angle : 0;
+	if (angle) from = turned(from, [cx, cy], -angle);
 	let dx = from[0] - cx, dy = from[1] - cy;
 	if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
 		dx = 1;
@@ -68,7 +72,15 @@ export function edgePoint(el: El, from: Point, gap = 0): Point {
 	const length = Math.hypot(dx, dy);
 	// (never past the point the line comes from: two elements that touch get a line of no length, not one that turns back)
 	const reach = Math.min(t * length + gap, Math.max(t * length, length));
-	return [cx + (dx / length) * reach, cy + (dy / length) * reach];
+	const point: Point = [cx + (dx / length) * reach, cy + (dy / length) * reach];
+	return angle ? turned(point, [cx, cy], angle) : point;
+}
+
+/** A point turned about another by an angle (in radians, clockwise on the drawing, where y grows downwards). */
+export function turned(p: Point, about: Point, angle: number): Point {
+	const cos = Math.cos(angle), sin = Math.sin(angle);
+	const dx = p[0] - about[0], dy = p[1] - about[1];
+	return [about[0] + dx * cos - dy * sin, about[1] + dx * sin + dy * cos];
 }
 
 /** A line's place, as Excalidraw keeps it: where it starts, its points from there, and the size of the box around them. */

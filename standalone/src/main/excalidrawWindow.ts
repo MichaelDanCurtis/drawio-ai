@@ -378,6 +378,8 @@ export class ExcalidrawWindow implements DocumentWindow {
 			}, 120_000);
 			const stopped = () => {
 				done();
+				// (the page is told too: a call that is still waiting for something there must not change the drawing afterwards)
+				this.sendToEditor({ type: "cancelTool", id });
 				reject(new Error("Stopped."));
 			};
 			const done = () => {

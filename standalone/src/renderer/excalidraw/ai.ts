@@ -34,6 +34,31 @@ export interface Editor {
 /** An operation that cannot be carried out; the message is for the model. */
 export class OperationError extends Error {}
 
+/** The request a tool call belongs to was stopped before the call changed anything. */
+export class StoppedError extends Error {
+	constructor() {
+		super("Stopped.");
+	}
+}
+
+/**
+ * A tool that waits for something (fonts, Mermaid) before it changes the drawing comes here
+ * right before it does: once the page has had the chance to hear that the request was stopped
+ * meanwhile, it changes nothing if it was.
+ */
+async function unlessStopped(stopped: () => boolean): Promise<void> {
+	// (a turn of the page's own queue, not a timer: timers are slowed down in a window that is not being looked at)
+	await new Promise<void>((resolve) => {
+		const channel = new MessageChannel();
+		channel.port1.onmessage = () => {
+			channel.port1.close();
+			resolve();
+		};
+		channel.port2.postMessage(0);
+	});
+	if (stopped()) throw new StoppedError();
+}
+
 const DEFAULT_WIDTH = 160, DEFAULT_HEIGHT = 80;
 const TEXT_STYLE = ["fontSize", "fontFamily", "textAlign", "verticalAlign"] as const;
 
@@ -204,8 +229,9 @@ export class DrawingAi {
 	// ----- changing -----
 
 	/** Applies the operations as one step: all of them, or (when one cannot be carried out) none. */
-	public async apply(operations: Operation[], select = false): Promise<unknown> {
+	public async apply(operations: Operation[], select = false, stopped: () => boolean = () => false): Promise<unknown> {
 		await this.fontsFor(operations);
+		await unlessStopped(stopped);
 		const draft = new Draft(this.scene());
 		const results: { op: string; id?: string }[] = [];
 		const problems: string[] = [];
@@ -226,7 +252,7 @@ export class DrawingAi {
 	}
 
 	/** A Mermaid diagram as Excalidraw elements, beside what is there (or where x and y say). */
-	public async fromMermaid(definition: string, at: { x?: number; y?: number }): Promise<unknown> {
+	public async fromMermaid(definition: string, at: { x?: number; y?: number }, stopped: () => boolean = () => false): Promise<unknown> {
 		const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
 		let parsed: { elements: any[]; files?: Record<string, any> };
 		try {
@@ -236,6 +262,7 @@ export class DrawingAi {
 		}
 		const made = this.editor.convert(parsed.elements) as El[];
 		if (made.length === 0) throw new OperationError("The Mermaid diagram is empty.");
+		await unlessStopped(stopped);
 		const draft = new Draft(this.scene());
 		const box = boxAround(made)!;
 		const [x, y] = at.x !== undefined && at.y !== undefined ? [at.x, at.y] : freePlace(draft.live());
@@ -419,13 +446,7 @@ export class DrawingAi {
 			}
 			return;
 		}
-		const label = { text: content, fontSize: old?.fontSize, fontFamily: old?.fontFamily, textAlign: old?.textAlign, verticalAlign: old?.verticalAlign, strokeColor: old?.strokeColor ?? el.strokeColor, ...textStyle };
-		for (const key of Object.keys(label) as (keyof typeof label)[]) if (label[key] === undefined) delete label[key];
-		// (a copy of the shape goes through Excalidraw with the label: it comes back with the label placed in it, taller if the words need it)
-		const { boundElements: _bound, ...bare } = el;
-		const made = this.editor.convert([{ ...bare, id: "omnidraw-relabel", label }], { regenerateIds: false }) as El[];
-		const shape = made.find((e) => e.id === "omnidraw-relabel")!, placed = made.find((e) => e.type === "text")!;
-		const { id: _id, index: _index, version: _version, versionNonce: _nonce, seed: _seed, containerId: _container, ...fresh } = placed;
+		const { shape, placed, fresh } = this.placeLabel(el, { text: content, fontSize: old?.fontSize, fontFamily: old?.fontFamily, textAlign: old?.textAlign, verticalAlign: old?.verticalAlign, strokeColor: old?.strokeColor ?? el.strokeColor, ...textStyle });
 		if (old) draft.change(old.id, fresh);
 		else {
 			draft.add({ ...placed, containerId: el.id });
@@ -433,6 +454,21 @@ export class DrawingAi {
 		}
 		// (a shape grows when its words need the room; a line's size is the box around its points, which a label does not change)
 		if (!isLine(el) && (shape.height !== el.height || shape.width !== el.width)) draft.change(el.id, { width: shape.width, height: shape.height });
+	}
+
+	/**
+	 * A label laid out in its shape (or on its line) by Excalidraw: a copy of the shape goes through
+	 * it with the label, and comes back with the label placed, the shape taller if the words need it.
+	 * `fresh`: what the label is then, without what makes it an element of its own.
+	 */
+	private placeLabel(container: El, label: Record<string, unknown>): { shape: El; placed: El; fresh: Record<string, any> } {
+		const given = { ...label };
+		for (const key of Object.keys(given)) if (given[key] === undefined) delete given[key];
+		const { boundElements: _bound, ...bare } = container;
+		const made = this.editor.convert([{ ...bare, id: "omnidraw-relabel", label: given }], { regenerateIds: false }) as El[];
+		const shape = made.find((e) => e.id === "omnidraw-relabel")!, placed = made.find((e) => e.type === "text")!;
+		const { id: _id, index: _index, version: _version, versionNonce: _nonce, seed: _seed, containerId: _container, ...fresh } = placed;
+		return { shape, placed, fresh };
 	}
 
 	private update(draft: Draft, op: UpdateOp): string {
@@ -446,8 +482,10 @@ export class DrawingAi {
 			return this.update(draft, { ...rest, id: container.id, ...(words !== undefined ? { label: words } : {}) });
 		}
 		if (el.type === "image" || el.type === "freedraw" || el.type === "frame" || el.type === "embeddable" || el.type === "iframe" || el.type === "magicframe") {
-			if (op.text !== undefined || op.label !== undefined || op.start !== undefined || op.end !== undefined || op.points !== undefined) throw new OperationError(`a ${el.type} can be moved, resized and restyled, nothing else.`);
+			if (op.text !== undefined || op.label !== undefined || op.start !== undefined || op.end !== undefined || op.points !== undefined) throw new OperationError(`a ${el.type} can be moved${el.type === "freedraw" ? "" : ", resized"} and restyled, nothing else.`);
 		}
+		// (a freehand stroke is its points: its size is theirs, and stretching them is not something this tool does)
+		if (el.type === "freedraw" && (op.width !== undefined || op.height !== undefined)) throw new OperationError("a freehand stroke cannot be resized here: it can be moved and restyled.");
 		const style = elementStyle(op, el.type);
 		const { fontSize, fontFamily, textAlign, verticalAlign, ...look } = style as any;
 		const textStyle: Record<string, unknown> = {};
@@ -579,6 +617,22 @@ export class DrawingAi {
 		});
 		// (what was cleared off the canvas altogether since, comes back at the end)
 		for (const was of restore) if (!byId.has(was.id)) elements.push(next({ ...was, index: null }));
+		// A label that comes back belongs in its shape where the shape is now. When the shape is put back
+		// with it, both are where they were; when it is not (the AI only changed the words, and the user
+		// has moved or resized the shape since), the label is laid out in the shape as it stands.
+		const after = new Map(elements.map((e) => [e.id, e]));
+		elements = elements.map((e) => {
+			const was = back.get(e.id);
+			const container = was && was.type === "text" && typeof was.containerId === "string" && !back.has(was.containerId) ? after.get(was.containerId) : undefined;
+			if (!was || !container || container.isDeleted) return e;
+			try {
+				const { fresh } = this.placeLabel(container, { text: String(was.originalText ?? was.text ?? ""), fontSize: was.fontSize, fontFamily: was.fontFamily, textAlign: was.textAlign, verticalAlign: was.verticalAlign, strokeColor: was.strokeColor });
+				return { ...e, x: fresh.x, y: fresh.y, width: fresh.width, height: fresh.height, text: fresh.text };
+			} catch {
+				// (as it was, then)
+				return e;
+			}
+		});
 		// What is attached to what is put right from the lines and labels that are there now: an element
 		// the AI attached an arrow to no longer lists it, and one that got its arrow back does. Only the
 		// elements this touches: what else the user has in the drawing is left exactly as it is.

@@ -24,7 +24,7 @@ import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { boxOf } from "../../excalidraw/geometry";
 import type { Change, Summary } from "../../excalidraw/review";
-import { DrawingAi, OperationError } from "./ai";
+import { DrawingAi, OperationError, StoppedError } from "./ai";
 
 type Format = "json" | "png" | "svg";
 /** What the window around the page looks like: the chat beside it, and the app's icon style. */
@@ -48,6 +48,8 @@ type HostMessage =
 	| { type: "look"; name: string; saved: boolean; look: Look }
 	/** A tool call of an agent's, checked by the app (src/main/excalidrawTools.ts). */
 	| { type: "tool"; id: number; name: string; args: any }
+	/** The request that tool call belongs to was stopped: if the call has not changed the drawing yet, it must not. */
+	| { type: "cancelTool"; id: number }
 	| { type: "resolveReview"; decision: "accept" | "reject" }
 	/** An agent is at work on the drawing (`text`: who), or has finished. */
 	| { type: "aiStatus"; working: boolean; text?: string };
@@ -168,13 +170,13 @@ function Icon({ name }: { name: keyof typeof ICONS }) {
 }
 
 /** An agent's tool call, carried out. The app has checked the arguments (see src/excalidraw/tools.ts). */
-async function runTool(ai: DrawingAi, name: string, args: any): Promise<unknown> {
+async function runTool(ai: DrawingAi, name: string, args: any, stopped: () => boolean): Promise<unknown> {
 	switch (name) {
 		case "excalidraw_get_scene": return ai.getScene(args);
-		case "excalidraw_apply_operations": return ai.apply(args.operations, args.select);
+		case "excalidraw_apply_operations": return ai.apply(args.operations, args.select, stopped);
 		case "excalidraw_select": return ai.select(args.ids);
 		case "excalidraw_render_image": return ai.render(args.ids);
-		case "excalidraw_from_mermaid": return ai.fromMermaid(args.definition, args);
+		case "excalidraw_from_mermaid": return ai.fromMermaid(args.definition, args, stopped);
 	}
 	throw new Error(`${name} is not a tool of the editor.`);
 }
@@ -313,6 +315,8 @@ function App({ doc, initial }: { doc: HostDocument; initial: ExcalidrawInitialDa
 	const [view, setView] = useState({ scrollX: 0, scrollY: 0, zoom: 1 });
 	const reviewing = useRef(false);
 	const selection = useRef("");
+	/** The tool calls under way, by the app's number for each; one that is stopped is taken out. */
+	const running = useRef(new Set<number>());
 	const sceneVersion = useRef(-1);
 
 	const report = useCallback((stamp: string, always = false) => {
@@ -348,10 +352,16 @@ function App({ doc, initial }: { doc: HostDocument; initial: ExcalidrawInitialDa
 				setLook(m.look);
 			} else if (m.type === "tool") {
 				const engine = ai.current;
-				void (engine && savedStamp.current !== undefined ? runTool(engine, m.name, m.args) : Promise.reject(new Error("The drawing is still loading. Try again in a moment.")))
-					.then((result) => host.post({ type: "toolResult", id: m.id, ok: true, result }))
+				const id = m.id;
+				running.current.add(id);
+				void (engine && savedStamp.current !== undefined ? runTool(engine, m.name, m.args, () => !running.current.has(id)) : Promise.reject(new Error("The drawing is still loading. Try again in a moment.")))
+					.then((result) => host.post({ type: "toolResult", id, ok: true, result }))
 					// (`forModel`: the call could not be carried out as asked, and saying why lets the model try again)
-					.catch((e) => host.post({ type: "toolResult", id: m.id, ok: false, forModel: e instanceof OperationError, error: String(e?.message ?? e) }));
+					.catch((e) => host.post({ type: "toolResult", id, ok: false, forModel: e instanceof OperationError, stopped: e instanceof StoppedError, error: String(e?.message ?? e) }))
+					.finally(() => running.current.delete(id));
+			} else if (m.type === "cancelTool") {
+				// (a call that is still waiting, for fonts or for Mermaid, finds this out before it changes anything)
+				running.current.delete(m.id);
 			} else if (m.type === "resolveReview") {
 				ai.current?.resolve(m.decision);
 			} else if (m.type === "aiStatus") {
