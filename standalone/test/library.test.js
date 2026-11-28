@@ -70,6 +70,27 @@ test("reading the library: documents, collections, and what is left out", () => 
 	for (const f of [path.join(outside, "Elsewhere.drawio"), path.join(root, "notes.txt"), path.join(root, ".git", "Hidden.drawio"), path.join(root, "Linked", "Elsewhere.drawio"), path.join(root, ".omnidraw", "trash", "x", "item.drawio")]) assert.equal(lib.idOf(f), undefined, f);
 });
 
+test("a library nothing was put into has no folder: looking at it makes none", () => {
+	const parent = temp();
+	const folder = path.join(parent, "OmniDraw");
+	const lib = new Library(folder);
+	assert.deepEqual(lib.contents(), { docs: [], collections: [], trash: [], more: false });
+	assert.equal(lib.idOf(path.join(folder, "Plan.drawio")), undefined);
+	assert.equal(lib.thumb("Plan.drawio"), undefined);
+	assert.deepEqual(lib.versions("Plan.drawio"), []);
+	refused(() => lib.read("Plan.drawio"), /not in the library/);
+	assert.equal(lib.exists, false);
+	assert.equal(fs.existsSync(folder), false);
+	// the first document makes it
+	assert.equal(lib.create("Team", "Plan", ".drawio", B("x")), "Team/Plan.drawio");
+	assert.equal(lib.exists, true);
+	assert.equal(lib.root, path.join(parent, "OmniDraw"));
+	assert.equal(lib.idOf(path.join(folder, "Team", "Plan.drawio")), "Team/Plan.drawio");
+	// a file where the folder should be is no library
+	fs.writeFileSync(path.join(parent, "a file"), "x");
+	refused(() => new Library(path.join(parent, "a file")), /not a folder/);
+});
+
 test("an id leads nowhere but into the library", () => {
 	const root = temp();
 	const lib = new Library(root);
@@ -138,7 +159,8 @@ test("collections: made, renamed with what is in them, and taken away without th
 	lib.create("", "Acme", ".drawio", B("another acme"));
 	fs.mkdirSync(path.join(root, "Customers", "sub"));
 	fs.writeFileSync(path.join(root, "Customers", "sub", "Deep.excalidraw"), "{}");
-	assert.deepEqual(lib.removeCollection("Customers"), { moved: 2, kept: false });
+	const removed = lib.removeCollection("Customers");
+	assert.deepEqual([removed.moved.sort((x, y) => x.from.localeCompare(y.from)), removed.kept], [[{ from: "Customers/Acme.drawio", to: "Acme 2.drawio" }, { from: "Customers/sub/Deep.excalidraw", to: "Deep.excalidraw" }], false]);
 	assert.deepEqual(ids(lib), ["Acme 2.drawio", "Acme.drawio", "Deep.excalidraw"]);
 	assert.equal(lib.versions("Acme 2.drawio").length, 1);
 	assert.equal(fs.existsSync(path.join(root, "Customers")), false);
@@ -146,7 +168,7 @@ test("collections: made, renamed with what is in them, and taken away without th
 	lib.createCollection("Mixed");
 	lib.create("Mixed", "One", ".drawio", B("1"));
 	fs.writeFileSync(path.join(root, "Mixed", "README.md"), "keep me");
-	assert.deepEqual(lib.removeCollection("Mixed"), { moved: 1, kept: true });
+	assert.deepEqual(lib.removeCollection("Mixed"), { moved: [{ from: "Mixed/One.drawio", to: "One.drawio" }], kept: true });
 	assert.equal(fs.readFileSync(path.join(root, "Mixed", "README.md"), "utf8"), "keep me");
 });
 
@@ -219,13 +241,20 @@ test("versions: one for a row of saves, one of its own for a point worth keeping
 	// a save after that is a version of its own, not the kept one's new state
 	lib.snapshot(doc, B("v5"), { now: t0 + 41 * min });
 	assert.equal(lib.versions(doc).length, 6);
+	// going back from a state that was just saved: that save is the way back, and the next save does not take its place
+	fs.writeFileSync(lib.pathOf(doc), "v5");
+	lib.restoreVersion(doc, v2.key, t0 + 42 * min);
+	assert.deepEqual([lib.versions(doc).length, lib.versions(doc)[0].kept, lib.versionBytes(doc, lib.versions(doc)[0].key).toString()], [6, true, "v5"]);
+	lib.snapshot(doc, B("v6"), { now: t0 + 43 * min });
+	assert.deepEqual(lib.versions(doc).slice(0, 2).map((v) => lib.versionBytes(doc, v.key).toString()), ["v6", "v5"]);
+	lib.snapshot(doc, B("v5"), { now: t0 + 60 * min });
 	refused(() => lib.versionBytes(doc, "../../../etc/passwd"), /not kept/);
 	refused(() => lib.restoreVersion(doc, "20200101T000000Z-s-000000000000.excalidraw"), /not kept/);
 
 	// versions follow the document where the app takes it
 	const renamed = lib.rename(doc, "Roadmap");
 	const moved = lib.move(renamed, "Team");
-	assert.equal(lib.versions(moved).length, 6);
+	assert.equal(lib.versions(moved).length, 8);
 	assert.equal(lib.versions(doc).length, 0);
 
 	// only so many are kept: the oldest go
@@ -243,10 +272,12 @@ test("the picture kept of a document is for the document as it is, not as it was
 	assert.equal(lib.thumb(doc), undefined);
 	lib.setThumb(doc, B("png"));
 	assert.equal(lib.thumb(doc).toString(), "png");
+	assert.ok(lib.contents().docs[0].pictured > 0);
 	// changed since by another program: the picture is of an older state
 	const later = new Date(Date.now() + 60_000);
 	fs.utimesSync(lib.pathOf(doc), later, later);
 	assert.equal(lib.thumb(doc), undefined);
+	assert.equal(lib.contents().docs[0].pictured, 0);
 	refused(() => lib.setThumb("../x.drawio", B("")), /not a document/);
 });
 

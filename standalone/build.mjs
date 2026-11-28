@@ -78,6 +78,7 @@ const jobs = [
 			"preload-settings": join(here, "src/preload/settings.ts"),
 			"preload-workshop": join(here, "src/preload/workshop.ts"),
 			"preload-excalidraw": join(here, "src/preload/excalidraw.ts"),
+			"preload-home": join(here, "src/preload/home.ts"),
 		},
 		outdir: out,
 		platform: "node",
@@ -133,7 +134,7 @@ await Promise.all(jobs.map((j) => build(j)));
 // Excalidraw's fonts (the hand-drawn ones, and its UI's), served by the app: the page never asks a CDN for them.
 cpSync(join(here, "node_modules/@excalidraw/excalidraw/dist/prod/fonts"), join(out, "excalidraw/fonts"), { recursive: true });
 for (const f of ["bar.css", "NOTICE.txt"]) copyFileSync(join(here, "src/renderer/excalidraw", f), join(out, "excalidraw", f));
-for (const f of ["chat.html", "mapper.html", "live.html", "settings.html", "workshop.html", "excalidraw.html", "desktop-menu.js", "desktop-toolbar.js", "desktop-menubar.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
+for (const f of ["chat.html", "mapper.html", "live.html", "settings.html", "workshop.html", "excalidraw.html", "home.html", "desktop-menu.js", "desktop-toolbar.js", "desktop-menubar.js", "presentation.js", "theme.js"]) copyFileSync(join(here, "src/renderer", f), join(out, f));
 // The app's look (omni-design): tokens, motion, the dot layers, and the self-hosted fonts.
 mkdirSync(join(out, "ui/fonts"), { recursive: true });
 for (const f of readdirSync(join(here, "src/renderer/ui"))) copyFileSync(join(here, "src/renderer/ui", f), join(out, "ui", f));

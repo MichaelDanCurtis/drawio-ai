@@ -2,7 +2,7 @@ import { app, BaseWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView }
 import * as fs from "fs";
 import * as path from "path";
 import { ChatController, type ChatEditor } from "./chatController";
-import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { ChatDock, documentHooks, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
 import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, formatForPath, pictureToWrite, readScene, sceneTextToWrite, type ExcalidrawFormat } from "./excalidrawFile";
 import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError } from "./excalidrawTools";
@@ -456,6 +456,17 @@ export class ExcalidrawWindow implements DocumentWindow {
 		return this.fileName() ?? "Untitled drawing";
 	}
 
+	public movedTo(file: string): void {
+		this.file = file;
+		this.updateTitle();
+		this.sendLook();
+		this.chat.postState();
+	}
+
+	public async picture(): Promise<Buffer> {
+		return (await this.contents("png")).bytes;
+	}
+
 	private setDirty(dirty: boolean): void {
 		this.dirty = dirty;
 		this.updateTitle();
@@ -536,6 +547,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 			const { bytes, stamp } = await this.contents(format);
 			fs.writeFileSync(file, bytes);
 			await this.confirmSaved(stamp);
+			documentHooks.saved?.(this, file);
 			return true;
 		} catch (e: any) {
 			ExcalidrawWindow.showError("Could not save", String(e?.message ?? e));

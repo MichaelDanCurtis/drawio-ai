@@ -57,6 +57,8 @@ export interface LibraryDoc {
 	size: number;
 	/** How many earlier states of it are kept. */
 	versions: number;
+	/** When the picture kept of it was made, when there is one of the document as it is now; else 0. */
+	pictured: number;
 }
 
 export interface Collection {
@@ -126,17 +128,46 @@ const stamp = (at: number): string => new Date(at).toISOString().replace(/[-:]/g
 const hashOf = (bytes: Buffer): string => crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 12);
 
 export class Library {
-	/** The library's folder, with the links on the way to it followed (so that what is in it can be told from what is not). */
-	public readonly root: string;
+	/**
+	 * `folder`: where the library is, or is to be. A library nothing was put into yet need not
+	 * have a folder: it is made with the first document or collection, not by being looked at.
+	 */
+	constructor(private readonly folder: string) {
+		const there = fs.statSync(folder, { throwIfNoEntry: false });
+		if (there && !there.isDirectory()) throw new LibraryError(`${folder} is not a folder.`);
+	}
 
-	constructor(folder: string) {
-		fs.mkdirSync(folder, { recursive: true });
-		this.root = fs.realpathSync(folder);
-		if (!fs.statSync(this.root).isDirectory()) throw new LibraryError(`${folder} is not a folder.`);
+	/** The library's folder, with the links on the way to it followed (so that what is in it can be told from what is not). */
+	public get root(): string {
+		try {
+			return fs.realpathSync(this.folder);
+		} catch {
+			// (not there yet: where it will be, as far as that can be said)
+			try {
+				return path.join(fs.realpathSync(path.dirname(this.folder)), path.basename(this.folder));
+			} catch {
+				return path.resolve(this.folder);
+			}
+		}
+	}
+
+	/** Whether the library's folder is there. */
+	public get exists(): boolean {
+		return fs.statSync(this.folder, { throwIfNoEntry: false })?.isDirectory() === true;
+	}
+
+	/** The library's folder, made if it is not there: for what puts something into the library. */
+	private made(): string {
+		try {
+			fs.mkdirSync(this.folder, { recursive: true });
+		} catch (e: any) {
+			throw new LibraryError(`The library folder ${this.folder} could not be made: ${e?.message ?? e}`);
+		}
+		return this.root;
 	}
 
 	private store(...parts: string[]): string {
-		const dir = path.join(this.root, STORE);
+		const dir = path.join(this.made(), STORE);
 		if (!fs.existsSync(dir)) {
 			fs.mkdirSync(dir, { recursive: true });
 			// (the app's own bookkeeping is not for a repository the library may be in: git has a history of its own)
@@ -204,9 +235,9 @@ export class Library {
 
 	/** The folder of a collection ("" is the library itself), made if it is not there. */
 	private collectionFolder(collection: string): string {
-		if (!collection) return this.root;
+		if (!collection) return this.made();
 		const name = cleanName(collection, "collection name");
-		const dir = path.join(this.root, name);
+		const dir = path.join(this.made(), name);
 		const s = fs.lstatSync(dir, { throwIfNoEntry: false });
 		if (s && !s.isDirectory()) throw new LibraryError(`${name} is not a folder in the library.`);
 		if (!s) fs.mkdirSync(dir);
@@ -266,7 +297,7 @@ export class Library {
 				const id = [...rel, e.name].join("/");
 				const collection = rel[0] ?? "";
 				if (collection) collections.set(collection, (collections.get(collection) ?? 0) + 1);
-				docs.push({ id, ...type, collection, within: rel.slice(1).join("/"), modified: stat.mtimeMs, size: stat.size, versions: this.versionFiles(id).length });
+				docs.push({ id, ...type, collection, within: rel.slice(1).join("/"), modified: stat.mtimeMs, size: stat.size, versions: this.versionFiles(id).length, pictured: this.pictured(id, stat.mtimeMs) });
 			}
 		};
 		walk(this.root, []);
@@ -352,7 +383,7 @@ export class Library {
 
 	public createCollection(name: string): string {
 		const clean = cleanName(name, "collection name");
-		const dir = path.join(this.root, clean);
+		const dir = path.join(this.made(), clean);
 		if (fs.lstatSync(dir, { throwIfNoEntry: false })) throw new LibraryError(`There is a ${clean} already.`);
 		fs.mkdirSync(dir);
 		return clean;
@@ -382,12 +413,14 @@ export class Library {
 
 	/**
 	 * Takes a collection away. Its documents are not thrown out with it: they go to the top of the
-	 * library. The folder goes if nothing else is left in it; `kept` says when it stayed.
+	 * library (`moved`: where each was, and where it is now). The folder goes if nothing else is
+	 * left in it; `kept` says when it stayed.
 	 */
-	public removeCollection(name: string): { moved: number; kept: boolean } {
+	public removeCollection(name: string): { moved: { from: string; to: string }[]; kept: boolean } {
 		const dir = this.collectionDir(name);
-		const inside = this.contents().docs.filter((d) => d.collection === name);
-		for (const d of inside) this.move(d.id, "");
+		const moved = this.contents()
+			.docs.filter((d) => d.collection === name)
+			.map((d) => ({ from: d.id, to: this.move(d.id, "") }));
 		let kept = false;
 		try {
 			// (empty folders that held documents go; a folder with anything else in it stays, and so does the collection's)
@@ -406,7 +439,7 @@ export class Library {
 		} catch {
 			kept = true;
 		}
-		return { moved: inside.length, kept };
+		return { moved, kept };
 	}
 
 	private collectionDir(name: string): string {
@@ -547,7 +580,8 @@ export class Library {
 	 * it was opened, or as it was before a restore), which later saves never take the place of.
 	 * Without it: a save. Saves within ten minutes of each other are one version, the last of them,
 	 * so that saving often does not fill the history. A state that is the newest version already
-	 * is not noted twice. Returns whether a version was written.
+	 * is not noted twice (asked to be kept, that version is, from then on). Returns whether a
+	 * version was written or marked.
 	 */
 	public snapshot(id: string, bytes: Buffer, options: { kept?: boolean; now?: number } = {}): boolean {
 		const { type } = this.existing(id);
@@ -556,7 +590,13 @@ export class Library {
 		const files = this.versionFiles(id);
 		const hash = hashOf(bytes);
 		const newest = files[0];
-		if (newest && newest.split("-")[2].startsWith(hash)) return false;
+		if (newest && newest.split("-")[2].startsWith(hash)) {
+			// It is the newest version already. Asked to be kept, and so far only one of a row of saves,
+			// it becomes a point of its own: the next save must not take its place.
+			if (!options.kept || newest.split("-")[1] === "k") return false;
+			fs.renameSync(path.join(dir, newest), path.join(dir, newest.replace("-s-", "-k-")));
+			return true;
+		}
 		fs.mkdirSync(dir, { recursive: true });
 		// (the newest is a save of the last ten minutes: this save is that version's new state)
 		const started = newest ? Date.parse(newest.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z.*$/, "$1-$2-$3T$4:$5:$6Z")) : NaN;
@@ -616,6 +656,16 @@ export class Library {
 		const file = this.thumbFile(id);
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		fs.writeFileSync(file, png);
+	}
+
+	/** When the picture kept of a document was made, if it is of the document as it is now (`modified`); else 0. */
+	private pictured(id: string, modified: number): number {
+		try {
+			const t = fs.lstatSync(path.join(this.root, STORE, "thumbs", ...this.parts(id).slice(0, -1), `${this.parts(id).pop()}.png`));
+			return t.isFile() && t.mtimeMs + 1000 >= modified ? t.mtimeMs : 0;
+		} catch {
+			return 0;
+		}
 	}
 
 	/** The picture kept of a document, when it is of the document as it is now (not of an older state). */

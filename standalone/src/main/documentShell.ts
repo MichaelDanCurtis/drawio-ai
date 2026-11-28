@@ -1,6 +1,7 @@
 // What a diagram window and an Excalidraw window share: where a new window goes, which document
 // is in front, and the chat beside the editor (sliding in and out, its edge dragged to resize).
 import { BaseWindow, screen, type WebContentsView } from "electron";
+import * as path from "path";
 import { settings, updateSettings } from "./settings";
 
 /** A window with one document in it: a draw.io diagram or an Excalidraw drawing. */
@@ -10,14 +11,28 @@ export interface DocumentWindow {
 	readonly editorView: WebContentsView;
 	readonly chatView: WebContentsView;
 	file: string | undefined;
+	/** It has changes that are not in its file. */
+	readonly isDirty: boolean;
 	save(): Promise<boolean>;
 	saveAs(): Promise<boolean>;
+	/** The app gave its file another name or place (the home screen did): the window is that file's from now on. */
+	movedTo(file: string): void;
+	/** A picture of the document as it is now (a PNG), for its card on the home screen. */
+	picture(): Promise<Buffer>;
 	toggleChat(): void;
 	resizeChat(delta: number): void;
 }
 
 const open = new Set<DocumentWindow>();
 let last: DocumentWindow | undefined;
+
+/** What the rest of the app wants to know of the documents (main.ts sets these; the home screen listens). */
+export const documentHooks: {
+	/** A document was written to `file`. */
+	saved?: (w: DocumentWindow, file: string) => void;
+	/** A document's window went. */
+	closed?: (w: DocumentWindow) => void;
+} = {};
 
 /** The document windows that are open, of both kinds. */
 export const documentWindows = {
@@ -28,6 +43,7 @@ export const documentWindows = {
 	remove(w: DocumentWindow): void {
 		open.delete(w);
 		if (last === w) last = undefined;
+		documentHooks.closed?.(w);
 	},
 	/** `w` got the focus. */
 	used(w: DocumentWindow): void {
@@ -35,6 +51,14 @@ export const documentWindows = {
 	},
 	get size(): number {
 		return open.size;
+	},
+	/** The window a file is open in, if it is. */
+	of(file: string): DocumentWindow | undefined {
+		const resolved = path.resolve(file);
+		return [...open].find((w) => w.file && path.resolve(w.file) === resolved);
+	},
+	all(): DocumentWindow[] {
+		return [...open];
 	},
 	/** The document in front: the one whose window has the focus, else the one used last (Settings, or another app, is in front). */
 	front(): DocumentWindow | undefined {

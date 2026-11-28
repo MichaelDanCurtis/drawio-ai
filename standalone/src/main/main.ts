@@ -5,9 +5,10 @@ import { adapterPackages, AGENTS } from "./agents";
 import { refreshAdapterVersions, useAdapterCache } from "./adapterVersions";
 import type { ChatController } from "./chatController";
 import { DiagramWindow, type DrawioMenuItem, flushDrawioStorage } from "./diagramWindow";
-import { documentWindows } from "./documentShell";
+import { documentHooks, documentWindows } from "./documentShell";
 import { sniffExcalidraw } from "./excalidrawFile";
 import { ExcalidrawWindow } from "./excalidrawWindow";
+import { HomeWindow } from "./homeWindow";
 import { LiveDialog } from "./liveDialog";
 import { toAccelerator } from "./shortcuts";
 import { runE2e } from "./e2e";
@@ -106,6 +107,25 @@ async function openFile(file?: string): Promise<void> {
 	// (an Excalidraw drawing, by its name or by what a picture carries, opens in the Excalidraw editor)
 	if (file && sniffExcalidraw(file, () => fs.readFileSync(file))) await ExcalidrawWindow.open(server, file);
 	else await DiagramWindow.open(server, file);
+	// (the home screen lists what was opened lately, and keeps a library document as it was opened)
+	if (file) HomeWindow.opened(file);
+}
+
+/** Window → Home: the library, and what was opened lately. */
+function showHome(): void {
+	if (ready) HomeWindow.open(server);
+}
+
+/** With the last document closed, the home screen comes back (not in a test run, which closes windows as it goes; the home screen's own run turns it on). */
+let homeWhenEmpty = !process.env.DRAWAI_E2E;
+
+/** The Window menu, with the home screen first in it. */
+function windowMenu(): MenuItemConstructorOptions {
+	const mac = process.platform === "darwin";
+	return {
+		role: "window",
+		submenu: [{ label: "Home", click: () => showHome() }, { type: "separator" }, { role: "minimize" }, { role: "zoom" }, ...(mac ? ([{ type: "separator" }, { role: "front" }] as MenuItemConstructorOptions[]) : ([{ role: "close" }] as MenuItemConstructorOptions[]))],
+	};
 }
 
 /** File → New Excalidraw Drawing: an empty drawing in the Excalidraw editor. */
@@ -140,7 +160,8 @@ app.on("open-file", (e, file) => {
 app.on("second-instance", (_e, argv) => {
 	const files = diagramArgs(argv);
 	if (files.length) files.forEach((f) => void openFile(f));
-	else documentWindows.front()?.win.focus();
+	else if (documentWindows.front()) documentWindows.front()!.win.focus();
+	else showHome();
 });
 
 /**
@@ -320,7 +341,7 @@ function excalidrawMenu(): MenuItemConstructorOptions[] {
 		},
 		{ label: "View", submenu: chatAndToolsItems() },
 		agentMenu(() => x()?.chat, (decision) => x()?.resolveReview(decision)),
-		{ role: "windowMenu" },
+		windowMenu(),
 		HELP_MENU,
 	];
 }
@@ -406,7 +427,7 @@ function buildMenu(): void {
 				{ label: "Play Tour", accelerator: "CmdOrCtrl+Shift+T", click: () => w()?.setPresenting(true, { startTour: true }) },
 			],
 		},
-		{ role: "windowMenu" },
+		windowMenu(),
 		HELP_MENU,
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -463,6 +484,15 @@ app.whenReady().then(async () => {
 	if (!process.env.DRAWAI_E2E) void refreshAdapterVersions(adapterPackages());
 	DiagramWindow.installIpc();
 	ExcalidrawWindow.installIpc();
+	// The home screen is told what happens to documents: one saved in the library gets a version and
+	// a picture for its card. With the last document closed (and the app not on its way out), the
+	// home screen is what is left to come back to.
+	HomeWindow.host = { openFile: (file) => openFile(file), openDialog: (folder) => void openDialog(folder) };
+	documentHooks.saved = (w, file) => HomeWindow.saved(w, file);
+	documentHooks.closed = (w) => {
+		HomeWindow.closed(w);
+		if (documentWindows.size === 0 && !DiagramWindow.quitting && homeWhenEmpty && process.platform === "darwin") showHome();
+	};
 	ExcalidrawWindow.appCommands = { newDrawing: () => void newDrawing(), open: () => void openDialog(), openPath: (file) => void openDroppedDrawing(file), settings: (section) => openSettings(section) };
 	// the menu bar follows the kind of document in front
 	// (a drawing's window that stays open after all ends a quit, as a diagram's does)
@@ -529,17 +559,18 @@ app.whenReady().then(async () => {
 	ready = true;
 
 	if (process.env.DRAWAI_E2E) {
-		await runE2e(server, JSON.parse(process.env.DRAWAI_E2E));
+		await runE2e(server, JSON.parse(process.env.DRAWAI_E2E), { openFile: (file) => openFile(file), showHome, homeWhenEmpty: (on) => (homeWhenEmpty = on) });
 		return;
 	}
 
+	// Started with a file, the app opens it. Started with none, it opens on the home screen.
 	const files = [...pendingFiles.splice(0), ...diagramArgs(process.argv)];
 	if (files.length) for (const f of files) await openFile(f);
-	else await openFile();
+	else showHome();
 });
 
 app.on("activate", () => {
-	if (ready && documentWindows.size === 0) void openFile();
+	if (ready && documentWindows.size === 0) showHome();
 });
 
 app.on("window-all-closed", () => {

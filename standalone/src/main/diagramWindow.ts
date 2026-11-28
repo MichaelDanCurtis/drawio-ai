@@ -7,7 +7,7 @@ import { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDraw
 import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
-import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { ChatDock, documentHooks, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
 import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram, renderDiagram } from "./exporter";
 import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
@@ -531,6 +531,27 @@ export class DiagramWindow implements DocumentWindow {
 		return this.file ? path.basename(this.file) : undefined;
 	}
 
+	public get isDirty(): boolean {
+		return this.dirty;
+	}
+
+	public movedTo(file: string): void {
+		const from = { cwd: this.cwd(), diagram: this.file };
+		this.file = file;
+		// (the maps' records follow the diagram, as they do when it is saved under another name)
+		try {
+			this.maps.adoptRecords(from, { cwd: this.cwd(), diagram: file });
+		} catch (e) {
+			console.warn("Could not carry the map records over:", e);
+		}
+		this.updateTitle();
+		this.chat.postState();
+	}
+
+	public async picture(): Promise<Buffer> {
+		return (await renderDiagram(this.client, "png", { currentPageOnly: true })).data;
+	}
+
 	public whenLoaded(): Promise<void> {
 		return this.loaded ? Promise.resolve() : new Promise((r) => this.loadedWaiters.push(r));
 	}
@@ -906,6 +927,7 @@ export class DiagramWindow implements DocumentWindow {
 			const buffer = await this.client.export(ext.endsWith(".png") || ext.endsWith(".svg") ? ext : ".drawio");
 			fs.writeFileSync(file, Buffer.from(buffer.toString("base64"), "base64"));
 			this.setDirty(false);
+			documentHooks.saved?.(this, file);
 			return true;
 		} catch (e: any) {
 			dialog.showErrorBox("Could not save", String(e?.message ?? e));

@@ -1,0 +1,520 @@
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme, shell } from "electron";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { documentWindows, type DocumentWindow } from "./documentShell";
+import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
+import { docType, Library, LibraryError, type DocKind } from "./library/library";
+import { Recents } from "./library/recents";
+import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
+import { paths } from "./paths";
+import { onSettingsChanged, settings, updateSettings } from "./settings";
+import type { StaticServer } from "./staticServer";
+
+/** What the home screen asks of the rest of the app (main.ts gives it). */
+export interface HomeHost {
+	openFile(file: string): Promise<void>;
+	/** File → Open…, starting in a folder. */
+	openDialog(folder: string): void;
+}
+
+/** A new document's file, before anything is drawn in it. */
+const EMPTY: Record<DocKind, { ending: string; bytes: () => Buffer }> = {
+	excalidraw: { ending: ".excalidraw", bytes: () => Buffer.from(JSON.stringify({ type: "excalidraw", version: 2, source: EXCALIDRAW_SOURCE, elements: [], appState: { viewBackgroundColor: "#ffffff" }, files: {} }, null, 2) + "\n") },
+	drawio: { ending: ".drawio", bytes: () => Buffer.from('<mxfile host="OmniDraw"><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>\n') },
+};
+
+/** How wide the picture kept of a document is at most: a card is small. */
+const PICTURE_WIDTH = 720;
+/** Files larger than this are not read for a preview, and files larger than the second are not sketched. */
+const PREVIEW_LIMIT = 30 * 1024 * 1024;
+const SKETCH_LIMIT = 8 * 1024 * 1024;
+
+const svgUrl = (svg: string): string => `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+const pngUrl = (png: Buffer): string => `data:image/png;base64,${png.toString("base64")}`;
+
+/** A picture made small enough for a card (a PNG); undefined when the bytes are no picture. */
+function small(image: Electron.NativeImage): Buffer | undefined {
+	if (image.isEmpty()) return undefined;
+	const { width } = image.getSize();
+	return (width > PICTURE_WIDTH ? image.resize({ width: PICTURE_WIDTH, quality: "good" }) : image).toPNG();
+}
+
+/**
+ * What a card shows of a document, from its file alone: the picture itself when the file is one
+ * (an editable PNG or SVG), else a sketch of what is in it (library/sketch.ts). As a data: address
+ * for an <img>, where nothing in it runs or loads. Undefined when there is nothing to show.
+ */
+function previewOf(bytes: Buffer, ending: string): string | undefined {
+	const e = ending.toLowerCase();
+	try {
+		if (e.endsWith(".png")) {
+			const png = small(nativeImage.createFromBuffer(bytes));
+			return png && pngUrl(png);
+		}
+		if (e.endsWith(".svg")) return bytes.length <= 3 * 1024 * 1024 ? `data:image/svg+xml;base64,${bytes.toString("base64")}` : undefined;
+		// (a sketch is drawn from the whole file, read here: not of a file that would hold the app up)
+		if (bytes.length > SKETCH_LIMIT) return undefined;
+		if (e === ".excalidraw") return svgUrl(sketchExcalidraw(readScene("json", bytes)));
+		const sketch = sketchDrawio(bytes.toString("utf8"));
+		return sketch && svgUrl(sketch);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The home screen: the library's documents as cards, in collections, with their versions and a
+ * trash; and the documents opened lately, wherever they are. One window, the app's front door.
+ */
+export class HomeWindow {
+	private static win: BrowserWindow | undefined;
+	private static installed = false;
+	public static host: HomeHost | undefined;
+	/** The library as it was last opened, and the folder that was. */
+	private static lib: { folder: string; library: Library } | undefined;
+	private static watcher: fs.FSWatcher | undefined;
+	private static refreshTimer: NodeJS.Timeout | undefined;
+	private static pictureTimers = new Map<DocumentWindow, NodeJS.Timeout>();
+	private static recentList: Recents | undefined;
+
+	/** The library's folder: the one in Settings, or OmniDraw in the user's Documents. */
+	public static folder(): string {
+		const chosen = settings().library.folder;
+		if (chosen) return chosen;
+		// (a test run has no business in the user's Documents: its library is with the rest of its data)
+		return process.env.DRAWAI_E2E ? path.join(app.getPath("userData"), "library") : path.join(app.getPath("documents"), "OmniDraw");
+	}
+
+	/**
+	 * The library. Its folder need not be there: it is made when something is first put into it,
+	 * not when the home screen is opened. Throws a LibraryError when the folder cannot be one.
+	 */
+	public static library(): Library {
+		const folder = HomeWindow.folder();
+		if (HomeWindow.lib?.folder !== folder) {
+			try {
+				HomeWindow.lib = { folder, library: new Library(folder) };
+			} catch (e: any) {
+				throw e instanceof LibraryError ? e : new LibraryError(`The library folder ${folder} could not be opened: ${e?.message ?? e}`);
+			}
+		}
+		return HomeWindow.lib.library;
+	}
+
+	/** The library when its folder is there already: opening or saving a file elsewhere does not make one. */
+	private static libraryIfThere(): Library | undefined {
+		try {
+			const lib = HomeWindow.library();
+			return lib.exists ? lib : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private static recents(): Recents {
+		return (HomeWindow.recentList ??= new Recents(path.join(app.getPath("userData"), "recent.json")));
+	}
+
+	public static open(server: StaticServer): void {
+		HomeWindow.install();
+		const existing = HomeWindow.window;
+		if (existing) {
+			if (existing.isMinimized()) existing.restore();
+			existing.show();
+			existing.focus();
+			return;
+		}
+		const win = new BrowserWindow({
+			width: 1180,
+			height: 760,
+			minWidth: 760,
+			minHeight: 480,
+			title: "OmniDraw",
+			backgroundColor: nativeTheme.shouldUseDarkColors ? "#000000" : "#f3f2ef",
+			show: false,
+			webPreferences: { preload: path.join(paths.out, "preload-home.js"), contextIsolation: true, sandbox: true, nodeIntegration: false },
+		});
+		HomeWindow.win = win;
+		win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+		win.webContents.on("will-navigate", (e) => e.preventDefault());
+		win.once("ready-to-show", () => win.show());
+		// (what changed while another window was in front, or another program: the folder is read again)
+		win.on("focus", () => HomeWindow.refreshSoon(0));
+		win.on("closed", () => {
+			HomeWindow.win = undefined;
+			HomeWindow.unwatch();
+		});
+		void win.loadURL(`${server.base}/home.html`);
+	}
+
+	/** The window while it is open (tests drive and screenshot it). */
+	public static get window(): BrowserWindow | undefined {
+		return HomeWindow.win && !HomeWindow.win.isDestroyed() ? HomeWindow.win : undefined;
+	}
+
+	private static install(): void {
+		if (HomeWindow.installed) return;
+		HomeWindow.installed = true;
+		ipcMain.on("home:toHost", (e, msg) => {
+			if (!HomeWindow.win || e.sender !== HomeWindow.win.webContents) return;
+			void HomeWindow.onMessage(msg).catch((err) => HomeWindow.problem(err));
+		});
+		onSettingsChanged((_s, patch) => {
+			if ("library" in patch) {
+				HomeWindow.unwatch();
+				HomeWindow.refreshSoon(0);
+			}
+		});
+	}
+
+	private static post(msg: unknown): void {
+		HomeWindow.window?.webContents.send("home:toWebview", msg);
+	}
+
+	/** Says what could not be done, in the page (the library's own words for it, or the system's). */
+	private static problem(e: unknown): void {
+		HomeWindow.post({ type: "problem", text: e instanceof LibraryError ? e.message : String((e as any)?.message ?? e) });
+	}
+
+	// ----- what the rest of the app tells the home screen -----
+
+	/** A document was opened. It is one opened lately; one of the library's with no version yet gets one, as it was opened. */
+	public static opened(file: string): void {
+		try {
+			HomeWindow.recents().add(file);
+			const lib = HomeWindow.libraryIfThere();
+			const id = lib?.idOf(file);
+			if (lib && id && lib.versions(id).length === 0) lib.snapshot(id, fs.readFileSync(file), { kept: true });
+		} catch (e) {
+			console.warn("OmniDraw: the home screen could not note an opened document:", e);
+		}
+		HomeWindow.refreshSoon();
+	}
+
+	/** A document was saved. In the library that is a version of it, and a new picture for its card. */
+	public static saved(w: DocumentWindow, file: string): void {
+		try {
+			HomeWindow.recents().add(file);
+			const lib = HomeWindow.libraryIfThere();
+			const id = lib?.idOf(file);
+			if (lib && id) {
+				lib.snapshot(id, fs.readFileSync(file));
+				// (the picture a moment later, and once for a row of saves: it is the editor's work to make)
+				clearTimeout(HomeWindow.pictureTimers.get(w));
+				HomeWindow.pictureTimers.set(w, setTimeout(() => void HomeWindow.picture(w), 400));
+			}
+		} catch (e) {
+			console.warn("OmniDraw: the home screen could not note a saved document:", e);
+		}
+		HomeWindow.refreshSoon();
+	}
+
+	public static closed(w: DocumentWindow): void {
+		clearTimeout(HomeWindow.pictureTimers.get(w));
+		HomeWindow.pictureTimers.delete(w);
+		HomeWindow.refreshSoon();
+	}
+
+	/** Keeps a picture of the document in a window, as its editor draws it, for its card. */
+	private static async picture(w: DocumentWindow): Promise<void> {
+		HomeWindow.pictureTimers.delete(w);
+		try {
+			if (w.win.isDestroyed() || !w.file) return;
+			const file = w.file;
+			const png = small(nativeImage.createFromBuffer(await w.picture()));
+			// (the document may have another name by now, or be gone: then this picture is nobody's)
+			const lib = HomeWindow.libraryIfThere();
+			const id = lib?.idOf(file);
+			if (!png || !lib || !id || w.file !== file) return;
+			lib.setThumb(id, png);
+			HomeWindow.refreshSoon();
+		} catch {
+			// (the card shows a sketch instead)
+		}
+	}
+
+	/** Has the page shown what is in the library now, a moment from now (many changes at once are one reading). */
+	public static refreshSoon(delay = 250): void {
+		if (!HomeWindow.window) return;
+		clearTimeout(HomeWindow.refreshTimer);
+		HomeWindow.refreshTimer = setTimeout(() => HomeWindow.postState(), delay);
+	}
+
+	// ----- the library, as the page sees it -----
+
+	private static watch(root: string): void {
+		if (HomeWindow.watcher) return;
+		try {
+			HomeWindow.watcher = fs.watch(root, { recursive: true }, () => HomeWindow.refreshSoon(400));
+			HomeWindow.watcher.on("error", () => HomeWindow.unwatch());
+		} catch {
+			// (where a folder cannot be watched with all that is in it, the page is as fresh as its last focus)
+			HomeWindow.watcher = undefined;
+		}
+	}
+
+	private static unwatch(): void {
+		HomeWindow.watcher?.close();
+		HomeWindow.watcher = undefined;
+	}
+
+	/** A path as a person would say it: from their home folder. */
+	private static shown(file: string): string {
+		const home = os.homedir();
+		return file === home || file.startsWith(home + path.sep) ? `~${file.slice(home.length)}` : file;
+	}
+
+	private static postState(): void {
+		if (!HomeWindow.window) return;
+		const folder = HomeWindow.folder();
+		const open = new Map(documentWindows.all().filter((w) => w.file).map((w) => [path.resolve(w.file!), w.isDirty]));
+		let lib: Library | undefined;
+		let problem: string | undefined;
+		try {
+			lib = HomeWindow.library();
+			if (lib.exists) HomeWindow.watch(lib.root);
+		} catch (e: any) {
+			problem = String(e?.message ?? e);
+		}
+		const contents = lib ? lib.contents() : { docs: [], collections: [], trash: [], more: false };
+		const recents = HomeWindow.recents()
+			.list()
+			.map((r) => {
+				const type = docType(path.basename(r.path));
+				return type ? { path: r.path, ...type, at: r.at, where: HomeWindow.shown(path.dirname(r.path)), id: lib?.idOf(r.path), open: open.has(path.resolve(r.path)) } : undefined;
+			})
+			.filter((r) => !!r);
+		HomeWindow.post({
+			type: "state",
+			folder: HomeWindow.shown(folder),
+			problem,
+			docs: contents.docs.map((d) => {
+				const file = lib!.pathOf(d.id);
+				return { ...d, open: open.has(file), unsaved: open.get(file) === true };
+			}),
+			collections: contents.collections,
+			trash: contents.trash,
+			more: contents.more,
+			recents,
+			mac: process.platform === "darwin",
+			matrix: settings().appearance.matrix,
+		});
+	}
+
+	// ----- what the page asks for -----
+
+	/** The window a library document is open in, if it is. */
+	private static windowOf(lib: Library, id: string): DocumentWindow | undefined {
+		return documentWindows.of(lib.pathOf(id));
+	}
+
+	/**
+	 * Closes the window a document is open in, for something that needs the file to itself (the
+	 * trash, going back to a version). Not over unsaved changes: then the person is told, and
+	 * nothing is done. True when the document is in no window afterwards.
+	 */
+	private static async closeWindowOf(lib: Library, id: string, doing: string): Promise<boolean> {
+		const w = HomeWindow.windowOf(lib, id);
+		if (!w) return true;
+		const name = path.basename(lib.pathOf(id));
+		if (w.isDirty) {
+			w.win.focus();
+			throw new LibraryError(`${name} has changes that are not saved. Save it or close its window, then ${doing}.`);
+		}
+		const gone = new Promise<boolean>((resolve) => {
+			const timer = setTimeout(() => resolve(false), 5000);
+			w.win.once("closed", () => {
+				clearTimeout(timer);
+				resolve(true);
+			});
+		});
+		w.win.close();
+		if (!(await gone)) throw new LibraryError(`${name} is open and its window did not close. Close it, then ${doing}.`);
+		return true;
+	}
+
+	/** The windows of documents that got another name or place follow them. */
+	private static follow(lib: Library, from: string, to: string): void {
+		if (from === to) return;
+		const a = lib.pathOf(from), b = lib.pathOf(to);
+		documentWindows.of(a)?.movedTo(b);
+		HomeWindow.recents().moved(a, b);
+	}
+
+	private static async onMessage(msg: any): Promise<void> {
+		const text = (v: unknown): string => (typeof v === "string" ? v : "");
+		if (msg?.type === "ready") return HomeWindow.postState();
+		if (msg?.type === "chooseFolder") {
+			const w = HomeWindow.window;
+			if (!w) return;
+			const r = await dialog.showOpenDialog(w, { title: "Choose the library folder", message: "The folder your diagrams and drawings are kept in", defaultPath: fs.existsSync(HomeWindow.folder()) ? HomeWindow.folder() : app.getPath("documents"), properties: ["openDirectory", "createDirectory"] });
+			if (!r.canceled && r.filePaths[0]) updateSettings({ library: { folder: r.filePaths[0] } });
+			return HomeWindow.postState();
+		}
+		if (msg?.type === "openRecent") {
+			// (only what is in the list is opened: the page names a place there, not a path of its own)
+			const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
+			if (recent) await HomeWindow.host?.openFile(recent.path);
+			return;
+		}
+		if (msg?.type === "removeRecent") {
+			HomeWindow.recents().remove(text(msg.path));
+			return HomeWindow.postState();
+		}
+		if (msg?.type === "revealRecent") {
+			const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
+			if (recent) shell.showItemInFolder(recent.path);
+			return;
+		}
+		const lib = HomeWindow.library();
+		try {
+			switch (msg?.type) {
+				case "open":
+					lib.read(text(msg.id));
+					await HomeWindow.host?.openFile(lib.pathOf(text(msg.id)));
+					return;
+				case "openOther":
+					HomeWindow.host?.openDialog(lib.exists ? lib.root : app.getPath("documents"));
+					return;
+				case "new": {
+					const kind: DocKind = msg.kind === "drawio" ? "drawio" : "excalidraw";
+					const id = lib.create(text(msg.collection), "Untitled", EMPTY[kind].ending, EMPTY[kind].bytes());
+					HomeWindow.postState();
+					await HomeWindow.host?.openFile(lib.pathOf(id));
+					return;
+				}
+				case "addRecent": {
+					// a document from elsewhere, copied into the library (the one elsewhere stays where it is)
+					const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
+					const type = recent && docType(path.basename(recent.path));
+					if (!recent || !type) break;
+					if (fs.statSync(recent.path).size > PREVIEW_LIMIT * 4) throw new LibraryError(`${path.basename(recent.path)} is too large to copy from here. Copy it into the library folder yourself.`);
+					lib.create(text(msg.collection), type.name, type.ending, fs.readFileSync(recent.path));
+					break;
+				}
+				case "rename":
+					HomeWindow.follow(lib, text(msg.id), lib.rename(text(msg.id), text(msg.name)));
+					break;
+				case "move":
+					HomeWindow.follow(lib, text(msg.id), lib.move(text(msg.id), text(msg.collection)));
+					break;
+				case "duplicate":
+					lib.duplicate(text(msg.id));
+					break;
+				case "trash":
+					await HomeWindow.closeWindowOf(lib, text(msg.id), "move it to the trash");
+					HomeWindow.recents().remove(lib.pathOf(text(msg.id)));
+					lib.trash(text(msg.id));
+					break;
+				case "reveal":
+					lib.read(text(msg.id));
+					shell.showItemInFolder(lib.pathOf(text(msg.id)));
+					return;
+				case "revealLibrary":
+					if (!lib.exists) throw new LibraryError(`The library folder is not there yet. It is made at ${HomeWindow.shown(lib.root)} with the first drawing or diagram you make here.`);
+					void shell.openPath(lib.root);
+					return;
+				case "newCollection":
+					lib.createCollection(text(msg.name));
+					break;
+				case "renameCollection": {
+					const from = text(msg.name);
+					const inside = lib.contents().docs.filter((d) => d.collection === from);
+					const to = lib.renameCollection(from, text(msg.to));
+					for (const d of inside) HomeWindow.follow(lib, d.id, [to, ...d.id.split("/").slice(1)].join("/"));
+					HomeWindow.post({ type: "collectionRenamed", from, to });
+					break;
+				}
+				case "removeCollection": {
+					const r = lib.removeCollection(text(msg.name));
+					for (const m of r.moved) HomeWindow.follow(lib, m.from, m.to);
+					if (r.kept) HomeWindow.post({ type: "note", text: `The folder ${text(msg.name)} has other files in it and was left in the library. Its diagrams and drawings are in the library's top now.` });
+					break;
+				}
+				case "restore":
+					lib.restore(text(msg.trashId));
+					break;
+				case "deleteForever": {
+					const item = lib.contents().trash.find((t) => t.id === msg.trashId);
+					if (!item || !(await HomeWindow.confirm(`Delete ${item.name}${item.ending} for good?`, "It and its earlier versions are removed from the library's trash. This cannot be undone.", "Delete"))) return;
+					lib.deleteForever(item.id);
+					break;
+				}
+				case "emptyTrash": {
+					const count = lib.contents().trash.length;
+					if (!count || !(await HomeWindow.confirm(`Delete the ${count === 1 ? "document" : `${count} documents`} in the trash for good?`, "They and their earlier versions are removed. This cannot be undone.", "Empty Trash"))) return;
+					lib.emptyTrash();
+					break;
+				}
+				case "versions":
+					HomeWindow.post({ type: "versions", id: text(msg.id), versions: lib.versions(text(msg.id)) });
+					return;
+				case "restoreVersion": {
+					const id = text(msg.id);
+					const reopen = !!HomeWindow.windowOf(lib, id);
+					await HomeWindow.closeWindowOf(lib, id, "go back to that version");
+					lib.restoreVersion(id, text(msg.key));
+					HomeWindow.post({ type: "versions", id, versions: lib.versions(id) });
+					if (reopen) await HomeWindow.host?.openFile(lib.pathOf(id));
+					break;
+				}
+				case "openVersion": {
+					// a version opened beside the document, as a document of its own
+					const id = text(msg.id);
+					const version = lib.versions(id).find((v) => v.key === msg.key);
+					const type = docType(id.split("/").pop()!);
+					if (!version || !type) throw new LibraryError("That version is not kept any more.");
+					const when = new Date(version.at);
+					const pad = (n: number): string => String(n).padStart(2, "0");
+					const copy = lib.create(id.includes("/") ? id.split("/")[0] : "", `${type.name} (${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ${pad(when.getHours())}.${pad(when.getMinutes())})`, type.ending, lib.versionBytes(id, version.key));
+					HomeWindow.postState();
+					await HomeWindow.host?.openFile(lib.pathOf(copy));
+					return;
+				}
+				case "preview":
+					HomeWindow.post({ type: "preview", key: text(msg.key), url: HomeWindow.preview(lib, msg) });
+					return;
+				default:
+					return;
+			}
+		} catch (e) {
+			HomeWindow.problem(e);
+		}
+		HomeWindow.postState();
+	}
+
+	private static async confirm(message: string, detail: string, action: string): Promise<boolean> {
+		const w = HomeWindow.window;
+		if (!w) return false;
+		const r = await dialog.showMessageBox(w, { type: "warning", message, detail, buttons: [action, "Cancel"], defaultId: 1, cancelId: 1 });
+		return r.response === 0;
+	}
+
+	/** The picture for a card: of a document, of one in the trash, of a version, or of a recent file elsewhere. */
+	private static preview(lib: Library, msg: any): string | undefined {
+		try {
+			if (typeof msg.trashId === "string") {
+				const thumb = lib.trashThumb(msg.trashId);
+				if (thumb) return pngUrl(thumb);
+				const file = lib.trashFile(msg.trashId);
+				// (in the trash a document's file is "item" with the document's ending)
+				return fs.statSync(file).size <= PREVIEW_LIMIT ? previewOf(fs.readFileSync(file), path.basename(file).slice("item".length)) : undefined;
+			}
+			if (typeof msg.path === "string") {
+				const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
+				const type = recent && docType(path.basename(recent.path));
+				return recent && type && fs.statSync(recent.path).size <= PREVIEW_LIMIT ? previewOf(fs.readFileSync(recent.path), type.ending) : undefined;
+			}
+			const id = String(msg.id ?? "");
+			const type = docType(id.split("/").pop() ?? "");
+			if (!type) return undefined;
+			if (typeof msg.version === "string") return previewOf(lib.versionBytes(id, msg.version), type.ending);
+			const thumb = lib.thumb(id);
+			if (thumb) return pngUrl(thumb);
+			return fs.statSync(lib.pathOf(id)).size <= PREVIEW_LIMIT ? previewOf(lib.read(id), type.ending) : undefined;
+		} catch {
+			return undefined;
+		}
+	}
+}
