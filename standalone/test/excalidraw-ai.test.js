@@ -9,7 +9,7 @@ require("./helpers/ts");
 const { EXCALIDRAW_TOOLS, ToolInputError, idList, inputObject, parseMermaid, parseOperations, parseSceneQuery, MAX_OPERATIONS } = require("../src/excalidraw/tools");
 const { boxOf, boxAround, centerOf, edgePoint, freePlace, routeBetween, routeThrough, absolutePoints, LINE_GAP } = require("../src/excalidraw/geometry");
 const { describeScene } = require("../src/excalidraw/describe");
-const { ReviewLedger, contentKey } = require("../src/excalidraw/review");
+const { ReviewLedger, boundTo, contentKey, differs } = require("../src/excalidraw/review");
 const { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError, excalidrawContext, excalidrawInstructions, excalidrawSystemPrompt } = require("../src/main/excalidrawTools");
 
 const refused = (fn, pattern) => assert.throws(fn, (e) => e instanceof ToolInputError && pattern.test(e.message), `expected a refusal matching ${pattern}`);
@@ -248,70 +248,103 @@ function drawing(elements) {
 	};
 }
 
+/** The AI changes the drawing: `change` is applied, and what it touched is entered in the ledger as the page enters it. */
+function byAi(ledger, d, ids, change) {
+	const before = new Map(ids.map((id) => [id, d.get(id)]));
+	change();
+	for (const id of ids) ledger.changed(id, before.get(id), d.get(id));
+}
+
 test("the review: what the AI added, changed and removed is pending; Reject gives back what was", () => {
 	const d = drawing([el("a", "rectangle", 0, 0, 100, 50), el("b", "ellipse", 200, 0, 100, 50), el("c", "diamond", 400, 0, 100, 50)]);
 	const ledger = new ReviewLedger();
 	assert.equal(ledger.open, false);
 	// the AI moves a, deletes b and adds n
-	for (const id of ["a", "b", "n"]) ledger.touch(id, d.get(id));
-	d.set("a", { x: 50 });
-	d.set("b", { isDeleted: true });
-	d.add(el("n", "rectangle", 0, 200, 100, 50));
+	byAi(ledger, d, ["a", "b", "n"], () => {
+		d.set("a", { x: 50 });
+		d.set("b", { isDeleted: true });
+		d.add(el("n", "rectangle", 0, 200, 100, 50));
+	});
 	assert.equal(ledger.open, true);
 	assert.deepEqual(ledger.summary(d.get), { added: 1, changed: 1, removed: 1 });
 	assert.deepEqual(ledger.changes(d.get).map((c) => `${c.change} ${c.id}`).sort(), ["added n", "changed a", "removed b"]);
 	// (a removed element is given as it was, for its outline)
 	assert.equal(ledger.changes(d.get).find((c) => c.id === "b").element.isDeleted, false);
-	// what an element was is kept from the first touch: a second change does not replace it
-	ledger.touch("a", d.get("a"));
-	d.set("a", { x: 90 });
+	// what an element was is kept from the first change: a second one does not replace it
+	byAi(ledger, d, ["a"], () => d.set("a", { x: 90 }));
 	const plan = ledger.revert();
 	assert.deepEqual(plan.remove, ["n"]);
 	assert.deepEqual(plan.restore.map((e) => [e.id, e.x, e.isDeleted]).sort(), [["a", 0, false], ["b", 200, false]]);
 	assert.equal(ledger.open, false);
+	assert.equal(ledger.watching, false);
 });
 
-test("the review: Accept keeps everything; what is undone is no longer pending", () => {
+test("the review: Accept keeps everything; what is undone is no longer pending, and what is redone is again", () => {
 	const d = drawing([el("a", "rectangle", 0, 0, 100, 50)]);
 	const ledger = new ReviewLedger();
-	ledger.touch("a", d.get("a"));
-	ledger.touch("n", d.get("n"));
-	d.set("a", { backgroundColor: "#ffc9c9" });
-	d.add(el("n", "ellipse", 0, 0, 10, 10));
+	byAi(ledger, d, ["a", "n"], () => {
+		d.set("a", { backgroundColor: "#ffc9c9" });
+		d.add(el("n", "ellipse", 0, 0, 10, 10));
+	});
 	assert.deepEqual(ledger.summary(d.get), { added: 1, changed: 1, removed: 0 });
 	// undone: a is as it was (a newer version of the same content), n is gone
 	d.set("a", { backgroundColor: "transparent" });
 	d.set("n", { isDeleted: true });
-	ledger.prune(d.get);
+	ledger.follow(d.get);
 	assert.equal(ledger.open, false);
 	assert.deepEqual(ledger.summary(d.get), { added: 0, changed: 0, removed: 0 });
+	// redone: the AI's change is there again, and pending again (it can still be reverted)
+	assert.equal(ledger.watching, true);
+	d.set("a", { backgroundColor: "#ffc9c9" });
+	d.set("n", { isDeleted: false });
+	ledger.follow(d.get);
+	assert.deepEqual(ledger.summary(d.get), { added: 1, changed: 1, removed: 0 });
+	assert.deepEqual(ledger.revert().restore.map((e) => [e.id, e.backgroundColor]), [["a", "transparent"]]);
+	// undone, and then changed by the user to something else: theirs, and forgotten here
+	byAi(ledger, d, ["a"], () => d.set("a", { x: 40 }));
+	d.set("a", { x: 0 });
+	ledger.follow(d.get);
+	d.set("a", { x: 7 });
+	ledger.follow(d.get);
+	assert.deepEqual([ledger.open, ledger.watching, ledger.changes(d.get).length], [false, false, 0]);
 	// kept
-	ledger.touch("a", d.get("a"));
-	d.set("a", { x: 5 });
+	byAi(ledger, d, ["a"], () => d.set("a", { x: 5 }));
 	ledger.accept();
-	assert.equal(ledger.open, false);
+	assert.deepEqual([ledger.open, ledger.watching], [false, false]);
 	assert.deepEqual(ledger.revert(), { restore: [], remove: [] });
 	assert.equal(d.get("a").x, 5);
+});
+
+test("the review: an undone change that the AI then makes again goes back to what was before the AI", () => {
+	const d = drawing([el("a", "rectangle", 0, 0, 100, 50)]);
+	const ledger = new ReviewLedger();
+	byAi(ledger, d, ["a"], () => d.set("a", { x: 50 }));
+	d.set("a", { x: 0 });
+	ledger.follow(d.get);
+	byAi(ledger, d, ["a"], () => d.set("a", { x: 80 }));
+	assert.deepEqual(ledger.summary(d.get), { added: 0, changed: 1, removed: 0 });
+	assert.deepEqual(ledger.revert().restore.map((e) => e.x), [0]);
 });
 
 test("the review: the user's own changes are theirs, unless they are to something pending", () => {
 	const d = drawing([el("a", "rectangle", 0, 0, 100, 50), el("mine", "rectangle", 300, 0, 100, 50)]);
 	const ledger = new ReviewLedger();
-	ledger.touch("a", d.get("a"));
-	d.set("a", { x: 50 });
+	byAi(ledger, d, ["a"], () => d.set("a", { x: 50 }));
 	// the user moves their own shape, and adds one: neither is entered, neither is pending, neither is reverted
 	d.set("mine", { x: 400 });
 	d.add(el("new", "ellipse", 0, 300, 10, 10));
+	ledger.follow(d.get);
 	assert.deepEqual(ledger.changes(d.get).map((c) => c.id), ["a"]);
 	// the user changes the pending one too: it stays pending, and Reject gives back what it was before the AI
 	d.set("a", { y: 70 });
+	ledger.follow(d.get);
 	assert.deepEqual(ledger.summary(d.get), { added: 0, changed: 1, removed: 0 });
 	const plan = ledger.revert();
 	assert.deepEqual(plan.restore.map((e) => [e.id, e.x, e.y]), [["a", 0, 0]]);
 	assert.deepEqual(plan.remove, []);
 });
 
-test("the review counts what the user sees: a relabelled shape is one change, an attached line changes only itself", () => {
+test("the review counts what the user sees: a relabelled shape is one change, and a shape an arrow was attached to is none", () => {
 	const d = drawing([
 		el("box", "rectangle", 0, 0, 100, 50, { boundElements: [{ type: "text", id: "old-label" }] }),
 		el("old-label", "text", 10, 10, 50, 20, { text: "Before", containerId: "box" }),
@@ -319,27 +352,55 @@ test("the review counts what the user sees: a relabelled shape is one change, an
 	]);
 	const ledger = new ReviewLedger();
 	// a new label for box (the old text goes, a new one comes, the box lists the new one), and an arrow from box to other
-	for (const id of ["box", "old-label", "new-label", "other", "arrow", "arrow-label"]) ledger.touch(id, d.get(id));
-	d.set("old-label", { isDeleted: true });
-	d.add(el("new-label", "text", 10, 10, 50, 20, { text: "After", containerId: "box" }));
-	d.set("box", { boundElements: [{ type: "text", id: "new-label" }, { type: "arrow", id: "arrow" }] });
-	d.set("other", { boundElements: [{ type: "arrow", id: "arrow" }] });
-	d.add(el("arrow", "arrow", 106, 25, 188, 0, { points: [[0, 0], [188, 0]], boundElements: [{ type: "text", id: "arrow-label" }] }));
-	d.add(el("arrow-label", "text", 180, 15, 40, 20, { text: "to", containerId: "arrow" }));
+	byAi(ledger, d, ["box", "old-label", "new-label", "other", "arrow", "arrow-label"], () => {
+		d.set("old-label", { isDeleted: true });
+		d.add(el("new-label", "text", 10, 10, 50, 20, { text: "After", containerId: "box" }));
+		d.set("box", { boundElements: [{ type: "text", id: "new-label" }, { type: "arrow", id: "arrow" }] });
+		d.set("other", { boundElements: [{ type: "arrow", id: "arrow" }] });
+		d.add(el("arrow", "arrow", 106, 25, 188, 0, { points: [[0, 0], [188, 0]], startBinding: { elementId: "box" }, endBinding: { elementId: "other" }, boundElements: [{ type: "text", id: "arrow-label" }] }));
+		d.add(el("arrow-label", "text", 180, 15, 40, 20, { text: "to", containerId: "arrow" }));
+	});
 	assert.deepEqual(ledger.changes(d.get).map((c) => `${c.change} ${c.id}`).sort(), ["added arrow", "changed box"]);
 	assert.deepEqual(ledger.summary(d.get), { added: 1, changed: 1, removed: 0 });
-	// Reject still puts everything back, what is not counted included
+	// the user moves the shape the arrow was attached to: that is theirs. It is not pending, and Reject does not move it back
+	d.set("other", { x: 500 });
+	ledger.follow(d.get);
+	assert.deepEqual(ledger.changes(d.get).map((c) => c.id).sort(), ["arrow", "box"]);
 	const plan = ledger.revert();
 	assert.deepEqual(plan.remove.sort(), ["arrow", "arrow-label", "new-label"]);
-	assert.deepEqual(plan.restore.map((e) => e.id).sort(), ["box", "old-label", "other"]);
-	assert.equal(plan.restore.find((e) => e.id === "other").boundElements, null);
+	assert.deepEqual(plan.restore.map((e) => e.id).sort(), ["old-label"]);
+	assert.equal(d.get("other").x, 500);
+});
+
+test("what is attached to what is read from the lines and labels themselves", () => {
+	const elements = [
+		el("box", "rectangle", 0, 0, 100, 50, { boundElements: [{ type: "arrow", id: "gone-arrow" }, { type: "arrow", id: "second" }, { type: "text", id: "label" }] }),
+		el("label", "text", 10, 10, 50, 20, { containerId: "box" }),
+		el("other", "ellipse", 300, 0, 100, 50, { boundElements: null }),
+		el("first", "arrow", 0, 0, 10, 10, { startBinding: { elementId: "box" }, endBinding: { elementId: "other" } }),
+		el("second", "arrow", 0, 0, 10, 10, { startBinding: { elementId: "other" }, endBinding: { elementId: "box" } }),
+		el("gone-arrow", "arrow", 0, 0, 10, 10, { isDeleted: true, startBinding: { elementId: "box" } }),
+		el("loose", "arrow", 0, 0, 10, 10, { startBinding: { elementId: "nobody" }, endBinding: null }),
+		el("self", "arrow", 0, 0, 10, 10, { startBinding: { elementId: "other" }, endBinding: { elementId: "other" } }),
+		el("free", "text", 0, 0, 10, 10, { containerId: null }),
+	];
+	const lists = boundTo(elements);
+	// (what the element listed stays in its order, what it did not list comes after; what is gone is not listed)
+	assert.deepEqual(lists.get("box"), [{ type: "arrow", id: "second" }, { type: "text", id: "label" }, { type: "arrow", id: "first" }]);
+	assert.deepEqual(lists.get("other"), [{ type: "arrow", id: "first" }, { type: "arrow", id: "second" }, { type: "arrow", id: "self" }]);
+	assert.deepEqual([...lists.keys()].sort(), ["box", "other"]);
 });
 
 test("two states of an element that draw the same thing have the same key", () => {
 	const a = el("a", "rectangle", 0, 0, 10, 10, { version: 3, versionNonce: 9, updated: 1, index: "a0", seed: 4 });
 	assert.equal(contentKey(a), contentKey({ ...a, version: 8, versionNonce: 1, updated: 99, index: "a5", seed: 7 }));
 	assert.notEqual(contentKey(a), contentKey({ ...a, x: 1 }));
-	assert.notEqual(contentKey(a), contentKey({ ...a, boundElements: [{ type: "arrow", id: "z" }] }));
+	// what is attached to it is not its own content (the lines and labels say that themselves)
+	assert.equal(contentKey(a), contentKey({ ...a, boundElements: [{ type: "arrow", id: "z" }] }));
+	assert.equal(differs(a, { ...a, version: 9 }), false);
+	assert.equal(differs(a, { ...a, isDeleted: true }), true);
+	assert.equal(differs(undefined, { ...a, isDeleted: true }), false);
+	assert.equal(differs(undefined, a), true);
 });
 
 // ----- the toolbox and the endpoint, with a stand-in for the editor page -----

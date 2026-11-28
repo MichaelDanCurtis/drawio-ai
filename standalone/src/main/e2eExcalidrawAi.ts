@@ -149,6 +149,26 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	menuItem("Edit", "Undo").click();
 	await settled();
 	expect(!(await elementIds(w)).includes("undone"), "Edit → Undo takes the agent's change away, and the review with it");
+	// (redone, it is the agent's change again: pending, and still to be reverted)
+	menuItem("Edit", "Redo").click();
+	await until("the redone change to be pending again", async () => (await review()).pending === "1 added" && (await chatReview()) === "1 added");
+	menuItem("Agent", "Revert AI Changes").click();
+	await settled();
+	expect(!(await elementIds(w)).includes("undone"), "a change that was undone and redone is reverted like any other");
+
+	// an arrow the agent attaches to the user's shapes: what the user does to those shapes meanwhile stays theirs
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "arrow", id: "link", start: "box-plan", end: "kept" }] });
+	await until("the pending arrow", async () => (await review()).pending === "1 added");
+	await inEditor(w, `x.api.updateScene({ elements: x.api.getSceneElementsIncludingDeleted().map((e) => (e.id === "kept" ? { ...e, x: e.x + 300, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)), captureUpdate: x.CaptureUpdateAction.IMMEDIATELY });`);
+	await pause(300);
+	expect((await review()).pending === "1 added", "a shape the agent only attached an arrow to is not a pending change, moved by the user or not");
+	const keptAt = await inEditor<number>(w, `return x.api.getSceneElements().find((e) => e.id === "kept").x;`);
+	await inEditor(w, `bar.getElementById("reject").click();`);
+	await settled();
+	const unlinked = await inEditor<any>(w, `const all = x.api.getSceneElements(); const e = (id) => all.find((el) => el.id === id); const lists = (id) => (e(id).boundElements || []).map((b) => b.id); return { link: !!e("link"), keptX: e("kept").x, onKept: lists("kept"), onPlan: lists("box-plan") };`);
+	log("aiAttachedArrowReverted", { ...unlinked, keptAt });
+	expect(!unlinked.link && unlinked.keptX === keptAt, "Reject takes the arrow away and leaves the shape where the user moved it");
+	expect(!unlinked.onKept.includes("link") && !unlinked.onPlan.includes("link") && unlinked.onPlan.includes("text-plan") && unlinked.onPlan.includes("arrow-1"), "the shapes no longer list the arrow, and still list what else is attached to them");
 	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "kept", backgroundColor: "#ffc9c9" }] });
 	await until("the pending change", async () => (await review()).pending === "1 changed");
 	await addElement(w, "by-hand", "rectangle", { x: 600, y: 600 });

@@ -14,7 +14,7 @@
     canvas (added, changed, removed), counted in the bar above it and in the chat, with **Reject**
     and **Accept** in both and under **Agent**. Reject gives each element back what it was before
     the agent touched it; what you draw yourself meanwhile is not part of the review; a change you
-    undo is no longer pending.
+    undo is no longer pending, and is again if you redo it.
   - A request is about the selection when there is one. A model used with an API key is asked
     about before it changes the drawing or writes a file.
   - Not yet: keeping or reverting part of a review, and reaching a drawing from Claude Code or

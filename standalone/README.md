@@ -157,9 +157,11 @@ of its own, which the window offers it the way a diagram's window offers draw.io
   them and holds **Reject** and **Accept**; so do the chat (**Pending changes**) and **Agent →
   Keep AI Changes / Revert AI Changes**. Reject gives every element back the state it had before
   the agent first touched it. What you draw yourself meanwhile is yours and is not part of the
-  review, unless it is on something pending, which then stays pending. A change you undo
-  (Cmd/Ctrl+Z) is no longer pending. Keeping or reverting is everything at once; a part of it
-  cannot be picked yet.
+  review, unless it is on something pending, which then stays pending. A shape the agent only
+  attached an arrow to is not changed as far as the review goes: move it meanwhile, and Reject
+  takes the arrow away and leaves the shape where you put it. A change you undo (Cmd/Ctrl+Z) is
+  no longer pending, and is pending again if you redo it. Keeping or reverting is everything at
+  once; a part of it cannot be picked yet.
 - **Selection.** A request is about what you have selected, when something is: the chat shows
   how many elements that is, and the agent is told their ids.
 - **Asking first.** An agent program asks permission the way it does for any tool. A model used

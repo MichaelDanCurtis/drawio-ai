@@ -11,7 +11,7 @@
 // runs, and keeping labels and attached lines in place when something is moved or resized.
 import { describeScene, FONT_CODES } from "../../excalidraw/describe";
 import { absolutePoints, boxAround, boxOf, freePlace, isLine, routeBetween, routeThrough, round, type El, type Point } from "../../excalidraw/geometry";
-import { ReviewLedger, type Change, type Summary } from "../../excalidraw/review";
+import { boundTo, ReviewLedger, type Change, type Summary } from "../../excalidraw/review";
 import type { AddOp, Operation, SceneQuery, Style, UpdateOp } from "../../excalidraw/tools";
 
 /** What this file needs of the editor (Excalidraw's API and three of its functions; app.tsx hands them over). */
@@ -257,8 +257,10 @@ export class DrawingAi {
 	private commit(draft: Draft): number {
 		const touched = draft.touched();
 		if (touched.length === 0) return 0;
-		for (const t of touched) this.ledger.touch(t.id, t.before);
+		// (what the user did since the last look is theirs: it is taken in before the AI's change is entered)
+		this.ledger.follow(this.current());
 		this.editor.api.updateScene({ elements: draft.all(), captureUpdate: this.editor.captureNow });
+		for (const t of touched) this.ledger.changed(t.id, t.before, draft.any(t.id));
 		this.report();
 		return touched.length;
 	}
@@ -536,21 +538,18 @@ export class DrawingAi {
 
 	/** Called when the drawing changed (by anyone): what was undone is no longer pending, and the app is told if the review changed. */
 	public sceneChanged(): void {
-		if (!this.ledger.open && this.lastReview === "") return;
-		this.report();
+		if (this.reviewing) this.report();
 	}
 
 	/** Whether there is a review to keep up to date (the page then tells this file of every change to the drawing). */
 	public get reviewing(): boolean {
-		return this.ledger.open || this.lastReview !== "";
+		return this.ledger.watching || this.lastReview !== "";
 	}
 
 	private report(): void {
 		const current = this.current();
-		this.ledger.prune(current);
+		this.ledger.follow(current);
 		const changes = this.ledger.changes(current);
-		// (nothing to show any more: what is left in the ledger is only lines noted on elements, which went with their lines)
-		if (changes.length === 0 && this.ledger.open) this.ledger.accept();
 		const summary: Summary = { added: 0, changed: 0, removed: 0 };
 		for (const c of changes) summary[c.change]++;
 		const key = changes.length ? JSON.stringify(changes.map((c) => [c.id, c.change, c.element.version])) : "";
@@ -571,7 +570,7 @@ export class DrawingAi {
 		const byId = new Map(scene.map((e) => [e.id, e]));
 		const back = new Map(restore.map((e) => [e.id, e]));
 		const gone = new Set(remove);
-		const elements = scene.map((now) => {
+		let elements = scene.map((now) => {
 			const was = back.get(now.id);
 			// (as it was, as a newer version than what is there; its place in the stacking order is today's)
 			if (was) return next({ ...was, index: now.index }, {}, now.version);
@@ -580,6 +579,19 @@ export class DrawingAi {
 		});
 		// (what was cleared off the canvas altogether since, comes back at the end)
 		for (const was of restore) if (!byId.has(was.id)) elements.push(next({ ...was, index: null }));
+		// What is attached to what is put right from the lines and labels that are there now: an element
+		// the AI attached an arrow to no longer lists it, and one that got its arrow back does. Only the
+		// elements this touches: what else the user has in the drawing is left exactly as it is.
+		const reverted = new Set([...back.keys(), ...gone]);
+		const lists = boundTo(elements);
+		elements = elements.map((e) => {
+			if (e.isDeleted) return e;
+			const have: { id: string }[] = Array.isArray(e.boundElements) ? e.boundElements : [];
+			const want = lists.get(e.id) ?? [];
+			if (!reverted.has(e.id) && ![...have, ...want].some((b) => reverted.has(b.id))) return e;
+			if (JSON.stringify(have.map((b) => b.id)) === JSON.stringify(want.map((b) => b.id))) return e;
+			return back.has(e.id) || gone.has(e.id) ? { ...e, boundElements: want.length ? want : null } : next(e, { boundElements: want.length ? want : null });
+		});
 		this.editor.api.updateScene({ elements, captureUpdate: this.editor.captureNow });
 		this.report();
 	}
