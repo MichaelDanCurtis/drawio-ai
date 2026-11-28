@@ -468,8 +468,10 @@ export class ExcalidrawWindow implements DocumentWindow {
 	}
 
 	private setDirty(dirty: boolean): void {
+		const was = this.dirty;
 		this.dirty = dirty;
 		this.updateTitle();
+		if (was !== dirty) documentHooks.changed?.(this);
 	}
 
 	private updateTitle(): void {

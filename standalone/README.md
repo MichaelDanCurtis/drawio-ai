@@ -52,6 +52,9 @@ installed and look signed in; when one is not, the chat says what to run (and of
 
 ## What it does
 
+- **Home**: started with no file, the app opens on its home screen: your diagrams and
+  drawings as cards with pictures, in collections, with their earlier versions and a trash.
+  See [Home](#home).
 - **Files**: opens and saves `.drawio`, `.dio`, `.drawio.svg` and `.drawio.png`
   (one window per diagram), with unsaved-change prompts. Excalidraw drawings
   (`.excalidraw`) are a second kind of document: see [Excalidraw drawings](#excalidraw-drawings).
@@ -88,6 +91,60 @@ installed and look signed in; when one is not, the chat says what to run (and of
   Miro: converted by draw.io into a new window), and Print (every page, fitted to the
   paper, through the system print dialog). draw.io's in-editor File menu is replaced by
   `src/renderer/desktop-menu.js`, a draw.io plugin loaded after the Draw.AI one.
+
+## Home
+
+**Window → Home** is the app's front door, and what it opens on when it is started with no
+file (opening a file goes straight to it, as before). It shows a **library**: one folder of
+plain files, `OmniDraw` in your Documents unless you choose another (**Change…** under the
+rail). The folder is made with the first drawing or diagram you make there, not by looking.
+
+- **Cards.** Every diagram (`.drawio`, `.dio`, `.drawio.svg`, `.drawio.png`) and drawing
+  (`.excalidraw`, `.excalidraw.png`, `.excalidraw.svg`) in the folder is a card with a picture,
+  its name and when it was last changed. Double-click (or Enter) opens it; the card says when
+  it is open, and when it has changes that are not saved. Search by name; order by last edit
+  or by name.
+- **New drawing / New diagram** make a file in the library at once (in the collection you are
+  looking at) and open it. File → New still makes an untitled one that is nowhere until you
+  save it.
+- **Collections** are the folders at the library's top. Make one with **+**, drag a card onto
+  it (or **Move to** in the card's menu), rename or remove it with a right-click. Removing a
+  collection does not throw its documents out: they go to the library's top.
+- **Versions.** A document of the library keeps earlier states: as it was when first opened
+  here, and each time it is saved (saves within ten minutes of each other are one version,
+  the last of them; the newest hundred are kept). **Versions…** in a card's menu lists them
+  with a picture of each; **Go back to this** makes one the document again, keeping what the
+  document was as a version first, so that going back can be gone back on; **Open as a copy**
+  opens it beside the document instead.
+- **Trash.** Move to Trash takes a document out of the folder with its versions; **Put Back**
+  returns it where it was (under its name, or beside one that took the name meanwhile).
+  **Delete for Good** and **Empty Trash** ask first.
+- **Recent** lists what you opened lately wherever it is kept; a file from elsewhere can be
+  copied into the library from there.
+- A document that is open follows what you do to it at home: renamed or moved, its window is
+  the new file's. Trashing, or going back to a version, closes its window first, and is
+  refused while it has unsaved changes.
+
+**It stays a folder.** Everything the app keeps of its own is in one hidden folder in the
+library, `.omnidraw` (`versions/`, `thumbs/`, `trash/`), with a `.gitignore` that keeps it
+out of a repository the library may be in. Files put into the folder by hand, by `git pull`
+or by a sync service appear as cards (the folder is watched); renamed in Finder, a document
+is a new document to the app, without the old one's versions. Hidden folders and
+`node_modules` are not read, links are not followed (a linked folder could be anywhere), and
+documents are looked for five folders deep, up to 4000 of them.
+
+**Pictures.** A document saved here gets its picture from its editor. One that came another
+way gets a sketch drawn from the file alone (`src/main/library/sketch.ts`): the shapes where
+they are, in their colours, with their words, and the lines between them; for a diagram, its
+first page. An editable PNG or SVG is its own picture. All of them are shown as images, where
+nothing in a file can run or load.
+
+Code: `src/main/library/` (the library, the list of recent documents and the sketches: no
+Electron, unit-tested), `src/main/homeWindow.ts`, `src/renderer/home.html`.
+
+Not yet: sharing from the home screen, tags, picking several cards at once, pictures of every
+page of a diagram, and a keyboard shortcut for Home (draw.io's and Excalidraw's own shortcuts
+leave few that mean the same in both).
 
 ## Excalidraw drawings
 
@@ -843,4 +900,9 @@ the window), for example:
   for a provider's API and by a stand-in agent over ACP (no real agent, key or network).
   `DRAWAI_E2E_CONSOLE=1` prints what the page's console says; `DRAWAI_E2E_PAGE_SCRIPT=<file>`
   runs a script in the editor page and prints what it returns.
+  `--home` checks the home screen instead (`src/main/e2eHome.ts`): a library folder of the run's
+  own with files put there by hand, cards and their pictures, a drawing and a diagram made from
+  the home screen and saved (a version and the editor's picture each), a document renamed, moved
+  and trashed while it is open, going back to a version, the trash, Recent, and the window in
+  light and dark (`home-light.png`, `home-dark.png`, `home-versions.png`, `home-trash.png`).
 - View → Editor/Chat Developer Tools for the two web views.

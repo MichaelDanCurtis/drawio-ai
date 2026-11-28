@@ -489,6 +489,7 @@ app.whenReady().then(async () => {
 	// home screen is what is left to come back to.
 	HomeWindow.host = { openFile: (file) => openFile(file), openDialog: (folder) => void openDialog(folder) };
 	documentHooks.saved = (w, file) => HomeWindow.saved(w, file);
+	documentHooks.changed = () => HomeWindow.refreshSoon();
 	documentHooks.closed = (w) => {
 		HomeWindow.closed(w);
 		if (documentWindows.size === 0 && !DiagramWindow.quitting && homeWhenEmpty && process.platform === "darwin") showHome();

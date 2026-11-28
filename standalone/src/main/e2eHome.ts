@@ -94,7 +94,7 @@ export async function runHome(config: E2eConfig, log: (k: string, v: unknown) =>
 	await until("the card to say it is open", async () => (await cards()).find((c) => c.name === "Untitled")?.open === "open");
 	expect(lib().versions("Untitled.excalidraw").length === 1 && lib().versions("Untitled.excalidraw")[0].kept, "the document as it was opened is kept as a version");
 	await addElement(w, "home-1", "rectangle", { x: 100, y: 100 });
-	await until("the card to say it has unsaved changes", async () => (await cards()).find((c) => c.name === "Untitled")?.open === "unsaved", 20_000).catch(() => undefined);
+	await until("the card to say it has unsaved changes", async () => (await cards()).find((c) => c.name === "Untitled")?.open === "unsaved");
 	expect(await w.save(), "the drawing is saved");
 	await until("the save to be a version", () => lib().versions("Untitled.excalidraw").length === 2);
 	await until("the editor's picture of it to be kept", () => !!lib().thumb("Untitled.excalidraw"));

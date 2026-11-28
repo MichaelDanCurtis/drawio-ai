@@ -200,8 +200,12 @@ test("the trash: there with its versions, back where it was, or gone for good", 
 	fs.rmSync(path.join(root, "Team"), { recursive: true });
 	assert.equal(lib.restore(t2), "Team/Plan 2.excalidraw");
 
+	// a picture of what the document was before it was last changed does not go with it
+	const later = new Date(Date.now() + 60_000);
+	fs.utimesSync(lib.pathOf("Team/Plan 2.excalidraw"), later, later);
 	// gone for good, one or all; and nothing that is not a trash item is named
 	const t3 = lib.trash("Team/Plan 2.excalidraw");
+	assert.equal(lib.trashThumb(t3), undefined);
 	const other = lib.create("", "Other", ".drawio", B("x"));
 	const t4 = lib.trash(other);
 	lib.deleteForever(t3);

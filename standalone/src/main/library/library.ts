@@ -454,7 +454,9 @@ export class Library {
 
 	/** Moves a document to the trash, with its versions and its picture. Returns the trash item's id. */
 	public trash(id: string, now = Date.now()): string {
-		const { file, type } = this.existing(id);
+		const { file, type, stat } = this.existing(id);
+		// (a picture of an older state is not what the document looks like in the trash: it stays behind, and goes)
+		if (!this.pictured(id, stat.mtimeMs)) fs.rmSync(this.thumbFile(id), { force: true });
 		const trashId = `${stamp(now)}-${crypto.randomBytes(4).toString("hex")}`;
 		const dir = this.store("trash", trashId);
 		fs.mkdirSync(dir, { recursive: true });

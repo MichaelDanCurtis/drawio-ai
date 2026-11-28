@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+- **Home.** Started with no file, the app opens on a home screen (also **Window → Home**):
+  your diagrams and drawings as cards with pictures. It shows a library, which is one folder
+  of plain files (`OmniDraw` in Documents, or one you choose) that stays usable in Finder, git
+  and sync.
+  - **Collections** are its folders: make, rename and remove them, drag cards onto them.
+  - **Versions:** a document of the library keeps earlier states, as it was opened and as it
+    is saved. Go back to one (what it was is kept, so that you can go back on that), or open
+    one as a copy.
+  - **Trash:** a document goes there with its versions, comes back where it was, or is
+    deleted for good after a question.
+  - **Recent** lists what was opened lately wherever it is kept.
+  - New drawing and New diagram on the home screen make a file in the library at once. A
+    document renamed or moved there while it is open takes its window with it.
+  - With the last document closed, the home screen comes back (macOS).
+
 ## [0.4.3]
 
 - **AI in an Excalidraw drawing.** The chat beside a drawing now works as it does beside a

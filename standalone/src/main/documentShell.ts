@@ -32,6 +32,8 @@ export const documentHooks: {
 	saved?: (w: DocumentWindow, file: string) => void;
 	/** A document's window went. */
 	closed?: (w: DocumentWindow) => void;
+	/** A document got unsaved changes, or has none any more. */
+	changed?: (w: DocumentWindow) => void;
 } = {};
 
 /** The document windows that are open, of both kinds. */
