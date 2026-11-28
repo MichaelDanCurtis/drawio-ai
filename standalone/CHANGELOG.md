@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.3]
+
 - **AI in an Excalidraw drawing.** The chat beside a drawing now works as it does beside a
   diagram: an agent (Claude Code, Gemini, Codex, GitHub Copilot, Kimi) or a model used with your
   API key edits the open drawing live.
