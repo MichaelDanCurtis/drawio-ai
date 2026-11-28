@@ -6,6 +6,7 @@
 // No agent is started and nothing leaves the machine.
 import { dialog, nativeTheme } from "electron";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { DiagramWindow } from "./diagramWindow";
 import { documentWindows } from "./documentShell";
@@ -299,6 +300,20 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 		const restored = loadRecord(lib().root, "e2e-map") as any;
 		log("homeMapsRestored", restored ? { diagram: restored.diagram, note: restored.note } : null);
 		expect(restored?.diagram === "Mapped 2.drawio" && restored.note === "changed in Maps", "its maps came back with it, under the name it has now");
+		// put back where its maps cannot go (the folder's .drawai is a file): the document is back, its maps are kept, and the person is told where
+		await send({ type: "trash", id: "Mapped 2.drawio" });
+		await until("it to be in the trash again", () => !fs.existsSync(lib().pathOf("Mapped 2.drawio")));
+		const trashId = lib().contents().trash.find((t) => t.name === "Mapped 2")!.id;
+		fs.rmSync(path.join(lib().root, ".drawai"), { recursive: true, force: true });
+		fs.writeFileSync(path.join(lib().root, ".drawai"), "not a folder");
+		await inHome<void>(`document.getElementById("said").hidden = true;`);
+		await send({ type: "restore", trashId });
+		await until("it to be back", () => fs.existsSync(lib().pathOf("Mapped 2.drawio")));
+		await until("the person to be told where its maps are", async () => /maps could not be put beside it/.test((await said()) ?? ""));
+		const keptAt = /kept in (.+)\.$/.exec((await said()) ?? "")?.[1]?.replace(/^~/, os.homedir());
+		log("homeMapsHeld", keptAt);
+		expect(!!keptAt && !!loadRecord(keptAt, "e2e-map"), "its maps are kept where it says, not thrown away");
+		fs.rmSync(path.join(lib().root, ".drawai"), { force: true });
 	}
 
 	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----

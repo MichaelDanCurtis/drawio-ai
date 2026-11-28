@@ -515,18 +515,27 @@ export class HomeWindow {
 					// (the maps that went with it are taken out of the trash before the trash's folder goes, and given its name now)
 					const holding = kept && fs.mkdtempSync(path.join(path.dirname(kept), ".restoring-"));
 					if (kept && holding && item) moveRecords({ cwd: kept, diagram: path.join(kept, `${item.name}${item.ending}`) }, { cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) });
+					let id: string;
 					try {
-						const id = lib.restore(text(msg.trashId));
-						if (holding && item) {
-							const now = lib.pathOf(id);
-							moveRecords({ cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) }, { cwd: path.dirname(now), diagram: now });
-						}
+						id = lib.restore(text(msg.trashId));
 					} catch (e) {
-						// (not put back: its maps go back into the trash with it)
-						if (holding && kept && item && fs.existsSync(kept)) moveRecords({ cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) }, { cwd: kept, diagram: path.join(kept, `${item.name}${item.ending}`) });
+						// (not put back: its maps go back into the trash with it, and only then is the holding place cleared)
+						if (holding && kept && item && fs.existsSync(kept)) {
+							moveRecords({ cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) }, { cwd: kept, diagram: path.join(kept, `${item.name}${item.ending}`) });
+							fs.rmSync(holding, { recursive: true, force: true });
+						}
 						throw e;
-					} finally {
-						if (holding) fs.rmSync(holding, { recursive: true, force: true });
+					}
+					if (holding && item) {
+						const now = lib.pathOf(id);
+						try {
+							moveRecords({ cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) }, { cwd: path.dirname(now), diagram: now });
+							fs.rmSync(holding, { recursive: true, force: true });
+						} catch (e: any) {
+							// The document is back; its maps could not be put beside it. They are not thrown away:
+							// the place they were held in stays, and the person is told where it is.
+							HomeWindow.post({ type: "problem", text: `${path.basename(now)} is back, but its maps could not be put beside it (${e?.message ?? e}). They are kept in ${HomeWindow.shown(holding)}.` });
+						}
 					}
 					break;
 				}
