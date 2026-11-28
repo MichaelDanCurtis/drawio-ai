@@ -367,7 +367,11 @@ export class ExcalidrawWindow implements DocumentWindow {
 		return { bytes, stamp: r.stamp };
 	}
 
+	/** How long the editor page is given for a tool call (the end-to-end run shortens it). */
+	public static toolTimeout = 120_000;
+
 	/** Has the editor page carry out a tool call of an agent's (the arguments are checked: excalidrawTools.ts). */
+
 	private pageTool(name: string, args: unknown, signal?: AbortSignal): Promise<any> {
 		if (!this.loaded) return Promise.reject(new Error("The drawing is still loading. Try again in a moment."));
 		if (signal?.aborted) return Promise.reject(new Error("Stopped."));
@@ -375,8 +379,10 @@ export class ExcalidrawWindow implements DocumentWindow {
 			const id = ++this.requestSeq;
 			const timer = setTimeout(() => {
 				done();
+				// (the page is told, as when the request is stopped: what it is still waiting for must not change the drawing once the caller has been told it failed)
+				this.sendToEditor({ type: "cancelTool", id });
 				reject(new Error("The editor did not answer in time."));
-			}, 120_000);
+			}, ExcalidrawWindow.toolTimeout);
 			const stopped = () => {
 				done();
 				// (the page is told too: a call that is still waiting for something there must not change the drawing afterwards)

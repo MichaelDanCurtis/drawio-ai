@@ -383,8 +383,13 @@ export class DrawingAi {
 		const { id: _id, index: _index, version: _version, versionNonce: _nonce, seed: _seed, ...fresh } = lineEl;
 		let bound = (lineEl.boundElements ?? []).filter((b: any) => b.type !== "text");
 		if (labelEl && oldLabel) {
-			const { id: _i, index: _x, version: _v, versionNonce: _n, seed: _s, ...text } = labelEl;
-			draft.change(oldLabel.id, { ...text, containerId: existing.id });
+			// Its words, its font and its place are what the line was built with. How it looks beyond
+			// that is its own, and stays: a colour or an alignment it was given apart from the line's
+			// is not lost because the line was laid out again. (A colour given to the line in the same
+			// change has been given to the label already: see update.)
+			const placed: Record<string, unknown> = {};
+			for (const key of ["x", "y", "width", "height", "angle", "text", "originalText", "fontSize", "fontFamily", "lineHeight", "autoResize"]) if (key in labelEl) placed[key] = labelEl[key];
+			draft.change(oldLabel.id, { ...placed, containerId: existing.id });
 			bound = [...bound, { type: "text", id: oldLabel.id }];
 		} else if (labelEl) {
 			draft.add({ ...labelEl, containerId: existing.id });

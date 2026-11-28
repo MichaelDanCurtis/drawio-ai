@@ -267,6 +267,35 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	menuItem("Agent", "Keep AI Changes").click();
 	await settled();
 
+	// ----- a call the editor does not answer in time is given up there too: it changes nothing afterwards -----
+	const countBeforeTimeout = (await elementIds(w)).length;
+	const usualTimeout = ExcalidrawWindow.toolTimeout;
+	ExcalidrawWindow.toolTimeout = 1;
+	const timedOut = await call("excalidraw_from_mermaid", { definition: "flowchart LR\n  L1[Too late one] --> L2[Too late two]" }).finally(() => (ExcalidrawWindow.toolTimeout = usualTimeout));
+	await pause(1500);
+	log("aiTimedOut", { answer: timedOut.text, elements: [countBeforeTimeout, (await elementIds(w)).length] });
+	expect(timedOut.isError && /did not answer in time/.test(timedOut.text) && (await elementIds(w)).length === countBeforeTimeout, "a call that timed out does not change the drawing later");
+
+	// ----- an arrow laid out again (its shape moved) keeps what its label was given of its own -----
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: "styled-a", x: 1000, y: 1950, width: 160, height: 80 }, { op: "add", type: "rectangle", id: "styled-b", x: 1600, y: 1950, width: 160, height: 80 }, { op: "add", type: "arrow", id: "styled-link", start: "styled-a", end: "styled-b", label: "kept look", strokeColor: "#1971c2" }] });
+	// (as when the user selects the label alone and gives it a colour, an alignment and an opacity)
+	await inEditor(w, `x.api.updateScene({ elements: x.api.getSceneElementsIncludingDeleted().map((e) => (e.containerId === "styled-link" ? { ...e, strokeColor: "#e03131", textAlign: "left", opacity: 60, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)) });`);
+	await pause(300);
+	const labelLook = `const all = x.api.getSceneElements(); const a = all.find((e) => e.id === "styled-link"), l = all.find((e) => e.containerId === "styled-link"); const last = a.points[a.points.length - 1];
+		return { strokeColor: l.strokeColor, textAlign: l.textAlign, opacity: l.opacity, text: l.text, arrowColor: a.strokeColor, offMiddle: [Math.round(l.x + l.width / 2 - (a.x + last[0] / 2)), Math.round(l.y + l.height / 2 - (a.y + last[1] / 2))], endY: Math.round(a.y + last[1]) };`;
+	const lookBefore = await inEditor<any>(w, labelLook);
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "styled-b", y: 2150 }] });
+	const lookMoved = await inEditor<any>(w, labelLook);
+	// (a colour given to the arrow itself is still its label's too, as in the editor)
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "styled-link", strokeColor: "#2f9e44" }] });
+	const lookRecoloured = await inEditor<any>(w, labelLook);
+	log("aiLabelLook", { lookBefore, lookMoved, lookRecoloured });
+	expect(lookMoved.endY > lookBefore.endY + 100 && Math.abs(lookMoved.offMiddle[0]) <= 2 && Math.abs(lookMoved.offMiddle[1]) <= 2, "the arrow follows the shape, and its label is in its middle");
+	expect(lookMoved.strokeColor === "#e03131" && lookMoved.textAlign === "left" && lookMoved.opacity === 60 && lookMoved.text === "kept look" && lookMoved.arrowColor === "#1971c2", "the label keeps the colour, alignment and opacity it was given of its own");
+	expect(lookRecoloured.strokeColor === "#2f9e44" && lookRecoloured.arrowColor === "#2f9e44" && lookRecoloured.textAlign === "left", "a colour given to the arrow is its label's too");
+	menuItem("Agent", "Keep AI Changes").click();
+	await settled();
+
 	// ----- export: a file beside the drawing, never over one that is there unasked -----
 	const exported = await call("excalidraw_export", { format: "png" });
 	log("aiExport", exported.data ?? exported.text);
