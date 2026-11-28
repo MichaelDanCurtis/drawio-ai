@@ -91,6 +91,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 			}
 		}
 		const w = new ExcalidrawWindow(server, file);
+		if (file) documentHooks.opened?.(w, file);
 		await w.start();
 		return w;
 	}
@@ -463,8 +464,13 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.chat.postState();
 	}
 
-	public async picture(): Promise<Buffer> {
-		return (await this.contents("png")).bytes;
+	/** What the drawing was when it was last written to its file (the editor's mark of it). */
+	private savedStamp: string | undefined;
+
+	public async picture(): Promise<Buffer | undefined> {
+		// (the picture comes with the mark of what it is a picture of: only the saved drawing's is the file's)
+		const { bytes, stamp } = await this.contents("png");
+		return stamp === this.savedStamp ? bytes : undefined;
 	}
 
 	private setDirty(dirty: boolean): void {
@@ -548,6 +554,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 		try {
 			const { bytes, stamp } = await this.contents(format);
 			fs.writeFileSync(file, bytes);
+			this.savedStamp = stamp;
 			await this.confirmSaved(stamp);
 			documentHooks.saved?.(this, file);
 			return true;

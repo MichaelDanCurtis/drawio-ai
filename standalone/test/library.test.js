@@ -8,7 +8,7 @@ const os = require("os");
 const path = require("path");
 const zlib = require("zlib");
 require("./helpers/ts");
-const { Library, LibraryError, cleanName, docType, VERSION_WINDOW, MAX_VERSIONS } = require("../src/main/library/library");
+const { Library, LibraryError, canonicalPath, cleanName, docType, VERSION_WINDOW, MAX_VERSIONS } = require("../src/main/library/library");
 const { Recents } = require("../src/main/library/recents");
 const { sketchExcalidraw, sketchDrawio, firstPage, safeColour } = require("../src/main/library/sketch");
 
@@ -268,6 +268,37 @@ test("versions: one for a row of saves, one of its own for a point worth keeping
 	assert.equal(kept.length, MAX_VERSIONS);
 	assert.equal(lib.versionBytes(many, kept[0].key).toString(), `s${MAX_VERSIONS + 5}`);
 	assert.equal(lib.versionBytes(many, kept[kept.length - 1].key).toString(), "s6");
+});
+
+test("a name whose capitals change keeps its history, a document's and a collection's", () => {
+	// (on a disk that does not tell capitals apart, the new name's place is the old one's: nothing is in the way there)
+	const lib = new Library(temp());
+	const doc = lib.create("Team", "Plan", ".drawio", B("v1"));
+	lib.snapshot(doc, B("v1"), { kept: true });
+	lib.snapshot(doc, B("v2"));
+	lib.setThumb(doc, B("png"));
+	const lower = lib.rename(doc, "plan");
+	assert.equal(lower, "Team/plan.drawio");
+	assert.deepEqual(fs.readdirSync(path.dirname(lib.pathOf(lower))), ["plan.drawio"]);
+	assert.deepEqual([lib.versions(lower).length, lib.thumb(lower)?.toString()], [2, "png"]);
+	assert.equal(lib.renameCollection("Team", "TEAM"), "TEAM");
+	assert.deepEqual(ids(lib), ["TEAM/plan.drawio"]);
+	assert.deepEqual([lib.versions("TEAM/plan.drawio").length, lib.thumb("TEAM/plan.drawio")?.toString()], [2, "png"]);
+	// and back again, with the versions still there
+	assert.equal(lib.rename("TEAM/plan.drawio", "PLAN"), "TEAM/PLAN.drawio");
+	assert.equal(lib.versions("TEAM/PLAN.drawio").length, 2);
+});
+
+test("two paths to one file are one place", () => {
+	const dir = temp("real");
+	const link = path.join(temp("links"), "by-link");
+	fs.symlinkSync(dir, link);
+	fs.writeFileSync(path.join(dir, "Plan.drawio"), "x");
+	assert.equal(canonicalPath(path.join(link, "Plan.drawio")), path.join(dir, "Plan.drawio"));
+	assert.equal(canonicalPath(path.join(dir, "Plan.drawio")), path.join(dir, "Plan.drawio"));
+	// a file that is not there (it was moved a moment ago): its folder's place, and its name
+	assert.equal(canonicalPath(path.join(link, "Gone.drawio")), path.join(dir, "Gone.drawio"));
+	assert.equal(canonicalPath(path.join(dir, "no such folder", "x.drawio")), path.join(dir, "no such folder", "x.drawio"));
 });
 
 test("the picture kept of a document is for the document as it is, not as it was", () => {

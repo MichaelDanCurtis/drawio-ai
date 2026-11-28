@@ -97,7 +97,7 @@ export async function runE2e(server: StaticServer, config: E2eConfig, appCommand
 			return finish(0);
 		}
 		if (config.home) {
-			await runHome(config, log, appCommands);
+			await runHome(server, config, log, appCommands);
 			return finish(0);
 		}
 		const t0 = Date.now();

@@ -15,8 +15,9 @@ import { ExcalidrawWindow } from "./excalidrawWindow";
 import { HomeWindow } from "./homeWindow";
 import { paths } from "./paths";
 import { updateSettings } from "./settings";
+import type { StaticServer } from "./staticServer";
 
-export async function runHome(config: E2eConfig, log: (k: string, v: unknown) => void, app: AppCommands): Promise<void> {
+export async function runHome(server: StaticServer, config: E2eConfig, log: (k: string, v: unknown) => void, app: AppCommands): Promise<void> {
 	const openFile = app.openFile;
 	process.env.DRAWAI_E2E_API = "1";
 	const folder = path.join(path.dirname(config.out), "library");
@@ -220,6 +221,47 @@ export async function runHome(config: E2eConfig, log: (k: string, v: unknown) =>
 	await until("every card to have its picture", async () => (await cards()).every((c) => c.img));
 	await shot("home-after");
 	log("homeAfter", (await cards()).map((c) => c.name));
+	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----
+	const byLink = path.join(path.dirname(config.out), "library-by-link");
+	fs.symlinkSync(folder, byLink);
+	await openFile(path.join(byLink, "Team", "Plan.excalidraw"));
+	await until("the window opened through the link", () => !!drawing("Plan.excalidraw"));
+	const linked = drawing("Plan.excalidraw")!;
+	await linked.whenLoaded();
+	expect(linked.file!.startsWith(byLink) && documentWindows.of(lib().pathOf("Team/Plan.excalidraw")) === linked, "a window opened through a link is found by the file's real place");
+	await until("its card to say it is open", async () => (await cards()).find((c) => c.name === "Plan")?.open === "open");
+	await addElement(linked, "home-link", "rectangle", { x: 500, y: 500 });
+	await until("the window to have unsaved changes", () => linked.isDirty);
+	await send({ type: "trash", id: "Team/Plan.excalidraw" });
+	await until("the refusal to be said", async () => /Plan\.excalidraw has changes that are not saved/.test((await said()) ?? ""));
+	expect(fs.existsSync(lib().pathOf("Team/Plan.excalidraw")), "its unsaved changes keep it out of the trash, by whatever path it was opened");
+	await send({ type: "rename", id: "Team/Plan.excalidraw", name: "Plan B" });
+	await until("the window to follow the new name", () => linked.file === lib().pathOf("Team/Plan B.excalidraw"));
+
+	// ----- the picture kept is of what was saved: changed again at once, the editor's picture is not the file's -----
+	expect(await linked.save(), "saved");
+	await addElement(linked, "home-after-save", "ellipse", { x: 800, y: 500 });
+	await pause(1500);
+	expect(!lib().thumb("Team/Plan B.excalidraw"), "a picture of changes that are not saved is not kept as the file's");
+	// (a window behind another does not load pictures it is not showing: the person comes back to it)
+	home.show();
+	home.focus();
+	await until("its card to show the file as it is all the same", async () => (await cards()).find((c) => c.name === "Plan B")?.img === true);
+	expect(await linked.save(), "saved again");
+	await until("the picture of what was saved", () => !!lib().thumb("Team/Plan B.excalidraw"));
+	linked.win.close();
+	await until("that window to close", () => linked.win.isDestroyed());
+
+	// ----- a diagram opened without the menus or the home screen (as an agent's tool opens one) is kept as it was opened too -----
+	if (fs.existsSync(path.join(paths.webapp, "index.html")) && fs.existsSync(lib().pathOf("Cloud architecture.drawio"))) {
+		expect(lib().versions("Cloud architecture.drawio").length === 0, "never opened so far");
+		const direct = await DiagramWindow.open(server, lib().pathOf("Cloud architecture.drawio"));
+		expect(lib().versions("Cloud architecture.drawio").length === 1 && lib().versions("Cloud architecture.drawio")[0].kept, "however a document is opened, what it was is kept");
+		await direct.whenLoaded();
+		direct.win.close();
+		await until("the diagram's window to close", () => direct.win.isDestroyed());
+	}
+
 	// ----- with the last document closed, the home screen is what is left: it comes back if it was closed -----
 	if (process.platform === "darwin") {
 		app.homeWhenEmpty(true);

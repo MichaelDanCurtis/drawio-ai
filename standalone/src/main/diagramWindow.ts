@@ -159,6 +159,7 @@ export class DiagramWindow implements DocumentWindow {
 		}
 		const w = new DiagramWindow(server, file);
 		w.initial = initial;
+		if (file) documentHooks.opened?.(w, file);
 		await w.start(server);
 		return w;
 	}
@@ -548,8 +549,11 @@ export class DiagramWindow implements DocumentWindow {
 		this.chat.postState();
 	}
 
-	public async picture(): Promise<Buffer> {
-		return (await renderDiagram(this.client, "png", { currentPageOnly: true })).data;
+	public async picture(): Promise<Buffer | undefined> {
+		// (changed since it was saved, before or while the picture was made: that is not the file's picture)
+		if (this.dirty) return undefined;
+		const { data } = await renderDiagram(this.client, "png", { currentPageOnly: true });
+		return this.dirty ? undefined : data;
 	}
 
 	public whenLoaded(): Promise<void> {

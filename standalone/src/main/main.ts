@@ -107,8 +107,6 @@ async function openFile(file?: string): Promise<void> {
 	// (an Excalidraw drawing, by its name or by what a picture carries, opens in the Excalidraw editor)
 	if (file && sniffExcalidraw(file, () => fs.readFileSync(file))) await ExcalidrawWindow.open(server, file);
 	else await DiagramWindow.open(server, file);
-	// (the home screen lists what was opened lately, and keeps a library document as it was opened)
-	if (file) HomeWindow.opened(file);
 }
 
 /** Window → Home: the library, and what was opened lately. */
@@ -488,6 +486,9 @@ app.whenReady().then(async () => {
 	// a picture for its card. With the last document closed (and the app not on its way out), the
 	// home screen is what is left to come back to.
 	HomeWindow.host = { openFile: (file) => openFile(file), openDialog: (folder) => void openDialog(folder) };
+	// (every way a file comes to be open goes through the windows themselves: the menus, the home
+	// screen, a dropped file, and a diagram an agent opens through the desktop tools)
+	documentHooks.opened = (_w, file) => HomeWindow.opened(file);
 	documentHooks.saved = (w, file) => HomeWindow.saved(w, file);
 	documentHooks.changed = () => HomeWindow.refreshSoon();
 	documentHooks.closed = (w) => {

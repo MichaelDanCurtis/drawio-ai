@@ -124,6 +124,38 @@ export function cleanName(typed: string, what = "name"): string {
 	return name;
 }
 
+/**
+ * A file's place with every link on the way to it followed, whether or not the file is there
+ * (then its folder's place, and the file's name in it). Two paths to the same file are the
+ * same here, which they need not be as they are written.
+ */
+export function canonicalPath(file: string): string {
+	try {
+		return fs.realpathSync(file);
+	} catch {
+		try {
+			return path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
+		} catch {
+			return path.resolve(file);
+		}
+	}
+}
+
+/**
+ * Moves what the app keeps of a document (`a`) to where it belongs now (`b`), in place of
+ * anything that is there. The two can be one and the same thing under two spellings (a name
+ * whose capitals changed, on a disk that does not tell capitals apart): then there is nothing
+ * in the way to take out, and taking it out would be taking out the thing itself.
+ */
+function moveOver(a: string, b: string): void {
+	const from = fs.lstatSync(a, { throwIfNoEntry: false });
+	if (!from) return;
+	const to = fs.lstatSync(b, { throwIfNoEntry: false });
+	if (to && !(to.ino === from.ino && to.dev === from.dev)) fs.rmSync(b, { recursive: true, force: true });
+	fs.mkdirSync(path.dirname(b), { recursive: true });
+	fs.renameSync(a, b);
+}
+
 const stamp = (at: number): string => new Date(at).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
 const hashOf = (bytes: Buffer): string => crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 12);
 
@@ -369,10 +401,7 @@ export class Library {
 	private carry(from: string, to: string): void {
 		for (const [a, b] of [[this.versionsFolder(from), this.versionsFolder(to)], [this.thumbFile(from), this.thumbFile(to)]]) {
 			try {
-				if (!fs.existsSync(a)) continue;
-				fs.rmSync(b, { recursive: true, force: true });
-				fs.mkdirSync(path.dirname(b), { recursive: true });
-				fs.renameSync(a, b);
+				moveOver(a, b);
 			} catch {
 				// (the document is where it should be; its history staying behind is no reason to say the move failed)
 			}
@@ -400,10 +429,7 @@ export class Library {
 		fs.renameSync(from, to);
 		for (const kind of ["versions", "thumbs"]) {
 			try {
-				const a = this.store(kind, name), b = this.store(kind, clean);
-				if (!fs.existsSync(a)) continue;
-				fs.rmSync(b, { recursive: true, force: true });
-				fs.renameSync(a, b);
+				moveOver(this.store(kind, name), this.store(kind, clean));
 			} catch {
 				// (as in carry)
 			}
@@ -535,10 +561,7 @@ export class Library {
 		const id = [...parts.slice(0, -1), fileName].join("/");
 		for (const [a, b] of [[path.join(entry.dir, "versions"), this.versionsFolder(id)], [path.join(entry.dir, "thumb.png"), this.thumbFile(id)]]) {
 			try {
-				if (!fs.existsSync(a)) continue;
-				fs.rmSync(b, { recursive: true, force: true });
-				fs.mkdirSync(path.dirname(b), { recursive: true });
-				fs.renameSync(a, b);
+				moveOver(a, b);
 			} catch {
 				// (as in carry)
 			}

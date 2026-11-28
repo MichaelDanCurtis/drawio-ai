@@ -4,7 +4,7 @@ import * as os from "os";
 import * as path from "path";
 import { documentWindows, type DocumentWindow } from "./documentShell";
 import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
-import { docType, Library, LibraryError, type DocKind } from "./library/library";
+import { canonicalPath, docType, Library, LibraryError, type DocKind } from "./library/library";
 import { Recents } from "./library/recents";
 import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
 import { paths } from "./paths";
@@ -222,7 +222,9 @@ export class HomeWindow {
 		try {
 			if (w.win.isDestroyed() || !w.file) return;
 			const file = w.file;
-			const png = small(nativeImage.createFromBuffer(await w.picture()));
+			// (none when the editor has moved on from what was saved: the card then shows the file as it is, sketched)
+			const made = await w.picture();
+			const png = made && small(nativeImage.createFromBuffer(made));
 			// (the document may have another name by now, or be gone: then this picture is nobody's)
 			const lib = HomeWindow.libraryIfThere();
 			const id = lib?.idOf(file);
@@ -268,7 +270,8 @@ export class HomeWindow {
 	private static postState(): void {
 		if (!HomeWindow.window) return;
 		const folder = HomeWindow.folder();
-		const open = new Map(documentWindows.all().filter((w) => w.file).map((w) => [path.resolve(w.file!), w.isDirty]));
+		// (by their real places: a window opened by a path with a link in it is the same file's)
+		const open = new Map(documentWindows.all().filter((w) => w.file).map((w) => [canonicalPath(w.file!), w.isDirty]));
 		let lib: Library | undefined;
 		let problem: string | undefined;
 		try {
@@ -282,7 +285,7 @@ export class HomeWindow {
 			.list()
 			.map((r) => {
 				const type = docType(path.basename(r.path));
-				return type ? { path: r.path, ...type, at: r.at, where: HomeWindow.shown(path.dirname(r.path)), id: lib?.idOf(r.path), open: open.has(path.resolve(r.path)) } : undefined;
+				return type ? { path: r.path, ...type, at: r.at, where: HomeWindow.shown(path.dirname(r.path)), id: lib?.idOf(r.path), open: open.has(canonicalPath(r.path)) } : undefined;
 			})
 			.filter((r) => !!r);
 		HomeWindow.post({
@@ -290,7 +293,7 @@ export class HomeWindow {
 			folder: HomeWindow.shown(folder),
 			problem,
 			docs: contents.docs.map((d) => {
-				const file = lib!.pathOf(d.id);
+				const file = canonicalPath(lib!.pathOf(d.id));
 				return { ...d, open: open.has(file), unsaved: open.get(file) === true };
 			}),
 			collections: contents.collections,
@@ -334,12 +337,19 @@ export class HomeWindow {
 		return true;
 	}
 
-	/** The windows of documents that got another name or place follow them. */
-	private static follow(lib: Library, from: string, to: string): void {
-		if (from === to) return;
-		const a = lib.pathOf(from), b = lib.pathOf(to);
-		documentWindows.of(a)?.movedTo(b);
-		HomeWindow.recents().moved(a, b);
+	/**
+	 * Gives documents another name or place (`change` does it, and says where each one went), and
+	 * has their windows follow. The windows are looked up before anything moves: afterwards the
+	 * path a window holds leads nowhere, and could not be told to be the same file's.
+	 */
+	private static moving(lib: Library, ids: string[], change: () => { from: string; to: string }[]): void {
+		const windows = new Map(ids.map((id) => [id, { w: HomeWindow.windowOf(lib, id), was: lib.pathOf(id) }]));
+		for (const { from, to } of change()) {
+			if (from === to) continue;
+			const now = lib.pathOf(to);
+			windows.get(from)?.w?.movedTo(now);
+			HomeWindow.recents().moved(windows.get(from)?.was ?? lib.pathOf(from), now);
+		}
 	}
 
 	private static async onMessage(msg: any): Promise<void> {
@@ -394,10 +404,10 @@ export class HomeWindow {
 					break;
 				}
 				case "rename":
-					HomeWindow.follow(lib, text(msg.id), lib.rename(text(msg.id), text(msg.name)));
+					HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.rename(text(msg.id), text(msg.name)) }]);
 					break;
 				case "move":
-					HomeWindow.follow(lib, text(msg.id), lib.move(text(msg.id), text(msg.collection)));
+					HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.move(text(msg.id), text(msg.collection)) }]);
 					break;
 				case "duplicate":
 					lib.duplicate(text(msg.id));
@@ -420,16 +430,23 @@ export class HomeWindow {
 					break;
 				case "renameCollection": {
 					const from = text(msg.name);
-					const inside = lib.contents().docs.filter((d) => d.collection === from);
-					const to = lib.renameCollection(from, text(msg.to));
-					for (const d of inside) HomeWindow.follow(lib, d.id, [to, ...d.id.split("/").slice(1)].join("/"));
+					const inside = lib.contents().docs.filter((d) => d.collection === from).map((d) => d.id);
+					let to = from;
+					HomeWindow.moving(lib, inside, () => {
+						to = lib.renameCollection(from, text(msg.to));
+						return inside.map((id) => ({ from: id, to: [to, ...id.split("/").slice(1)].join("/") }));
+					});
 					HomeWindow.post({ type: "collectionRenamed", from, to });
 					break;
 				}
 				case "removeCollection": {
-					const r = lib.removeCollection(text(msg.name));
-					for (const m of r.moved) HomeWindow.follow(lib, m.from, m.to);
-					if (r.kept) HomeWindow.post({ type: "note", text: `The folder ${text(msg.name)} has other files in it and was left in the library. Its diagrams and drawings are in the library's top now.` });
+					let kept = false;
+					HomeWindow.moving(lib, lib.contents().docs.filter((d) => d.collection === text(msg.name)).map((d) => d.id), () => {
+						const r = lib.removeCollection(text(msg.name));
+						kept = r.kept;
+						return r.moved;
+					});
+					if (kept) HomeWindow.post({ type: "note", text: `The folder ${text(msg.name)} has other files in it and was left in the library. Its diagrams and drawings are in the library's top now.` });
 					break;
 				}
 				case "restore":

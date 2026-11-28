@@ -1,7 +1,7 @@
 // What a diagram window and an Excalidraw window share: where a new window goes, which document
 // is in front, and the chat beside the editor (sliding in and out, its edge dragged to resize).
 import { BaseWindow, screen, type WebContentsView } from "electron";
-import * as path from "path";
+import { canonicalPath } from "./library/library";
 import { settings, updateSettings } from "./settings";
 
 /** A window with one document in it: a draw.io diagram or an Excalidraw drawing. */
@@ -17,8 +17,12 @@ export interface DocumentWindow {
 	saveAs(): Promise<boolean>;
 	/** The app gave its file another name or place (the home screen did): the window is that file's from now on. */
 	movedTo(file: string): void;
-	/** A picture of the document as it is now (a PNG), for its card on the home screen. */
-	picture(): Promise<Buffer>;
+	/**
+	 * A picture of the document as it was last saved (a PNG), for its card on the home screen.
+	 * Undefined when what the editor shows is not that any more: a picture of changes that may
+	 * never be saved is not the file's.
+	 */
+	picture(): Promise<Buffer | undefined>;
 	toggleChat(): void;
 	resizeChat(delta: number): void;
 }
@@ -28,6 +32,8 @@ let last: DocumentWindow | undefined;
 
 /** What the rest of the app wants to know of the documents (main.ts sets these; the home screen listens). */
 export const documentHooks: {
+	/** A file was opened in a new window, by whatever way (the menus, the home screen, a file dropped, an agent's tool). */
+	opened?: (w: DocumentWindow, file: string) => void;
 	/** A document was written to `file`. */
 	saved?: (w: DocumentWindow, file: string) => void;
 	/** A document's window went. */
@@ -54,10 +60,13 @@ export const documentWindows = {
 	get size(): number {
 		return open.size;
 	},
-	/** The window a file is open in, if it is. */
+	/**
+	 * The window a file is open in, if it is. By the file's real place: a window that was opened by
+	 * a path with a link in it holds the same file as one opened by the path without.
+	 */
 	of(file: string): DocumentWindow | undefined {
-		const resolved = path.resolve(file);
-		return [...open].find((w) => w.file && path.resolve(w.file) === resolved);
+		const real = canonicalPath(file);
+		return [...open].find((w) => w.file && canonicalPath(w.file) === real);
 	},
 	all(): DocumentWindow[] {
 		return [...open];
