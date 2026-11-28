@@ -194,6 +194,20 @@ export function moveRecords(from: { cwd: string; diagram: string }, to: { cwd: s
 	return n;
 }
 
+/** The ids of a diagram's maps that have records kept in its folder. */
+export function recordIds(cwd: string, diagram: string): string[] {
+	const name = path.basename(diagram);
+	try {
+		return fs
+			.readdirSync(mapsDir(cwd))
+			.filter((n) => n.endsWith(".json"))
+			.map((n) => n.replace(/\.json$/, ""))
+			.filter((id) => loadRecord(cwd, id)?.diagram === name);
+	} catch {
+		return [];
+	}
+}
+
 /** Whether a diagram has maps with records kept in its folder. */
 export function hasRecords(cwd: string, diagram: string): boolean {
 	const name = path.basename(diagram);

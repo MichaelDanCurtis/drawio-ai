@@ -7,7 +7,7 @@ import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
 import { canonicalPath, docType, Library, LibraryError, type DocKind } from "./library/library";
 import { readRecent, RecentFileError, Recents } from "./library/recents";
 import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
-import { adoptRecords, hasRecords, moveRecords } from "./mapper/store";
+import { adoptRecords, hasRecords, loadRecord, moveRecords, recordIds } from "./mapper/store";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
@@ -435,6 +435,12 @@ export class HomeWindow {
 					const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
 					const type = recent && docType(path.basename(recent.path));
 					if (!recent || !type) break;
+					// A diagram's maps are known by ids in its cells, and their records by those ids in the folder.
+					// Where the copy goes there are records by one of its ids already (it was copied in before):
+					// the two copies would share them, and so it is not copied again.
+					const into = text(msg.collection) ? path.join(lib.root, text(msg.collection)) : lib.root;
+					const shared = recordIds(path.dirname(recent.path), recent.path).filter((mapId) => !!loadRecord(into, mapId));
+					if (shared.length) throw new LibraryError(`${path.basename(recent.path)} has maps that a diagram in ${text(msg.collection) || "the library"} has too (it was copied in before). A second copy would share them with that one. Open the one that is there, or copy this one into another collection.`);
 					// (only as the very file that was opened here, never through a link that took its place: see readRecent)
 					const copied = lib.pathOf(lib.create(text(msg.collection), type.name, type.ending, readRecent(recent, PREVIEW_LIMIT * 4)));
 					// (its maps' records are copied beside it, as Save As to another folder copies them: in a folder

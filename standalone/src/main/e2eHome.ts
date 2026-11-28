@@ -222,6 +222,11 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 	await until("the copy in the library", () => fs.existsSync(path.join(folder, "elsewhere.drawio")));
 	await until("its map record beside it", () => loadRecord(lib().root, "e2e-elsewhere-map")?.diagram === "elsewhere.drawio");
 	expect(!!loadRecord(path.dirname(outside), "e2e-elsewhere-map"), "the original keeps its map record");
+	// copied in a second time: its maps would be shared with the first copy's, so it is not
+	await inHome<void>(`document.getElementById("said").hidden = true;`);
+	await send({ type: "addRecent", path: outside, collection: "" });
+	await until("the refusal to be said", async () => /would share them/.test((await said()) ?? ""));
+	expect(!fs.existsSync(path.join(folder, "elsewhere 2.drawio")), "a second copy of a mapped diagram is not made beside the first");
 	expect(fs.existsSync(outside), "the file elsewhere stays where it is");
 	documentWindows.of(outside)?.win.close();
 	await until("that window to close", () => !documentWindows.of(outside));
