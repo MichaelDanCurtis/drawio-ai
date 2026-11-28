@@ -198,15 +198,44 @@ export class Library {
 		return this.root;
 	}
 
+	/**
+	 * A place in the app's own folder in the library, for keeping something there: the folder is
+	 * made if it is not there. Throws when a link is on the way (see `unlinked`).
+	 */
 	private store(...parts: string[]): string {
 		const dir = path.join(this.made(), STORE);
-		if (!fs.existsSync(dir)) {
+		if (!fs.lstatSync(dir, { throwIfNoEntry: false })) {
 			fs.mkdirSync(dir, { recursive: true });
 			// (the app's own bookkeeping is not for a repository the library may be in: git has a history of its own)
 			fs.writeFileSync(path.join(dir, ".gitignore"), "*\n");
 		}
-		// (a link in place of the store would take the trash and the versions elsewhere)
-		if (fs.lstatSync(dir).isSymbolicLink()) throw new LibraryError(`${STORE} in the library is a link, and the app does not keep its files through a link.`);
+		return this.unlinked(dir, parts);
+	}
+
+	/** The same place for looking only: nothing is made, and there is no such place (undefined) when the folder is not there or a link is on the way. */
+	private stored(...parts: string[]): string | undefined {
+		try {
+			return this.unlinked(path.join(this.root, STORE), parts);
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
+	 * `dir` and what is under it by `parts`, once none of it is a link. The library's folder may
+	 * be anybody's making (a repository that was checked out, a folder that is synced): a link in
+	 * place of the app's folder there, or of anything in it, would have the app read, move and
+	 * delete things somewhere else altogether, in the belief that they were its own.
+	 */
+	private unlinked(dir: string, parts: string[]): string {
+		let at = dir;
+		for (const part of [undefined, ...parts]) {
+			if (part !== undefined) at = path.join(at, part);
+			const there = fs.lstatSync(at, { throwIfNoEntry: false });
+			// (not there yet: what is made from here on is made by this code, as plain folders and files)
+			if (!there) break;
+			if (there.isSymbolicLink()) throw new LibraryError(`${path.relative(this.root, at)} in the library is a link, and the app does not keep its files through a link.`);
+		}
 		return path.join(dir, ...parts);
 	}
 
@@ -425,9 +454,9 @@ export class Library {
 
 	/** What the app keeps of a document (its versions, its picture) goes where the document went. */
 	private carry(from: string, to: string): void {
-		for (const [a, b] of [[this.versionsFolder(from), this.versionsFolder(to)], [this.thumbFile(from), this.thumbFile(to)]]) {
+		for (const place of [(id: string) => this.versionsFolder(id), (id: string) => this.thumbFile(id)]) {
 			try {
-				moveOver(a, b);
+				moveOver(place(from), place(to));
 			} catch {
 				// (the document is where it should be; its history staying behind is no reason to say the move failed)
 			}
@@ -505,16 +534,21 @@ export class Library {
 	/** Moves a document to the trash, with its versions and its picture. Returns the trash item's id. */
 	public trash(id: string, now = Date.now()): string {
 		const { file, type, stat } = this.existing(id);
-		// (a picture of an older state is not what the document looks like in the trash: it stays behind, and goes)
-		if (!this.pictured(id, stat.mtimeMs)) fs.rmSync(this.thumbFile(id), { force: true });
 		const trashId = `${stamp(now)}-${crypto.randomBytes(4).toString("hex")}`;
 		const dir = this.store("trash", trashId);
+		try {
+			// (a picture of an older state is not what the document looks like in the trash: it stays behind, and goes)
+			if (!this.pictured(id, stat.mtimeMs)) fs.rmSync(this.thumbFile(id), { force: true });
+		} catch {
+			// (as below)
+		}
 		fs.mkdirSync(dir, { recursive: true });
 		fs.renameSync(file, path.join(dir, `item${type.ending}`));
 		fs.writeFileSync(path.join(dir, "info.json"), JSON.stringify({ from: id, at: now }));
-		for (const [a, b] of [[this.versionsFolder(id), path.join(dir, "versions")], [this.thumbFile(id), path.join(dir, "thumb.png")]]) {
+		for (const [place, name] of [[() => this.versionsFolder(id), "versions"], [() => this.thumbFile(id), "thumb.png"]] as const) {
 			try {
-				if (fs.existsSync(a)) fs.renameSync(a, b);
+				const a = place();
+				if (fs.lstatSync(a, { throwIfNoEntry: false })) fs.renameSync(a, path.join(dir, name));
 			} catch {
 				// (the document is in the trash; what goes with it is not worth failing for)
 			}
@@ -547,10 +581,10 @@ export class Library {
 	}
 
 	private trashItems(): TrashItem[] {
-		const dir = path.join(this.root, STORE, "trash");
+		const dir = this.stored("trash");
 		let names: string[];
 		try {
-			names = fs.readdirSync(dir);
+			names = dir ? fs.readdirSync(dir) : [];
 		} catch {
 			return [];
 		}
@@ -583,9 +617,9 @@ export class Library {
 		const fileName = this.free(dir, entry.item.name, entry.item.ending);
 		fs.renameSync(entry.file, path.join(dir, fileName));
 		const id = [...parts.slice(0, -1), fileName].join("/");
-		for (const [a, b] of [[path.join(entry.dir, "versions"), this.versionsFolder(id)], [path.join(entry.dir, "thumb.png"), this.thumbFile(id)]]) {
+		for (const [a, place] of [[path.join(entry.dir, "versions"), () => this.versionsFolder(id)], [path.join(entry.dir, "thumb.png"), () => this.thumbFile(id)]] as const) {
 			try {
-				moveOver(a, b);
+				moveOver(a, place());
 			} catch {
 				// (as in carry)
 			}
@@ -614,8 +648,10 @@ export class Library {
 
 	private versionFiles(id: string): string[] {
 		try {
+			const dir = this.stored("versions", ...this.parts(id));
+			if (!dir) return [];
 			return fs
-				.readdirSync(path.join(this.root, STORE, "versions", ...this.parts(id)))
+				.readdirSync(dir)
 				.filter((n) => /^\d{8}T\d{6}Z-[sk]-[0-9a-f]{12}\./.test(n))
 				.sort()
 				.reverse();
@@ -659,7 +695,8 @@ export class Library {
 
 	/** The versions of a document, the newest first. */
 	public versions(id: string): Version[] {
-		const dir = path.join(this.root, STORE, "versions", ...this.parts(id));
+		const dir = this.stored("versions", ...this.parts(id));
+		if (!dir) return [];
 		return this.versionFiles(id)
 			.map((key) => {
 				try {
@@ -712,8 +749,9 @@ export class Library {
 	/** When the picture kept of a document was made, if it is of the document as it is now (`modified`); else 0. */
 	private pictured(id: string, modified: number): number {
 		try {
-			const t = fs.lstatSync(path.join(this.root, STORE, "thumbs", ...this.parts(id).slice(0, -1), `${this.parts(id).pop()}.png`));
-			return t.isFile() && t.mtimeMs + 1000 >= modified ? t.mtimeMs : 0;
+			const file = this.stored("thumbs", ...this.parts(id).slice(0, -1), `${this.parts(id).pop()}.png`);
+			const t = file ? fs.lstatSync(file) : undefined;
+			return t?.isFile() && t.mtimeMs + 1000 >= modified ? t.mtimeMs : 0;
 		} catch {
 			return 0;
 		}

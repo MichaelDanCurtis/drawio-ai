@@ -172,6 +172,45 @@ test("collections: made, renamed with what is in them, and taken away without th
 	assert.equal(fs.readFileSync(path.join(root, "Mixed", "README.md"), "utf8"), "keep me");
 });
 
+test("the app's own folder in the library is never reached through a link, at its top or anywhere in it", () => {
+	// a library that came from somewhere else, with links where the app keeps its things
+	for (const linked of [".omnidraw", ".omnidraw/versions", ".omnidraw/thumbs", ".omnidraw/trash", ".omnidraw/versions/Downloads"]) {
+		const root = temp();
+		const outside = temp("outside");
+		// (what the link leads to: someone's folders, by the names of the library's collections)
+		fs.mkdirSync(path.join(outside, "Documents"), { recursive: true });
+		fs.writeFileSync(path.join(outside, "Documents", "taxes.txt"), "the user's own file");
+		fs.mkdirSync(path.join(outside, "Downloads", "Plan.drawio"), { recursive: true });
+		fs.writeFileSync(path.join(outside, "Downloads", "Plan.drawio", "20260101T000000Z-s-000000000000.drawio"), "not a version of anything");
+		fs.mkdirSync(path.join(root, "Downloads"));
+		fs.writeFileSync(path.join(root, "Downloads", "Plan.drawio"), "plan");
+		fs.mkdirSync(path.join(root, path.dirname(linked)), { recursive: true });
+		fs.symlinkSync(linked.endsWith("Downloads") ? path.join(outside, "Downloads") : outside, path.join(root, linked));
+		const lib = new Library(root);
+		const untouched = () => {
+			assert.equal(fs.readFileSync(path.join(outside, "Documents", "taxes.txt"), "utf8"), "the user's own file", linked);
+			assert.equal(fs.existsSync(path.join(outside, "Downloads", "Plan.drawio", "20260101T000000Z-s-000000000000.drawio")), true, linked);
+		};
+		// nothing is read through the link
+		const doc = "Downloads/Plan.drawio";
+		if (linked !== ".omnidraw/thumbs" && linked !== ".omnidraw/trash") assert.deepEqual(lib.versions(doc), [], linked);
+		assert.equal(lib.thumb(doc), undefined, linked);
+		assert.deepEqual(lib.contents().trash, [], linked);
+		// the rename that would have had the other folder's Documents taken out and its Downloads put in its place
+		assert.equal(lib.renameCollection("Downloads", "Documents"), "Documents");
+		untouched();
+		// and nothing is written, moved or deleted through it either
+		const moved = "Documents/Plan.drawio";
+		if (linked === ".omnidraw" || linked === ".omnidraw/versions") refused(() => lib.snapshot(moved, B("v")), /is a link/);
+		if (linked === ".omnidraw" || linked === ".omnidraw/thumbs") refused(() => lib.setThumb(moved, B("png")), /is a link/);
+		if (linked === ".omnidraw" || linked === ".omnidraw/trash") refused(() => lib.trash(moved), /is a link/);
+		lib.rename(moved, "Other");
+		lib.move("Documents/Other.drawio", "");
+		untouched();
+		assert.deepEqual(fs.readdirSync(outside).sort(), ["Documents", "Downloads"], linked);
+	}
+});
+
 test("a collection that is there is taken by its name as it is spelled", () => {
 	// two folders made outside the app, their names apart only by a second space
 	const root = temp();
