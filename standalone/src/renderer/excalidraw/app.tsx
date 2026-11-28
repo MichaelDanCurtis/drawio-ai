@@ -477,7 +477,7 @@ async function start(): Promise<void> {
 	if (doc.bytes) {
 		try {
 			// (Excalidraw's own reader: a .excalidraw file, or a PNG or SVG that carries a drawing)
-			initial = await loadFromBlob(new Blob([doc.bytes], { type: doc.mime }), null, null);
+			initial = await loadFromBlob(new Blob([doc.bytes as BlobPart], { type: doc.mime }), null, null);
 		} catch (e: any) {
 			return problem(`${doc.name} could not be opened: ${String(e?.message ?? e)}`);
 		}
