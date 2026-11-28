@@ -255,6 +255,16 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 		await send({ type: "openVersion", id: "Mapped.drawio", key: lib().versions("Mapped.drawio")[0].key });
 		await until("the refusal to be said", async () => /has maps/.test((await said()) ?? ""));
 		expect(lib().contents().docs.length === before, "no version of a diagram with maps is opened as a copy");
+		// trashed, a new diagram made under its name, and put back: it comes back as "Mapped 2" with its own maps, and the new one has none
+		await send({ type: "trash", id: "Mapped.drawio" });
+		await until("it to be in the trash", () => !fs.existsSync(lib().pathOf("Mapped.drawio")));
+		expect(!loadRecord(lib().root, "e2e-map"), "its maps went into the trash with it");
+		lib().create("", "Mapped", ".drawio", Buffer.from("<mxfile/>"));
+		await send({ type: "restore", trashId: lib().contents().trash.find((t) => t.name === "Mapped")!.id });
+		await until("it to be back under another name", () => fs.existsSync(lib().pathOf("Mapped 2.drawio")));
+		const restored = loadRecord(lib().root, "e2e-map") as any;
+		log("homeMapsRestored", restored ? { diagram: restored.diagram, note: restored.note } : null);
+		expect(restored?.diagram === "Mapped 2.drawio" && restored.note === "changed in Maps", "its maps came back with it, under the name it has now");
 	}
 
 	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----

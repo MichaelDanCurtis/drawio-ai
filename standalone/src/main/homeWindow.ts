@@ -453,11 +453,22 @@ export class HomeWindow {
 					lib.duplicate(text(msg.id));
 					break;
 				}
-				case "trash":
+				case "trash": {
 					await HomeWindow.closeWindowOf(lib, text(msg.id), "move it to the trash");
-					HomeWindow.recents().remove(lib.pathOf(text(msg.id)));
-					lib.trash(text(msg.id));
+					const file = lib.pathOf(text(msg.id));
+					HomeWindow.recents().remove(file);
+					const trashId = lib.trash(text(msg.id));
+					// A diagram's maps go into the trash with it (Mapper keeps them in its folder, by its name):
+					// left in the folder, they would be taken for the maps of a new diagram of the same name,
+					// and not be the restored diagram's if it came back under another name.
+					try {
+						const kept = lib.trashFolder(trashId);
+						moveRecords({ cwd: path.dirname(file), diagram: file }, { cwd: kept, diagram: path.join(kept, path.basename(file)) });
+					} catch {
+						// (the document is in the trash; its maps can be drawn again)
+					}
 					break;
+				}
 				case "reveal":
 					lib.read(text(msg.id));
 					shell.showItemInFolder(lib.pathOf(text(msg.id)));
@@ -498,9 +509,27 @@ export class HomeWindow {
 					else if (kept) HomeWindow.post({ type: "note", text: `The folder ${text(msg.name)} has other files in it and was left in the library. Its diagrams and drawings are in the library's top now.` });
 					break;
 				}
-				case "restore":
-					lib.restore(text(msg.trashId));
+				case "restore": {
+					const item = lib.contents().trash.find((t) => t.id === msg.trashId);
+					const kept = item ? lib.trashFolder(item.id) : undefined;
+					// (the maps that went with it are taken out of the trash before the trash's folder goes, and given its name now)
+					const holding = kept && fs.mkdtempSync(path.join(path.dirname(kept), ".restoring-"));
+					if (kept && holding && item) moveRecords({ cwd: kept, diagram: path.join(kept, `${item.name}${item.ending}`) }, { cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) });
+					try {
+						const id = lib.restore(text(msg.trashId));
+						if (holding && item) {
+							const now = lib.pathOf(id);
+							moveRecords({ cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) }, { cwd: path.dirname(now), diagram: now });
+						}
+					} catch (e) {
+						// (not put back: its maps go back into the trash with it)
+						if (holding && kept && item && fs.existsSync(kept)) moveRecords({ cwd: holding, diagram: path.join(holding, `${item.name}${item.ending}`) }, { cwd: kept, diagram: path.join(kept, `${item.name}${item.ending}`) });
+						throw e;
+					} finally {
+						if (holding) fs.rmSync(holding, { recursive: true, force: true });
+					}
 					break;
+				}
 				case "deleteForever": {
 					const item = lib.contents().trash.find((t) => t.id === msg.trashId);
 					if (!item || !(await HomeWindow.confirm(`Delete ${item.name}${item.ending} for good?`, "It and its earlier versions are removed from the library's trash. This cannot be undone.", "Delete"))) return;

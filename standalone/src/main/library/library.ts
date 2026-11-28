@@ -637,6 +637,14 @@ export class Library {
 		return trashId;
 	}
 
+	/**
+	 * The folder something in the trash is kept in, for what else belongs to it there (a diagram's
+	 * maps, kept by the app that made them): it goes when the item is put back or deleted.
+	 */
+	public trashFolder(trashId: string): string {
+		return this.trashDir(trashId);
+	}
+
 	private trashDir(trashId: string): string {
 		if (typeof trashId !== "string" || !/^[0-9TZ]+-[0-9a-f]{8}$/.test(trashId)) throw new LibraryError("That is not in the trash.");
 		const dir = this.store("trash", trashId);
