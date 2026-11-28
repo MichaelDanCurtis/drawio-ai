@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.2]
+
 - **Settings → Sharing.** The OmniPad server Go live shares through, and the name others see,
   have a place in Settings. OmniDraw has no server built in: you give the address of one you
   or your team runs, and can change it there. **Check** asks the server whether it can share
