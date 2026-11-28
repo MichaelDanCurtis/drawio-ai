@@ -152,3 +152,40 @@ test("a replaced file keeps who may read it, however long its name is, and a wri
 		f.done();
 	}
 });
+
+test("a replaced file stays its owner's and its group's, and is not replaced where that cannot be kept", (t) => {
+	if (process.platform === "win32") return t.skip("a file has no group to keep on Windows");
+	const f = folder();
+	try {
+		// a file of a group that new files in this folder do not get (as one shared with a team is)
+		const shared = path.join(f.real, "team.svg");
+		fs.writeFileSync(shared, "old");
+		fs.chmodSync(shared, 0o640);
+		const mine = fs.statSync(shared);
+		const other = process.getgroups().find((g) => g !== mine.gid);
+		if (other === undefined) return t.skip("this user is in one group only");
+		fs.chownSync(shared, mine.uid, other);
+		writeExport(shared, Buffer.from("<svg>new</svg>"), true);
+		const now = fs.statSync(shared);
+		assert.equal(fs.readFileSync(shared, "utf8"), "<svg>new</svg>");
+		assert.deepEqual([now.uid, now.gid, now.mode & 0o777], [mine.uid, other, 0o640]);
+
+		// the old file's owner or group cannot be given to the new one (another user's file, a group
+		// this user is not in): it is not replaced by one that other people could read
+		const chown = fs.fchownSync;
+		fs.fchownSync = () => {
+			throw Object.assign(new Error("EPERM: operation not permitted, fchown"), { code: "EPERM" });
+		};
+		try {
+			refused(() => writeExport(shared, Buffer.from("<svg>never</svg>"), true), /belongs to another user or group/);
+		} finally {
+			fs.fchownSync = chown;
+		}
+		assert.equal(fs.readFileSync(shared, "utf8"), "<svg>new</svg>");
+		assert.equal(fs.statSync(shared).gid, other);
+		assert.deepEqual(fs.readdirSync(f.real).filter((n) => n.endsWith(".tmp")), []);
+		f.untouched();
+	} finally {
+		f.done();
+	}
+});
