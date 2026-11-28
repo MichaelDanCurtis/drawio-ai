@@ -9,7 +9,7 @@ import { diagramContent } from "./xmlContent";
 import { settings, updateSettings } from "./settings";
 import { drawioLocalStorage } from "./diagramWindow";
 import { SettingsWindow } from "./settingsWindow";
-import { Menu, screen } from "electron";
+import { dialog, Menu, screen } from "electron";
 import type { StaticServer } from "./staticServer";
 import { runExcalidraw } from "./e2eExcalidraw";
 
@@ -123,6 +123,49 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		log("cellsBefore", model.totalCells);
 		const unauthorized = await fetch(mcp.url, { method: "POST", body: "{}" });
 		log("mcpWithoutTokenStatus", unauthorized.status);
+
+		// drawio_export, as an agent calls it: a new file is written, one that is there is only replaced when the
+		// user says so (and is shown where it really is), and nothing is written through a link (exportTarget.ts)
+		{
+			const exportTo = async (args: Record<string, unknown>) => {
+				const r = (await rpc("tools/call", { name: "drawio_export", arguments: args })).result;
+				return { failed: !!r.isError, text: String(r.content?.[0]?.text ?? "") };
+			};
+			const fail = (what: string): never => {
+				throw new Error(`drawio_export: ${what}`);
+			};
+			const target = path.join(config.out, "tool-export.drawio.svg");
+			const first = await exportTo({ format: "svg", path: target });
+			if (first.failed || !fs.readFileSync(target, "utf8").includes("<svg")) fail(`a new file was not written: ${first.text}`);
+			const second = await exportTo({ format: "svg", path: target });
+			if (!second.failed || !/exists\. Pass overwrite: true/.test(second.text)) fail(`a file that is there was replaced unasked: ${second.text}`);
+			const asked: string[] = [];
+			const box = dialog.showMessageBox;
+			(dialog as any).showMessageBox = async (_win: unknown, options: Electron.MessageBoxOptions) => {
+				asked.push(`${options.message} (${options.detail})`);
+				return { response: asked.length === 1 ? 1 : 0, checkboxChecked: false };
+			};
+			try {
+				fs.writeFileSync(target, "to be replaced");
+				const declined = await exportTo({ format: "svg", path: target, overwrite: true });
+				if (!declined.failed || fs.readFileSync(target, "utf8") !== "to be replaced") fail(`the file was replaced although the user said no: ${declined.text}`);
+				const replaced = await exportTo({ format: "svg", path: target, overwrite: true });
+				if (replaced.failed || !fs.readFileSync(target, "utf8").includes("<svg")) fail(`the file was not replaced when the user agreed: ${replaced.text}`);
+				if (asked[1] !== `Replace tool-export.drawio.svg with a new export? (${path.join(fs.realpathSync(config.out), "tool-export.drawio.svg")})`) fail(`the question does not show the file's real place: ${asked[1]}`);
+				// a link under the export's name, as a folder someone else made could hold
+				const notes = path.join(config.out, "notes.txt");
+				fs.writeFileSync(notes, "the user's own file");
+				fs.symlinkSync(notes, path.join(config.out, "linked.drawio.svg"));
+				const throughLink = [await exportTo({ format: "svg", path: path.join(config.out, "linked.drawio.svg") }), await exportTo({ format: "svg", path: path.join(config.out, "linked.drawio.svg"), overwrite: true })];
+				if (throughLink.some((r) => !r.failed || !/is a link to another file/.test(r.text)) || fs.readFileSync(notes, "utf8") !== "the user's own file" || asked.length !== 2) fail(`an export went through a link: ${throughLink.map((r) => r.text).join(" | ")}`);
+				// (a folder the agent names is still made for it)
+				const nested = await exportTo({ format: "drawio", path: path.join(config.out, "made-for-it", "copy.drawio") });
+				if (nested.failed || !fs.existsSync(path.join(config.out, "made-for-it", "copy.drawio"))) fail(`a folder was not made for an export: ${nested.text}`);
+				log("toolExport", { written: true, askedBeforeReplacing: asked.length, throughLink: throughLink[0].text });
+			} finally {
+				(dialog as any).showMessageBox = box;
+			}
+		}
 
 		const before = await w.client.getXml();
 		if (config.workshop) {

@@ -18,13 +18,21 @@ export interface ExportResult {
 	note?: string;
 }
 
-/** Renders the diagram in the given format and writes it to `file`. */
+/** Renders the diagram in the given format and writes it to `file` (a place the user picked: for one an agent named, see DiagramWindow.exportForTool). */
 export async function exportDiagram(
 	client: CustomizedDrawioClient,
 	format: ExportFormat,
 	file: string,
 	options: { currentPageOnly?: boolean } = {}
 ): Promise<ExportResult> {
+	const { data, note } = await renderDiagram(client, format, options);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, data);
+	return { bytes: data.length, note };
+}
+
+/** The diagram in the given format, as the bytes of a file. */
+export async function renderDiagram(client: CustomizedDrawioClient, format: ExportFormat, options: { currentPageOnly?: boolean } = {}): Promise<{ data: Buffer; note?: string }> {
 	let data: Buffer;
 	let note: string | undefined;
 	switch (format) {
@@ -54,9 +62,7 @@ export async function exportDiagram(
 		default:
 			throw new Error(`Unknown format ${format}`);
 	}
-	fs.mkdirSync(path.dirname(file), { recursive: true });
-	fs.writeFileSync(file, data);
-	return { bytes: data.length, note };
+	return { data, note };
 }
 
 /** One SVG per diagram page (all pages unless currentPageOnly), via draw.io's own export. */
