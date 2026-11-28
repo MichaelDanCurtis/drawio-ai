@@ -4,7 +4,7 @@ import { DiagramWindow } from "./diagramWindow";
 import { personColor } from "./live/liveShare";
 import { parseBoardLink, serverOrigin } from "./live/protocol";
 import { paths } from "./paths";
-import { settings, updateSettings } from "./settings";
+import { onSettingsChanged, settings, updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
 
 /**
@@ -69,6 +69,12 @@ export class LiveDialog {
 		LiveDialog.installed = true;
 		ipcMain.on("live:toHost", (e, msg) => {
 			if (e.sender.id === LiveDialog.win?.webContents.id) void LiveDialog.onMessage(msg);
+		});
+		// The server and the name can be changed in Settings → Sharing while this window is open: a
+		// field that has not been typed in here follows, so that Go live does not share through the
+		// address that was there before (and put it back into the settings).
+		onSettingsChanged((_s, patch) => {
+			if ("sharing" in patch) LiveDialog.post();
 		});
 	}
 

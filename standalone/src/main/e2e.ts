@@ -932,11 +932,25 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await inSettings(`(() => { const i = document.getElementById("sharingServer"); i.value = "not an address"; i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
 	await new Promise((r) => setTimeout(r, 500));
 	const refused = await inSettings(`document.getElementById("sharingServerHelp").textContent`);
-	const sharing = { kept, isTheRelay: kept === config.live!.relay, checked, refused, stillKept: settings().sharing.server };
+	// The Go live window is open while the address is changed in Settings: its field, not typed in,
+	// follows, so that Go live does not share through the address that was there before.
+	LiveDialog.window?.close();
+	await new Promise((r) => setTimeout(r, 300));
+	LiveDialog.open(server, w, "share");
+	await new Promise((r) => setTimeout(r, 1200));
+	const setServer = (value: string) => inSettings(`(() => { const i = document.getElementById("sharingServer"); i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+	const dialogBefore = await inDialog(`document.getElementById("server").value`);
+	await setServer("http://localhost:9");
+	await new Promise((r) => setTimeout(r, 600));
+	const dialogAfter = await inDialog(`document.getElementById("server").value`);
+	await setServer(config.live!.relay);
+	await new Promise((r) => setTimeout(r, 600));
+	LiveDialog.window?.close();
+	const sharing = { kept, isTheRelay: kept === config.live!.relay, checked, refused, dialogBefore, dialogAfter, stillKept: settings().sharing.server };
 	log("liveSettingsSharing", sharing);
 	fs.writeFileSync(path.join(config.out, "settings-sharing-checked.png"), (await sp.capturePage()).toPNG());
 	SettingsWindow.window?.close();
-	if (!sharing.isTheRelay || checked !== "This server can share diagrams." || !/not an address a server can be at/.test(refused) || sharing.stillKept !== config.live!.relay) throw new Error("Settings → Sharing did not keep, check or refuse a server address as it should.");
+	if (!sharing.isTheRelay || checked !== "This server can share diagrams." || !/not an address a server can be at/.test(refused) || sharing.stillKept !== config.live!.relay || dialogBefore !== config.live!.relay || dialogAfter !== "http://localhost:9") throw new Error("Settings → Sharing did not keep, check or refuse a server address as it should, or the Go live window did not follow it.");
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {

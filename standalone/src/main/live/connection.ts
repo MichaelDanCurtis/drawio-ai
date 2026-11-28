@@ -8,11 +8,40 @@ import { boardLink, parseBoardLink, socketUrl, type BoardLink, type ClientMessag
 
 export class BoardError extends Error {}
 
-async function call(url: string, init: RequestInit, timeoutMs = 20_000): Promise<Response> {
+/** The most of an answer that is read: what these calls are answered with is a few lines. */
+const MAX_ANSWER = 1024 * 1024;
+
+/**
+ * Asks the server and reads its answer, as JSON where it is JSON (`json` is undefined where it
+ * is not, or is too long to be one of these answers). The time limit covers the whole of it: a
+ * server that sends its headers and then goes quiet has not answered in time either.
+ */
+async function call(url: string, init: RequestInit, timeoutMs = 20_000): Promise<{ status: number; ok: boolean; json: any }> {
 	const stop = new AbortController();
 	const timer = setTimeout(() => stop.abort(), timeoutMs);
 	try {
-		return await fetch(url, { ...init, signal: stop.signal, redirect: "error" });
+		const res = await fetch(url, { ...init, signal: stop.signal, redirect: "error" });
+		const parts: Uint8Array[] = [];
+		let size = 0;
+		if (res.body) {
+			for await (const part of res.body as any as AsyncIterable<Uint8Array>) {
+				size += part.length;
+				if (size > MAX_ANSWER) {
+					stop.abort();
+					break;
+				}
+				parts.push(part);
+			}
+		}
+		let json: any;
+		if (size <= MAX_ANSWER) {
+			try {
+				json = JSON.parse(Buffer.concat(parts).toString("utf8"));
+			} catch {
+				json = undefined;
+			}
+		}
+		return { status: res.status, ok: res.ok, json };
 	} catch (e: any) {
 		throw new BoardError(stop.signal.aborted ? "The OmniPad server did not answer in time." : `The OmniPad server could not be reached (${String(e?.cause?.code ?? e?.code ?? "no connection").slice(0, 40)}).`);
 	} finally {
@@ -24,16 +53,15 @@ async function call(url: string, init: RequestInit, timeoutMs = 20_000): Promise
  * Whether a server is an OmniPad that can share diagrams, for Settings. It is asked for the
  * boards of a pad that is not there: nothing is made, changed or sent but that question.
  */
-export async function checkServer(server: string): Promise<{ ok: boolean; text: string }> {
-	let res: Response;
+export async function checkServer(server: string, timeoutMs = 8_000): Promise<{ ok: boolean; text: string }> {
+	let res: { status: number; ok: boolean; json: any };
 	try {
-		res = await call(`${server}/api/pads/omnidraw-check-${Math.random().toString(36).slice(2, 12)}/boards`, { method: "GET" }, 8_000);
+		res = await call(`${server}/api/pads/omnidraw-check-${Math.random().toString(36).slice(2, 12)}/boards`, { method: "GET" }, timeoutMs);
 	} catch (e: any) {
 		return { ok: false, text: String(e?.message ?? e) };
 	}
 	if (res.ok) {
-		const boards: any = await res.json().catch(() => undefined);
-		if (Array.isArray(boards)) return { ok: true, text: "This server can share diagrams." };
+		if (Array.isArray(res.json)) return { ok: true, text: "This server can share diagrams." };
 		return { ok: false, text: "Something answers at that address, but not as an OmniPad server does." };
 	}
 	if (res.status === 404 || res.status === 405) return { ok: false, text: "Something answers at that address, but it has no boards: it is not an OmniPad server that can share diagrams." };
@@ -54,7 +82,7 @@ export async function createBoard(server: string, board: { title: string; xml: s
 	// (the server lets one address start only so many in a while)
 	if (res.status === 503 || res.status === 429) throw new BoardError("The OmniPad server is not taking another shared diagram from here just now. Try again in a few minutes.");
 	if (!res.ok) throw new BoardError(`The OmniPad server would not make a board (${res.status}).`);
-	const made: any = await res.json().catch(() => undefined);
+	const made: any = res.json;
 	// (read through a link, so that what comes back is held to what a link may be)
 	const link = typeof made?.pad === "string" && typeof made?.board === "string" ? parseBoardLink(`${server}/b/${made.pad}/${made.board}`) : undefined;
 	if (!link || typeof made.owner_key !== "string" || !made.owner_key) throw new BoardError("The OmniPad server's answer was not a board.");
@@ -69,7 +97,7 @@ export async function boardExists(link: BoardLink): Promise<boolean> {
 	if (res.status === 404) return false;
 	if (res.status === 401 || res.status === 403) throw new BoardError("That shared diagram is in a private pad, which OmniDraw cannot open yet.");
 	if (!res.ok) throw new BoardError(`The OmniPad server would not say whether the diagram is still shared (${res.status}).`);
-	const boards: any = await res.json().catch(() => undefined);
+	const boards: any = res.json;
 	return Array.isArray(boards) && boards.some((b) => b?.id === link.board);
 }
 

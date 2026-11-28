@@ -924,6 +924,30 @@ test("making, finding and ending a board; what the app says when the server is n
 	await new Promise((r) => notOne.listen(0, "127.0.0.1", r));
 	assert.deepEqual(await checkServer(`http://127.0.0.1:${notOne.address().port}`), { ok: false, text: "Something answers at that address, but not as an OmniPad server does." });
 	notOne.close();
+	// a server that starts to answer and then goes quiet has not answered in time either: the asking ends
+	const stalls = http.createServer((req, res) => {
+		res.writeHead(200, { "content-type": "application/json" });
+		res.write("[");
+	});
+	await new Promise((r) => stalls.listen(0, "127.0.0.1", r));
+	const began = Date.now();
+	assert.deepEqual(await checkServer(`http://127.0.0.1:${stalls.address().port}`, 300), { ok: false, text: "The OmniPad server did not answer in time." });
+	assert.ok(Date.now() - began < 3000);
+	// (the same for the other calls: sharing a diagram does not wait for ever on half an answer)
+	stalls.closeAllConnections?.();
+	stalls.close();
+	// and an answer far longer than any of these is not read to its end
+	const endless = http.createServer((req, res) => {
+		res.writeHead(200, { "content-type": "application/json" });
+		const more = () => res.write("[".repeat(256 * 1024)) && setImmediate(more);
+		res.on("drain", more);
+		res.on("error", () => {});
+		more();
+	});
+	await new Promise((r) => endless.listen(0, "127.0.0.1", r));
+	assert.equal((await checkServer(`http://127.0.0.1:${endless.address().port}`, 5000)).ok, false);
+	endless.closeAllConnections?.();
+	endless.close();
 	const asked = await startBoardRelay();
 	relays.push(asked);
 	assert.deepEqual(await checkServer(asked.url), { ok: true, text: "This server can share diagrams." });
