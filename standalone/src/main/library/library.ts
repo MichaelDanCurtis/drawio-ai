@@ -737,9 +737,11 @@ export class Library {
 		try {
 			const dir = this.stored("versions", ...this.parts(id));
 			if (!dir) return [];
+			// (only plain files by a version's name: a link or a folder by such a name is nothing of the app's, and no version)
 			return fs
-				.readdirSync(dir)
-				.filter((n) => /^\d{8}T\d{6}Z-[sk]-[0-9a-f]{12}\./.test(n))
+				.readdirSync(dir, { withFileTypes: true })
+				.filter((e) => e.isFile() && /^\d{8}T\d{6}Z-[sk]-[0-9a-f]{12}\./.test(e.name))
+				.map((e) => e.name)
 				.sort()
 				.reverse();
 		} catch {
@@ -774,7 +776,16 @@ export class Library {
 		const started = newest ? Date.parse(newest.replace(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z.*$/, "$1-$2-$3T$4:$5:$6Z")) : NaN;
 		const sameRow = !options.kept && !!newest && newest.split("-")[1] === "s" && now - started < VERSION_WINDOW && now >= started;
 		const name = `${sameRow ? newest.split("-")[0] : stamp(now)}-${options.kept ? "k" : "s"}-${hash}${type.ending}`;
-		fs.writeFileSync(path.join(dir, name), bytes);
+		// (made anew, or not at all: whatever is there by that name, a link above all, is not written through)
+		const target = path.join(dir, name);
+		try {
+			fs.writeFileSync(target, bytes, { flag: "wx" });
+		} catch (e: any) {
+			if (e?.code !== "EEXIST") throw e;
+			// (the same name is the same state of the same kind, at the same second: a plain file of it is that version already)
+			const there = fs.lstatSync(target);
+			if (!there.isFile() || readPlainFile(target)?.equals(bytes) !== true) throw new LibraryError(`${name} in the library's versions is not a version the app made. Nothing was written.`);
+		}
 		if (sameRow && newest !== name) fs.rmSync(path.join(dir, newest), { force: true });
 		for (const old of this.versionFiles(id).slice(MAX_VERSIONS)) fs.rmSync(path.join(dir, old), { force: true });
 		return true;
@@ -839,7 +850,15 @@ export class Library {
 		this.existing(id);
 		const file = this.thumbFile(id);
 		fs.mkdirSync(path.dirname(file), { recursive: true });
-		fs.writeFileSync(file, png);
+		// (a new file of its own, put in the picture's place whole: a link by the picture's name is replaced, never written through)
+		const temp = path.join(path.dirname(file), `.new-${crypto.randomBytes(6).toString("hex")}.png`);
+		fs.writeFileSync(temp, png, { flag: "wx" });
+		try {
+			fs.renameSync(temp, file);
+		} catch (e) {
+			fs.rmSync(temp, { force: true });
+			throw e;
+		}
 	}
 
 	/** When the picture kept of a document was made, if it is of the document as it is now (`modified`); else 0. */

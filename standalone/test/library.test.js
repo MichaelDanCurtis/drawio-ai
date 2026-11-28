@@ -250,6 +250,38 @@ test("a document comes back from the trash with its history, or stays there with
 	assert.equal(lib.versions(doc).length, 1);
 });
 
+test("a version or a picture is never written through a link that is already there by its name", () => {
+	const crypto = require("crypto");
+	const root = temp();
+	const lib = new Library(root);
+	const doc = lib.create("", "Crafted", ".drawio", B("the document's bytes"));
+	const victim = path.join(temp("home"), ".bashrc");
+	fs.writeFileSync(victim, "the user's own file");
+	// a link put in the library (a repository it came from) under the name the next version will have
+	const now = Date.UTC(2026, 10, 28, 12, 0, 0);
+	const name = `20261128T120000Z-k-${crypto.createHash("sha256").update("the document's bytes").digest("hex").slice(0, 12)}.drawio`;
+	fs.mkdirSync(path.join(root, ".omnidraw", "versions", doc), { recursive: true });
+	fs.symlinkSync(victim, path.join(root, ".omnidraw", "versions", doc, name));
+	refused(() => lib.snapshot(doc, B("the document's bytes"), { kept: true, now }), /not a version the app made/);
+	assert.equal(fs.readFileSync(victim, "utf8"), "the user's own file");
+	// the same for the picture kept of it
+	fs.mkdirSync(path.join(root, ".omnidraw", "thumbs"), { recursive: true });
+	fs.symlinkSync(victim, path.join(root, ".omnidraw", "thumbs", `${doc}.png`));
+	refused(() => lib.setThumb(doc, B("png")), /is a link/);
+	assert.equal(fs.readFileSync(victim, "utf8"), "the user's own file");
+	assert.equal(lib.thumb(doc), undefined);
+	// once it is gone, the picture is a file of its own, made whole
+	fs.rmSync(path.join(root, ".omnidraw", "thumbs", `${doc}.png`));
+	lib.setThumb(doc, B("png"));
+	assert.ok(fs.lstatSync(path.join(root, ".omnidraw", "thumbs", `${doc}.png`)).isFile());
+	assert.equal(lib.thumb(doc).toString(), "png");
+	assert.deepEqual(fs.readdirSync(path.join(root, ".omnidraw", "thumbs")).filter((n) => n.startsWith(".new-")), []);
+	// a version that is there already as a plain file of the same state: that is the version
+	fs.rmSync(path.join(root, ".omnidraw", "versions", doc, name));
+	assert.equal(lib.snapshot(doc, B("the document's bytes"), { kept: true, now }), true);
+	assert.equal(lib.snapshot(doc, B("the document's bytes"), { kept: true, now }), false);
+});
+
 test("a file is read through one descriptor, and only as the plain file under its name", () => {
 	const dir = temp("plain");
 	const file = path.join(dir, "Plan.drawio");
