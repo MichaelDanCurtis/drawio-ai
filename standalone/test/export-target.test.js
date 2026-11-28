@@ -95,3 +95,60 @@ test("a file the user agreed to replace is replaced whole, and nothing goes thro
 		f.done();
 	}
 });
+
+test("a replaced file keeps who may read it, however long its name is, and a write that fails leaves nothing behind", () => {
+	const f = folder();
+	try {
+		// a private file stays private (the new file is not given what a new file gets by default)
+		const secret = path.join(f.real, "private.svg");
+		fs.writeFileSync(secret, "old", { mode: 0o600 });
+		fs.chmodSync(secret, 0o600);
+		writeExport(secret, Buffer.from("<svg>new</svg>"), true);
+		assert.equal(fs.readFileSync(secret, "utf8"), "<svg>new</svg>");
+		if (process.platform !== "win32") assert.equal(fs.statSync(secret).mode & 0o777, 0o600);
+		// and one that others may read still may be
+		const shared = path.join(f.real, "shared.svg");
+		fs.writeFileSync(shared, "old");
+		fs.chmodSync(shared, 0o664);
+		writeExport(shared, Buffer.from("<svg>new</svg>"), true);
+		if (process.platform !== "win32") assert.equal(fs.statSync(shared).mode & 0o777, 0o664);
+
+		// a name as long as a file system takes (255 bytes) can still be replaced
+		const long = path.join(f.real, `${"a".repeat(251)}.svg`);
+		fs.writeFileSync(long, "old");
+		writeExport(long, Buffer.from("<svg>long</svg>"), true);
+		assert.equal(fs.readFileSync(long, "utf8"), "<svg>long</svg>");
+
+		// the disk fills up while the new file is written: the old one is as it was, and nothing is left beside it
+		const kept = path.join(f.real, "kept.svg");
+		fs.writeFileSync(kept, "still here");
+		const write = fs.writeFileSync;
+		fs.writeFileSync = (target, ...rest) => {
+			if (typeof target !== "number") return write(target, ...rest);
+			fs.writeSync(target, "half of");
+			throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+		};
+		try {
+			assert.throws(() => writeExport(kept, Buffer.from("<svg>never</svg>"), true), /ENOSPC/);
+		} finally {
+			fs.writeFileSync = write;
+		}
+		assert.equal(fs.readFileSync(kept, "utf8"), "still here");
+		assert.deepEqual(fs.readdirSync(f.real).filter((n) => n.endsWith(".tmp")), []);
+		// the same for a new file: half an export is not left under its name
+		fs.writeFileSync = (target, ...rest) => {
+			if (typeof target !== "number") return write(target, ...rest);
+			fs.writeSync(target, "half of");
+			throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+		};
+		try {
+			assert.throws(() => writeExport(path.join(f.real, "half.svg"), Buffer.from("<svg>never</svg>"), false), /ENOSPC/);
+		} finally {
+			fs.writeFileSync = write;
+		}
+		assert.equal(fs.existsSync(path.join(f.real, "half.svg")), false);
+		f.untouched();
+	} finally {
+		f.done();
+	}
+});

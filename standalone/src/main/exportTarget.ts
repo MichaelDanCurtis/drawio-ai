@@ -54,25 +54,53 @@ export function exportTarget(target: string): { exists: boolean; real: string } 
  * and the user agreed to replace it; otherwise there must be none. A link is never followed:
  * a new file is made only if nothing has that name (not even a link that appeared meanwhile),
  * and a file is replaced by putting the new one in its place whole, whatever is there by then.
+ * The new file can be read and written by whom the old one could (a private export stays private).
  */
 export function writeExport(real: string, bytes: Buffer, replace: boolean): void {
 	if (!replace) {
+		let made: number;
 		try {
-			fs.writeFileSync(real, bytes, { flag: "wx" });
+			made = fs.openSync(real, "wx");
 		} catch (e: any) {
 			if (e?.code === "EEXIST") throw new ExportTargetError(`${path.basename(real)} appeared while the export was made. Nothing was written.`);
 			throw e;
 		}
+		fill(made, real, bytes);
 		return;
 	}
 	const still = exportTarget(real);
 	if (!still.exists) return writeExport(real, bytes, false);
-	const temp = path.join(path.dirname(real), `.${path.basename(real)}.${crypto.randomBytes(6).toString("hex")}.tmp`);
-	fs.writeFileSync(temp, bytes, { flag: "wx" });
+	// (who may read, write and run it; nothing else of its mode is carried over)
+	const mode = fs.lstatSync(real).mode & 0o777;
+	// (a short name of its own beside the file: a long file name leaves no room to add to)
+	const temp = path.join(path.dirname(real), `.omnidraw-${crypto.randomBytes(8).toString("hex")}.tmp`);
+	// (made anew, or not at all: a name that is taken is someone else's, and is left alone)
+	const fd = fs.openSync(temp, "wx", mode);
+	fill(fd, temp, bytes, mode);
 	try {
 		fs.renameSync(temp, real);
 	} catch (e) {
 		fs.rmSync(temp, { force: true });
+		throw e;
+	}
+}
+
+/**
+ * Fills a file this code has just made (`fd`, at `file`) and closes it. When it cannot be
+ * written whole (the disk is full, a quota is reached) it is taken away again: half an export is
+ * left neither under the export's name nor beside it. `mode`: the permissions it gets, whatever
+ * this process would give a new file by default.
+ */
+function fill(fd: number, file: string, bytes: Buffer, mode?: number): void {
+	try {
+		try {
+			if (mode !== undefined) fs.fchmodSync(fd, mode);
+			fs.writeFileSync(fd, bytes);
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch (e) {
+		fs.rmSync(file, { force: true });
 		throw e;
 	}
 }
