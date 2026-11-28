@@ -5,7 +5,7 @@ import * as path from "path";
 import { documentWindows, type DocumentWindow } from "./documentShell";
 import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
 import { canonicalPath, docType, Library, LibraryError, type DocKind } from "./library/library";
-import { Recents } from "./library/recents";
+import { readRecent, RecentFileError, Recents } from "./library/recents";
 import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings } from "./settings";
@@ -174,7 +174,7 @@ export class HomeWindow {
 
 	/** Says what could not be done, in the page (the library's own words for it, or the system's). */
 	private static problem(e: unknown): void {
-		HomeWindow.post({ type: "problem", text: e instanceof LibraryError ? e.message : String((e as any)?.message ?? e) });
+		HomeWindow.post({ type: "problem", text: e instanceof LibraryError || e instanceof RecentFileError ? e.message : String((e as any)?.message ?? e) });
 	}
 
 	// ----- what the rest of the app tells the home screen -----
@@ -403,8 +403,8 @@ export class HomeWindow {
 					const recent = HomeWindow.recents().list().find((r) => r.path === msg.path);
 					const type = recent && docType(path.basename(recent.path));
 					if (!recent || !type) break;
-					if (fs.statSync(recent.path).size > PREVIEW_LIMIT * 4) throw new LibraryError(`${path.basename(recent.path)} is too large to copy from here. Copy it into the library folder yourself.`);
-					lib.create(text(msg.collection), type.name, type.ending, fs.readFileSync(recent.path));
+					// (only as the very file that was opened here, never through a link that took its place: see readRecent)
+					lib.create(text(msg.collection), type.name, type.ending, readRecent(recent, PREVIEW_LIMIT * 4));
 					break;
 				}
 				case "rename":

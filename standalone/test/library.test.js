@@ -9,7 +9,7 @@ const path = require("path");
 const zlib = require("zlib");
 require("./helpers/ts");
 const { Library, LibraryError, canonicalPath, cleanName, docType, VERSION_WINDOW, MAX_VERSIONS } = require("../src/main/library/library");
-const { Recents } = require("../src/main/library/recents");
+const { Recents, readRecent, RecentFileError } = require("../src/main/library/recents");
 const { sketchExcalidraw, sketchDrawio, firstPage, safeColour } = require("../src/main/library/sketch");
 
 const made = [];
@@ -397,7 +397,9 @@ test("recent documents: the latest first, each once, gone when the file is", () 
 	recents.add(a, 100);
 	recents.add(b, 200);
 	recents.add(a, 300);
-	assert.deepEqual(recents.list(), [{ path: a, at: 300 }, { path: b, at: 200 }]);
+	assert.deepEqual(recents.list().map((r) => [r.path, r.at]), [[a, 300], [b, 200]]);
+	// (each with which file it was, as the disk knows it)
+	assert.deepEqual([recents.list()[0].dev, recents.list()[0].ino], [fs.statSync(a).dev, fs.statSync(a).ino]);
 	// only so many are remembered
 	recents.add(c, 400);
 	assert.deepEqual(recents.list().map((r) => r.path), [c, a]);
@@ -410,6 +412,39 @@ test("recent documents: the latest first, each once, gone when the file is", () 
 	// a file that is not a list is no list
 	fs.writeFileSync(file, "not json");
 	assert.deepEqual(new Recents(file).list(), []);
+});
+
+test("a file from the list is copied only as the very file that was opened", () => {
+	const dir = temp("shared");
+	const recents = new Recents(path.join(temp("data"), "recent.json"));
+	const budget = path.join(dir, "Budget.drawio");
+	fs.writeFileSync(budget, "the budget");
+	recents.add(budget);
+	const noted = () => recents.list().find((r) => r.path === budget);
+	const no = (pattern) => assert.throws(() => readRecent(noted(), 1000), (e) => e instanceof RecentFileError && pattern.test(e.message));
+	assert.equal(readRecent(noted(), 1000).toString(), "the budget");
+	// written into again (as this app saves): the same file still
+	fs.writeFileSync(budget, "the budget, revised");
+	assert.equal(readRecent(noted(), 1000).toString(), "the budget, revised");
+	assert.throws(() => readRecent(noted(), 5), (e) => e instanceof RecentFileError && /too large/.test(e.message));
+	// someone who can write in that folder puts a link to a file of the user's in its place: not fetched
+	const secret = path.join(temp("private"), "id_rsa");
+	fs.writeFileSync(secret, "a private key");
+	fs.rmSync(budget);
+	fs.symlinkSync(secret, budget);
+	no(/not the file that was opened here any more/);
+	// another file under the name: not the one that was opened either
+	fs.rmSync(budget);
+	fs.writeFileSync(path.join(dir, "other"), "something else");
+	fs.renameSync(path.join(dir, "other"), budget);
+	no(/not the file that was opened here any more/);
+	// opened again, it is the file that was opened
+	recents.add(budget);
+	assert.equal(readRecent(noted(), 1000).toString(), "something else");
+	// an entry from before files were noted (or noted by hand) is opened from the list, not copied
+	assert.throws(() => readRecent({ path: budget, at: 1 }, 1000), RecentFileError);
+	fs.rmSync(budget);
+	assert.throws(() => readRecent({ path: budget, at: 1, dev: 1, ino: 1 }, 1000), RecentFileError);
 });
 
 test("a sketch of a drawing: its shapes, lines and words, and nothing of the file written as it stands", () => {
