@@ -66,6 +66,8 @@ export interface Settings {
 	workshop: { galleries: GalleryConfig[] };
 	/** Go live: the OmniPad server diagrams are shared through (its origin), and the name others see. */
 	sharing: { server: string; name: string };
+	/** The home screen's library: the folder it is ("" for OmniDraw in the user's Documents). */
+	library: { folder: string };
 }
 
 const DEFAULTS: Settings = {
@@ -86,6 +88,7 @@ const DEFAULTS: Settings = {
 	shapes: { locations: [] },
 	workshop: { galleries: DEFAULT_GALLERIES },
 	sharing: { server: "", name: "" },
+	library: { folder: "" },
 };
 
 let cached: Settings | undefined;
@@ -129,6 +132,8 @@ function merge(user: any): Settings {
 			server: typeof obj(user.sharing).server === "string" ? user.sharing.server.trim().slice(0, 300) : "",
 			name: typeof obj(user.sharing).name === "string" ? user.sharing.name.trim().slice(0, 60) : "",
 		},
+		// (a folder is kept only as a full path: anything else in a hand-edited file is the default)
+		library: { folder: typeof obj(user.library).folder === "string" && path.isAbsolute(user.library.folder) ? user.library.folder : "" },
 	};
 }
 

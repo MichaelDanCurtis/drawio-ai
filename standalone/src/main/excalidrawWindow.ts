@@ -2,7 +2,8 @@ import { app, BaseWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView }
 import * as fs from "fs";
 import * as path from "path";
 import { ChatController, type ChatEditor } from "./chatController";
-import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { ChatDock, documentHooks, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { canonicalPath } from "./library/library";
 import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, formatForPath, pictureToWrite, readScene, sceneTextToWrite, type ExcalidrawFormat } from "./excalidrawFile";
 import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError } from "./excalidrawTools";
@@ -78,7 +79,9 @@ export class ExcalidrawWindow implements DocumentWindow {
 	 */
 	public static async open(server: StaticServer, file?: string): Promise<ExcalidrawWindow | undefined> {
 		if (file) {
-			const existing = [...ExcalidrawWindow.all].find((w) => w.file === file);
+			// (by the file's real place: the same file by another path, one with a link in it, is not opened twice)
+			const real = canonicalPath(file);
+			const existing = [...ExcalidrawWindow.all].find((w) => w.file && canonicalPath(w.file) === real);
 			if (existing) {
 				existing.win.focus();
 				return existing;
@@ -91,6 +94,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 			}
 		}
 		const w = new ExcalidrawWindow(server, file);
+		if (file) documentHooks.opened?.(w, file);
 		await w.start();
 		return w;
 	}
@@ -456,9 +460,29 @@ export class ExcalidrawWindow implements DocumentWindow {
 		return this.fileName() ?? "Untitled drawing";
 	}
 
+	public movedTo(file: string): void {
+		this.file = file;
+		this.updateTitle();
+		this.sendLook();
+		this.chat.postState();
+		// (an agent at work on it works in its folder: in another folder now, it starts again there)
+		this.chat.folderChanged();
+	}
+
+	/** What the drawing was when it was last written to its file (the editor's mark of it). */
+	private savedStamp: string | undefined;
+
+	public async picture(): Promise<Buffer | undefined> {
+		// (the picture comes with the mark of what it is a picture of: only the saved drawing's is the file's)
+		const { bytes, stamp } = await this.contents("png");
+		return stamp === this.savedStamp ? bytes : undefined;
+	}
+
 	private setDirty(dirty: boolean): void {
+		const was = this.dirty;
 		this.dirty = dirty;
 		this.updateTitle();
+		if (was !== dirty) documentHooks.changed?.(this);
 	}
 
 	private updateTitle(): void {
@@ -528,14 +552,31 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.updateTitle();
 		this.sendLook();
 		this.chat.postState();
+		this.chat.folderChanged();
 		return true;
 	}
 
-	private async writeTo(file: string, format: ExcalidrawFormat): Promise<boolean> {
+	/** The saves under way (see DocumentWindow.whenSaved). */
+	private writing = new Set<Promise<boolean>>();
+
+	public async whenSaved(): Promise<void> {
+		while (this.writing.size) await Promise.allSettled([...this.writing]);
+	}
+
+	private writeTo(file: string, format: ExcalidrawFormat): Promise<boolean> {
+		const run = this.writeNow(file, format);
+		this.writing.add(run);
+		void run.finally(() => this.writing.delete(run));
+		return run;
+	}
+
+	private async writeNow(file: string, format: ExcalidrawFormat): Promise<boolean> {
 		try {
 			const { bytes, stamp } = await this.contents(format);
 			fs.writeFileSync(file, bytes);
+			this.savedStamp = stamp;
 			await this.confirmSaved(stamp);
+			documentHooks.saved?.(this, file);
 			return true;
 		} catch (e: any) {
 			ExcalidrawWindow.showError("Could not save", String(e?.message ?? e));

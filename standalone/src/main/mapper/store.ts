@@ -159,6 +159,68 @@ export function diffRecords(before: MapRecord, after: MapRecord): { added: strin
  * another folder they are copied there (the old file keeps its own); in the same
  * folder they are re-associated with the new name.
  */
+/**
+ * A diagram's records go with it to its new folder or name (the diagram was moved or renamed, not
+ * copied): the ones it has now take the place of any left at the new place by an earlier move,
+ * and none stay behind, where they would be stale the next time the diagram came back.
+ */
+export function moveRecords(from: { cwd: string; diagram: string }, to: { cwd: string; diagram: string }): number {
+	const oldName = path.basename(from.diagram);
+	const newName = path.basename(to.diagram);
+	// (by the folders' real places: the same folder by a path with a link in it is the same folder, and its records are not taken out of it)
+	const real = (dir: string): string => {
+		try {
+			return fs.realpathSync(dir);
+		} catch {
+			return path.resolve(dir);
+		}
+	};
+	const sameFolder = real(from.cwd) === real(to.cwd);
+	let names: string[] = [];
+	try {
+		names = fs.readdirSync(mapsDir(from.cwd)).filter((n) => n.endsWith(".json"));
+	} catch {
+		return 0;
+	}
+	let n = 0;
+	for (const name of names) {
+		const r = loadRecord(from.cwd, name.replace(/\.json$/, ""));
+		if (!r || (r.diagram ?? undefined) !== oldName) continue;
+		r.diagram = newName;
+		saveRecord(to.cwd, r);
+		if (!sameFolder) fs.rmSync(path.join(mapsDir(from.cwd), name), { force: true });
+		n++;
+	}
+	return n;
+}
+
+/** The ids of a diagram's maps that have records kept in its folder. */
+export function recordIds(cwd: string, diagram: string): string[] {
+	const name = path.basename(diagram);
+	try {
+		return fs
+			.readdirSync(mapsDir(cwd))
+			.filter((n) => n.endsWith(".json"))
+			.map((n) => n.replace(/\.json$/, ""))
+			.filter((id) => loadRecord(cwd, id)?.diagram === name);
+	} catch {
+		return [];
+	}
+}
+
+/** Whether a diagram has maps with records kept in its folder. */
+export function hasRecords(cwd: string, diagram: string): boolean {
+	const name = path.basename(diagram);
+	try {
+		return fs
+			.readdirSync(mapsDir(cwd))
+			.filter((n) => n.endsWith(".json"))
+			.some((n) => loadRecord(cwd, n.replace(/\.json$/, ""))?.diagram === name);
+	} catch {
+		return false;
+	}
+}
+
 export function adoptRecords(from: { cwd: string; diagram?: string }, to: { cwd: string; diagram: string }): number {
 	const oldName = from.diagram ? path.basename(from.diagram) : undefined;
 	const newName = path.basename(to.diagram);

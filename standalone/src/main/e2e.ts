@@ -12,6 +12,15 @@ import { SettingsWindow } from "./settingsWindow";
 import { dialog, Menu, screen } from "electron";
 import type { StaticServer } from "./staticServer";
 import { runExcalidraw } from "./e2eExcalidraw";
+import { runHome } from "./e2eHome";
+
+/** What a run asks of the app itself (main.ts): the same doors the menus and the start go through. */
+export interface AppCommands {
+	openFile(file: string): Promise<void>;
+	showHome(): void;
+	/** Whether the home screen comes back when the last document is closed (off in test runs unless asked for). */
+	homeWhenEmpty(on: boolean): void;
+}
 
 export interface E2eConfig {
 	/** Diagram to open (use a copy: the run may save over it). */
@@ -48,6 +57,8 @@ export interface E2eConfig {
 	apiChat?: boolean;
 	/** Check Excalidraw drawings (`file` is a .excalidraw): open, edit through Excalidraw's API, save, reopen, export, themes (see e2eExcalidraw.ts). */
 	excalidraw?: boolean;
+	/** Check the home screen: a library of this run's own, documents made, saved, renamed, moved, trashed, versions (see e2eHome.ts). */
+	home?: boolean;
 }
 
 /**
@@ -56,7 +67,7 @@ export interface E2eConfig {
  * endpoint like an agent would, optionally runs one prompt through an ACP agent
  * (permission requests auto-approved), then exports and screenshots the result.
  */
-export async function runE2e(server: StaticServer, config: E2eConfig): Promise<void> {
+export async function runE2e(server: StaticServer, config: E2eConfig, appCommands: AppCommands): Promise<void> {
 	const summary: Record<string, unknown> = { file: config.file, agent: config.agent ?? null };
 	const log = (k: string, v: unknown) => {
 		summary[k] = v;
@@ -83,6 +94,10 @@ export async function runE2e(server: StaticServer, config: E2eConfig): Promise<v
 		if (config.excalidraw) {
 			// (no diagram window in this run: the drawing is the document)
 			await runExcalidraw(server, config, log);
+			return finish(0);
+		}
+		if (config.home) {
+			await runHome(server, config, log, appCommands);
 			return finish(0);
 		}
 		const t0 = Date.now();

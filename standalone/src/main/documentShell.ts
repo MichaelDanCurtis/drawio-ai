@@ -1,6 +1,7 @@
 // What a diagram window and an Excalidraw window share: where a new window goes, which document
 // is in front, and the chat beside the editor (sliding in and out, its edge dragged to resize).
 import { BaseWindow, screen, type WebContentsView } from "electron";
+import { canonicalPath } from "./library/library";
 import { settings, updateSettings } from "./settings";
 
 /** A window with one document in it: a draw.io diagram or an Excalidraw drawing. */
@@ -10,14 +11,42 @@ export interface DocumentWindow {
 	readonly editorView: WebContentsView;
 	readonly chatView: WebContentsView;
 	file: string | undefined;
+	/** It has changes that are not in its file. */
+	readonly isDirty: boolean;
 	save(): Promise<boolean>;
 	saveAs(): Promise<boolean>;
+	/** The app gave its file another name or place (the home screen did): the window is that file's from now on. */
+	movedTo(file: string): void;
+	/**
+	 * Settles when no save of this window is under way. A save takes its file's name when it
+	 * starts and writes there when the editor has handed the document over: what moves the file
+	 * waits for this first, or the save would make the file again where it was.
+	 */
+	whenSaved(): Promise<void>;
+	/**
+	 * A picture of the document as it was last saved (a PNG), for its card on the home screen.
+	 * Undefined when what the editor shows is not that any more: a picture of changes that may
+	 * never be saved is not the file's.
+	 */
+	picture(): Promise<Buffer | undefined>;
 	toggleChat(): void;
 	resizeChat(delta: number): void;
 }
 
 const open = new Set<DocumentWindow>();
 let last: DocumentWindow | undefined;
+
+/** What the rest of the app wants to know of the documents (main.ts sets these; the home screen listens). */
+export const documentHooks: {
+	/** A file was opened in a new window, by whatever way (the menus, the home screen, a file dropped, an agent's tool). */
+	opened?: (w: DocumentWindow, file: string) => void;
+	/** A document was written to `file`. */
+	saved?: (w: DocumentWindow, file: string) => void;
+	/** A document's window went. */
+	closed?: (w: DocumentWindow) => void;
+	/** A document got unsaved changes, or has none any more. */
+	changed?: (w: DocumentWindow) => void;
+} = {};
 
 /** The document windows that are open, of both kinds. */
 export const documentWindows = {
@@ -28,6 +57,7 @@ export const documentWindows = {
 	remove(w: DocumentWindow): void {
 		open.delete(w);
 		if (last === w) last = undefined;
+		documentHooks.closed?.(w);
 	},
 	/** `w` got the focus. */
 	used(w: DocumentWindow): void {
@@ -35,6 +65,22 @@ export const documentWindows = {
 	},
 	get size(): number {
 		return open.size;
+	},
+	/**
+	 * The window a file is open in, if it is. By the file's real place: a window that was opened by
+	 * a path with a link in it holds the same file as one opened by the path without.
+	 */
+	of(file: string): DocumentWindow | undefined {
+		const real = canonicalPath(file);
+		return [...open].find((w) => w.file && canonicalPath(w.file) === real);
+	},
+	/** Every window that holds a file. A file is opened once (see the windows' own `open`), but what needs the file to itself asks about them all. */
+	allOf(file: string): DocumentWindow[] {
+		const real = canonicalPath(file);
+		return [...open].filter((w) => w.file && canonicalPath(w.file) === real);
+	},
+	all(): DocumentWindow[] {
+		return [...open];
 	},
 	/** The document in front: the one whose window has the focus, else the one used last (Settings, or another app, is in front). */
 	front(): DocumentWindow | undefined {

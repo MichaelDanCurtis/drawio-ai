@@ -7,7 +7,8 @@ import { CustomizedDrawioClient } from "../../../src/DrawioClient/CustomizedDraw
 import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
-import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { ChatDock, documentHooks, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { canonicalPath } from "./library/library";
 import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram, renderDiagram } from "./exporter";
 import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
@@ -151,7 +152,9 @@ export class DiagramWindow implements DocumentWindow {
 
 	public static async open(server: StaticServer, file?: string, initial?: { xml: string; name: string }): Promise<DiagramWindow> {
 		if (file) {
-			const existing = [...DiagramWindow.all].find((w) => w.file === file);
+			// (by the file's real place: the same file by another path, one with a link in it, is not opened twice)
+			const real = canonicalPath(file);
+			const existing = [...DiagramWindow.all].find((w) => w.file && canonicalPath(w.file) === real);
 			if (existing) {
 				existing.win.focus();
 				return existing;
@@ -159,6 +162,7 @@ export class DiagramWindow implements DocumentWindow {
 		}
 		const w = new DiagramWindow(server, file);
 		w.initial = initial;
+		if (file) documentHooks.opened?.(w, file);
 		await w.start(server);
 		return w;
 	}
@@ -531,6 +535,33 @@ export class DiagramWindow implements DocumentWindow {
 		return this.file ? path.basename(this.file) : undefined;
 	}
 
+	public get isDirty(): boolean {
+		return this.dirty;
+	}
+
+	public movedTo(file: string): void {
+		const from = { cwd: this.cwd(), diagram: this.file };
+		this.file = file;
+		// (the maps' records follow the diagram, as they do when it is saved under another name)
+		try {
+			// (moved, not copied: the records it has now go with it, and none stay behind to be found stale later)
+			if (from.diagram) this.maps.moveRecords({ cwd: from.cwd, diagram: from.diagram }, { cwd: this.cwd(), diagram: file });
+		} catch (e) {
+			console.warn("Could not carry the map records over:", e);
+		}
+		this.updateTitle();
+		this.chat.postState();
+		// (an agent at work on it works in its folder: in another folder now, it starts again there)
+		this.chat.folderChanged();
+	}
+
+	public async picture(): Promise<Buffer | undefined> {
+		// (changed since it was saved, before or while the picture was made: that is not the file's picture)
+		if (this.dirty) return undefined;
+		const { data } = await renderDiagram(this.client, "png", { currentPageOnly: true });
+		return this.dirty ? undefined : data;
+	}
+
 	public whenLoaded(): Promise<void> {
 		return this.loaded ? Promise.resolve() : new Promise((r) => this.loadedWaiters.push(r));
 	}
@@ -856,8 +887,10 @@ export class DiagramWindow implements DocumentWindow {
 	// ----- document -----
 
 	private setDirty(dirty: boolean): void {
+		const was = this.dirty;
 		this.dirty = dirty;
 		this.updateTitle();
+		if (was !== dirty) documentHooks.changed?.(this);
 	}
 
 	private updateTitle(): void {
@@ -896,16 +929,32 @@ export class DiagramWindow implements DocumentWindow {
 			app.addRecentDocument(r.filePath);
 			this.updateTitle();
 			this.chat.postState();
+			this.chat.folderChanged();
 		}
 		return ok;
 	}
 
-	private async writeTo(file: string): Promise<boolean> {
+	/** The saves under way (see DocumentWindow.whenSaved). */
+	private writing = new Set<Promise<boolean>>();
+
+	public async whenSaved(): Promise<void> {
+		while (this.writing.size) await Promise.allSettled([...this.writing]);
+	}
+
+	private writeTo(file: string): Promise<boolean> {
+		const run = this.writeNow(file);
+		this.writing.add(run);
+		void run.finally(() => this.writing.delete(run));
+		return run;
+	}
+
+	private async writeNow(file: string): Promise<boolean> {
 		try {
 			const ext = /\.(png|svg)$/i.test(file) ? file : file.replace(/\.(xml|dio)$/i, ".drawio");
 			const buffer = await this.client.export(ext.endsWith(".png") || ext.endsWith(".svg") ? ext : ".drawio");
 			fs.writeFileSync(file, Buffer.from(buffer.toString("base64"), "base64"));
 			this.setDirty(false);
+			documentHooks.saved?.(this, file);
 			return true;
 		} catch (e: any) {
 			dialog.showErrorBox("Could not save", String(e?.message ?? e));

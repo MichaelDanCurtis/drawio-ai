@@ -5,7 +5,7 @@ import type { CustomizedDrawioClient } from "../../../../src/DrawioClient/Custom
 import { applyDescriptions, Badge, drawBadges, drawMap, mapsOnPage } from "./draw";
 import { answerGraph, checkDescriptions, checkTour, findNodes, findPath, showNode, worksheet } from "./query";
 import { recipeById } from "./registry";
-import { activeFindings, adoptRecords, createRecord, diffRecords, findingFingerprint, loadRecord, MapRecord, mapsDir, newMapId, saveRecord } from "./store";
+import { activeFindings, adoptRecords, createRecord, moveRecords, diffRecords, findingFingerprint, loadRecord, MapRecord, mapsDir, newMapId, saveRecord } from "./store";
 import type { CollectContext, CollectResult, MapFinding, MapInput } from "./types";
 import { MapperError } from "./types";
 
@@ -64,6 +64,11 @@ export class MapperService {
 	 * another folder they are copied there (the old file keeps its own); in the same
 	 * folder they are re-associated with the new name.
 	 */
+	/** The diagram was moved or renamed (not saved as a copy): its records go with it. */
+	public moveRecords(from: { cwd: string; diagram: string }, to: { cwd: string; diagram: string }): number {
+		return moveRecords(from, to);
+	}
+
 	public adoptRecords(from: { cwd: string; diagram?: string }, to: { cwd: string; diagram: string }): number {
 		return adoptRecords(from, to);
 	}

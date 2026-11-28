@@ -392,9 +392,28 @@ export class ChatController {
 		void this.ensureSession().catch(() => undefined);
 	}
 
+	/** The folder the agent's session works in (its `session/new` cwd); undefined for a session that has none. */
+	private sessionCwd: string | undefined;
+
+	/**
+	 * The document is in another folder now (moved or renamed from the home screen, or saved under
+	 * a new name elsewhere). An agent works in the folder its session was started in, and cannot be
+	 * moved: one that was started is ended, and the next request starts it again in the new folder.
+	 * The conversation so far stays on screen; the agent does not have it.
+	 */
+	public folderChanged(): void {
+		if (!this.session || this.sessionCwd === undefined || path.resolve(this.sessionCwd) === path.resolve(this.host.cwd())) return;
+		this.stop();
+		this.resetSession();
+		if (this.transcript.length) this.push({ kind: "note", text: `The document is in ${path.basename(this.host.cwd()) || this.host.cwd()} now: ${this.agentLabel(this.agent)} starts a new conversation there.` });
+		this.postState();
+		void this.ensureSession().catch(() => undefined);
+	}
+
 	private resetSession(): void {
 		this.session?.dispose();
 		this.session = undefined;
+		this.sessionCwd = undefined;
 		this.starting = undefined;
 		this.sessionError = undefined;
 		this.authMethods = [];
@@ -479,7 +498,8 @@ export class ChatController {
 			return Promise.reject(new Error(spec.error));
 		}
 		this.mcp.compactDescriptions = !!spec.compactTools;
-		const session = new AcpAgentSession(def, spec, this.host.cwd(), { url: this.mcp.url, token: this.mcp.token, stdioProxy: paths.stdioProxy }, {
+		this.sessionCwd = this.host.cwd();
+		const session = new AcpAgentSession(def, spec, this.sessionCwd, { url: this.mcp.url, token: this.mcp.token, stdioProxy: paths.stdioProxy }, {
 			onUpdate: (u) => this.onUpdate(u),
 			requestPermission: (req, signal) => this.requestPermission(req, signal),
 			onExit: (message) => {

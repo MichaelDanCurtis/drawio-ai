@@ -93,7 +93,7 @@ export class StaticServer {
 			res.writeHead(200, { "content-type": MIME[".html"], "cache-control": "no-store" });
 			return void res.end(this.editorHtml(o));
 		}
-		if (p === "/chat.html" || p === "/mapper.html" || p === "/live.html" || p === "/settings.html" || p === "/workshop.html" || p === "/excalidraw.html") {
+		if (p === "/chat.html" || p === "/mapper.html" || p === "/live.html" || p === "/settings.html" || p === "/workshop.html" || p === "/excalidraw.html" || p === "/home.html") {
 			const nonce = crypto.randomBytes(16).toString("hex");
 			const html = fs
 				.readFileSync(path.join(paths.out, p.slice(1)), "utf8")

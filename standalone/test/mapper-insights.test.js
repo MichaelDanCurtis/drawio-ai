@@ -173,3 +173,36 @@ test("Save As: the map records follow the diagram (copied to a new folder, re-as
 	assert.equal(service.records()[0].id, untitled.id);
 	assert.equal(store.loadRecord(b, untitled.id).diagram, "shop-v2.drawio");
 });
+
+test("a move: the map records go with the diagram, the current ones win, and none stay behind", () => {
+	const a = fs.mkdtempSync(path.join(os.tmpdir(), "maps-move-a-"));
+	const b = fs.mkdtempSync(path.join(os.tmpdir(), "maps-move-b-"));
+	const mine = { ...store.createRecord({ recipe, input: {}, result: result() }), diagram: "plan.drawio" };
+	const other = { ...store.createRecord({ recipe, input: {}, result: result() }), diagram: "other.drawio" };
+	store.saveRecord(a, mine);
+	store.saveRecord(a, other);
+	// a → b: moved, the other diagram's map stays
+	assert.equal(store.moveRecords({ cwd: a, diagram: path.join(a, "plan.drawio") }, { cwd: b, diagram: path.join(b, "plan.drawio") }), 1);
+	assert.equal(store.loadRecord(a, mine.id), undefined);
+	assert.equal(store.loadRecord(a, other.id).diagram, "other.drawio");
+	// changed in b, and a stale copy left in a (as an earlier Save As would leave one)
+	store.saveRecord(b, { ...store.loadRecord(b, mine.id), note: "current" });
+	store.saveRecord(a, { ...mine, note: "stale" });
+	// b → a: the current one comes back, over the stale one
+	assert.equal(store.moveRecords({ cwd: b, diagram: path.join(b, "plan.drawio") }, { cwd: a, diagram: path.join(a, "plan.drawio") }), 1);
+	assert.equal(store.loadRecord(a, mine.id).note, "current");
+	assert.equal(store.loadRecord(b, mine.id), undefined);
+	// a new name in the same folder: re-associated, still there
+	assert.equal(store.moveRecords({ cwd: a, diagram: path.join(a, "plan.drawio") }, { cwd: a, diagram: path.join(a, "roadmap.drawio") }), 1);
+	assert.equal(store.loadRecord(a, mine.id).diagram, "roadmap.drawio");
+	// the same folder by a path with a link in it: re-associated in place, never taken out
+	const linked = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "maps-link-")), "by-link");
+	fs.symlinkSync(a, linked);
+	assert.equal(store.moveRecords({ cwd: linked, diagram: path.join(linked, "roadmap.drawio") }, { cwd: fs.realpathSync(a), diagram: path.join(fs.realpathSync(a), "plan-b.drawio") }), 1);
+	assert.equal(store.loadRecord(a, mine.id).diagram, "plan-b.drawio");
+	assert.equal(store.hasRecords(a, path.join(a, "plan-b.drawio")), true);
+	assert.equal(store.hasRecords(a, path.join(a, "roadmap.drawio")), false);
+	assert.equal(store.hasRecords(b, path.join(b, "plan-b.drawio")), false);
+	fs.rmSync(a, { recursive: true, force: true });
+	fs.rmSync(b, { recursive: true, force: true });
+});

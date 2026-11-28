@@ -3,6 +3,7 @@
 //   yarn e2e --agent claude|gemini|codex|copilot|kimi  also one prompt through that agent over ACP
 //   yarn e2e --api-chat                        the chat answered through an API key, with a stand-in provider (nothing is sent, no keychain)
 //   yarn e2e --excalidraw                      an Excalidraw drawing: open, edit, save, reopen, export, light and dark
+//   yarn e2e --home                            the home screen: a library, cards, collections, versions, the trash, light and dark
 //   yarn e2e --agent codex --prompt "…" --file ../examples/use-cases/cloud-architecture.drawio
 //   node scripts/e2e.mjs --app dist/mac-arm64/Draw.AI.app/Contents/MacOS/Draw.AI   the packaged app
 // The diagram is copied to a temp folder first; results land in <temp>/out.
@@ -20,7 +21,8 @@ const arg = (name, fallback) => {
 	return i >= 0 ? process.argv[i + 1] : fallback;
 };
 const excalidraw = process.argv.includes("--excalidraw");
-const source = resolve(arg("file", excalidraw ? join(here, "../test/fixtures/excalidraw/sample.excalidraw") : join(here, "../../examples/use-cases/cloud-architecture.drawio")));
+const home = process.argv.includes("--home");
+const source = resolve(arg("file", excalidraw || home ? join(here, "../test/fixtures/excalidraw/sample.excalidraw") : join(here, "../../examples/use-cases/cloud-architecture.drawio")));
 const dir = mkdtempSync(join(tmpdir(), "drawai-e2e-"));
 const file = join(dir, basename(source));
 copyFileSync(source, file);
@@ -43,6 +45,7 @@ const config = {
 	polish: process.argv.includes("--polish"),
 	apiChat: process.argv.includes("--api-chat"),
 	excalidraw,
+	home,
 	clickAllowAll: process.argv.includes("--click-allow-all"),
 	// yarn e2e --map software.github-actions --map-input '{"folder":"…"}' [--map-dialog] [--agent claude --ask-agent] [--dig "question"]
 	map: arg("map")
