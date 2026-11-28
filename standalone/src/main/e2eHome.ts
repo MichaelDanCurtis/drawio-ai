@@ -216,8 +216,12 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 	await go("Recent");
 	await until("Recent to list it", async () => (await cards()).some((c) => c.name === "elsewhere"));
 	log("homeRecent", (await cards()).map((c) => `${c.name} (${c.sub})`));
+	// (with a map: its record is copied beside the copy, and stays with the original too)
+	saveRecord(path.dirname(outside), { version: 1, id: "e2e-elsewhere-map", diagram: "elsewhere.drawio" } as any);
 	await send({ type: "addRecent", path: outside, collection: "" });
 	await until("the copy in the library", () => fs.existsSync(path.join(folder, "elsewhere.drawio")));
+	await until("its map record beside it", () => loadRecord(lib().root, "e2e-elsewhere-map")?.diagram === "elsewhere.drawio");
+	expect(!!loadRecord(path.dirname(outside), "e2e-elsewhere-map"), "the original keeps its map record");
 	expect(fs.existsSync(outside), "the file elsewhere stays where it is");
 	documentWindows.of(outside)?.win.close();
 	await until("that window to close", () => !documentWindows.of(outside));

@@ -7,7 +7,7 @@ import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
 import { canonicalPath, docType, Library, LibraryError, type DocKind } from "./library/library";
 import { readRecent, RecentFileError, Recents } from "./library/recents";
 import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
-import { hasRecords, moveRecords } from "./mapper/store";
+import { adoptRecords, hasRecords, moveRecords } from "./mapper/store";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
@@ -436,7 +436,16 @@ export class HomeWindow {
 					const type = recent && docType(path.basename(recent.path));
 					if (!recent || !type) break;
 					// (only as the very file that was opened here, never through a link that took its place: see readRecent)
-					lib.create(text(msg.collection), type.name, type.ending, readRecent(recent, PREVIEW_LIMIT * 4));
+					const copied = lib.pathOf(lib.create(text(msg.collection), type.name, type.ending, readRecent(recent, PREVIEW_LIMIT * 4)));
+					// (its maps' records are copied beside it, as Save As to another folder copies them: in a folder
+					// of its own, the copy's maps are its own, and the original keeps its records where they are)
+					if (canonicalPath(path.dirname(copied)) !== canonicalPath(path.dirname(recent.path))) {
+						try {
+							adoptRecords({ cwd: path.dirname(recent.path), diagram: recent.path }, { cwd: path.dirname(copied), diagram: copied });
+						} catch {
+							// (the diagram is copied; its maps can be drawn again)
+						}
+					}
 					break;
 				}
 				case "rename":
