@@ -444,7 +444,12 @@ export class HomeWindow {
 					break;
 				case "renameCollection": {
 					const from = text(msg.name);
-					const inside = lib.contents().docs.filter((d) => d.collection === from).map((d) => d.id);
+					// (the cards are read up to a number; a document open in a window is in the collection whether or not it got a card)
+					const openInside = documentWindows
+						.all()
+						.map((w) => (w.file ? lib.idOf(w.file) : undefined))
+						.filter((id): id is string => !!id && id.split("/")[0] === from);
+					const inside = [...new Set([...lib.contents().docs.filter((d) => d.collection === from).map((d) => d.id), ...openInside])];
 					let to = from;
 					await HomeWindow.moving(lib, inside, () => {
 						to = lib.renameCollection(from, text(msg.to));
