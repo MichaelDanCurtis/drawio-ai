@@ -44,7 +44,9 @@ for individuals"), so the Gemini entry uses `agy` when it is installed. Gemini C
 works with an API key or Vertex AI.
 
 The ACP adapters for Claude Code and Codex are fetched with `npx` on first use when
-they are not installed globally. The agent picker in the chat shows which agents are
+they are not installed globally. `npx` is started in an empty folder of the app's own, not in
+the document's: npm's settings and packages are then yours, never those of a folder a document
+happens to be in. The agent itself works in the document's folder. The agent picker in the chat shows which agents are
 installed and look signed in; when one is not, the chat says what to run (and offers
 **Sign In** when the agent supports signing in over ACP).
 

@@ -19,6 +19,14 @@
     about before it changes the drawing or writes a file.
   - Not yet: keeping or reverting part of a review, and reaching a drawing from Claude Code or
     Codex connected from outside the app.
+- **Security: `npx` is no longer run in the document's folder.** When the Claude Code or Codex
+  adapter is not installed (or an older one is), the app fetches it with `npx` as the chat opens.
+  That was done in the folder of the diagram or drawing, where npm reads the folder's own
+  settings (an `.npmrc` can name another registry) and looks in its `node_modules` first: a
+  checked-out repository could so decide what was run as the agent, by a file in it being
+  opened. `npx`, and any other package runner set as an agent's command in settings.json, is
+  now started in an empty folder of the app's own; the agent still works in the document's
+  folder, which its session is told. Installed adapters and agents are started as before.
 
 ## [0.4.1]
 

@@ -6,14 +6,15 @@
 // No real agent is started, no key is used and nothing is sent anywhere.
 import { dialog, Menu, type WebContents } from "electron";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import type { E2eConfig } from "./e2e";
 import { addElement, closed, elementIds, expect, inEditor, menuItem, pause, shot, until } from "./e2eExcalidraw";
 import { readScene } from "./excalidrawFile";
 import { ExcalidrawWindow } from "./excalidrawWindow";
 import { paths } from "./paths";
-import { agentDef, launchSpec } from "./agents";
-import { updateSettings } from "./settings";
+import { agentDef, launchSpec, type LaunchSpec } from "./agents";
+import { settingsPath, updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
 
 /** `sample`: the drawing the run was started with, as it was before anything changed it. */
@@ -326,14 +327,30 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	const fake = path.join(paths.appDir, "test/helpers/fake-acp-agent.js");
 	if (fs.existsSync(fake)) {
 		// (in the run's own settings file: "Claude Code" is the stand-in here, and no real agent is started)
-		updateSettings({ agents: { claude: { command: process.execPath, args: [fake], env: { ELECTRON_RUN_AS_NODE: "1" } } } });
-		expect(launchSpec(agentDef("claude")) && (launchSpec(agentDef("claude")) as any).args?.[0] === fake, "the stand-in agent is the one that will be started");
+		// It is started as the adapters are when they are not installed: through a program called
+		// npx (here one that fetches nothing, and runs the stand-in). The drawing's folder is the
+		// session's; the program itself is started in the app's own folder, where nothing that came
+		// with the drawing (an .npmrc, a node_modules) is read by it.
+		const viaNpx = process.platform !== "win32";
+		const npxDir = fs.mkdtempSync(path.join(os.tmpdir(), "omnidraw-e2e-npx-"));
+		const npx = path.join(npxDir, "npx");
+		if (viaNpx) fs.writeFileSync(npx, `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec "${process.execPath}" "${fake}"\n`, { mode: 0o755 });
+		updateSettings({ agents: { claude: viaNpx ? { command: npx, args: [] } : { command: process.execPath, args: [fake], env: { ELECTRON_RUN_AS_NODE: "1" } } } });
+		const spec = launchSpec(agentDef("claude")) as LaunchSpec;
+		expect(viaNpx ? spec.command === npx : spec.args?.[0] === fake, "the stand-in agent is the one that will be started");
+		const own = path.join(fs.realpathSync(path.dirname(settingsPath())), "agent-start");
+		const drawingFolder = fs.realpathSync(path.dirname(file));
+		expect(!viaNpx || (spec.startIn === own && own !== drawingFolder && fs.readdirSync(own).length === 0), "a launch through npx is to start in the app's own folder, which is empty");
 		await w.chat.onMessage({ type: "pickProvider", providerId: "claude" });
 		w.chat.autoApprove = true;
-		const steps = [{ tools: true }, { call: { name: "excalidraw_apply_operations", arguments: { operations: [{ op: "add", type: "text", id: "from-agent", x: 80, y: 520, text: "Drawn by an agent" }] } } }, { call: { name: "excalidraw_get_scene", arguments: { query: "agent" } } }];
+		const steps = [{ tools: true }, { where: true }, { call: { name: "excalidraw_apply_operations", arguments: { operations: [{ op: "add", type: "text", id: "from-agent", x: 80, y: 520, text: "Drawn by an agent" }] } } }, { call: { name: "excalidraw_get_scene", arguments: { query: "agent" } } }];
 		const done = await turn(`Do this. STEPS:${JSON.stringify(steps)}`);
 		const reply = [...w.chat.items].reverse().find((i) => i.kind === "assistant")?.text ?? "";
 		log("aiAgent", { ...done, reply: reply.slice(0, 400) });
+		log("aiAgentPlace", { own, drawingFolder, said: /\[started in [^\]]*\] \[session in [^\]]*\]/.exec(reply)?.[0] });
+		expect(reply.includes(`[session in ${w.cwd()}]`) && fs.realpathSync(w.cwd()) === drawingFolder, "the agent's session is in the drawing's folder");
+		expect(!viaNpx || reply.includes(`[started in ${own}]`), "the program started through npx was not started in the drawing's folder");
+		fs.rmSync(npxDir, { recursive: true, force: true });
 		expect(done.stop === "end_turn" && /\[tools excalidraw_get_scene,excalidraw_apply_operations,/.test(reply) && /\[call ok:/.test(reply) && (await elementIds(w)).includes("from-agent"), "an agent over ACP is given the drawing's tools, and its call changes the drawing");
 		// (what the agent was told with its first request: where it is, what is open and which tools to use)
 		await until("the agent's change to be pending", async () => (await review()).pending === "1 added");

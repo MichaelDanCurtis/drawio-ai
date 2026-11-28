@@ -2,6 +2,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { ChildProcess, spawn } from "child_process";
 import { Readable, Writable } from "stream";
 import type { AgentDef, LaunchSpec } from "./agents";
+import { startFolder } from "./launchPlace";
 
 export interface McpEndpoint {
 	url: string;
@@ -79,8 +80,9 @@ export class AcpAgentSession implements ChatSession {
 	}
 
 	public async start(): Promise<SessionInfo> {
+		// (the session works in this.cwd, told to the agent below; a package runner is not started there)
 		const child = spawn(this.launch.command, this.launch.args, {
-			cwd: this.cwd,
+			cwd: startFolder(this.launch, this.cwd),
 			env: this.launch.env,
 			stdio: ["pipe", "pipe", "pipe"],
 		});
