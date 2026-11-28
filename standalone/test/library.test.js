@@ -1,0 +1,344 @@
+// The library behind the home screen (src/main/library): documents in a folder, collections,
+// the trash, versions, the list of recent documents, and the sketches drawn for cards.
+// Run from standalone/: node --test test/library.test.js
+const { test, after } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const zlib = require("zlib");
+require("./helpers/ts");
+const { Library, LibraryError, cleanName, docType, VERSION_WINDOW, MAX_VERSIONS } = require("../src/main/library/library");
+const { Recents } = require("../src/main/library/recents");
+const { sketchExcalidraw, sketchDrawio, firstPage, safeColour } = require("../src/main/library/sketch");
+
+const made = [];
+after(() => made.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+function temp(name = "library") {
+	const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), `omnidraw-${name}-`)));
+	made.push(dir);
+	return dir;
+}
+const refused = (fn, pattern) => assert.throws(fn, (e) => e instanceof LibraryError && pattern.test(e.message), `expected a refusal matching ${pattern}`);
+const B = (s) => Buffer.from(s);
+const ids = (lib) => lib.contents().docs.map((d) => d.id).sort();
+
+test("what a file's name says it is", () => {
+	assert.deepEqual(docType("Plan.excalidraw"), { name: "Plan", ending: ".excalidraw", kind: "excalidraw" });
+	assert.deepEqual(docType("Plan.excalidraw.PNG"), { name: "Plan", ending: ".excalidraw.PNG", kind: "excalidraw" });
+	assert.deepEqual(docType("net.v2.drawio.svg"), { name: "net.v2", ending: ".drawio.svg", kind: "drawio" });
+	assert.deepEqual(docType("old.dio"), { name: "old", ending: ".dio", kind: "drawio" });
+	for (const n of ["notes.txt", "picture.png", "picture.svg", ".drawio", "drawio", "Plan.excalidraw.bak"]) assert.equal(docType(n), undefined, n);
+});
+
+test("a name is a name: never a path, never hidden, never one the system keeps", () => {
+	assert.equal(cleanName("  Road   map  "), "Road map");
+	for (const bad of ["", "   ", "a/b", "a\\b", "..", ".hidden", "trailing.", "what?", "a:b", "nul", "COM1", "x".repeat(121), "bell\u0007here"]) refused(() => cleanName(bad), /./);
+	// (white space of any kind between words is one space)
+	assert.equal(cleanName("tab\there"), "tab here");
+});
+
+test("reading the library: documents, collections, and what is left out", () => {
+	const root = temp();
+	const lib = new Library(root);
+	fs.writeFileSync(path.join(root, "Top.drawio"), "<mxfile/>");
+	fs.mkdirSync(path.join(root, "Team", "deep"), { recursive: true });
+	fs.writeFileSync(path.join(root, "Team", "Plan.excalidraw"), "{}");
+	fs.writeFileSync(path.join(root, "Team", "deep", "Net.drawio.svg"), "<svg/>");
+	fs.mkdirSync(path.join(root, "Empty"));
+	// left out: other files, hidden folders, other people's code, links (which could lead anywhere)
+	fs.writeFileSync(path.join(root, "notes.txt"), "x");
+	fs.mkdirSync(path.join(root, ".git"));
+	fs.writeFileSync(path.join(root, ".git", "Hidden.drawio"), "x");
+	fs.mkdirSync(path.join(root, "node_modules"));
+	fs.writeFileSync(path.join(root, "node_modules", "Dep.drawio"), "x");
+	const outside = temp("outside");
+	fs.writeFileSync(path.join(outside, "Elsewhere.drawio"), "x");
+	fs.symlinkSync(outside, path.join(root, "Linked"));
+	fs.symlinkSync(path.join(outside, "Elsewhere.drawio"), path.join(root, "Link.drawio"));
+
+	const c = lib.contents();
+	assert.deepEqual(c.docs.map((d) => d.id).sort(), ["Team/Plan.excalidraw", "Team/deep/Net.drawio.svg", "Top.drawio"]);
+	assert.deepEqual(c.collections, [{ name: "Empty", count: 0 }, { name: "Team", count: 2 }]);
+	const net = c.docs.find((d) => d.name === "Net");
+	assert.deepEqual([net.collection, net.within, net.kind, net.ending], ["Team", "deep", "drawio", ".drawio.svg"]);
+	assert.equal(c.more, false);
+
+	// which document a file is, when it is one in the library
+	assert.equal(lib.idOf(path.join(root, "Team", "Plan.excalidraw")), "Team/Plan.excalidraw");
+	assert.equal(lib.idOf(path.join(root, "Team", "New one.excalidraw")), "Team/New one.excalidraw");
+	for (const f of [path.join(outside, "Elsewhere.drawio"), path.join(root, "notes.txt"), path.join(root, ".git", "Hidden.drawio"), path.join(root, "Linked", "Elsewhere.drawio"), path.join(root, ".omnidraw", "trash", "x", "item.drawio")]) assert.equal(lib.idOf(f), undefined, f);
+});
+
+test("an id leads nowhere but into the library", () => {
+	const root = temp();
+	const lib = new Library(root);
+	const outside = temp("outside");
+	fs.writeFileSync(path.join(outside, "Secret.drawio"), "secret");
+	fs.symlinkSync(outside, path.join(root, "Linked"));
+	fs.symlinkSync(path.join(outside, "Secret.drawio"), path.join(root, "Link.drawio"));
+	for (const id of ["../Secret.drawio", "Team/../../Secret.drawio", "/etc/passwd", ".omnidraw/trash/x/item.drawio", "", "a//b.drawio", "notes.txt", "Linked/Secret.drawio", "Link.drawio", "a\\b.drawio"]) {
+		refused(() => lib.read(id), /not (a document )?in the library/);
+		refused(() => lib.trash(id), /not (a document )?in the library/);
+		refused(() => lib.rename(id, "x"), /not (a document )?in the library/);
+	}
+	assert.equal(fs.readFileSync(path.join(outside, "Secret.drawio"), "utf8"), "secret");
+});
+
+test("making, renaming, moving and copying documents", () => {
+	const lib = new Library(temp());
+	const a = lib.create("", "Untitled", ".excalidraw", B("one"));
+	const b = lib.create("", "Untitled", ".excalidraw", B("two"));
+	const c = lib.create("Team", "Untitled", ".drawio", B("three"));
+	assert.deepEqual([a, b, c], ["Untitled.excalidraw", "Untitled 2.excalidraw", "Team/Untitled.drawio"]);
+	refused(() => lib.create("", "x", ".png", B("")), /not an ending/);
+	refused(() => lib.create("../up", "x", ".drawio", B("")), /cannot have/);
+
+	// a new name, its ending kept; a name that is taken is not taken over
+	const plan = lib.rename(a, "Plan");
+	assert.equal(plan, "Plan.excalidraw");
+	assert.equal(lib.read(plan).toString(), "one");
+	refused(() => lib.rename(plan, "Untitled 2"), /already/);
+	refused(() => lib.rename(plan, "../Escape"), /cannot have/);
+	assert.equal(lib.rename(plan, "Plan"), plan);
+
+	// to a collection (made when it is new), to the top, and beside one of the same name
+	const moved = lib.move(plan, "Team");
+	assert.equal(moved, "Team/Plan.excalidraw");
+	assert.equal(lib.move(moved, "Team"), moved);
+	lib.create("", "Plan", ".excalidraw", B("another plan"));
+	assert.equal(lib.move(moved, ""), "Plan 2.excalidraw");
+	assert.equal(lib.move("Plan 2.excalidraw", "Brand new"), "Brand new/Plan 2.excalidraw");
+
+	const copy = lib.duplicate(c);
+	assert.equal(copy, "Team/Untitled copy.drawio");
+	assert.equal(lib.duplicate(c), "Team/Untitled copy 2.drawio");
+	assert.equal(lib.read(copy).toString(), "three");
+	assert.deepEqual(ids(lib), ["Brand new/Plan 2.excalidraw", "Plan.excalidraw", "Team/Untitled copy 2.drawio", "Team/Untitled copy.drawio", "Team/Untitled.drawio", "Untitled 2.excalidraw"]);
+});
+
+test("collections: made, renamed with what is in them, and taken away without their documents", () => {
+	const root = temp();
+	const lib = new Library(root);
+	assert.equal(lib.createCollection(" Clients "), "Clients");
+	refused(() => lib.createCollection("Clients"), /already/);
+	refused(() => lib.createCollection("a/b"), /cannot have/);
+	const doc = lib.create("Clients", "Acme", ".drawio", B("acme"));
+	lib.snapshot(doc, B("acme"));
+	lib.setThumb(doc, B("png"));
+
+	assert.equal(lib.renameCollection("Clients", "Customers"), "Customers");
+	const now = "Customers/Acme.drawio";
+	assert.deepEqual(ids(lib), [now]);
+	assert.equal(lib.versions(now).length, 1);
+	assert.equal(lib.thumb(now).toString(), "png");
+	refused(() => lib.renameCollection("Clients", "x"), /not a collection/);
+
+	// taken away: the documents go to the top, under names that are free there
+	lib.create("", "Acme", ".drawio", B("another acme"));
+	fs.mkdirSync(path.join(root, "Customers", "sub"));
+	fs.writeFileSync(path.join(root, "Customers", "sub", "Deep.excalidraw"), "{}");
+	assert.deepEqual(lib.removeCollection("Customers"), { moved: 2, kept: false });
+	assert.deepEqual(ids(lib), ["Acme 2.drawio", "Acme.drawio", "Deep.excalidraw"]);
+	assert.equal(lib.versions("Acme 2.drawio").length, 1);
+	assert.equal(fs.existsSync(path.join(root, "Customers")), false);
+	// a folder with something else in it stays, with that in it
+	lib.createCollection("Mixed");
+	lib.create("Mixed", "One", ".drawio", B("1"));
+	fs.writeFileSync(path.join(root, "Mixed", "README.md"), "keep me");
+	assert.deepEqual(lib.removeCollection("Mixed"), { moved: 1, kept: true });
+	assert.equal(fs.readFileSync(path.join(root, "Mixed", "README.md"), "utf8"), "keep me");
+});
+
+test("the trash: there with its versions, back where it was, or gone for good", () => {
+	const root = temp();
+	const lib = new Library(root);
+	const doc = lib.create("Team", "Plan", ".excalidraw", B("plan"));
+	lib.snapshot(doc, B("plan"));
+	lib.setThumb(doc, B("png"));
+	const t = lib.trash(doc, Date.UTC(2026, 10, 28, 10, 0, 0));
+	assert.deepEqual(ids(lib), []);
+	const [item] = lib.contents().trash;
+	assert.deepEqual([item.id, item.from, item.name, item.kind, item.collection, item.at], [t, doc, "Plan", "excalidraw", "Team", Date.UTC(2026, 10, 28, 10, 0, 0)]);
+	assert.equal(fs.readFileSync(lib.trashFile(t), "utf8"), "plan");
+	assert.equal(lib.trashThumb(t).toString(), "png");
+	// (the collection is still one, with nothing in it)
+	assert.deepEqual(lib.contents().collections, [{ name: "Team", count: 0 }]);
+
+	// back: under its name, or beside one that took the name meanwhile; its folder made again if it went
+	lib.create("Team", "Plan", ".excalidraw", B("a newer plan"));
+	const back = lib.restore(t);
+	assert.equal(back, "Team/Plan 2.excalidraw");
+	assert.equal(lib.read(back).toString(), "plan");
+	assert.equal(lib.versions(back).length, 1);
+	assert.equal(lib.thumb(back).toString(), "png");
+	assert.deepEqual(lib.contents().trash, []);
+	refused(() => lib.restore(t), /not in the trash/);
+	const t2 = lib.trash(back);
+	fs.rmSync(path.join(root, "Team"), { recursive: true });
+	assert.equal(lib.restore(t2), "Team/Plan 2.excalidraw");
+
+	// gone for good, one or all; and nothing that is not a trash item is named
+	const t3 = lib.trash("Team/Plan 2.excalidraw");
+	const other = lib.create("", "Other", ".drawio", B("x"));
+	const t4 = lib.trash(other);
+	lib.deleteForever(t3);
+	assert.deepEqual(lib.contents().trash.map((i) => i.id), [t4]);
+	assert.equal(lib.emptyTrash(), 1);
+	assert.deepEqual(lib.contents().trash, []);
+	for (const bad of ["../..", "..", "x", "20261128T100000Z-zzzzzzzz", ""]) refused(() => lib.deleteForever(bad), /not in the trash/);
+	// (what the app keeps is not offered to a repository the library is in)
+	assert.equal(fs.readFileSync(path.join(root, ".omnidraw", ".gitignore"), "utf8"), "*\n");
+});
+
+test("versions: one for a row of saves, one of its own for a point worth keeping, and a way back", () => {
+	const lib = new Library(temp());
+	const doc = lib.create("", "Plan", ".excalidraw", B("v0"));
+	const t0 = Date.UTC(2026, 10, 28, 10, 0, 0);
+	const min = 60 * 1000;
+	// as it was opened: kept
+	assert.equal(lib.snapshot(doc, B("v0"), { kept: true, now: t0 }), true);
+	// saves within ten minutes are one version, the last of them; the opened state is not replaced
+	assert.equal(lib.snapshot(doc, B("v1"), { now: t0 + 1 * min }), true);
+	assert.equal(lib.snapshot(doc, B("v2"), { now: t0 + 4 * min }), true);
+	assert.equal(lib.snapshot(doc, B("v2"), { now: t0 + 5 * min }), false);
+	assert.deepEqual(lib.versions(doc).map((v) => [lib.versionBytes(doc, v.key).toString(), v.kept]), [["v2", false], ["v0", true]]);
+	// later saves start a new one
+	lib.snapshot(doc, B("v3"), { now: t0 + 1 * min + VERSION_WINDOW });
+	lib.snapshot(doc, B("v4"), { now: t0 + 30 * min });
+	assert.deepEqual(lib.versions(doc).map((v) => lib.versionBytes(doc, v.key).toString()), ["v4", "v3", "v2", "v0"]);
+	assert.equal(lib.contents().docs[0].versions, 4);
+
+	// going back: the document is the version again, and what it was is kept, so that this can be gone back on
+	fs.writeFileSync(lib.pathOf(doc), "what it is now, and longer than a version");
+	const v2 = lib.versions(doc).find((v) => lib.versionBytes(doc, v.key).toString() === "v2");
+	lib.restoreVersion(doc, v2.key, t0 + 40 * min);
+	assert.equal(lib.read(doc).toString(), "v2");
+	const after = lib.versions(doc);
+	assert.deepEqual([lib.versionBytes(doc, after[0].key).toString(), after[0].kept, after.length], ["what it is now, and longer than a version", true, 5]);
+	// a save after that is a version of its own, not the kept one's new state
+	lib.snapshot(doc, B("v5"), { now: t0 + 41 * min });
+	assert.equal(lib.versions(doc).length, 6);
+	refused(() => lib.versionBytes(doc, "../../../etc/passwd"), /not kept/);
+	refused(() => lib.restoreVersion(doc, "20200101T000000Z-s-000000000000.excalidraw"), /not kept/);
+
+	// versions follow the document where the app takes it
+	const renamed = lib.rename(doc, "Roadmap");
+	const moved = lib.move(renamed, "Team");
+	assert.equal(lib.versions(moved).length, 6);
+	assert.equal(lib.versions(doc).length, 0);
+
+	// only so many are kept: the oldest go
+	const many = lib.create("", "Busy", ".drawio", B("0"));
+	for (let i = 1; i <= MAX_VERSIONS + 5; i++) lib.snapshot(many, B(`s${i}`), { now: t0 + i * 11 * min });
+	const kept = lib.versions(many);
+	assert.equal(kept.length, MAX_VERSIONS);
+	assert.equal(lib.versionBytes(many, kept[0].key).toString(), `s${MAX_VERSIONS + 5}`);
+	assert.equal(lib.versionBytes(many, kept[kept.length - 1].key).toString(), "s6");
+});
+
+test("the picture kept of a document is for the document as it is, not as it was", () => {
+	const lib = new Library(temp());
+	const doc = lib.create("", "Plan", ".drawio", B("x"));
+	assert.equal(lib.thumb(doc), undefined);
+	lib.setThumb(doc, B("png"));
+	assert.equal(lib.thumb(doc).toString(), "png");
+	// changed since by another program: the picture is of an older state
+	const later = new Date(Date.now() + 60_000);
+	fs.utimesSync(lib.pathOf(doc), later, later);
+	assert.equal(lib.thumb(doc), undefined);
+	refused(() => lib.setThumb("../x.drawio", B("")), /not a document/);
+});
+
+test("recent documents: the latest first, each once, gone when the file is", () => {
+	const dir = temp("recents");
+	const file = path.join(dir, "data", "recent.json");
+	const a = path.join(dir, "a.drawio"), b = path.join(dir, "b.excalidraw"), c = path.join(dir, "c.drawio");
+	for (const f of [a, b, c]) fs.writeFileSync(f, "x");
+	const recents = new Recents(file, 2);
+	assert.deepEqual(recents.list(), []);
+	recents.add(a, 100);
+	recents.add(b, 200);
+	recents.add(a, 300);
+	assert.deepEqual(recents.list(), [{ path: a, at: 300 }, { path: b, at: 200 }]);
+	// only so many are remembered
+	recents.add(c, 400);
+	assert.deepEqual(recents.list().map((r) => r.path), [c, a]);
+	recents.moved(a, b);
+	assert.deepEqual(recents.list().map((r) => r.path), [c, b]);
+	fs.rmSync(c);
+	assert.deepEqual(recents.list().map((r) => r.path), [b]);
+	recents.remove(b);
+	assert.deepEqual(recents.list(), []);
+	// a file that is not a list is no list
+	fs.writeFileSync(file, "not json");
+	assert.deepEqual(new Recents(file).list(), []);
+});
+
+test("a sketch of a drawing: its shapes, lines and words, and nothing of the file written as it stands", () => {
+	const svg = sketchExcalidraw({
+		appState: { viewBackgroundColor: "#fffce8" },
+		elements: [
+			{ id: "a", type: "rectangle", x: 0, y: 0, width: 160, height: 80, strokeColor: "#1971c2", backgroundColor: "#a5d8ff", roundness: { type: 3 }, angle: Math.PI / 2 },
+			{ id: "b", type: "ellipse", x: 300, y: 0, width: 120, height: 80, strokeColor: "red; evil", backgroundColor: 'url("http://example.invalid/x")' },
+			{ id: "d", type: "diamond", x: 0, y: 200, width: 100, height: 100, strokeStyle: "dashed", opacity: 50 },
+			{ id: "l", type: "arrow", x: 160, y: 40, width: 140, height: 0, points: [[0, 0], [140, 0]], strokeColor: "#000000" },
+			{ id: "t", type: "text", x: 10, y: 320, width: 200, height: 25, text: 'Hello <script>alert(1)</script> & "you"', fontSize: 20 },
+			{ id: "gone", type: "rectangle", x: 5000, y: 5000, width: 10, height: 10, isDeleted: true },
+			{ id: "bad", type: "rectangle", x: "0", y: 0, width: 10, height: 10 },
+			null,
+		],
+	});
+	assert.match(svg, /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" viewBox="/);
+	assert.match(svg, /<rect[^>]*fill="#fffce8"/);
+	assert.match(svg, /<rect[^>]*rx=[^>]*stroke="#1971c2" fill="#a5d8ff"[^>]*transform="rotate\(90 80 40\)"/);
+	assert.match(svg, /<ellipse[^>]*stroke="#1e1e1e" fill="none"/);
+	assert.match(svg, /<polygon[^>]*stroke-dasharray[^>]*opacity="0.5"/);
+	assert.equal((svg.match(/<polyline/g) ?? []).length, 2);
+	assert.match(svg, /Hello &lt;script&gt;alert\(1\)&lt;\/script&gt; &amp; &quot;you&quot;/);
+	assert.ok(!/evil|example\.invalid|<script|5000/.test(svg), svg);
+	// an empty drawing is an empty page, not an error
+	assert.match(sketchExcalidraw({ elements: [] }), /^<svg /);
+	assert.match(sketchExcalidraw({}), /^<svg /);
+	assert.equal(safeColour("#ABCDEF", "x"), "#abcdef");
+	assert.equal(safeColour("transparent", "x"), "none");
+	for (const c of ["red", "rgb(1,2,3)", "#12", "#gggggg", 'x" onload="y', undefined, 5]) assert.equal(safeColour(c, "fallback"), "fallback");
+});
+
+const MODEL = `<mxGraphModel dx="800" dy="600"><root><mxCell id="0"/><mxCell id="1" parent="0"/>
+<mxCell id="box" value="Web &lt;b&gt;server&lt;/b&gt;&lt;br&gt;nginx" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="40" width="120" height="60" as="geometry"/></mxCell>
+<mxCell id="group" value="" style="swimlane;fillColor=javascript:alert(1);" vertex="1" parent="1"><mxGeometry x="300" y="20" width="240" height="200" as="geometry"/></mxCell>
+<mxCell id="db" value="DB" style="ellipse;whiteSpace=wrap;html=1;" vertex="1" parent="group"><mxGeometry x="60" y="80" width="80" height="80" as="geometry"/></mxCell>
+<object label="Check &amp;amp; go" id="check"><mxCell style="rhombus;dashed=1;" vertex="1" parent="1"><mxGeometry x="60" y="200" width="80" height="80" as="geometry"/></mxCell></object>
+<mxCell id="e1" style="endArrow=classic;strokeColor=#333333;" edge="1" parent="1" source="box" target="db"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="230" y="70"/></Array></mxGeometry></mxCell>
+<mxCell id="e2" style="endArrow=none;" edge="1" parent="1"><mxGeometry relative="1" as="geometry"><mxPoint x="10" y="10" as="sourcePoint"/><mxPoint x="30" y="300" as="targetPoint"/></mxGeometry></mxCell>
+</root></mxGraphModel>`;
+
+test("a sketch of a diagram: its first page, plain or packed, shapes placed in what holds them", () => {
+	const plain = `<mxfile host="x"><diagram id="p1" name="Page-1">${MODEL}</diagram><diagram id="p2" name="Page-2"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="other" value="SECOND PAGE" vertex="1" parent="1"><mxGeometry x="0" y="0" width="10" height="10" as="geometry"/></mxCell></root></mxGraphModel></diagram></mxfile>`;
+	const svg = sketchDrawio(plain);
+	assert.match(svg, /^<svg /);
+	// the label's words, its HTML gone; the wrapped cell's label; colours that are colours
+	assert.match(svg, /<rect[^>]*rx=[^>]*stroke="#6c8ebf" fill="#dae8fc"/);
+	assert.match(svg, />Web server<\/tspan><tspan[^>]*>nginx</);
+	assert.match(svg, /Check &amp; go/);
+	assert.match(svg, /<polygon[^>]*stroke-dasharray/);
+	// the ellipse is placed from its container's corner: (300 + 60 + 40, 20 + 80 + 40)
+	assert.match(svg, /<ellipse cx="400" cy="140" rx="40" ry="40"/);
+	// the line from the box's middle, by its bend, to the ellipse's middle; the other between its two points, with no head
+	assert.match(svg, /<polyline points="100,70 230,70 400,140"/);
+	assert.match(svg, /<polyline points="10,10 30,300"/);
+	assert.equal((svg.match(/<polyline/g) ?? []).length, 3);
+	// what holds shapes is drawn before the lines, the shapes after them
+	assert.ok(svg.indexOf('x="300" y="20"') < svg.indexOf("<polyline") && svg.indexOf("<polyline") < svg.indexOf("<ellipse"), "order");
+	assert.ok(!/javascript|SECOND PAGE/.test(svg), svg);
+
+	// packed, as draw.io may keep a page: the same picture
+	const packed = `<mxfile><diagram id="p1" name="Page-1">${zlib.deflateRawSync(Buffer.from(encodeURIComponent(MODEL))).toString("base64")}</diagram></mxfile>`;
+	assert.equal(sketchDrawio(packed), svg);
+	// a bare model, and files that are not diagrams
+	assert.match(sketchDrawio(MODEL), /^<svg /);
+	assert.equal(sketchDrawio("<svg><rect/></svg>"), undefined);
+	assert.equal(sketchDrawio("<mxfile><diagram>not base64 at all !!!</diagram></mxfile>"), undefined);
+	assert.equal(firstPage("x".repeat(13_000_000)), undefined);
+});
