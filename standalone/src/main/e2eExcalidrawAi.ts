@@ -273,15 +273,25 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	const again = await call("excalidraw_export", { format: "png" });
 	const itself = await call("excalidraw_export", { format: "excalidraw", path: "ai.excalidraw" });
 	expect(again.isError && /exists/.test(again.text) && itself.isError && /replace the drawing itself/.test(itself.text), "an export does not replace a file unasked, nor the drawing itself");
+	// a link under the export's name (as a folder someone else made could hold) is not written through
+	const notes = path.join(config.out, "notes.txt");
+	fs.writeFileSync(notes, "the user's own file");
+	fs.symlinkSync(notes, path.join(config.out, "ai.svg"));
+	const throughLink = await call("excalidraw_export", { format: "svg" });
+	const throughLinkAsked = await call("excalidraw_export", { format: "svg", overwrite: true });
+	log("aiExportThroughLink", { answer: throughLink.text, notes: fs.readFileSync(notes, "utf8") });
+	expect(throughLink.isError && throughLinkAsked.isError && /is a link to another file/.test(throughLink.text) && /is a link to another file/.test(throughLinkAsked.text) && fs.readFileSync(notes, "utf8") === "the user's own file", "an export is not written through a link, asked to replace or not");
 	const askedToReplace: string[] = [];
 	const realBox = dialog.showMessageBox;
 	(dialog as any).showMessageBox = async (_win: unknown, options: Electron.MessageBoxOptions) => {
-		askedToReplace.push(String(options.message));
+		askedToReplace.push(`${options.message} (${options.detail})`);
 		return { response: 1, checkboxChecked: false };
 	};
 	try {
 		const declined = await call("excalidraw_export", { format: "png", overwrite: true });
 		expect(declined.isError && askedToReplace.length === 1 && /chose not to replace/.test(declined.text), "with overwrite the user is asked, and No is an answer");
+		// (asked about the file by name, and shown where it really is)
+		expect(askedToReplace[0] === `Replace ai.png with a new export? (${path.join(fs.realpathSync(config.out), "ai.png")})`, `the question names the file and its real place: ${askedToReplace[0]}`);
 	} finally {
 		(dialog as any).showMessageBox = realBox;
 	}

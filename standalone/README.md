@@ -144,7 +144,7 @@ of its own, which the window offers it the way a diagram's window offers draw.io
 | `excalidraw_select` | Selects elements for you and brings them into view. |
 | `excalidraw_render_image` | Renders the drawing, or some elements, to a PNG for the model to look at (models that take pictures only). |
 | `excalidraw_from_mermaid` | Adds a diagram written in Mermaid as editable shapes: a flowchart becomes shapes and arrows, laid out. |
-| `excalidraw_export` | Writes a PNG, an SVG (both with the drawing inside) or a `.excalidraw` file. An existing file is only replaced when the agent says so, and you are asked. |
+| `excalidraw_export` | Writes a PNG, an SVG (both with the drawing inside) or a `.excalidraw` file. An existing file is only replaced when the agent says so, and you are asked, with the file's real place shown. It is never written through a link: a name in the folder that is a link to another file is refused. |
 
 - **Elements are Excalidraw's own.** A shape, its label and an arrow are made by Excalidraw
   itself (it measures the text, fits a label into its shape and attaches an arrow to what it ends

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ChatController, type ChatEditor } from "./chatController";
 import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
-import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, formatForPath, pictureToWrite, readScene, sceneTextToWrite, type ExcalidrawFormat } from "./excalidrawFile";
+import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, exportTarget, formatForPath, pictureToWrite, readScene, realPath, sceneTextToWrite, writeExport, type ExcalidrawFormat } from "./excalidrawFile";
 import { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError } from "./excalidrawTools";
 import { paths } from "./paths";
 import { documentKey } from "./shortcuts";
@@ -601,15 +601,19 @@ export class ExcalidrawWindow implements DocumentWindow {
 		const dir = this.cwd();
 		const target = request.path ? path.resolve(dir, request.path) : path.join(dir, `${baseName(this.fileName() ?? "Untitled")}.${ending === "excalidraw" ? "copy.excalidraw" : ending}`);
 		if (formatForPath(target) !== format) throw new Error(`The path must end in .${ending} for this format.`);
-		if (this.file && path.resolve(target) === path.resolve(this.file)) throw new Error("That would replace the drawing itself.");
-		if ([...ExcalidrawWindow.all].some((w) => w.file && path.resolve(w.file) === target)) throw new Error(`${path.basename(target)} is open in another window.`);
-		if (fs.existsSync(target)) {
+		// (where it really lands: a name that is a link to another file is refused here, and the folders' own links are followed,
+		// so that what is compared, asked about and written is one and the same place)
+		const where = exportTarget(target);
+		if (this.file && where.real === realPath(this.file)) throw new Error("That would replace the drawing itself.");
+		if ([...ExcalidrawWindow.all].some((w) => w.file && realPath(w.file) === where.real)) throw new Error(`${path.basename(target)} is open in another window.`);
+		if (where.exists) {
 			if (!request.overwrite) throw new Error(`${target} exists. Pass overwrite: true to replace it (the user is asked).`);
-			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
+			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, detail: where.real, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
 			if (r.response !== 0) throw new Error("The user chose not to replace the file.");
 		}
 		const { bytes } = await this.contents(format);
-		fs.writeFileSync(target, bytes);
+		// (never through a link, and never over a file that was not there when the user was asked)
+		writeExport(where.real, bytes, where.exists);
 		return { path: target, bytes: bytes.length };
 	}
 
