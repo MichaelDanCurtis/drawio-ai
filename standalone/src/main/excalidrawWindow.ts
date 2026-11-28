@@ -146,7 +146,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 			aiResolveReview: (decision) => this.resolveReview(decision),
 		};
 		this.mcp = new ExcalidrawEndpoint(
-			new ExcalidrawToolbox({ fileName: () => this.fileName(), page: (name, args, signal) => this.pageTool(name, args, signal), exportForTool: (request) => this.exportForTool(request) }),
+			new ExcalidrawToolbox({ fileName: () => this.fileName(), page: (name, args, signal) => this.pageTool(name, args, signal), exportForTool: (request, signal) => this.exportForTool(request, signal) }),
 			() => this.fileName()
 		);
 		this.chat = new ChatController(
@@ -596,7 +596,12 @@ export class ExcalidrawWindow implements DocumentWindow {
 	}
 
 	/** excalidraw_export from an agent: next to the drawing unless a path is given; never silently overwrites. */
-	private async exportForTool(request: { format: string; path?: string; overwrite?: boolean }): Promise<{ path: string; bytes: number }> {
+	private async exportForTool(request: { format: string; path?: string; overwrite?: boolean }, signal?: AbortSignal): Promise<{ path: string; bytes: number }> {
+		// (a request that was stopped writes nothing: asked again at each point the export waits at)
+		const unlessStopped = () => {
+			if (signal?.aborted) throw new Error("Stopped.");
+		};
+		unlessStopped();
 		const format: ExcalidrawFormat = request.format === "excalidraw" ? "json" : (request.format as "png" | "svg");
 		const ending = request.format;
 		const dir = this.cwd();
@@ -609,10 +614,13 @@ export class ExcalidrawWindow implements DocumentWindow {
 		if ([...ExcalidrawWindow.all].some((w) => w.file && realPath(w.file) === where.real)) throw new Error(`${path.basename(target)} is open in another window.`);
 		if (where.exists) {
 			if (!request.overwrite) throw new Error(`${target} exists. Pass overwrite: true to replace it (the user is asked).`);
-			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, detail: where.real, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1 });
+			// (stopping the request takes the question away, as if it were answered Cancel)
+			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, detail: where.real, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1, ...(signal ? { signal } : {}) });
+			unlessStopped();
 			if (r.response !== 0) throw new Error("The user chose not to replace the file.");
 		}
 		const { bytes } = await this.contents(format);
+		unlessStopped();
 		// (never through a link, and never over a file that was not there when the user was asked)
 		writeExport(where.real, bytes, where.exists);
 		return { path: target, bytes: bytes.length };

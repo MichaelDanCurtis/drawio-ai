@@ -293,6 +293,26 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 		expect(declined.isError && askedToReplace.length === 1 && /chose not to replace/.test(declined.text), "with overwrite the user is asked, and No is an answer");
 		// (asked about the file by name, and shown where it really is)
 		expect(askedToReplace[0] === `Replace ai.png with a new export? (${path.join(fs.realpathSync(config.out), "ai.png")})`, `the question names the file and its real place: ${askedToReplace[0]}`);
+
+		// A request that is stopped writes nothing afterwards: not a new file (stopped while the
+		// editor hands the drawing over), and not over a file whose replacing was agreed to
+		// (stopped while the question is open, and after it was answered Replace).
+		const stoppedNew = new AbortController();
+		const newFile = (w as any).mcp.call("excalidraw_export", { format: "png", path: "stopped.png" }, { signal: stoppedNew.signal });
+		stoppedNew.abort();
+		const before = fs.readFileSync(path.join(config.out, "ai.png"));
+		const stoppedAsked = new AbortController();
+		(dialog as any).showMessageBox = async (_win: unknown, options: Electron.MessageBoxOptions) => {
+			askedToReplace.push(`signal: ${!!options.signal}`);
+			stoppedAsked.abort();
+			return { response: 0, checkboxChecked: false };
+		};
+		const replaced = (w as any).mcp.call("excalidraw_export", { format: "png", overwrite: true }, { signal: stoppedAsked.signal });
+		const stoppedExports = [await newFile, await replaced];
+		await pause(800);
+		log("aiExportStopped", { answers: stoppedExports.map((r: any) => r.text), asked: askedToReplace.slice(1), made: fs.existsSync(path.join(config.out, "stopped.png")) });
+		expect(stoppedExports.every((r: any) => r.isError && /Stopped/.test(r.text)) && !fs.existsSync(path.join(config.out, "stopped.png")), "a stopped request does not make an export file");
+		expect(askedToReplace[1] === "signal: true" && fs.readFileSync(path.join(config.out, "ai.png")).equals(before), "a request stopped after Replace was chosen leaves the file as it was, and the question goes away with the request");
 	} finally {
 		(dialog as any).showMessageBox = realBox;
 	}

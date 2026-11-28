@@ -12,8 +12,8 @@ export interface DrawingHost {
 	fileName(): string | undefined;
 	/** Has the editor page carry out a tool call. Rejects with a PageToolError when the page says the call cannot be done as asked. */
 	page(name: string, args: unknown, signal?: AbortSignal): Promise<any>;
-	/** excalidraw_export: writes the drawing to a file (asking before it replaces one). */
-	exportForTool(request: { format: string; path?: string; overwrite?: boolean }): Promise<{ path: string; bytes: number }>;
+	/** excalidraw_export: writes the drawing to a file (asking before it replaces one). `signal`: the request was stopped; nothing is written after that. */
+	exportForTool(request: { format: string; path?: string; overwrite?: boolean }, signal?: AbortSignal): Promise<{ path: string; bytes: number }>;
 }
 
 /** The editor could not do what was asked, and why is for the model to read (and try again). */
@@ -117,7 +117,7 @@ export class ExcalidrawToolbox {
 				case "excalidraw_export": {
 					if (input.format !== "png" && input.format !== "svg" && input.format !== "excalidraw") throw new ToolInputError('format must be "png", "svg" or "excalidraw".');
 					if (input.path !== undefined && (typeof input.path !== "string" || !input.path.trim() || input.path.length > 2000)) throw new ToolInputError("path must be a file path.");
-					const written = await this.host.exportForTool({ format: input.format, ...(typeof input.path === "string" ? { path: input.path.trim() } : {}), overwrite: input.overwrite === true });
+					const written = await this.host.exportForTool({ format: input.format, ...(typeof input.path === "string" ? { path: input.path.trim() } : {}), overwrite: input.overwrite === true }, options.signal);
 					return { text: JSON.stringify(written), summary: `Exported ${written.path.split(/[\\/]/).pop()}` };
 				}
 			}
