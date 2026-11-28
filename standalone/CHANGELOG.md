@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Settings → Sharing.** The OmniPad server Go live shares through, and the name others see,
+  have a place in Settings. OmniDraw has no server built in: you give the address of one you
+  or your team runs, and can change it there. **Check** asks the server whether it can share
+  diagrams, without sharing anything.
+- The link Go live gives you is the one the server itself writes, when it knows its public
+  address: a server reached under one name and known under another hands out the name it goes by.
 - An agent's export of a diagram (`drawio_export`) is never written through a link. A file in
   the diagram's folder that is a link to another file (as a checked-out repository can hold)
   used to send the export over that other file, while the question was about the name in the
