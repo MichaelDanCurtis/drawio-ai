@@ -322,7 +322,7 @@ export class Library {
 		const rel = path.relative(this.root, real);
 		if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
 		const parts = rel.split(path.sep);
-		if (parts.length > MAX_DEPTH + 1 || parts.some((p) => p.startsWith("."))) return undefined;
+		if (parts.length > MAX_DEPTH + 1 || parts.some((p) => p.startsWith(".") || p.includes("\\"))) return undefined;
 		return docType(parts[parts.length - 1]) ? parts.join("/") : undefined;
 	}
 
@@ -412,6 +412,8 @@ export class Library {
 			for (const e of entries) {
 				// (hidden things, the app's own folder among them, and what a project keeps of other people's code)
 				if (e.name.startsWith(".") || e.name === "node_modules") continue;
+				// (a name with a backslash in it is a file on this system but no name a document can be known by here: it is passed over)
+				if (e.name.includes("\\")) continue;
 				// (a link is not followed: it could lead anywhere)
 				if (e.isSymbolicLink()) continue;
 				if (e.isDirectory()) {

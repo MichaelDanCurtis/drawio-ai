@@ -13,6 +13,7 @@ import type { AppCommands, E2eConfig } from "./e2e";
 import { addElement, elementIds, expect, pause, until } from "./e2eExcalidraw";
 import { ExcalidrawWindow } from "./excalidrawWindow";
 import { HomeWindow } from "./homeWindow";
+import { loadRecord, saveRecord } from "./mapper/store";
 import { paths } from "./paths";
 import { updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
@@ -228,6 +229,17 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 	await until("every card to have its picture", async () => (await cards()).every((c) => c.img));
 	await shot("home-after");
 	log("homeAfter", (await cards()).map((c) => c.name));
+	// ----- a diagram moved while it is closed takes its maps along (Mapper's records, kept in its folder) -----
+	{
+		const mapped = lib().create("", "Mapped", ".drawio", Buffer.from('<mxfile><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>'));
+		saveRecord(lib().root, { version: 1, id: "e2e-map", diagram: "Mapped.drawio" } as any);
+		await send({ type: "move", id: mapped, collection: "Maps" });
+		await until("the closed diagram to be in the collection", () => fs.existsSync(lib().pathOf("Maps/Mapped.drawio")));
+		const carried = loadRecord(path.join(lib().root, "Maps"), "e2e-map");
+		log("homeMapsCarried", carried ? { diagram: carried.diagram } : null);
+		expect(carried?.diagram === "Mapped.drawio", "a closed diagram's map records go with it to its new folder");
+	}
+
 	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----
 	const byLink = path.join(path.dirname(config.out), "library-by-link");
 	fs.symlinkSync(folder, byLink);

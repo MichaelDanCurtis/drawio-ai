@@ -48,6 +48,12 @@ test("reading the library: documents, collections, and what is left out", () => 
 	fs.mkdirSync(path.join(root, "Empty"));
 	// left out: other files, hidden folders, other people's code, links (which could lead anywhere)
 	fs.writeFileSync(path.join(root, "notes.txt"), "x");
+	// a name with a backslash is a file here, but no name a document can be known by: passed over, and it does not stop the rest
+	if (process.platform !== "win32") {
+		fs.writeFileSync(path.join(root, "Plan\\2026.drawio"), "x");
+		fs.mkdirSync(path.join(root, "Odd\\Folder"));
+		fs.writeFileSync(path.join(root, "Odd\\Folder", "In.drawio"), "x");
+	}
 	fs.mkdirSync(path.join(root, ".git"));
 	fs.writeFileSync(path.join(root, ".git", "Hidden.drawio"), "x");
 	fs.mkdirSync(path.join(root, "node_modules"));
