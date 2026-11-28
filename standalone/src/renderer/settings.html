@@ -85,6 +85,7 @@
 	.loc input[type="text"] { padding: 3px 8px; min-height: 28px; width: 100%; }
 	.actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 	input[type="number"] { width: 90px; padding: 5px 8px; min-height: 30px; }
+	#sharing input[type="text"] { width: 300px; max-width: 45%; padding: 5px 8px; min-height: 30px; }
 	.saved { position: fixed; right: 18px; bottom: 16px; animation: fade-in var(--dur) var(--ease-out); }
 </style>
 </head>
@@ -101,6 +102,7 @@
 			<button data-section="chat"><span data-icon="chatPanel"></span>Chat</button>
 			<button data-section="editor"><span data-icon="pen"></span>Editor</button>
 			<button data-section="shapes"><span data-icon="shapes"></span>Shapes</button>
+			<button data-section="sharing"><span data-icon="send"></span>Sharing</button>
 			<div class="foot"><button class="btn btn-sm btn-ghost" id="openFile" title="">Open settings.json</button></div>
 		</nav>
 		<div id="panes">
@@ -190,6 +192,19 @@
 					<button class="btn btn-sm btn-primary" id="openGallery">Open the Shape Gallery…</button>
 					<button class="btn btn-sm" id="addFolder">Add a folder…</button>
 					<button class="btn btn-sm" id="addLibrary">Add a library file…</button>
+				</div>
+			</section>
+
+			<section id="sharing">
+				<h2>Sharing</h2>
+				<p class="lead">Go live (File → Go Live…) shares a diagram through an OmniPad server, where others open it by a link. OmniDraw has no server built in: give the address of one you or your team runs.</p>
+				<div class="card-list">
+					<div class="row"><div class="what"><b>OmniPad server</b><span id="sharingServerHelp">Its address, such as https://omnipad.example.com. The diagrams you share go through it; a link you join names its own server.</span></div>
+						<input type="text" id="sharingServer" placeholder="https://omnipad.example.com" autocomplete="off" spellcheck="false" aria-describedby="sharingServerHelp"></div>
+					<div class="row"><div class="what"><b>Check the server</b><span id="sharingCheck" role="status">Asks the server whether it can share diagrams. Nothing is shared.</span></div>
+						<button class="btn btn-sm" id="sharingTest">Check</button></div>
+					<div class="row"><div class="what"><b>Your name</b><span>Shown to the people you share a diagram with.</span></div>
+						<input type="text" id="sharingName" maxlength="60" autocomplete="off" spellcheck="false"></div>
 				</div>
 			</section>
 		</div>
@@ -401,6 +416,33 @@
 	});
 	$("startCollapsed").addEventListener("change", (e) => set({ chat: { ...state.settings.chat, startCollapsed: e.target.checked } }));
 	$("allowAllByDefault").addEventListener("change", (e) => set({ chat: { ...state.settings.chat, allowAllByDefault: e.target.checked } }));
+
+	// Sharing: the OmniPad server Go live shares through, and the name others see
+	const SHARING_HELP = $("sharingServerHelp").textContent;
+	const SHARING_CHECK = $("sharingCheck").textContent;
+	function renderSharing(s, extra) {
+		const section = $("sharing");
+		if (!editing(section)) {
+			$("sharingServer").value = s.sharing.server;
+			$("sharingName").value = s.sharing.name;
+		}
+		const info = extra || {};
+		// (an address that is not one is not kept: said where it was typed)
+		$("sharingServerHelp").textContent = info.problem || SHARING_HELP;
+		$("sharingServerHelp").style.color = info.problem ? "var(--danger)" : "";
+		const check = info.check && info.check.server === s.sharing.server ? info.check : null;
+		$("sharingCheck").textContent = info.checking ? "Asking the server…" : check ? check.text : SHARING_CHECK;
+		$("sharingCheck").style.color = check && !info.checking ? (check.ok ? "var(--ok)" : "var(--danger)") : "";
+		$("sharingTest").disabled = !s.sharing.server || !!info.checking;
+	}
+	const sendSharing = () => post({ type: "setSharing", server: $("sharingServer").value, name: $("sharingName").value });
+	// (whether an address is kept is for the app to say: one that is not an address is not)
+	$("sharingServer").addEventListener("change", sendSharing);
+	$("sharingName").addEventListener("change", () => {
+		sendSharing();
+		saved();
+	});
+	$("sharingTest").onclick = () => post({ type: "checkSharing" });
 
 	function renderEditor(s) {
 		for (const el of document.querySelectorAll("[data-editor]")) {
@@ -633,6 +675,7 @@
 			renderChat(m.settings);
 			renderEditor(m.settings);
 			renderShapes(m.settings);
+			renderSharing(m.settings, m.sharing);
 		} else if (m.type === "section") show(m.section);
 	});
 	post({ type: "ready" });

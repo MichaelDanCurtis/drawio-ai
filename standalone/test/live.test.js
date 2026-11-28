@@ -7,7 +7,7 @@ const assert = require("node:assert");
 const crypto = require("crypto");
 require("./helpers/ts");
 const { LiveSession } = require("../src/main/live/session");
-const { createBoard, boardExists, closeBoard, openBoard, BoardError } = require("../src/main/live/connection");
+const { createBoard, boardExists, closeBoard, openBoard, checkServer, BoardError } = require("../src/main/live/connection");
 const { parseBoardLink, boardLink, serverOrigin, socketUrl, touched, apart, wireChecksum, lockKey, cellOn } = require("../src/main/live/protocol");
 const { LiveShare } = require("../src/main/live/liveShare");
 const { startBoardRelay } = require("./helpers/boardRelay");
@@ -912,6 +912,43 @@ test("making, finding and ending a board; what the app says when the server is n
 	await assert.rejects(createBoard(url, { title: "T", xml: "{}" }), (e) => e instanceof BoardError && /has no boards/.test(e.message));
 	other.close();
 	await assert.rejects(createBoard(url, { title: "T", xml: "{}" }), (e) => e instanceof BoardError && /could not be reached/.test(e.message) && !e.message.includes("api/boards"));
+	// asking a server whether it can share diagrams, for Settings: nothing is made by asking
+	const plain = http.createServer((req, res) => (req.url === "/json" || req.url.startsWith("/api/pads/x") ? res.writeHead(200, { "content-type": "application/json" }).end("{}") : res.writeHead(404).end("no")));
+	await new Promise((r) => plain.listen(0, "127.0.0.1", r));
+	const plainUrl = `http://127.0.0.1:${plain.address().port}`;
+	assert.match((await checkServer(plainUrl)).text, /has no boards/);
+	assert.equal((await checkServer(plainUrl)).ok, false);
+	plain.close();
+	assert.match((await checkServer(plainUrl)).text, /could not be reached/);
+	const notOne = http.createServer((req, res) => res.writeHead(200, { "content-type": "text/html" }).end("<html>hello</html>"));
+	await new Promise((r) => notOne.listen(0, "127.0.0.1", r));
+	assert.deepEqual(await checkServer(`http://127.0.0.1:${notOne.address().port}`), { ok: false, text: "Something answers at that address, but not as an OmniPad server does." });
+	notOne.close();
+	const asked = await startBoardRelay();
+	relays.push(asked);
+	assert.deepEqual(await checkServer(asked.url), { ok: true, text: "This server can share diagrams." });
+	assert.equal(asked.pads.size, 0, "asking made nothing");
+	// a server that goes by another name than the one it was reached under: the link handed to others is the one it writes,
+	// while this app keeps talking to the address it was given
+	const renamed = await startBoardRelay({ publicUrl: "https://pad.example.com" });
+	relays.push(renamed);
+	const there = await createBoard(renamed.url, { title: "T", xml: "{}" });
+	assert.equal(there.link.server, renamed.url);
+	assert.equal(there.publicLink, `https://pad.example.com/b/${there.link.pad}/${there.link.board}`);
+	const hostWin = { client: editorStub(new Diagram({ a: { label: "start" } })), remoteChanged() {}, changed() {}, log() {} };
+	const shared = await LiveShare.host(hostWin, renamed.url, { name: "Host", title: "T" });
+	assert.match(shared.url, /^https:\/\/pad\.example\.com\/b\//);
+	assert.equal(renamed.stats(shared.link).people, 1, "connected at the address it was given");
+	await shared.stop();
+	assert.equal(b.publicLink, undefined, "a server that does not know its public address gives a path: the link is made from the address it was reached at");
+	// (a link the server writes that is not to this board, or not a link at all, is not handed to anyone)
+	for (const link of [`https://pad.example.com/b/${"Z".repeat(22)}/k3x9m2p7qa`, "javascript:alert(1)", "http://pad.example.com/b/x/y", 7]) {
+		const lying = http.createServer((req, res) => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ pad: "A".repeat(22), board: "k3x9m2p7qa", owner_key: "k", link })));
+		await new Promise((r) => lying.listen(0, "127.0.0.1", r));
+		assert.equal((await createBoard(`http://127.0.0.1:${lying.address().port}`, { title: "T", xml: "{}" })).publicLink, undefined, String(link));
+		lying.close();
+	}
+
 	// a server that has had enough shared diagrams from this address for now, and one whose answer is not a board
 	for (const [status, body, says] of [[503, "{}", /not taking another shared diagram/], [200, JSON.stringify({ pad: "../etc", board: "x", owner_key: "k" }), /answer was not a board/], [200, JSON.stringify({ pad: "A".repeat(22), board: "k3x9m2p7qa" }), /answer was not a board/]]) {
 		const odd = http.createServer((req, res) => res.writeHead(status, { "content-type": "application/json" }).end(body));

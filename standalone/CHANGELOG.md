@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **Settings → Sharing.** The OmniPad server Go live shares through, and the name others see,
+  have a place in Settings. OmniDraw has no server built in: you give the address of one you
+  or your team runs, and can change it there. **Check** asks the server whether it can share
+  diagrams, without sharing anything.
+- The link Go live gives you is the one the server itself writes, when it knows its public
+  address: a server reached under one name and known under another hands out the name it goes by.
+
 ## [0.4.1]
 
 - A new app icon: a letter D drawn in dots, white on black with one red dot. (The square of

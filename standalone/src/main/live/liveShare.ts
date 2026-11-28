@@ -139,6 +139,8 @@ export class LiveShare {
 
 	/** Where the board is. (A host's is known once the server has made it.) */
 	public link!: BoardLink;
+	/** The link as the server writes it, when it said (see createBoard). */
+	private publicLink: string | undefined;
 	private ownerKey: string | undefined;
 
 	private constructor(private readonly win: LiveWindow, public readonly role: "host" | "guest") {
@@ -192,7 +194,7 @@ export class LiveShare {
 
 	/** The link to give to others. A secret: whoever has it can edit. */
 	public get url(): string {
-		return boardLink(this.link);
+		return this.publicLink ?? boardLink(this.link);
 	}
 
 	public people(): Person[] {
@@ -235,6 +237,7 @@ export class LiveShare {
 				throw new BoardError(live.ended ?? "Sharing was stopped before it had started.");
 			}
 			live.link = made.link;
+			live.publicLink = made.publicLink;
 			live.ownerKey = made.ownerKey;
 			await live.connect(who.name);
 		} catch (e) {

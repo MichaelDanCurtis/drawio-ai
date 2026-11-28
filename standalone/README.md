@@ -509,7 +509,11 @@ one someone shared. Everyone sees the others' changes as they are made, with the
 selections. The host's file stays the master copy and is saved as always; a guest's window
 holds the shared diagram, not a file.
 
-It goes through an OmniPad server, whose address you give: the diagram becomes a *board* there,
+OmniDraw has no server built in. **Settings → Sharing** holds the address of the OmniPad server
+you or your team runs (the Go live window asks for it the first time, and remembers it), and
+its **Check** asks that server whether it can share diagrams.
+
+It goes through that OmniPad server: the diagram becomes a *board* there,
 in a pad of its own, and the link (`https://<omnipad>/b/<pad>/<board>`) opens it in OmniDraw or
 in OmniPad in a browser. The protocol is OmniPad's;
 [`docs/omnipad-boards-protocol.md`](../docs/omnipad-boards-protocol.md) says what OmniDraw does
