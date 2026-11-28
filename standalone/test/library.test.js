@@ -172,6 +172,34 @@ test("collections: made, renamed with what is in them, and taken away without th
 	assert.equal(fs.readFileSync(path.join(root, "Mixed", "README.md"), "utf8"), "keep me");
 });
 
+test("a collection that is there is taken by its name as it is spelled", () => {
+	// two folders made outside the app, their names apart only by a second space
+	const root = temp();
+	const lib = new Library(root);
+	fs.mkdirSync(path.join(root, "Team  A"));
+	fs.mkdirSync(path.join(root, "Team A"));
+	fs.writeFileSync(path.join(root, "Team  A", "Wide.drawio"), "wide");
+	fs.writeFileSync(path.join(root, "Team A", "Narrow.drawio"), "narrow");
+	assert.deepEqual(lib.contents().collections, [{ name: "Team  A", count: 1 }, { name: "Team A", count: 1 }]);
+	// a document made in, or moved to, the one that was picked
+	assert.equal(lib.create("Team  A", "New", ".drawio", B("n")), "Team  A/New.drawio");
+	assert.equal(lib.move("Team A/Narrow.drawio", "Team  A"), "Team  A/Narrow.drawio");
+	assert.equal(lib.move("Team  A/Narrow.drawio", "Team A"), "Team A/Narrow.drawio");
+	lib.snapshot("Team  A/Wide.drawio", B("wide"));
+	// renamed: that one, with its history, and not its neighbour
+	assert.equal(lib.renameCollection("Team  A", "Zeta"), "Zeta");
+	assert.deepEqual(ids(lib), ["Team A/Narrow.drawio", "Zeta/New.drawio", "Zeta/Wide.drawio"]);
+	assert.equal(lib.versions("Zeta/Wide.drawio").length, 1);
+	// taken away: that one
+	fs.mkdirSync(path.join(root, "Team  A"));
+	fs.writeFileSync(path.join(root, "Team  A", "Again.drawio"), "again");
+	assert.deepEqual(lib.removeCollection("Team  A"), { moved: [{ from: "Team  A/Again.drawio", to: "Again.drawio" }], kept: false });
+	assert.deepEqual(ids(lib), ["Again.drawio", "Team A/Narrow.drawio", "Zeta/New.drawio", "Zeta/Wide.drawio"]);
+	// a name that is no folder's is still not one; and a new collection's name is tidied as before
+	for (const bad of ["Team  B", "../Team A", "Team A/x", ".omnidraw", ""]) refused(() => lib.renameCollection(bad, "x"), /not a collection/);
+	assert.equal(lib.create("  Brand   new ", "One", ".drawio", B("1")), "Brand new/One.drawio");
+});
+
 test("the trash: there with its versions, back where it was, or gone for good", () => {
 	const root = temp();
 	const lib = new Library(root);
@@ -238,8 +266,12 @@ test("versions: one for a row of saves, one of its own for a point worth keeping
 	// going back: the document is the version again, and what it was is kept, so that this can be gone back on
 	fs.writeFileSync(lib.pathOf(doc), "what it is now, and longer than a version");
 	const v2 = lib.versions(doc).find((v) => lib.versionBytes(doc, v.key).toString() === "v2");
+	// (the picture kept is of what it was until now: it goes, however close the two files' times are)
+	lib.setThumb(doc, B("png of what it is now"));
+	assert.ok(lib.thumb(doc));
 	lib.restoreVersion(doc, v2.key, t0 + 40 * min);
 	assert.equal(lib.read(doc).toString(), "v2");
+	assert.equal(lib.thumb(doc), undefined);
 	const after = lib.versions(doc);
 	assert.deepEqual([lib.versionBytes(doc, after[0].key).toString(), after[0].kept, after.length], ["what it is now, and longer than a version", true, 5]);
 	// a save after that is a version of its own, not the kept one's new state

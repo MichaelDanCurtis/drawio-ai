@@ -230,6 +230,10 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 	await linked.whenLoaded();
 	expect(linked.file!.startsWith(byLink) && documentWindows.of(lib().pathOf("Team/Plan.excalidraw")) === linked, "a window opened through a link is found by the file's real place");
 	await until("its card to say it is open", async () => (await cards()).find((c) => c.name === "Plan")?.open === "open");
+	// (opened again by its plain path, from its card: the window it has, not a second one on the same file)
+	await send({ type: "open", id: "Team/Plan.excalidraw" });
+	await pause(600);
+	expect(documentWindows.allOf(lib().pathOf("Team/Plan.excalidraw")).length === 1 && [...ExcalidrawWindow.all].filter((x) => x.file && path.basename(x.file) === "Plan.excalidraw").length === 1, "a file is open in one window, by whatever path it is asked for");
 	await addElement(linked, "home-link", "rectangle", { x: 500, y: 500 });
 	await until("the window to have unsaved changes", () => linked.isDirty);
 	await send({ type: "trash", id: "Team/Plan.excalidraw" });

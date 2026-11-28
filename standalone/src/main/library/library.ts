@@ -265,14 +265,40 @@ export class Library {
 		return { file, stat, type };
 	}
 
-	/** The folder of a collection ("" is the library itself), made if it is not there. */
+	/**
+	 * The folder of a collection ("" is the library itself), made if it is not there. A collection
+	 * that is there is taken by its name exactly as it is spelled (a folder made in Finder can be
+	 * spelled in ways the app would not spell a new one: two spaces in a row, say); only the name
+	 * of one that is made here is tidied.
+	 */
 	private collectionFolder(collection: string): string {
 		if (!collection) return this.made();
+		const there = this.collectionIfThere(collection);
+		if (there) return there;
 		const name = cleanName(collection, "collection name");
 		const dir = path.join(this.made(), name);
 		const s = fs.lstatSync(dir, { throwIfNoEntry: false });
 		if (s && !s.isDirectory()) throw new LibraryError(`${name} is not a folder in the library.`);
 		if (!s) fs.mkdirSync(dir);
+		return dir;
+	}
+
+	/** The folder of a collection that is there, by its name as it is spelled; undefined when there is none by that name. */
+	private collectionIfThere(name: string): string | undefined {
+		let parts: string[];
+		try {
+			parts = this.parts(name);
+		} catch {
+			return undefined;
+		}
+		if (parts.length !== 1) return undefined;
+		const dir = path.join(this.root, parts[0]);
+		// (by that very spelling: a disk that takes another spelling for the same folder would say yes to a name that is not this one's)
+		try {
+			if (!fs.lstatSync(dir).isDirectory() || !fs.readdirSync(this.root).includes(parts[0])) return undefined;
+		} catch {
+			return undefined;
+		}
 		return dir;
 	}
 
@@ -469,10 +495,8 @@ export class Library {
 	}
 
 	private collectionDir(name: string): string {
-		const clean = cleanName(name, "collection name");
-		const dir = path.join(this.root, clean);
-		const s = fs.lstatSync(dir, { throwIfNoEntry: false });
-		if (!s || !s.isDirectory()) throw new LibraryError(`${clean} is not a collection in the library.`);
+		const dir = this.collectionIfThere(name);
+		if (!dir) throw new LibraryError(`${String(name).slice(0, 120)} is not a collection in the library.`);
 		return dir;
 	}
 
@@ -663,6 +687,8 @@ export class Library {
 		const bytes = this.versionBytes(id, key);
 		const { file } = this.existing(id);
 		this.snapshot(id, fs.readFileSync(file), { kept: true, now });
+		// (the picture kept is of what the document was until now: it goes, whatever the clocks say of the two files)
+		fs.rmSync(this.thumbFile(id), { force: true });
 		// (into the file that is there, which `existing` has seen to be a plain file and no link)
 		fs.writeFileSync(file, bytes, { flag: "r+" });
 		fs.truncateSync(file, bytes.length);

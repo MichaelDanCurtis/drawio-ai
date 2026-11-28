@@ -8,6 +8,7 @@ import type { DrawioConfig } from "../../../src/DrawioClient/DrawioTypes";
 import { DiagramToolbox } from "../../../src/features/ai/DiagramToolbox";
 import { ChatController } from "./chatController";
 import { ChatDock, documentHooks, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { canonicalPath } from "./library/library";
 import { exportDiagram, EXPORT_FORMATS, ExportFormat, printDiagram, renderDiagram } from "./exporter";
 import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { detectImportFormat, IMPORT_FILTERS } from "./importFormats";
@@ -151,7 +152,9 @@ export class DiagramWindow implements DocumentWindow {
 
 	public static async open(server: StaticServer, file?: string, initial?: { xml: string; name: string }): Promise<DiagramWindow> {
 		if (file) {
-			const existing = [...DiagramWindow.all].find((w) => w.file === file);
+			// (by the file's real place: the same file by another path, one with a link in it, is not opened twice)
+			const real = canonicalPath(file);
+			const existing = [...DiagramWindow.all].find((w) => w.file && canonicalPath(w.file) === real);
 			if (existing) {
 				existing.win.focus();
 				return existing;

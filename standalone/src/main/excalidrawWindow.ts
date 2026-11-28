@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { ChatController, type ChatEditor } from "./chatController";
 import { ChatDock, documentHooks, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
+import { canonicalPath } from "./library/library";
 import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, formatForPath, pictureToWrite, readScene, sceneTextToWrite, type ExcalidrawFormat } from "./excalidrawFile";
 import { exportTarget, realPath, writeExport } from "./exportTarget";
 import { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError } from "./excalidrawTools";
@@ -78,7 +79,9 @@ export class ExcalidrawWindow implements DocumentWindow {
 	 */
 	public static async open(server: StaticServer, file?: string): Promise<ExcalidrawWindow | undefined> {
 		if (file) {
-			const existing = [...ExcalidrawWindow.all].find((w) => w.file === file);
+			// (by the file's real place: the same file by another path, one with a link in it, is not opened twice)
+			const real = canonicalPath(file);
+			const existing = [...ExcalidrawWindow.all].find((w) => w.file && canonicalPath(w.file) === real);
 			if (existing) {
 				existing.win.focus();
 				return existing;

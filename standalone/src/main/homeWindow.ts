@@ -318,22 +318,26 @@ export class HomeWindow {
 	 * nothing is done. True when the document is in no window afterwards.
 	 */
 	private static async closeWindowOf(lib: Library, id: string, doing: string): Promise<boolean> {
-		const w = HomeWindow.windowOf(lib, id);
-		if (!w) return true;
+		// (every window that holds it, were there more than one: none is passed over for another's sake)
+		const windows = documentWindows.allOf(lib.pathOf(id));
+		if (!windows.length) return true;
 		const name = path.basename(lib.pathOf(id));
-		if (w.isDirty) {
-			w.win.focus();
+		const unsaved = windows.find((w) => w.isDirty);
+		if (unsaved) {
+			unsaved.win.focus();
 			throw new LibraryError(`${name} has changes that are not saved. Save it or close its window, then ${doing}.`);
 		}
-		const gone = new Promise<boolean>((resolve) => {
-			const timer = setTimeout(() => resolve(false), 5000);
-			w.win.once("closed", () => {
-				clearTimeout(timer);
-				resolve(true);
+		for (const w of windows) {
+			const gone = new Promise<boolean>((resolve) => {
+				const timer = setTimeout(() => resolve(false), 5000);
+				w.win.once("closed", () => {
+					clearTimeout(timer);
+					resolve(true);
+				});
 			});
-		});
-		w.win.close();
-		if (!(await gone)) throw new LibraryError(`${name} is open and its window did not close. Close it, then ${doing}.`);
+			w.win.close();
+			if (!(await gone)) throw new LibraryError(`${name} is open and its window did not close. Close it, then ${doing}.`);
+		}
 		return true;
 	}
 
@@ -343,11 +347,11 @@ export class HomeWindow {
 	 * path a window holds leads nowhere, and could not be told to be the same file's.
 	 */
 	private static moving(lib: Library, ids: string[], change: () => { from: string; to: string }[]): void {
-		const windows = new Map(ids.map((id) => [id, { w: HomeWindow.windowOf(lib, id), was: lib.pathOf(id) }]));
+		const windows = new Map(ids.map((id) => [id, { all: documentWindows.allOf(lib.pathOf(id)), was: lib.pathOf(id) }]));
 		for (const { from, to } of change()) {
 			if (from === to) continue;
 			const now = lib.pathOf(to);
-			windows.get(from)?.w?.movedTo(now);
+			for (const w of windows.get(from)?.all ?? []) w.movedTo(now);
 			HomeWindow.recents().moved(windows.get(from)?.was ?? lib.pathOf(from), now);
 		}
 	}

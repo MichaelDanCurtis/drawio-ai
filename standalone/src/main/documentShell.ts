@@ -68,6 +68,11 @@ export const documentWindows = {
 		const real = canonicalPath(file);
 		return [...open].find((w) => w.file && canonicalPath(w.file) === real);
 	},
+	/** Every window that holds a file. A file is opened once (see the windows' own `open`), but what needs the file to itself asks about them all. */
+	allOf(file: string): DocumentWindow[] {
+		const real = canonicalPath(file);
+		return [...open].filter((w) => w.file && canonicalPath(w.file) === real);
+	},
 	all(): DocumentWindow[] {
 		return [...open];
 	},
