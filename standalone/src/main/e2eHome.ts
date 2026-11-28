@@ -248,6 +248,13 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 		await send({ type: "duplicate", id: "Mapped.drawio" });
 		await until("the refusal to be said", async () => /has maps/.test((await said()) ?? ""));
 		expect(!fs.existsSync(lib().pathOf("Mapped copy.drawio")), "a diagram with maps is not duplicated");
+		// nor is a version of it opened as a copy
+		lib().snapshotNow("Mapped.drawio", { kept: true });
+		const before = lib().contents().docs.length;
+		await inHome<void>(`document.getElementById("said").hidden = true;`);
+		await send({ type: "openVersion", id: "Mapped.drawio", key: lib().versions("Mapped.drawio")[0].key });
+		await until("the refusal to be said", async () => /has maps/.test((await said()) ?? ""));
+		expect(lib().contents().docs.length === before, "no version of a diagram with maps is opened as a copy");
 	}
 
 	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----

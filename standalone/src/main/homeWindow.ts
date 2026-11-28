@@ -344,6 +344,16 @@ export class HomeWindow {
 		return true;
 	}
 
+	/**
+	 * A copy of a diagram with maps would point at the same maps' records as the original (the ids
+	 * are in its cells), and what is done to the maps of either would be done to both. Until a copy
+	 * can be given maps of its own, no copy of such a diagram is made here, by any way of making one.
+	 */
+	private static noCopyWithMaps(lib: Library, id: string, what: string): void {
+		const file = lib.pathOf(id);
+		if (hasRecords(path.dirname(file), file)) throw new LibraryError(`${path.basename(file)} has maps, and ${what} would share them with it. Open it and draw the maps again in a copy, or copy it without its maps in Finder.`);
+	}
+
 	/** Waits until none of these windows has a save under way (a save that starts meanwhile is waited for too). */
 	private static async savesDone(windows: DocumentWindow[]): Promise<void> {
 		await Promise.all(windows.map((w) => w.whenSaved()));
@@ -439,8 +449,7 @@ export class HomeWindow {
 					// A copy of a diagram with maps would point at the same maps' records as the original, and
 					// what is done to the maps of either would be done to both. Until a copy can be given maps
 					// of its own, such a diagram is not duplicated here.
-					const file = lib.pathOf(text(msg.id));
-					if (hasRecords(path.dirname(file), file)) throw new LibraryError(`${path.basename(file)} has maps, and a copy would share them with it. Open it and draw the maps again in a copy, or copy it without its maps in Finder.`);
+					HomeWindow.noCopyWithMaps(lib, text(msg.id), "a copy");
 					lib.duplicate(text(msg.id));
 					break;
 				}
@@ -522,6 +531,7 @@ export class HomeWindow {
 					const version = lib.versions(id).find((v) => v.key === msg.key);
 					const type = docType(id.split("/").pop()!);
 					if (!version || !type) throw new LibraryError("That version is not kept any more.");
+					HomeWindow.noCopyWithMaps(lib, id, "a version opened as a copy");
 					const when = new Date(version.at);
 					const pad = (n: number): string => String(n).padStart(2, "0");
 					const copy = lib.create(id.includes("/") ? id.split("/")[0] : "", `${type.name} (${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ${pad(when.getHours())}.${pad(when.getMinutes())})`, type.ending, lib.versionBytes(id, version.key));
