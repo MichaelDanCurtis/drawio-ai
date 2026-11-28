@@ -673,17 +673,25 @@ export class DrawingAi {
 		});
 		// (what was cleared off the canvas altogether since, comes back at the end)
 		for (const was of restore) if (!byId.has(was.id)) elements.push(next({ ...was, index: null }));
-		// A label that comes back belongs in its shape where the shape is now. When the shape is put back
-		// with it, both are where they were; when it is not (the AI only changed the words, and the user
-		// has moved or resized the shape since), the label is laid out in the shape as it stands.
+		// A label belongs in its shape where the shape is now, and the two are put back each on its own.
+		// A label that comes back while its shape does not (the AI only changed the words, and the user
+		// has moved or resized the shape since) is laid out in the shape as it stands. A label that was
+		// not the review's, in a shape that goes back to where it was (the AI only restyled the shape,
+		// and the user's drag took both along), is laid out in the shape again, with the words and the
+		// look it has now. When both come back, both are where they were.
 		const after = new Map(elements.map((e) => [e.id, e]));
+		const outline = (e: El) => [e.x, e.y, e.width, e.height, e.angle ?? 0, isLine(e) ? JSON.stringify(e.points) : ""].join(" ");
 		elements = elements.map((e) => {
-			const was = back.get(e.id);
-			const container = was && was.type === "text" && typeof was.containerId === "string" && !back.has(was.containerId) ? after.get(was.containerId) : undefined;
-			if (!was || !container || container.isDeleted) return e;
+			if (e.type !== "text" || e.isDeleted || typeof e.containerId !== "string") return e;
+			const container = after.get(e.containerId);
+			if (!container || container.isDeleted) return e;
+			const before = byId.get(container.id);
+			// (only where one of the two came back without the other, and the shape is not where the label was laid out for)
+			if (back.has(e.id) === back.has(container.id) || (!back.has(e.id) && before && outline(before) === outline(container))) return e;
 			try {
-				const { fresh } = this.placeLabel(container, { text: String(was.originalText ?? was.text ?? ""), fontSize: was.fontSize, fontFamily: was.fontFamily, textAlign: was.textAlign, verticalAlign: was.verticalAlign, strokeColor: was.strokeColor });
-				return { ...e, x: fresh.x, y: fresh.y, width: fresh.width, height: fresh.height, text: fresh.text };
+				const { fresh } = this.placeLabel(container, { text: String(e.originalText ?? e.text ?? ""), fontSize: e.fontSize, fontFamily: e.fontFamily, textAlign: e.textAlign, verticalAlign: e.verticalAlign, strokeColor: e.strokeColor });
+				// (one that came back is the new state already; one that was there gets a newer one)
+				return back.has(e.id) ? { ...e, ...laidOut(fresh) } : next(e, laidOut(fresh));
 			} catch {
 				// (as it was, then)
 				return e;
@@ -707,7 +715,6 @@ export class DrawingAi {
 		// (the user's drag took it along with a shape that now goes back to where it was) is routed to
 		// that shape again; so is an arrow that came back, to a shape the user has moved since.
 		const draft = new Draft(elements);
-		const outline = (e: El) => [e.x, e.y, e.width, e.height, e.angle ?? 0].join(" ");
 		const apart = new Set<string>();
 		for (const line of draft.live()) {
 			// (an elbow arrow keeps the route Excalidraw gave it, here as everywhere)

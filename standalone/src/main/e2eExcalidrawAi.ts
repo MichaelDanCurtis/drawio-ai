@@ -340,10 +340,22 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	menuItem("Agent", "Revert AI Changes").click();
 	await settled();
 	const arrowBack = await inEditor<any>(w, ends);
-	log("aiRejectMeets", { meetsAtFirst, dragged, shapeBack, arrowBack });
+	// the same for a label: the AI only restyles its shape, the user drags the shape (the label goes along), Reject puts the shape back
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: "rj-c", x: 1000, y: 3200, width: 200, height: 80, label: "Stay inside" }] });
+	menuItem("Agent", "Keep AI Changes").click();
+	await settled();
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "rj-c", backgroundColor: "#ffec99" }] });
+	await inEditor(w, `x.api.updateScene({ elements: x.api.getSceneElementsIncludingDeleted().map((e) => (e.id === "rj-c" || e.containerId === "rj-c" ? { ...e, y: e.y + 300, ...(e.containerId ? { opacity: 60 } : {}), version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)) });`);
+	await pause(300);
+	menuItem("Agent", "Revert AI Changes").click();
+	await settled();
+	const labelBack = await inEditor<any>(w, `const all = x.api.getSceneElements(); const c = all.find((e) => e.id === "rj-c"), labels = all.filter((e) => e.containerId === "rj-c"), l = labels[0];
+		return { labels: labels.length, text: l && l.text, opacity: l && l.opacity, shapeY: c.y, fill: c.backgroundColor, inside: !!l && l.x >= c.x && l.x + l.width <= c.x + c.width && l.y >= c.y && l.y + l.height <= c.y + c.height };`);
+	log("aiRejectMeets", { meetsAtFirst, dragged, shapeBack, arrowBack, labelBack });
 	expect(dragged.a[1] === 2700 && dragged.startOff <= 10, "the drag is as the editor leaves it: the shape lower, the arrow's start at it");
 	expect(shapeBack.a[1] === 2400 && shapeBack.fill === meetsAtFirst.fill && shapeBack.startOff <= 10 && shapeBack.endOff <= 10 && shapeBack.bound.join() === "rj-a,rj-b", "a shape that is put back where it was has its arrow at it again");
 	expect(arrowBack.b[1] === 2700 && arrowBack.stroke === meetsAtFirst.stroke && arrowBack.startOff <= 10 && arrowBack.endOff <= 10 && arrowBack.bound.join() === "rj-a,rj-b", "an arrow that is put back is at the shape the user moved since");
+	expect(labelBack.shapeY === 3200 && labelBack.fill === "transparent" && labelBack.labels === 1 && labelBack.inside && labelBack.text === "Stay inside" && labelBack.opacity === 60, "a shape that is put back where it was has its label in it again, as the label is now");
 
 	// ----- export: a file beside the drawing, never over one that is there unasked -----
 	const exported = await call("excalidraw_export", { format: "png" });
