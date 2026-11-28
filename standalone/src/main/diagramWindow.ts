@@ -551,6 +551,8 @@ export class DiagramWindow implements DocumentWindow {
 		}
 		this.updateTitle();
 		this.chat.postState();
+		// (an agent at work on it works in its folder: in another folder now, it starts again there)
+		this.chat.folderChanged();
 	}
 
 	public async picture(): Promise<Buffer | undefined> {
@@ -927,6 +929,7 @@ export class DiagramWindow implements DocumentWindow {
 			app.addRecentDocument(r.filePath);
 			this.updateTitle();
 			this.chat.postState();
+			this.chat.folderChanged();
 		}
 		return ok;
 	}

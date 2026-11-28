@@ -229,6 +229,40 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 	await until("every card to have its picture", async () => (await cards()).every((c) => c.img));
 	await shot("home-after");
 	log("homeAfter", (await cards()).map((c) => c.name));
+	// ----- an agent at work on a document works in its folder: moved to another, it starts again there -----
+	{
+		const fake = path.join(paths.appDir, "test/helpers/fake-acp-agent.js");
+		if (fs.existsSync(fake)) {
+			// (the stand-in agent, in place of "Claude Code" in this run's own settings: no real agent is started)
+			updateSettings({ agents: { claude: { command: process.execPath, args: [fake], env: { ELECTRON_RUN_AS_NODE: "1" } } } });
+			const agentDoc = lib().create("", "Agent", ".excalidraw", fs.readFileSync(config.file));
+			await openFile(lib().pathOf(agentDoc));
+			await until("the agent's drawing to be open", () => !!drawing("Agent.excalidraw"));
+			const aw = drawing("Agent.excalidraw")!;
+			await aw.whenLoaded();
+			await aw.chat.onMessage({ type: "pickProvider", providerId: "claude" });
+			aw.chat.autoApprove = true;
+			const turn = (text: string) => {
+				const done = new Promise<void>((resolve) => (aw.chat.onTurnEnd = () => resolve()));
+				void aw.chat.send(text);
+				return done;
+			};
+			const where = async () => {
+				await turn(`Where? STEPS:${JSON.stringify([{ where: true }])}`);
+				const reply = ([...aw.chat.items].reverse().find((i: any) => i.kind === "assistant") as any)?.text ?? "";
+				return /\[session in ([^\]]*)\]/.exec(reply)?.[1];
+			};
+			const first = await where();
+			await send({ type: "move", id: agentDoc, collection: "Agents" });
+			await until("the window to follow", () => aw.file === lib().pathOf("Agents/Agent.excalidraw"));
+			const second = await where();
+			log("homeAgentFolder", { first, second });
+			expect(first && fs.realpathSync(first) === lib().root && second && fs.realpathSync(second) === path.join(lib().root, "Agents"), "an agent started for a document works in its new folder once the document moved");
+			aw.win.close();
+			await until("the agent's window to close", () => aw.win.isDestroyed());
+		}
+	}
+
 	// ----- a diagram moved while it is closed takes its maps along (Mapper's records, kept in its folder) -----
 	{
 		const mapped = lib().create("", "Mapped", ".drawio", Buffer.from('<mxfile><diagram name="Page-1"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel></diagram></mxfile>'));

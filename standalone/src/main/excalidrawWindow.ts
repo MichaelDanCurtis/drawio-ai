@@ -465,6 +465,8 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.updateTitle();
 		this.sendLook();
 		this.chat.postState();
+		// (an agent at work on it works in its folder: in another folder now, it starts again there)
+		this.chat.folderChanged();
 	}
 
 	/** What the drawing was when it was last written to its file (the editor's mark of it). */
@@ -550,6 +552,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.updateTitle();
 		this.sendLook();
 		this.chat.postState();
+		this.chat.folderChanged();
 		return true;
 	}
 
