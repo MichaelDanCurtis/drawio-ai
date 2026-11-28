@@ -1,5 +1,9 @@
+import * as fs from "fs";
+import * as nodePath from "path";
 import * as vscode from "vscode";
 import type { DrawioEditor } from "../../DrawioEditorService";
+// The desktop app's own code for writing an agent's export (no Electron in it), used as it is.
+import { exportTarget, writeExport } from "../../../standalone/src/main/exportTarget";
 
 export const EXPORT_FORMATS = ["vsdx", "pdf", "svg", "png", "drawio"] as const;
 export type ExportFormat = (typeof EXPORT_FORMATS)[number];
@@ -39,8 +43,11 @@ export async function exportDiagramToWorkspace(
 	if (sameFile(target, editor.uri)) {
 		throw new Error("That path is the open diagram itself. Choose another path.");
 	}
-	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
-	const existed = await exists(target);
+	const root = exportRoot(editor.uri);
+	// A file on this computer's disk is placed and written by where it really is (see placeOnDisk).
+	const onDisk = target.scheme === "file";
+	await assertNoSymbolicLinks(root, target);
+	const existed = onDisk ? !!placeOnDisk(root, target, shown)?.exists : await exists(target);
 	if (existed) {
 		if (isDiagramFile(target.path)) {
 			throw new Error(`${shown} is an existing draw.io diagram; exports never replace diagrams. Choose another path.`);
@@ -72,9 +79,17 @@ export async function exportDiagramToWorkspace(
 		data = await editor.drawioClient.export(`.${format}`, true);
 	}
 	// Exporting can take a while: check the path again right before writing.
-	await assertNoSymbolicLinks(exportRoot(editor.uri), target);
+	await assertNoSymbolicLinks(root, target);
+	if (onDisk) placeOnDisk(root, target, shown);
 	await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, ".."));
-	if (existed) {
+	if (onDisk) {
+		// Where it lands now that its folders are there, and a write that follows no link: a new file
+		// is made only if nothing has its name by then, and a file the user agreed to replace is
+		// written into only if it is still a plain file under that name.
+		const where = placeOnDisk(root, target, shown);
+		if (!where) throw new Error(`${shown} could not be created.`);
+		writeExport(where.real, Buffer.from(data.buffer, data.byteOffset, data.byteLength), existed);
+	} else if (existed) {
 		// The user agreed to replace this file.
 		await vscode.workspace.fs.writeFile(target, data);
 	} else {
@@ -137,6 +152,55 @@ export function isInsideFolder(root: vscode.Uri, target: vscode.Uri): boolean {
 /** Exports stay inside the diagram's workspace folder, or its own folder outside a workspace. */
 function exportRoot(diagram: vscode.Uri): vscode.Uri {
 	return vscode.workspace.getWorkspaceFolder(diagram)?.uri ?? vscode.Uri.joinPath(diagram, "..");
+}
+
+/**
+ * Where an export to a file on this computer's disk really lands, with the links in its folders
+ * followed: whether a file is there already (looked at without following a link), and its real
+ * place. `undefined` while its folder is not there yet. Refuses a place that the links take out
+ * of the folder exports stay in, and a name that is a link (to a file or to nothing) or a folder.
+ *
+ * `assertNoSymbolicLinks` asks VS Code about each part of the path, which is all there is for a
+ * file system that is not a disk. For a disk this is the check that counts: it does not rest on
+ * how VS Code reports a link, and it is made again at the moment of writing.
+ */
+function placeOnDisk(root: vscode.Uri, target: vscode.Uri, shown: string): { exists: boolean; real: string } | undefined {
+	const within = vscode.workspace.getWorkspaceFolder(target) ? "the workspace folder" : "the diagram's folder";
+	const limit = fs.realpathSync(root.fsPath);
+	// The deepest folder above the file that is there: where the folders still to be made would go.
+	let folder = nodePath.dirname(target.fsPath);
+	let real: string | undefined;
+	let missing = false;
+	while (real === undefined) {
+		try {
+			real = fs.realpathSync(folder);
+		} catch (e: any) {
+			if (e?.code === "ENOTDIR") throw new Error(`${shown} cannot be written: a part of its path is a file, not a folder.`);
+			const up = nodePath.dirname(folder);
+			if (e?.code !== "ENOENT" || up === folder) throw e;
+			// (no such folder yet; a link to nothing under its name is a link all the same)
+			if (isLink(folder)) throw new Error(`${shown} is reached through a symbolic link that leads nowhere; exports are not written through links.`);
+			folder = up;
+			missing = true;
+		}
+	}
+	if (!fs.statSync(real).isDirectory()) throw new Error(`${shown} cannot be written: a part of its path is a file, not a folder.`);
+	const outside = () => new Error(`${shown} is reached through a symbolic link that leads out of ${within}; exports are not written through links.`);
+	const below = nodePath.relative(limit, real);
+	if (below === ".." || below.startsWith(".." + nodePath.sep) || nodePath.isAbsolute(below)) throw outside();
+	if (missing) return undefined;
+	const where = exportTarget(nodePath.join(real, nodePath.basename(target.fsPath)));
+	// (the folder that was just checked, and no other one that a link put in its place since)
+	if (nodePath.dirname(where.real) !== real) throw outside();
+	return where;
+}
+
+function isLink(file: string): boolean {
+	try {
+		return fs.lstatSync(file).isSymbolicLink();
+	} catch {
+		return false;
+	}
 }
 
 /**

@@ -5,7 +5,8 @@
 		"outDir": "out",
 		"lib": ["es2022"],
 		"sourceMap": true,
-		// The Mapper is the desktop app's own code (standalone/src/main/mapper), used as it is.
+		// The Mapper is the desktop app's own code (standalone/src/main/mapper), used as it is; so is
+		// what writes an agent's export without following a link (standalone/src/main/exportTarget.ts).
 		"rootDir": ".",
 		"strict": true,
 		"experimentalDecorators": true
