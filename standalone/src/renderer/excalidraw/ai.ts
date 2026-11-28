@@ -69,6 +69,17 @@ function next(el: El, changes: Record<string, unknown> = {}, over = 0): El {
 	return { ...el, ...changes, version: Math.max(el.version ?? 0, over) + 1, versionNonce: (nonce = (nonce * 1103515245 + 12345) % 2147483647), updated: Date.now() };
 }
 
+/**
+ * What laying a label out anew decides: its words as they are broken into lines, its font, its
+ * place and size (and `also`, where the layout was asked for with them). Everything else a label
+ * that is already there has stays its own.
+ */
+function laidOut(fresh: Record<string, any>, also: string[] = []): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const key of ["x", "y", "width", "height", "angle", "text", "originalText", "fontSize", "fontFamily", "lineHeight", "autoResize", ...also]) if (key in fresh) out[key] = fresh[key];
+	return out;
+}
+
 /** Excalidraw's names for the settings the tools call by friendlier ones. */
 function elementStyle(style: Style, type: string): Record<string, unknown> {
 	const out: Record<string, unknown> = {};
@@ -387,9 +398,7 @@ export class DrawingAi {
 			// that is its own, and stays: a colour or an alignment it was given apart from the line's
 			// is not lost because the line was laid out again. (A colour given to the line in the same
 			// change has been given to the label already: see update.)
-			const placed: Record<string, unknown> = {};
-			for (const key of ["x", "y", "width", "height", "angle", "text", "originalText", "fontSize", "fontFamily", "lineHeight", "autoResize"]) if (key in labelEl) placed[key] = labelEl[key];
-			draft.change(oldLabel.id, { ...placed, containerId: existing.id });
+			draft.change(oldLabel.id, { ...laidOut(labelEl), containerId: existing.id });
 			bound = [...bound, { type: "text", id: oldLabel.id }];
 		} else if (labelEl) {
 			draft.add({ ...labelEl, containerId: existing.id });
@@ -453,7 +462,8 @@ export class DrawingAi {
 			return;
 		}
 		const { shape, placed, fresh } = this.placeLabel(el, { text: content, fontSize: old?.fontSize, fontFamily: old?.fontFamily, textAlign: old?.textAlign, verticalAlign: old?.verticalAlign, strokeColor: old?.strokeColor ?? el.strokeColor, ...textStyle });
-		if (old) draft.change(old.id, fresh);
+		// (a label that is there keeps what it was given of its own, an opacity, a colour: only its layout is new)
+		if (old) draft.change(old.id, laidOut(fresh, ["textAlign", "verticalAlign"]));
 		else {
 			draft.add({ ...placed, containerId: el.id });
 			draft.change(el.id, { boundElements: [...(el.boundElements ?? []), { type: "text", id: placed.id }] });
