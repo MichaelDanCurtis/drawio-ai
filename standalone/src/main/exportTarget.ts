@@ -54,7 +54,10 @@ export function exportTarget(target: string): { exists: boolean; real: string } 
  * and the user agreed to replace it; otherwise there must be none. A link is never followed:
  * a new file is made only if nothing has that name (not even a link that appeared meanwhile),
  * and a file is replaced by putting the new one in its place whole, whatever is there by then.
- * The new file can be read and written by whom the old one could (a private export stays private).
+ * The new file can be read and written by whom the old one could (a private export stays
+ * private): it gets the old one's permissions, and its owner and group. Where those cannot be
+ * given to it (the old file is another user's, or of a group this user is not in), nothing is
+ * replaced and an ExportTargetError says so.
  */
 export function writeExport(real: string, bytes: Buffer, replace: boolean): void {
 	if (!replace) {
@@ -70,13 +73,15 @@ export function writeExport(real: string, bytes: Buffer, replace: boolean): void
 	}
 	const still = exportTarget(real);
 	if (!still.exists) return writeExport(real, bytes, false);
+	const old = fs.lstatSync(real);
 	// (who may read, write and run it; nothing else of its mode is carried over)
-	const mode = fs.lstatSync(real).mode & 0o777;
+	const like = { mode: old.mode & 0o777, uid: old.uid, gid: old.gid, name: path.basename(real) };
 	// (a short name of its own beside the file: a long file name leaves no room to add to)
 	const temp = path.join(path.dirname(real), `.omnidraw-${crypto.randomBytes(8).toString("hex")}.tmp`);
 	// (made anew, or not at all: a name that is taken is someone else's, and is left alone)
-	const fd = fs.openSync(temp, "wx", mode);
-	fill(fd, temp, bytes, mode);
+	// (and nobody else's to read until it is whose the old file was)
+	const fd = fs.openSync(temp, "wx", 0o600);
+	fill(fd, temp, bytes, like);
 	try {
 		fs.renameSync(temp, real);
 	} catch (e) {
@@ -88,13 +93,25 @@ export function writeExport(real: string, bytes: Buffer, replace: boolean): void
 /**
  * Fills a file this code has just made (`fd`, at `file`) and closes it. When it cannot be
  * written whole (the disk is full, a quota is reached) it is taken away again: half an export is
- * left neither under the export's name nor beside it. `mode`: the permissions it gets, whatever
- * this process would give a new file by default.
+ * left neither under the export's name nor beside it. `like`: the file it takes the place of
+ * (`name`), whose owner, group and permissions it gets before anything is written into it,
+ * whatever this process would give a new file by default.
  */
-function fill(fd: number, file: string, bytes: Buffer, mode?: number): void {
+function fill(fd: number, file: string, bytes: Buffer, like?: { mode: number; uid: number; gid: number; name: string }): void {
 	try {
 		try {
-			if (mode !== undefined) fs.fchmodSync(fd, mode);
+			if (like) {
+				// (a new file is this user's, and of the group new files get in this folder, which need not be the old file's)
+				const now = fs.fstatSync(fd);
+				if (now.uid !== like.uid || now.gid !== like.gid) {
+					try {
+						fs.fchownSync(fd, like.uid, like.gid);
+					} catch {
+						throw new ExportTargetError(`${like.name} belongs to another user or group than a new file here would, and that cannot be kept. Nothing was replaced. Export under another name.`);
+					}
+				}
+				fs.fchmodSync(fd, like.mode);
+			}
 			fs.writeFileSync(fd, bytes);
 		} finally {
 			fs.closeSync(fd);
