@@ -60,6 +60,7 @@ async function unlessStopped(stopped: () => boolean): Promise<void> {
 }
 
 const DEFAULT_WIDTH = 160, DEFAULT_HEIGHT = 80;
+const isFrame = (el: El): boolean => el.type === "frame" || el.type === "magicframe";
 const TEXT_STYLE = ["fontSize", "fontFamily", "textAlign", "verticalAlign"] as const;
 
 let nonce = Date.now() % 1_000_000;
@@ -519,6 +520,8 @@ export class DrawingAi {
 		}
 		if (op.start !== undefined || op.end !== undefined || op.points !== undefined) throw new OperationError(`start, end and points are for arrows and lines; this is a ${el.type}.`);
 
+		// (what it is before any of this, to tell at the end whether its outline is somewhere else)
+		const first = el;
 		// how it looks (a shape's label takes its line colour and opacity with it, and turns with it, as in the editor)
 		const turnedNow = look.angle !== undefined && look.angle !== (el.angle ?? 0);
 		if (Object.keys(look).length) {
@@ -535,14 +538,48 @@ export class DrawingAi {
 			el = draft.change(el.id, { x: round(el.x + dx), y: round(el.y + dy), ...(op.width !== undefined ? { width: op.width } : {}), ...(op.height !== undefined ? { height: op.height } : {}) });
 			const label = draft.labelOf(el);
 			if (label && (dx || dy)) draft.change(label.id, { x: round(label.x + dx), y: round(label.y + dy) });
+			// (a frame is moved with what is in it)
+			if ((dx || dy) && isFrame(el)) this.moveFrameContents(draft, el.id, dx, dy);
 		}
 		// its words
 		if (words !== undefined || Object.keys(textStyle).length || (resized && draft.labelOf(el))) this.relabel(draft, el.id, words, textStyle);
-		// the lines attached to it follow
+		// The lines attached to it follow, whenever its outline is somewhere else than it was: it was moved,
+		// resized or turned, or its words made it wider or taller.
 		// (an elbow arrow's route is Excalidraw's own to work out: it is left as it is, and Excalidraw puts it right the next time the shape is moved by hand)
-		// (a shape that is turned has its outline somewhere else, too)
-		if (dx || dy || resized || turnedNow || draft.get(el.id)!.height !== el.height) for (const line of draft.linesAt(draft.get(el.id)!)) if (!line.elbowed) this.rebuildLine(draft, line);
+		const last = draft.get(el.id)!;
+		const reshaped = last.x !== first.x || last.y !== first.y || last.width !== first.width || last.height !== first.height || (last.angle ?? 0) !== (first.angle ?? 0);
+		if (reshaped) for (const line of draft.linesAt(last)) if (!line.elbowed) this.rebuildLine(draft, line);
 		return el.id;
+	}
+
+	/**
+	 * What is in a frame moves with the frame, each element with its label. An arrow that has one end
+	 * in the frame and one outside it runs between the two again.
+	 */
+	private moveFrameContents(draft: Draft, frameId: string, dx: number, dy: number): void {
+		const moved = new Set<string>();
+		const shift = (c: El) => {
+			if (moved.has(c.id)) return;
+			moved.add(c.id);
+			draft.change(c.id, { x: round(c.x + dx), y: round(c.y + dy) });
+		};
+		for (const c of draft.live().filter((e) => e.frameId === frameId)) {
+			shift(c);
+			// (a label goes with its shape, whether it is marked as in the frame itself or not)
+			const label = draft.labelOf(c);
+			if (label) shift(label);
+		}
+		const again = new Set<string>();
+		for (const id of moved) {
+			const c = draft.get(id)!;
+			if (c.type === "arrow") {
+				if ([c.startBinding?.elementId, c.endBinding?.elementId].some((end) => end && !moved.has(end))) again.add(c.id);
+			} else for (const line of draft.linesAt(c)) if (!moved.has(line.id)) again.add(line.id);
+		}
+		for (const id of again) {
+			const line = draft.get(id);
+			if (line && !line.elbowed) this.rebuildLine(draft, line);
+		}
 	}
 
 	private remove(draft: Draft, id: string): string {
@@ -556,6 +593,8 @@ export class DrawingAi {
 		}
 		const label = draft.labelOf(el);
 		if (label) draft.change(label.id, { isDeleted: true });
+		// (what was in a frame that goes stays in the drawing, in no frame, as when a frame is deleted by hand)
+		if (isFrame(el)) for (const c of draft.live()) if (c.frameId === el.id) draft.change(c.id, { frameId: null });
 		if (isLine(el)) {
 			draft.unbind(el.startBinding?.elementId, el.id);
 			draft.unbind(el.endBinding?.elementId, el.id);

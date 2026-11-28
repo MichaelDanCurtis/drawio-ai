@@ -232,6 +232,32 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	menuItem("Agent", "Keep AI Changes").click();
 	await settled();
 
+	// ----- a text that gets longer: the arrow attached to it leaves from where the text ends now -----
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "text", id: "short", x: 1000, y: 1500, text: "T" }, { op: "add", type: "rectangle", id: "target", x: 1600, y: 1470, width: 160, height: 80 }, { op: "add", type: "arrow", id: "from-text", start: "short", end: "target" }] });
+	await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "short", text: "A much longer line of text" }] });
+	const longer = await inEditor<any>(w, `const all = x.api.getSceneElements(); const t = all.find((e) => e.id === "short"), a = all.find((e) => e.id === "from-text"); return { textEnds: Math.round(t.x + t.width), arrowStarts: Math.round(a.x + a.points[0][0]), bound: a.startBinding.elementId };`);
+	log("aiLongerText", longer);
+	expect(longer.textEnds > 1150 && longer.arrowStarts >= longer.textEnds && longer.arrowStarts <= longer.textEnds + 12 && longer.bound === "short", "the arrow starts where the longer text ends, not inside it");
+
+	// ----- a frame is moved with what is in it; an arrow from inside it to outside follows; deleted, it leaves its contents -----
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: "framed", x: 1000, y: 1700, width: 160, height: 80, label: "Inside" }, { op: "add", type: "rectangle", id: "unframed", x: 1600, y: 1700, width: 160, height: 80 }, { op: "add", type: "arrow", id: "crossing", start: "framed", end: "unframed" }] });
+	// (the frame itself is drawn by hand, around the first shape: the tools do not make frames)
+	await inEditor(w, `const all = x.api.getSceneElementsIncludingDeleted(); const base = all.find((e) => e.id === "framed");
+		const frame = { ...base, id: "frame-1", type: "frame", name: null, x: 960, y: 1660, width: 260, height: 170, backgroundColor: "transparent", boundElements: null, roundness: null, index: null, version: 1, versionNonce: 91 };
+		x.api.updateScene({ elements: [...all.map((e) => (e.id === "framed" || e.containerId === "framed" ? { ...e, frameId: "frame-1", version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)), frame], captureUpdate: x.CaptureUpdateAction.IMMEDIATELY });`);
+	expect(!(await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "frame-1", y: 1960 }] })).isError, "a frame is moved");
+	const framed = await inEditor<any>(w, `const all = x.api.getSceneElements(); const e = (id) => all.find((el) => el.id === id); const s = e("framed"), l = all.find((el) => el.containerId === "framed"), a = e("crossing"), f = e("frame-1");
+		const start = [a.x + a.points[0][0], a.y + a.points[0][1]], end = [a.x + a.points[a.points.length - 1][0], a.y + a.points[a.points.length - 1][1]];
+		return { frameY: f.y, shapeY: s.y, labelInside: l.y > s.y && l.y + l.height < s.y + s.height, inFrame: s.y > f.y && s.y + s.height < f.y + f.height, start: start.map(Math.round), end: end.map(Math.round), startAtShape: start[0] > s.x + s.width - 2 && start[0] < s.x + s.width + 14 && start[1] > s.y - 10 && start[1] < s.y + s.height + 10, endAtOther: Math.abs(end[0] - 1600) < 14 && end[1] > 1700 - 10 && end[1] < 1780 + 10, bound: [a.startBinding.elementId, a.endBinding.elementId] };`);
+	log("aiFrameMoved", framed);
+	expect(framed.frameY === 1960 && framed.shapeY === 2000 && framed.labelInside && framed.inFrame, "what is in the frame moved with it, label and all");
+	expect(framed.startAtShape && framed.endAtOther && framed.bound[0] === "framed" && framed.bound[1] === "unframed", "the arrow from inside the frame to outside it runs between the two again");
+	expect(!(await call("excalidraw_apply_operations", { operations: [{ op: "delete", id: "frame-1" }] })).isError, "a frame is deleted");
+	const unframedNow = await inEditor<any>(w, `const all = x.api.getSceneElements(); return { frame: all.some((e) => e.id === "frame-1"), shape: all.some((e) => e.id === "framed"), stillInAFrame: all.filter((e) => e.frameId === "frame-1").length };`);
+	expect(!unframedNow.frame && unframedNow.shape && unframedNow.stillInAFrame === 0, "its contents stay, in no frame");
+	menuItem("Agent", "Keep AI Changes").click();
+	await settled();
+
 	// ----- a Mermaid flowchart becomes shapes -----
 	const mermaid = await call("excalidraw_from_mermaid", { definition: "flowchart LR\n  A[Start] --> B{Ready?}\n  B -- yes --> C[Go]\n  B -- no --> A" });
 	log("aiMermaid", mermaid.data ?? mermaid.text);
