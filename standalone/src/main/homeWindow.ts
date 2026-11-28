@@ -7,7 +7,7 @@ import { EXCALIDRAW_SOURCE, readScene } from "./excalidrawFile";
 import { canonicalPath, docType, Library, LibraryError, type DocKind } from "./library/library";
 import { readRecent, RecentFileError, Recents } from "./library/recents";
 import { sketchDrawio, sketchExcalidraw } from "./library/sketch";
-import { moveRecords } from "./mapper/store";
+import { hasRecords, moveRecords } from "./mapper/store";
 import { paths } from "./paths";
 import { onSettingsChanged, settings, updateSettings } from "./settings";
 import type { StaticServer } from "./staticServer";
@@ -435,9 +435,15 @@ export class HomeWindow {
 				case "move":
 					await HomeWindow.moving(lib, [text(msg.id)], () => [{ from: text(msg.id), to: lib.move(text(msg.id), text(msg.collection)) }]);
 					break;
-				case "duplicate":
+				case "duplicate": {
+					// A copy of a diagram with maps would point at the same maps' records as the original, and
+					// what is done to the maps of either would be done to both. Until a copy can be given maps
+					// of its own, such a diagram is not duplicated here.
+					const file = lib.pathOf(text(msg.id));
+					if (hasRecords(path.dirname(file), file)) throw new LibraryError(`${path.basename(file)} has maps, and a copy would share them with it. Open it and draw the maps again in a copy, or copy it without its maps in Finder.`);
 					lib.duplicate(text(msg.id));
 					break;
+				}
 				case "trash":
 					await HomeWindow.closeWindowOf(lib, text(msg.id), "move it to the trash");
 					HomeWindow.recents().remove(lib.pathOf(text(msg.id)));

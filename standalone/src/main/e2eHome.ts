@@ -244,6 +244,10 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 		await until("the diagram to be back at the top", () => fs.existsSync(lib().pathOf("Mapped.drawio")));
 		const back = loadRecord(lib().root, "e2e-map") as any;
 		expect(back?.note === "changed in Maps" && !loadRecord(path.join(lib().root, "Maps"), "e2e-map"), "moved back, it has its records as they are now");
+		// not duplicated while it has maps: a copy would share them
+		await send({ type: "duplicate", id: "Mapped.drawio" });
+		await until("the refusal to be said", async () => /has maps/.test((await said()) ?? ""));
+		expect(!fs.existsSync(lib().pathOf("Mapped copy.drawio")), "a diagram with maps is not duplicated");
 	}
 
 	// ----- a document opened by a path with a link in it is the same document: its card says so, and it follows -----

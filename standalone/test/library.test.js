@@ -520,6 +520,24 @@ test("two paths to one file are one place", () => {
 	assert.equal(canonicalPath(path.join(dir, "no such folder", "x.drawio")), path.join(dir, "no such folder", "x.drawio"));
 });
 
+test("versions written in the same second are in the order they were written", () => {
+	const lib = new Library(temp());
+	const doc = lib.create("", "Quick", ".drawio", B("a"));
+	const at = Date.UTC(2026, 10, 28, 19, 0, 7);
+	// as it was opened, then going back right away keeps the state before as its own point: all within one second
+	lib.snapshot(doc, B("as opened"), { kept: true, now: at });
+	const first = lib.versions(doc)[0].key;
+	// (written a moment later, whatever the clock's second says)
+	const later = new Date(Date.now() + 5000);
+	lib.snapshot(doc, B("the saved state, which sorts first by name: zzz"), { kept: true, now: at });
+	const second = lib.versions(doc).find((v) => v.key !== first).key;
+	fs.utimesSync(path.join(lib.root, ".omnidraw", "versions", doc, second), later, later);
+	assert.deepEqual(lib.versions(doc).map((v) => lib.versionBytes(doc, v.key).toString()), ["the saved state, which sorts first by name: zzz", "as opened"]);
+	// and the other way round, whatever their names
+	fs.utimesSync(path.join(lib.root, ".omnidraw", "versions", doc, first), new Date(Date.now() + 9000), new Date(Date.now() + 9000));
+	assert.equal(lib.versionBytes(doc, lib.versions(doc)[0].key).toString(), "as opened");
+});
+
 test("the picture kept of a document is for the document as it is, not as it was", () => {
 	const lib = new Library(temp());
 	const doc = lib.create("", "Plan", ".drawio", B("x"));

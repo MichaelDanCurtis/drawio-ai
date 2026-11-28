@@ -195,6 +195,14 @@ test("a move: the map records go with the diagram, the current ones win, and non
 	// a new name in the same folder: re-associated, still there
 	assert.equal(store.moveRecords({ cwd: a, diagram: path.join(a, "plan.drawio") }, { cwd: a, diagram: path.join(a, "roadmap.drawio") }), 1);
 	assert.equal(store.loadRecord(a, mine.id).diagram, "roadmap.drawio");
+	// the same folder by a path with a link in it: re-associated in place, never taken out
+	const linked = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "maps-link-")), "by-link");
+	fs.symlinkSync(a, linked);
+	assert.equal(store.moveRecords({ cwd: linked, diagram: path.join(linked, "roadmap.drawio") }, { cwd: fs.realpathSync(a), diagram: path.join(fs.realpathSync(a), "plan-b.drawio") }), 1);
+	assert.equal(store.loadRecord(a, mine.id).diagram, "plan-b.drawio");
+	assert.equal(store.hasRecords(a, path.join(a, "plan-b.drawio")), true);
+	assert.equal(store.hasRecords(a, path.join(a, "roadmap.drawio")), false);
+	assert.equal(store.hasRecords(b, path.join(b, "plan-b.drawio")), false);
 	fs.rmSync(a, { recursive: true, force: true });
 	fs.rmSync(b, { recursive: true, force: true });
 });

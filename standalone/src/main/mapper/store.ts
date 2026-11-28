@@ -167,7 +167,15 @@ export function diffRecords(before: MapRecord, after: MapRecord): { added: strin
 export function moveRecords(from: { cwd: string; diagram: string }, to: { cwd: string; diagram: string }): number {
 	const oldName = path.basename(from.diagram);
 	const newName = path.basename(to.diagram);
-	const sameFolder = path.resolve(from.cwd) === path.resolve(to.cwd);
+	// (by the folders' real places: the same folder by a path with a link in it is the same folder, and its records are not taken out of it)
+	const real = (dir: string): string => {
+		try {
+			return fs.realpathSync(dir);
+		} catch {
+			return path.resolve(dir);
+		}
+	};
+	const sameFolder = real(from.cwd) === real(to.cwd);
 	let names: string[] = [];
 	try {
 		names = fs.readdirSync(mapsDir(from.cwd)).filter((n) => n.endsWith(".json"));
@@ -184,6 +192,19 @@ export function moveRecords(from: { cwd: string; diagram: string }, to: { cwd: s
 		n++;
 	}
 	return n;
+}
+
+/** Whether a diagram has maps with records kept in its folder. */
+export function hasRecords(cwd: string, diagram: string): boolean {
+	const name = path.basename(diagram);
+	try {
+		return fs
+			.readdirSync(mapsDir(cwd))
+			.filter((n) => n.endsWith(".json"))
+			.some((n) => loadRecord(cwd, n.replace(/\.json$/, ""))?.diagram === name);
+	} catch {
+		return false;
+	}
 }
 
 export function adoptRecords(from: { cwd: string; diagram?: string }, to: { cwd: string; diagram: string }): number {

@@ -746,12 +746,22 @@ export class Library {
 			const dir = this.stored("versions", ...this.parts(id));
 			if (!dir) return [];
 			// (only plain files by a version's name: a link or a folder by such a name is nothing of the app's, and no version)
+			// The newest first: by when each was last written, which the name cannot tell for two in the
+			// same second (and a row of saves keeps the second it started in); by name after that.
 			return fs
 				.readdirSync(dir, { withFileTypes: true })
 				.filter((e) => e.isFile() && /^\d{8}T\d{6}Z-[sk]-[0-9a-f]{12}\./.test(e.name))
-				.map((e) => e.name)
-				.sort()
-				.reverse();
+				.map((e) => {
+					let at = 0;
+					try {
+						at = fs.lstatSync(path.join(dir, e.name)).mtimeMs;
+					} catch {
+						// (gone meanwhile: it sorts last, and reading it says so)
+					}
+					return { name: e.name, at };
+				})
+				.sort((a, b) => b.at - a.at || (a.name < b.name ? 1 : a.name > b.name ? -1 : 0))
+				.map((e) => e.name);
 		} catch {
 			return [];
 		}
