@@ -96,6 +96,18 @@ export async function runDrawingAi(server: StaticServer, config: E2eConfig, log:
 	log("aiMove", { before, moved });
 	expect(moved.check[0] === 520 && moved.check[1] === 420 && moved.labelInside && moved.endNearCheck && moved.stillBound, "the moved shape's label is inside it and its arrow ends at it");
 
+	// a shape that is turned takes its label round with it, and its arrow leaves from where its outline is now
+	await call("excalidraw_apply_operations", { operations: [{ op: "add", type: "rectangle", id: "turn", x: 0, y: 700, width: 160, height: 80, label: "Turn" }, { op: "add", type: "rectangle", id: "beside", x: 400, y: 700, width: 160, height: 80 }, { op: "add", type: "arrow", id: "turn-beside", start: "turn", end: "beside" }] });
+	const startOf = () => inEditor<number[]>(w, `const a = x.api.getSceneElements().find((e) => e.id === "turn-beside"); return [Math.round(a.x + a.points[0][0]), Math.round(a.y + a.points[0][1])];`);
+	const flat = await startOf();
+	expect(!(await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "turn", angle: 90 }] })).isError, "a shape is turned");
+	const upright = await inEditor<any>(w, `const all = x.api.getSceneElements(); const s = all.find((e) => e.id === "turn"), l = all.find((e) => e.containerId === "turn"), a = all.find((e) => e.id === "turn-beside"); return { shape: s.angle, label: l.angle, bound: a.startBinding.elementId };`);
+	const stood = await startOf();
+	log("aiTurned", { flat, stood, upright });
+	// (160 wide lying down, its right edge is at x=160; stood up about its centre it is 80 wide, and that edge is at x=120)
+	expect(Math.abs(flat[0] - 166) <= 2 && Math.abs(stood[0] - 126) <= 2 && Math.abs(stood[1] - 740) <= 2, `the arrow leaves from the turned shape's outline (${flat} → ${stood})`);
+	expect(Math.abs(upright.shape - Math.PI / 2) < 1e-9 && upright.label === upright.shape && upright.bound === "turn", "the label is turned with its shape, and the arrow is still attached");
+
 	// an arrow is restyled and relabelled where it is, and attached elsewhere
 	const rewired = await call("excalidraw_apply_operations", { operations: [{ op: "update", id: "api-check", strokeColor: "#e03131", strokeStyle: "dashed", label: "asks again" }, { op: "update", id: "api-check", end: "box-plan" }] });
 	const wired = await inEditor<any>(w, `const all = x.api.getSceneElements(); const e = (id) => all.find((el) => el.id === id); const a = e("api-check"), label = all.find((el) => el.containerId === "api-check");

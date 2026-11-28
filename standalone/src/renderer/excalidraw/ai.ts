@@ -519,11 +519,12 @@ export class DrawingAi {
 		}
 		if (op.start !== undefined || op.end !== undefined || op.points !== undefined) throw new OperationError(`start, end and points are for arrows and lines; this is a ${el.type}.`);
 
-		// how it looks (a shape's label takes its line colour and opacity with it, as in the editor)
+		// how it looks (a shape's label takes its line colour and opacity with it, and turns with it, as in the editor)
+		const turnedNow = look.angle !== undefined && look.angle !== (el.angle ?? 0);
 		if (Object.keys(look).length) {
 			el = draft.change(el.id, look);
 			const label = draft.labelOf(el);
-			if (label && (look.strokeColor !== undefined || look.opacity !== undefined)) draft.change(label.id, { ...(look.strokeColor !== undefined ? { strokeColor: look.strokeColor } : {}), ...(look.opacity !== undefined ? { opacity: look.opacity } : {}) });
+			if (label && (look.strokeColor !== undefined || look.opacity !== undefined || turnedNow)) draft.change(label.id, { ...(look.strokeColor !== undefined ? { strokeColor: look.strokeColor } : {}), ...(look.opacity !== undefined ? { opacity: look.opacity } : {}), ...(turnedNow ? { angle: look.angle } : {}) });
 		}
 		// where it is, and how large
 		const box = boxOf(el);
@@ -539,7 +540,8 @@ export class DrawingAi {
 		if (words !== undefined || Object.keys(textStyle).length || (resized && draft.labelOf(el))) this.relabel(draft, el.id, words, textStyle);
 		// the lines attached to it follow
 		// (an elbow arrow's route is Excalidraw's own to work out: it is left as it is, and Excalidraw puts it right the next time the shape is moved by hand)
-		if (dx || dy || resized || draft.get(el.id)!.height !== el.height) for (const line of draft.linesAt(draft.get(el.id)!)) if (!line.elbowed) this.rebuildLine(draft, line);
+		// (a shape that is turned has its outline somewhere else, too)
+		if (dx || dy || resized || turnedNow || draft.get(el.id)!.height !== el.height) for (const line of draft.linesAt(draft.get(el.id)!)) if (!line.elbowed) this.rebuildLine(draft, line);
 		return el.id;
 	}
 
