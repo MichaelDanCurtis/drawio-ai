@@ -27,6 +27,9 @@
   opened. `npx`, and any other package runner set as an agent's command in settings.json, is
   now started in an empty folder of the app's own; the agent still works in the document's
   folder, which its session is told. Installed adapters and agents are started as before.
+
+## [0.4.2]
+
 - **Settings → Sharing.** The OmniPad server Go live shares through, and the name others see,
   have a place in Settings. OmniDraw has no server built in: you give the address of one you
   or your team runs, and can change it there. **Check** asks the server whether it can share
