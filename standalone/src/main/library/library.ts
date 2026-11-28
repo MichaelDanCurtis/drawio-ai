@@ -248,10 +248,16 @@ export class Library {
 	 */
 	private store(...parts: string[]): string {
 		const dir = path.join(this.made(), STORE);
-		if (!fs.lstatSync(dir, { throwIfNoEntry: false })) {
-			fs.mkdirSync(dir, { recursive: true });
+		const there = fs.lstatSync(dir, { throwIfNoEntry: false });
+		if (!there) {
+			// (the user's alone: copies of their documents are kept in it, which may be documents others may not read)
+			fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+			fs.chmodSync(dir, 0o700);
 			// (the app's own bookkeeping is not for a repository the library may be in: git has a history of its own)
 			fs.writeFileSync(path.join(dir, ".gitignore"), "*\n");
+		} else if (there.isDirectory() && !there.isSymbolicLink() && (there.mode & 0o077) !== 0 && there.uid === process.getuid?.()) {
+			// (one made before it was kept private, or by another program: made the user's alone now)
+			fs.chmodSync(dir, 0o700);
 		}
 		return this.unlinked(dir, parts);
 	}
@@ -779,7 +785,7 @@ export class Library {
 		// (made anew, or not at all: whatever is there by that name, a link above all, is not written through)
 		const target = path.join(dir, name);
 		try {
-			fs.writeFileSync(target, bytes, { flag: "wx" });
+			fs.writeFileSync(target, bytes, { flag: "wx", mode: 0o600 });
 		} catch (e: any) {
 			if (e?.code !== "EEXIST") throw e;
 			// (the same name is the same state of the same kind, at the same second: a plain file of it is that version already)
@@ -852,7 +858,7 @@ export class Library {
 		fs.mkdirSync(path.dirname(file), { recursive: true });
 		// (a new file of its own, put in the picture's place whole: a link by the picture's name is replaced, never written through)
 		const temp = path.join(path.dirname(file), `.new-${crypto.randomBytes(6).toString("hex")}.png`);
-		fs.writeFileSync(temp, png, { flag: "wx" });
+		fs.writeFileSync(temp, png, { flag: "wx", mode: 0o600 });
 		try {
 			fs.renameSync(temp, file);
 		} catch (e) {

@@ -282,6 +282,31 @@ test("a version or a picture is never written through a link that is already the
 	assert.equal(lib.snapshot(doc, B("the document's bytes"), { kept: true, now }), false);
 });
 
+test("what the app keeps is the user's alone, whatever the library's own folders allow", (t) => {
+	if (process.platform === "win32") return t.skip("modes are not how Windows says who may read a file");
+	const root = temp();
+	fs.chmodSync(root, 0o755);
+	const lib = new Library(root);
+	const doc = lib.create("", "Private", ".drawio", B("secret plan"));
+	fs.chmodSync(lib.pathOf(doc), 0o600);
+	const old = process.umask(0o022);
+	try {
+		lib.snapshotNow(doc, { kept: true });
+		lib.setThumb(doc, B("png"));
+	} finally {
+		process.umask(old);
+	}
+	const store = path.join(root, ".omnidraw");
+	assert.equal(fs.statSync(store).mode & 0o777, 0o700);
+	const version = path.join(store, "versions", doc, lib.versions(doc)[0].key);
+	assert.equal(fs.statSync(version).mode & 0o777, 0o600);
+	assert.equal(fs.statSync(path.join(store, "thumbs", `${doc}.png`)).mode & 0o777, 0o600);
+	// one made open to others before (or by another program) is made the user's alone
+	fs.chmodSync(store, 0o755);
+	lib.snapshot(doc, B("another state"));
+	assert.equal(fs.statSync(store).mode & 0o777, 0o700);
+});
+
 test("a file is read through one descriptor, and only as the plain file under its name", () => {
 	const dir = temp("plain");
 	const file = path.join(dir, "Plan.drawio");
