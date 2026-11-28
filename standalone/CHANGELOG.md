@@ -27,6 +27,11 @@
   opened. `npx`, and any other package runner set as an agent's command in settings.json, is
   now started in an empty folder of the app's own; the agent still works in the document's
   folder, which its session is told. Installed adapters and agents are started as before.
+- An agent's export of a diagram (`drawio_export`) is never written through a link. A file in
+  the diagram's folder that is a link to another file (as a checked-out repository can hold)
+  used to send the export over that other file, while the question was about the name in the
+  folder. Such a name is now refused; the question before a file is replaced shows where the
+  file really is; and the file is written so that a link appearing meanwhile is not followed.
 
 ## [0.4.1]
 
