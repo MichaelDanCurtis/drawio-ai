@@ -7,6 +7,7 @@
 //   { "permission": { title, kind, rawInput, options? } }   asks for permission, says the answer
 //   { "call": { name, arguments } }                calls a tool, says what came back
 //   { "cwd": true }                                says what is in the folder it was started in
+//   { "where": true }                              says the folder it was started in, and the one its session was given
 //   { "wait": ms }                                 waits (a cancel ends it)
 //   { "exit": code }                               ends its process, mid-request
 // It also says which model it was switched to, and how many images came with the prompt.
@@ -26,6 +27,7 @@ const ask = (method, params) =>
 const sessionId = "fake-session-1";
 let mcp;
 let model = "small";
+let sessionFolder = "";
 let cancelled = false;
 const say = (text) => send({ method: "session/update", params: { sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
 
@@ -53,6 +55,7 @@ async function prompt(blocks) {
 		if (step.say) say(step.say);
 		if (step.tools) say(`[tools ${(await tool("tools/list", {})).tools.map((t) => t.name).join(",")}] `);
 		if (step.cwd) say(`[cwd ${fs.readdirSync(process.cwd()).length} entries] `);
+		if (step.where) say(`[started in ${fs.realpathSync(process.cwd())}] [session in ${sessionFolder}] `);
 		if (step.permission) {
 			const { options, ...toolCall } = step.permission;
 			const r = await ask("session/request_permission", { sessionId, toolCall: { toolCallId: `t${nextId}`, status: "pending", ...toolCall }, options: options ?? OPTIONS });
@@ -96,6 +99,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
 			case "session/new": {
 				const server = msg.params.mcpServers[0];
 				mcp = server ? { url: server.url, authorization: server.headers[0].value } : undefined;
+				sessionFolder = msg.params.cwd;
 				return answer({
 					sessionId,
 					configOptions: [

@@ -1,15 +1,17 @@
 import { app, BaseWindow, dialog, ipcMain, nativeTheme, shell, WebContentsView } from "electron";
 import * as fs from "fs";
 import * as path from "path";
+import { ChatController, type ChatEditor } from "./chatController";
 import { ChatDock, documentWindows, windowPlacement, type DocumentWindow } from "./documentShell";
 import { baseName, EXCALIDRAW_MIME, ExcalidrawFileError, formatForPath, pictureToWrite, readScene, sceneTextToWrite, type ExcalidrawFormat } from "./excalidrawFile";
+import { exportTarget, realPath, writeExport } from "./exportTarget";
+import { ExcalidrawEndpoint, ExcalidrawToolbox, PageToolError } from "./excalidrawTools";
 import { paths } from "./paths";
 import { documentKey } from "./shortcuts";
 import { onSettingsChanged, settings, type Settings } from "./settings";
 import type { StaticServer } from "./staticServer";
 
-/** What the chat says in a window with an Excalidraw drawing: the agents' drawing tools are draw.io's. */
-export const NO_AI_YET = "AI editing of Excalidraw drawings is not there yet: the agents' drawing tools work on draw.io diagrams.";
+
 
 let nextId = 1;
 
@@ -18,6 +20,8 @@ let nextId = 1;
  * other, in the same shell as a diagram window (documentShell.ts). The editor is the real
  * Excalidraw (src/renderer/excalidraw/app.tsx); this class is the document around it: the file,
  * unsaved changes, Save and Save As, export, and the question asked before the window closes.
+ * The chat is the app's (ChatController), with the drawing's own tools (excalidrawTools.ts):
+ * an agent's changes are made by the editor page and stay pending until they are kept or reverted.
  *
  * A drawing is a `.excalidraw` file (Excalidraw's JSON), or a PNG or SVG with the drawing inside
  * it: those are saved back as the pictures they are.
@@ -58,6 +62,13 @@ export class ExcalidrawWindow implements DocumentWindow {
 	private offSettings: (() => void) | undefined;
 	private requestSeq = 0;
 	private requests = new Map<number, { resolve: (r: Serialized) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+	/** Tool calls the editor page is carrying out. */
+	private toolCalls = new Map<number, { resolve: (r: unknown) => void; reject: (e: Error) => void; done: () => void }>();
+	/** What is selected in the drawing, and what is pending of an agent's changes, as the page last said. */
+	private selection: string[] = [];
+	private review: ChatEditor["pendingReview"];
+	public readonly chat: ChatController;
+	private readonly mcp: ExcalidrawEndpoint;
 	/** Saves whose file is written and whose page has not yet said whether the drawing changed meanwhile. */
 	private confirmations = new Map<number, () => void>();
 
@@ -80,7 +91,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 			}
 		}
 		const w = new ExcalidrawWindow(server, file);
-		w.start();
+		await w.start();
 		return w;
 	}
 
@@ -122,6 +133,35 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.win.contentView.addChildView(this.editorView);
 		this.win.contentView.addChildView(this.chatView);
 		this.dock = new ChatDock(this.win, this.editorView, this.chatView, { changed: () => this.sendLook() });
+		const window = this;
+		/** The drawing's editor, as the chat sees it (what a diagram's draw.io client is for a diagram's chat). */
+		const editor: ChatEditor = {
+			get currentSelection() {
+				return window.selection;
+			},
+			get pendingReview() {
+				return window.review;
+			},
+			aiSetStatus: (working, text) => this.sendToEditor({ type: "aiStatus", working, text }),
+			aiResolveReview: (decision) => this.resolveReview(decision),
+		};
+		this.mcp = new ExcalidrawEndpoint(
+			new ExcalidrawToolbox({ fileName: () => this.fileName(), page: (name, args, signal) => this.pageTool(name, args, signal), exportForTool: (request, signal) => this.exportForTool(request, signal) }),
+			() => this.fileName()
+		);
+		this.chat = new ChatController(
+			{
+				client: () => editor,
+				fileName: () => this.fileName(),
+				cwd: () => this.cwd(),
+				ready: () => this.loaded,
+				openSettings: (section) => ExcalidrawWindow.appCommands.settings(section),
+				collapseChat: () => this.dock.setVisible(false),
+				resizeChatTo: (screenX, done) => this.dock.resizeTo(screenX, done),
+			},
+			this.mcp
+		);
+		this.chat.attach(this.chatView.webContents);
 		ExcalidrawWindow.byEditor.set(this.editorView.webContents.id, this);
 		ExcalidrawWindow.byChat.set(this.chatView.webContents.id, this);
 		ExcalidrawWindow.all.add(this);
@@ -151,6 +191,9 @@ export class ExcalidrawWindow implements DocumentWindow {
 			if (!isMainFrame || inPlace) return;
 			this.loaded = false;
 			this.failRequests("The editor was reloaded.");
+			// (what was pending is the drawing's as it is read from the file again)
+			this.selection = [];
+			this.review = undefined;
 		});
 
 		this.win.on("resize", () => this.dock.layout());
@@ -159,13 +202,16 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.win.on("focus", () => {
 			documentWindows.used(this);
 			ExcalidrawWindow.onFront?.();
+			this.chat.postState();
 		});
 		this.offSettings = onSettingsChanged((_s, patch) => this.applySettings(patch));
 		this.dock.layout();
 		this.updateTitle();
 	}
 
-	private start(): void {
+	private async start(): Promise<void> {
+		// (the chat asks for the drawing's tools as soon as its page is there)
+		await this.mcp.start();
 		this.win.show();
 		this.editorView.webContents.focus();
 		void this.editorView.webContents.loadURL(`${this.server.base}/excalidraw.html`);
@@ -176,10 +222,11 @@ export class ExcalidrawWindow implements DocumentWindow {
 	private applySettings(patch: Partial<Settings>): void {
 		if (this.win.isDestroyed()) return;
 		if ("chat" in patch || "chatWidth" in patch) this.dock.layout();
-		if ("appearance" in patch || "chat" in patch) {
-			this.sendLook();
-			this.postChatState();
-		}
+		if ("appearance" in patch || "chat" in patch) this.sendLook();
+		// (a catalog-only change is a chat recording what its agent offers: nothing to redraw, unless
+		// this chat is answered through an API key, whose models are the ones the provider listed)
+		if ("models" in patch || "agents" in patch || "appearance" in patch || "chat" in patch) this.chat.settingsChanged("agents" in patch);
+		else if ("modelCatalog" in patch) this.chat.catalogChanged();
 	}
 
 	// ----- the editor page -----
@@ -217,6 +264,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 				this.setDirty(false);
 				this.loadedWaiters.splice(0).forEach((r) => r());
 				ExcalidrawWindow.onFront?.();
+				this.chat.postState();
 				break;
 			case "loadFailed":
 				// (the file was a drawing when the window opened: it changed, or went, since)
@@ -227,6 +275,24 @@ export class ExcalidrawWindow implements DocumentWindow {
 			case "dirty":
 				this.setDirty(!!msg.dirty);
 				break;
+			case "selection":
+				this.selection = Array.isArray(msg.ids) ? msg.ids.filter((id: unknown): id is string => typeof id === "string").slice(0, 2000) : [];
+				this.chat.postState();
+				break;
+			case "review": {
+				const count = (v: unknown) => (typeof v === "number" && isFinite(v) && v > 0 ? Math.floor(v) : 0);
+				this.review = msg.pending ? { pending: true, summary: { added: count(msg.summary?.added), changed: count(msg.summary?.changed), removed: count(msg.summary?.removed) } } : undefined;
+				this.chat.postState();
+				break;
+			}
+			case "toolResult": {
+				const call = this.toolCalls.get(Number(msg.id));
+				if (!call) break;
+				call.done();
+				if (msg.ok) call.resolve(msg.result);
+				else call.reject(msg.forModel ? new PageToolError(String(msg.error)) : new Error(String(msg.error || "The editor could not do that.")));
+				break;
+			}
 			case "command":
 				this.runCommand(String(msg.command));
 				break;
@@ -301,7 +367,59 @@ export class ExcalidrawWindow implements DocumentWindow {
 		return { bytes, stamp: r.stamp };
 	}
 
+	/** How long the editor page is given for a tool call (the end-to-end run shortens it). */
+	public static toolTimeout = 120_000;
+
+	/** Has the editor page carry out a tool call of an agent's (the arguments are checked: excalidrawTools.ts). */
+
+	private pageTool(name: string, args: unknown, signal?: AbortSignal): Promise<any> {
+		if (!this.loaded) return Promise.reject(new Error("The drawing is still loading. Try again in a moment."));
+		if (signal?.aborted) return Promise.reject(new Error("Stopped."));
+		return new Promise((resolve, reject) => {
+			const id = ++this.requestSeq;
+			const timer = setTimeout(() => {
+				done();
+				// (the page is told, as when the request is stopped: what it is still waiting for must not change the drawing once the caller has been told it failed)
+				this.sendToEditor({ type: "cancelTool", id });
+				reject(new Error("The editor did not answer in time."));
+			}, ExcalidrawWindow.toolTimeout);
+			const stopped = () => {
+				done();
+				// (the page is told too: a call that is still waiting for something there must not change the drawing afterwards)
+				this.sendToEditor({ type: "cancelTool", id });
+				reject(new Error("Stopped."));
+			};
+			const done = () => {
+				clearTimeout(timer);
+				signal?.removeEventListener("abort", stopped);
+				this.toolCalls.delete(id);
+			};
+			signal?.addEventListener("abort", stopped, { once: true });
+			this.toolCalls.set(id, { resolve, reject, done });
+			this.sendToEditor({ type: "tool", id, name, args });
+		});
+	}
+
+	/** A tool call from outside the window's own chat (the end-to-end run). */
+	public callTool(name: string, args: unknown) {
+		return this.mcp.call(name, args);
+	}
+
+	/** Keep (accept) or revert (reject) what is pending of an agent's changes. */
+	public resolveReview(decision: "accept" | "reject"): void {
+		this.sendToEditor({ type: "resolveReview", decision });
+	}
+
+	/** Folder the agent works in: the drawing's folder. */
+	public cwd(): string {
+		return this.file ? path.dirname(this.file) : app.getPath("documents");
+	}
+
 	private failRequests(reason: string): void {
+		for (const call of [...this.toolCalls.values()]) {
+			call.done();
+			call.reject(new Error(reason));
+		}
 		for (const done of [...this.confirmations.values()]) done();
 		for (const [id, request] of this.requests) {
 			clearTimeout(request.timer);
@@ -317,44 +435,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 	 * no tools: those draw in draw.io. It says so, and still closes, resizes and opens Settings.
 	 */
 	private onChatMessage(msg: any): void {
-		switch (msg?.type) {
-			case "ready":
-				this.postChatState();
-				break;
-			case "collapseChat":
-				this.dock.setVisible(false);
-				break;
-			case "resizeChat":
-				if (typeof msg.screenX === "number" && isFinite(msg.screenX)) this.dock.resizeTo(msg.screenX, !!msg.done);
-				else if (msg.done) this.dock.resizeTo(NaN, true);
-				break;
-			case "openSettings":
-				ExcalidrawWindow.appCommands.settings(msg.section === "agents" || msg.section === "api" ? msg.section : undefined);
-				break;
-			case "command":
-				if (msg.command === "drawai.openSettings") ExcalidrawWindow.appCommands.settings();
-				break;
-		}
-	}
-
-	private postChatState(): void {
-		if (this.chatView.webContents.isDestroyed()) return;
-		const s = settings();
-		this.chatView.webContents.send("chat:toWebview", {
-			type: "state",
-			state: {
-				file: this.displayName(),
-				unavailable: NO_AI_YET,
-				transcript: [],
-				transcriptVersion: 0,
-				busy: false,
-				providers: [],
-				models: [],
-				iconStyle: s.appearance.iconStyle,
-				matrix: s.appearance.matrix,
-				chatSide: s.chat.side,
-			},
-		});
+		void this.chat.onMessage(msg);
 	}
 
 	public toggleChat(): void {
@@ -446,7 +527,7 @@ export class ExcalidrawWindow implements DocumentWindow {
 		app.addRecentDocument(target);
 		this.updateTitle();
 		this.sendLook();
-		this.postChatState();
+		this.chat.postState();
 		return true;
 	}
 
@@ -520,6 +601,37 @@ export class ExcalidrawWindow implements DocumentWindow {
 		}
 	}
 
+	/** excalidraw_export from an agent: next to the drawing unless a path is given; never silently overwrites. */
+	private async exportForTool(request: { format: string; path?: string; overwrite?: boolean }, signal?: AbortSignal): Promise<{ path: string; bytes: number }> {
+		// (a request that was stopped writes nothing: asked again at each point the export waits at)
+		const unlessStopped = () => {
+			if (signal?.aborted) throw new Error("Stopped.");
+		};
+		unlessStopped();
+		const format: ExcalidrawFormat = request.format === "excalidraw" ? "json" : (request.format as "png" | "svg");
+		const ending = request.format;
+		const dir = this.cwd();
+		const target = request.path ? path.resolve(dir, request.path) : path.join(dir, `${baseName(this.fileName() ?? "Untitled")}.${ending === "excalidraw" ? "copy.excalidraw" : ending}`);
+		if (formatForPath(target) !== format) throw new Error(`The path must end in .${ending} for this format.`);
+		// (where it really lands, see exportTarget.ts: a name that is a link to another file is refused here, and the folders' own links are followed,
+		// so that what is compared, asked about and written is one and the same place)
+		const where = exportTarget(target);
+		if (this.file && where.real === realPath(this.file)) throw new Error("That would replace the drawing itself.");
+		if ([...ExcalidrawWindow.all].some((w) => w.file && realPath(w.file) === where.real)) throw new Error(`${path.basename(target)} is open in another window.`);
+		if (where.exists) {
+			if (!request.overwrite) throw new Error(`${target} exists. Pass overwrite: true to replace it (the user is asked).`);
+			// (stopping the request takes the question away, as if it were answered Cancel)
+			const r = await dialog.showMessageBox(this.win, { type: "warning", message: `Replace ${path.basename(target)} with a new export?`, detail: where.real, buttons: ["Replace", "Cancel"], defaultId: 1, cancelId: 1, ...(signal ? { signal } : {}) });
+			unlessStopped();
+			if (r.response !== 0) throw new Error("The user chose not to replace the file.");
+		}
+		const { bytes } = await this.contents(format);
+		unlessStopped();
+		// (never through a link, and never over a file that was not there when the user was asked)
+		writeExport(where.real, bytes, where.exists);
+		return { path: target, bytes: bytes.length };
+	}
+
 	private async onClose(e: Electron.Event): Promise<void> {
 		if (this.closing || !this.dirty) return;
 		e.preventDefault();
@@ -557,6 +669,8 @@ export class ExcalidrawWindow implements DocumentWindow {
 		this.loadedWaiters.splice(0).forEach((r) => r());
 		this.dock.dispose();
 		this.offSettings?.();
+		this.chat.dispose();
+		this.mcp.dispose();
 		documentWindows.remove(this);
 		ExcalidrawWindow.all.delete(this);
 		for (const [k, v] of ExcalidrawWindow.byEditor) if (v === this) ExcalidrawWindow.byEditor.delete(k);

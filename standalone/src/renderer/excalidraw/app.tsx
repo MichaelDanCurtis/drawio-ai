@@ -22,6 +22,9 @@ import type { AppState, ExcalidrawImperativeAPI, ExcalidrawInitialDataState } fr
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { createRoot } from "react-dom/client";
+import { boxOf } from "../../excalidraw/geometry";
+import type { Change, Summary } from "../../excalidraw/review";
+import { DrawingAi, OperationError, StoppedError } from "./ai";
 
 type Format = "json" | "png" | "svg";
 /** What the window around the page looks like: the chat beside it, and the app's icon style. */
@@ -42,7 +45,20 @@ interface HostDocument {
 type HostMessage =
 	| { type: "serialize"; id: number; format: Format }
 	| { type: "saved"; id: number; stamp: string }
-	| { type: "look"; name: string; saved: boolean; look: Look };
+	| { type: "look"; name: string; saved: boolean; look: Look }
+	/** A tool call of an agent's, checked by the app (src/main/excalidrawTools.ts). */
+	| { type: "tool"; id: number; name: string; args: any }
+	/** The request that tool call belongs to was stopped: if the call has not changed the drawing yet, it must not. */
+	| { type: "cancelTool"; id: number }
+	| { type: "resolveReview"; decision: "accept" | "reject" }
+	/** An agent is at work on the drawing (`text`: who), or has finished. */
+	| { type: "aiStatus"; working: boolean; text?: string };
+
+/** What is pending of an agent's changes: how many, and which elements (for the outlines on the canvas). */
+interface Review {
+	summary: Summary;
+	changes: Change[];
+}
 
 interface Host {
 	post(msg: unknown): void;
@@ -153,8 +169,65 @@ function Icon({ name }: { name: keyof typeof ICONS }) {
 	);
 }
 
-/** The app's bar above the canvas: which drawing this is, whether it has unsaved changes, Save, Export and the chat. */
-function Bar({ name, dirty, saved, look }: { name: string; dirty: boolean; saved: boolean; look: Look }) {
+/** An agent's tool call, carried out. The app has checked the arguments (see src/excalidraw/tools.ts). */
+async function runTool(ai: DrawingAi, name: string, args: any, stopped: () => boolean): Promise<unknown> {
+	switch (name) {
+		case "excalidraw_get_scene": return ai.getScene(args);
+		case "excalidraw_apply_operations": return ai.apply(args.operations, args.select, stopped);
+		case "excalidraw_select": return ai.select(args.ids);
+		case "excalidraw_render_image": return ai.render(args.ids);
+		case "excalidraw_from_mermaid": return ai.fromMermaid(args.definition, args, stopped);
+	}
+	throw new Error(`${name} is not a tool of the editor.`);
+}
+
+/**
+ * The agent's pending changes, outlined on the canvas: what it added, what it changed, and
+ * (dashed) where something it removed was. Only outlines: nothing of Excalidraw's is restyled,
+ * and the mouse goes through them.
+ */
+function ReviewOverlay({ changes, view }: { changes: Change[]; view: { scrollX: number; scrollY: number; zoom: number } }) {
+	const colour = { added: "var(--ok)", changed: "var(--warn)", removed: "var(--danger)" };
+	return (
+		<svg id="review-outlines" aria-hidden="true" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", zIndex: 2, pointerEvents: "none", overflow: "hidden" }}>
+			{changes.slice(0, 300).map((c) => {
+				const box = boxOf(c.element as any);
+				const pad = 6;
+				const x = (box.x + view.scrollX) * view.zoom - pad, y = (box.y + view.scrollY) * view.zoom - pad;
+				const width = box.width * view.zoom + pad * 2, height = box.height * view.zoom + pad * 2;
+				const angle = (((c.element as any).angle ?? 0) * 180) / Math.PI;
+				return (
+					<rect
+						key={c.id}
+						data-change={c.change}
+						data-element={c.id}
+						x={x}
+						y={y}
+						width={width}
+						height={height}
+						rx={7}
+						fill="none"
+						stroke={colour[c.change]}
+						strokeWidth={2}
+						strokeDasharray={c.change === "removed" ? "6 5" : undefined}
+						transform={angle ? `rotate(${angle} ${x + width / 2} ${y + height / 2})` : undefined}
+					/>
+				);
+			})}
+		</svg>
+	);
+}
+
+/** "2 added, 1 changed": what is pending, in a few words. */
+function pendingWords(s: Summary): string {
+	return (["added", "changed", "removed"] as const).filter((k) => s[k] > 0).map((k) => `${s[k]} ${k}`).join(", ");
+}
+
+/**
+ * The app's bar above the canvas: which drawing this is, whether it has unsaved changes, Save, Export and the chat.
+ * While an agent works it says so; while its changes are pending it holds Reject and Accept (the chat has them too).
+ */
+function Bar({ name, dirty, saved, look, review, working, onResolve }: { name: string; dirty: boolean; saved: boolean; look: Look; review: Review | undefined; working: string | undefined; onResolve: (decision: "accept" | "reject") => void }) {
 	const [root] = useState(() => {
 		const el = document.getElementById("bar")!;
 		return el.shadowRoot ?? el.attachShadow({ mode: "open" });
@@ -169,7 +242,7 @@ function Bar({ name, dirty, saved, look }: { name: string; dirty: boolean; saved
 			<link rel="stylesheet" href="/ui/app.css" onLoad={() => setStyled((n) => n + 1)} />
 			<link rel="stylesheet" href="/excalidraw/bar.css" onLoad={() => setStyled((n) => n + 1)} />
 			{/* (nothing shows until both sheets are in: unstyled buttons would flash) */}
-			<header className={`bar${look.chatSide === "left" ? " side-left" : ""}`} hidden={styled < 2}>
+			<header className={`bar${look.chatSide === "left" ? " side-left" : ""}${review || working ? " busy" : ""}`} hidden={styled < 2}>
 				<span className="brandmark" aria-hidden="true">
 					{[1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 2, 0, 0, 0].map((lit, i) => (lit === 2 ? <i key={i} data-signal="" /> : lit ? <i key={i} data-on="" /> : <i key={i} />))}
 				</span>
@@ -179,11 +252,34 @@ function Bar({ name, dirty, saved, look }: { name: string; dirty: boolean; saved
 				{dirty && <span className="unsaved" id="unsaved" role="img" aria-label="Unsaved changes" title="Unsaved changes" />}
 				<span className="label kind">Excalidraw</span>
 				<span className="spacer" />
-				<span className="label">Export</span>
-				<button className="btn btn-sm btn-ghost" id="exportPng" title={`Export as a PNG picture with the drawing inside it, so it opens again for editing (${key("⇧E")})`} onClick={() => command("exportPng")}>
+				{working && (
+					<span className="working" id="working" role="status">
+						<span className="dot-loader" aria-hidden="true">
+							<i />
+							<i />
+							<i />
+						</span>
+						<span className="label">{working}</span>
+					</span>
+				)}
+				{review && (
+					<span className="review" id="review" role="status">
+						<span className="label" id="pending" title="The agent's changes are in the drawing, outlined. Keep them or put the drawing back as it was.">
+							{pendingWords(review.summary)}
+						</span>
+						<button className="btn btn-sm" id="reject" title="Revert every pending AI change" onClick={() => onResolve("reject")}>
+							Reject
+						</button>
+						<button className="btn btn-sm" id="accept" title="Keep every pending AI change" onClick={() => onResolve("accept")}>
+							Accept
+						</button>
+					</span>
+				)}
+				<span className="label export">Export</span>
+				<button className="btn btn-sm btn-ghost export" id="exportPng" title={`Export as a PNG picture with the drawing inside it, so it opens again for editing (${key("⇧E")})`} onClick={() => command("exportPng")}>
 					PNG
 				</button>
-				<button className="btn btn-sm btn-ghost" id="exportSvg" title="Export as an SVG picture with the drawing inside it, so it opens again for editing" onClick={() => command("exportSvg")}>
+				<button className="btn btn-sm btn-ghost export" id="exportSvg" title="Export as an SVG picture with the drawing inside it, so it opens again for editing" onClick={() => command("exportSvg")}>
 					SVG
 				</button>
 				<button className={`btn btn-sm${dirty ? " btn-primary" : ""}`} id="save" title={`Save (${key("S")})`} disabled={saved && !dirty} onClick={() => command("save")}>
@@ -212,6 +308,16 @@ function App({ doc, initial }: { doc: HostDocument; initial: ExcalidrawInitialDa
 	/** What the drawing held when it was loaded or last saved (undefined until it has loaded). */
 	const savedStamp = useRef<string | undefined>(undefined);
 	const wasDirty = useRef(false);
+	const ai = useRef<DrawingAi | null>(null);
+	const [review, setReview] = useState<Review | undefined>(undefined);
+	const [working, setWorking] = useState<string | undefined>(undefined);
+	/** Where the canvas is looking, while there are outlines to draw on it. */
+	const [view, setView] = useState({ scrollX: 0, scrollY: 0, zoom: 1 });
+	const reviewing = useRef(false);
+	const selection = useRef("");
+	/** The tool calls under way, by the app's number for each; one that is stopped is taken out. */
+	const running = useRef(new Set<number>());
+	const sceneVersion = useRef(-1);
 
 	const report = useCallback((stamp: string, always = false) => {
 		const now = stamp !== savedStamp.current;
@@ -244,17 +350,46 @@ function App({ doc, initial }: { doc: HostDocument; initial: ExcalidrawInitialDa
 				setName(m.name);
 				setSaved(m.saved);
 				setLook(m.look);
+			} else if (m.type === "tool") {
+				const engine = ai.current;
+				const id = m.id;
+				running.current.add(id);
+				void (engine && savedStamp.current !== undefined ? runTool(engine, m.name, m.args, () => !running.current.has(id)) : Promise.reject(new Error("The drawing is still loading. Try again in a moment.")))
+					.then((result) => host.post({ type: "toolResult", id, ok: true, result }))
+					// (`forModel`: the call could not be carried out as asked, and saying why lets the model try again)
+					.catch((e) => host.post({ type: "toolResult", id, ok: false, forModel: e instanceof OperationError, stopped: e instanceof StoppedError, error: String(e?.message ?? e) }))
+					.finally(() => running.current.delete(id));
+			} else if (m.type === "cancelTool") {
+				// (a call that is still waiting, for fonts or for Mermaid, finds this out before it changes anything)
+				running.current.delete(m.id);
+			} else if (m.type === "resolveReview") {
+				ai.current?.resolve(m.decision);
+			} else if (m.type === "aiStatus") {
+				setWorking(m.working ? m.text || "Working…" : undefined);
 			}
 		});
 	}, [report]);
 
 	return (
 		<>
-			<Bar name={name} dirty={dirty} saved={saved} look={look} />
+			<Bar name={name} dirty={dirty} saved={saved} look={look} review={review} working={working} onResolve={(decision) => ai.current?.resolve(decision)} />
+			{review && <ReviewOverlay changes={review.changes} view={view} />}
 			<Excalidraw
 				excalidrawAPI={(a) => {
 					api.current = a;
-					window.omnidrawExcalidraw = { api: a, edit, typingText, convertToExcalidrawElements, CaptureUpdateAction };
+					ai.current = new DrawingAi(
+						{ api: a as any, convert: convertToExcalidrawElements as any, exportToBlob, captureNow: CaptureUpdateAction.IMMEDIATELY, captureNever: CaptureUpdateAction.NEVER },
+						(pending, summary, changes) => {
+							reviewing.current = pending;
+							if (pending) {
+								const s = a.getAppState();
+								setView({ scrollX: s.scrollX, scrollY: s.scrollY, zoom: s.zoom.value });
+							}
+							setReview(pending ? { summary, changes } : undefined);
+							host.post({ type: "review", pending, summary });
+						}
+					);
+					window.omnidrawExcalidraw = { api: a, ai: ai.current, edit, typingText, convertToExcalidrawElements, CaptureUpdateAction };
 				}}
 				initialData={initial ? { ...initial, scrollToContent: true } : null}
 				onChange={(elements, appState) => {
@@ -265,6 +400,22 @@ function App({ doc, initial }: { doc: HostDocument; initial: ExcalidrawInitialDa
 						host.post({ type: "loaded", elements: elements.filter((e) => !e.isDeleted).length });
 					}
 					report(stamp);
+					// the agent's pending changes follow the drawing (one that is undone is no longer pending), and their outlines the view
+					// (asked only when an element changed: this runs for every move of the view, too)
+					if (ai.current?.reviewing) {
+						const version = hashElementsVersion(elements);
+						if (version !== sceneVersion.current) {
+							sceneVersion.current = version;
+							ai.current.sceneChanged();
+						}
+					}
+					if (reviewing.current) setView((v) => (v.scrollX === appState.scrollX && v.scrollY === appState.scrollY && v.zoom === appState.zoom.value ? v : { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom.value }));
+					// what is selected, for the chat (a request is about the selection when there is one)
+					const selected = Object.keys(appState.selectedElementIds).filter((id) => appState.selectedElementIds[id]).join(",");
+					if (selected !== selection.current) {
+						selection.current = selected;
+						host.post({ type: "selection", ids: ai.current?.selection() ?? [] });
+					}
 				}}
 				theme={theme}
 				name={name.replace(/(\.excalidraw)?\.(png|svg)$|\.excalidraw$/i, "")}
@@ -326,7 +477,7 @@ async function start(): Promise<void> {
 	if (doc.bytes) {
 		try {
 			// (Excalidraw's own reader: a .excalidraw file, or a PNG or SVG that carries a drawing)
-			initial = await loadFromBlob(new Blob([doc.bytes], { type: doc.mime }), null, null);
+			initial = await loadFromBlob(new Blob([doc.bytes as BlobPart], { type: doc.mime }), null, null);
 		} catch (e: any) {
 			return problem(`${doc.name} could not be opened: ${String(e?.message ?? e)}`);
 		}

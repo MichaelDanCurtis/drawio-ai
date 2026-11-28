@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+- **AI in an Excalidraw drawing.** The chat beside a drawing now works as it does beside a
+  diagram: an agent (Claude Code, Gemini, Codex, GitHub Copilot, Kimi) or a model used with your
+  API key edits the open drawing live.
+  - Six tools of its own: it reads the drawing, changes it with a list of add, update and delete
+    operations applied as one step, selects, renders a picture to look at, adds a Mermaid
+    flowchart as editable shapes, and exports. Shapes, labels and arrows are made by Excalidraw
+    itself; an arrow between two shapes is routed between them, and follows them when the agent
+    moves them.
+  - What it changes is pending until you keep or revert it, as in a diagram: outlined on the
+    canvas (added, changed, removed), counted in the bar above it and in the chat, with **Reject**
+    and **Accept** in both and under **Agent**. Reject gives each element back what it was before
+    the agent touched it; what you draw yourself meanwhile is not part of the review; a change you
+    undo is no longer pending, and is again if you redo it.
+  - A request is about the selection when there is one. A model used with an API key is asked
+    about before it changes the drawing or writes a file.
+  - Not yet: keeping or reverting part of a review, and reaching a drawing from Claude Code or
+    Codex connected from outside the app.
+- **Security: `npx` is no longer run in the document's folder.** When the Claude Code or Codex
+  adapter is not installed (or an older one is), the app fetches it with `npx` as the chat opens.
+  That was done in the folder of the diagram or drawing, where npm reads the folder's own
+  settings (an `.npmrc` can name another registry) and looks in its `node_modules` first: a
+  checked-out repository could so decide what was run as the agent, by a file in it being
+  opened. `npx`, and any other package runner set as an agent's command in settings.json, is
+  now started in an empty folder of the app's own; the agent still works in the document's
+  folder, which its session is told. Installed adapters and agents are started as before.
+
 ## [0.4.2]
 
 - **Settings → Sharing.** The OmniPad server Go live shares through, and the name others see,

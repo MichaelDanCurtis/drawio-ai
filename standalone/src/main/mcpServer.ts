@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import * as http from "http";
 import type { DiagramToolbox, ToolResult } from "../../../src/features/ai/DiagramToolbox";
 import { createMcpListener, McpTool } from "../../../src/features/ai/mcp";
-import { SYSTEM_PROMPT } from "../../../src/features/ai/systemPrompt";
+import { describeContext, SYSTEM_PROMPT, type SelectionContext } from "../../../src/features/ai/systemPrompt";
 import { toMcpTools, TOOL_SCHEMAS } from "../../../src/features/ai/toolSchemas";
 import { callMapperTool, MAPPER_TOOL_NAMES, MAPPER_TOOLS } from "./mapper/mcpTools";
 import type { MapperService } from "./mapper/service";
@@ -105,7 +105,8 @@ export function compactTools(tools: McpTool[]): McpTool[] {
 	return tools.map((t) => compactTool(t).tool);
 }
 
-function toolReference(tools: McpTool[]): string {
+/** For a client that gets shortened tools: what was shortened, in full. */
+export function toolReference(tools: McpTool[]): string {
 	return [
 		"Tool reference. This client gets shortened tool descriptions and, for large tools, only parameter names and types; these are the full versions.",
 		...tools.flatMap(longDescriptions).map(([where, text]) => `- ${where}: ${text}`),
@@ -177,11 +178,16 @@ const READS_TOO: Record<string, (args: Record<string, unknown>) => boolean> = {
 	drawio_pages: (a) => a.action !== "list" && a.action !== "select",
 };
 
+/** A tool as a model used through its API is offered it (see api/chatSession.ts). */
+export type ChatTool = McpTool & { picture?: boolean; changes?(args: Record<string, unknown>): boolean };
+
 /**
- * Model Context Protocol endpoint for one window's diagram, on 127.0.0.1 with a
- * random bearer token. The window's ACP session gets it in `session/new`.
+ * The tools of one window's document, and the endpoint an agent reaches them through: Model
+ * Context Protocol on 127.0.0.1 with a random bearer token, which the window's ACP session
+ * gets in `session/new`. A draw.io diagram's tools are WindowMcpServer's below; an Excalidraw
+ * drawing's are ExcalidrawEndpoint's (excalidrawTools.ts). What the chat needs of either is here.
  */
-export class WindowMcpServer {
+export abstract class ToolEndpoint {
 	public readonly token = randomBytes(24).toString("hex");
 	private server: http.Server | undefined;
 	private port = 0;
@@ -192,12 +198,26 @@ export class WindowMcpServer {
 	/** What the user added in the chat while a request is under way, once: it goes at the end of the next answer to the chat's own call. */
 	public additions: (() => () => string | undefined) | undefined;
 
-	constructor(
-		private readonly toolbox: DiagramToolbox,
-		private readonly fileName: () => string | undefined,
-		/** The window's Mapper: its maps become mapper_* tools. */
-		private readonly mapper?: () => MapperService
-	) {}
+	/** What the document is called in a sentence: "diagram", "drawing". */
+	public abstract readonly noun: string;
+	/** The tools, whole. */
+	protected abstract tools(): McpTool[];
+	/** What an agent program reads from the endpoint about these tools (`compact`: with the full reference of what was shortened). */
+	protected abstract instructions(compact: boolean): string;
+	/** Runs one tool. */
+	protected abstract invoke(name: string, args: unknown, opts: { signal?: AbortSignal }): Promise<ToolResult>;
+	/** This window's tools, whole, as a model used through its API is offered them. */
+	public abstract chatTools(): ChatTool[];
+	/** What a model used through its API is told it is here for (it has no endpoint to read instructions from, only these tools). */
+	public abstract chatSystemPrompt(): string;
+	/** What an agent program is told with its first request: where it is, and which tools to use. */
+	public abstract firstPromptNote(fileName: string | undefined): string;
+	/** What is open and what the user selected, as a request is told it. */
+	public abstract describeContext(fileName: string, selection: SelectionContext): string;
+	/** Whether this window has the Mapper's tools. */
+	public get maps(): boolean {
+		return false;
+	}
 
 	/**
 	 * Runs a tool the way the endpoint does (the desktop-wide endpoint routes calls here, and a
@@ -207,7 +227,7 @@ export class WindowMcpServer {
 	public async call(name: string, args: unknown, opts: { signal?: AbortSignal; chat?: boolean } = {}): Promise<ToolResult> {
 		// (asked for as the call begins: it is for the request under way now, whenever the tool is done)
 		const take = opts.chat ? this.additions?.() : undefined;
-		let result: ToolResult = this.mapper && MAPPER_TOOL_NAMES.has(name) ? await callMapperTool(this.mapper(), name, args, { signal: opts.signal }) : await this.toolbox.invoke(name, args as any, { scoped: true, ...(opts.signal ? { signal: opts.signal } : {}) });
+		let result: ToolResult = await this.invoke(name, args, { ...(opts.signal ? { signal: opts.signal } : {}) });
 		this.onToolResult?.(name, result);
 		// (`chat`: the call is the window's own chat's, an agent's over the endpoint or a model's the app
 		// runs. What the user typed while it works goes to it here. Never to another caller.)
@@ -217,24 +237,12 @@ export class WindowMcpServer {
 		return result;
 	}
 
-	/** This window's tools, whole, as a model used through its API is offered them (see api/chatSession.ts). */
-	public chatTools(): (McpTool & { picture?: boolean; changes?(args: Record<string, unknown>): boolean })[] {
-		const mapperTools = this.mapper ? MAPPER_TOOLS.map(({ run, ...t }) => t) : [];
-		return [...standaloneTools().map((t) => (TOOL_SCHEMAS.find((s) => s.name === t.name)?.requiresVision ? { ...t, picture: true } : t)), ...mapperTools].map((t) => (READS_TOO[t.name] ? { ...t, changes: READS_TOO[t.name] } : t));
-	}
-
-	/** Whether this window has the Mapper's tools. */
-	public get maps(): boolean {
-		return !!this.mapper;
-	}
-
 	public get url(): string {
 		return `http://127.0.0.1:${this.port}/mcp`;
 	}
 
 	public async start(): Promise<void> {
-		const mapperTools = this.mapper ? MAPPER_TOOLS.map(({ run, ...t }) => t) : [];
-		const tools = [...standaloneTools(), ...mapperTools];
+		const tools = this.tools();
 		const compact = compactTools(tools);
 		const listener = createMcpListener({
 			token: () => this.token,
@@ -242,7 +250,7 @@ export class WindowMcpServer {
 			deps: {
 				serverVersion: "0.1.0",
 				tools: () => (this.compactDescriptions ? compact : tools),
-				instructions: async () => standaloneInstructions(this.fileName(), this.compactDescriptions, mapperTools),
+				instructions: async () => this.instructions(this.compactDescriptions),
 				callTool: async (name, args) => this.call(name, args, { chat: true }),
 			},
 		});
@@ -253,5 +261,65 @@ export class WindowMcpServer {
 
 	public dispose(): void {
 		this.server?.close();
+	}
+}
+
+/** What an agent program is told with its first request about a draw.io diagram. */
+function diagramFirstPromptNote(fileName: string | undefined): string {
+	return [
+		`You are working inside the OmniDraw app. The user has the draw.io diagram ${fileName ? `"${fileName}"` : "(not saved yet)"} open next to this chat.`,
+		"Read and change it ONLY with the drawio_* tools of the \"omnidraw\" MCP server (drawio_get_diagram, drawio_apply_operations, drawio_search_shapes, drawio_render_image, drawio_lint, ...). They edit the open diagram live and the user can keep or revert your changes. Never edit diagram files on disk or with shell commands.",
+		ADDITIONS_NOTE,
+		"Reply with a brief summary of what you changed.",
+	].join("\n");
+}
+
+/** The tools of one window's draw.io diagram (and its maps). */
+export class WindowMcpServer extends ToolEndpoint {
+	public readonly noun = "diagram";
+
+	constructor(
+		private readonly toolbox: DiagramToolbox,
+		private readonly fileName: () => string | undefined,
+		/** The window's Mapper: its maps become mapper_* tools. */
+		private readonly mapper?: () => MapperService
+	) {
+		super();
+	}
+
+	private mapperTools(): McpTool[] {
+		return this.mapper ? MAPPER_TOOLS.map(({ run, ...t }) => t) : [];
+	}
+
+	protected tools(): McpTool[] {
+		return [...standaloneTools(), ...this.mapperTools()];
+	}
+
+	protected instructions(compact: boolean): string {
+		return standaloneInstructions(this.fileName(), compact, this.mapperTools());
+	}
+
+	protected async invoke(name: string, args: unknown, opts: { signal?: AbortSignal }): Promise<ToolResult> {
+		return this.mapper && MAPPER_TOOL_NAMES.has(name) ? callMapperTool(this.mapper(), name, args, { signal: opts.signal }) : this.toolbox.invoke(name, args as any, { scoped: true, ...(opts.signal ? { signal: opts.signal } : {}) });
+	}
+
+	public chatTools(): ChatTool[] {
+		return [...standaloneTools().map((t) => (TOOL_SCHEMAS.find((s) => s.name === t.name)?.requiresVision ? { ...t, picture: true } : t)), ...this.mapperTools()].map((t) => (READS_TOO[t.name] ? { ...t, changes: READS_TOO[t.name] } : t));
+	}
+
+	public chatSystemPrompt(): string {
+		return chatSystemPrompt(this.maps);
+	}
+
+	public firstPromptNote(fileName: string | undefined): string {
+		return diagramFirstPromptNote(fileName);
+	}
+
+	public describeContext(fileName: string, selection: SelectionContext): string {
+		return describeContext(fileName, selection);
+	}
+
+	public get maps(): boolean {
+		return !!this.mapper;
 	}
 }

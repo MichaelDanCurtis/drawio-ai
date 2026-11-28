@@ -3,7 +3,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { chooseAdapter, installedAdapterVersion, latestAdapterVersion } from "./adapterVersions";
-import { settings } from "./settings";
+import { fetchesPackages, LaunchPlaceError, ownLaunchFolder } from "./launchPlace";
+import { settings, settingsPath } from "./settings";
 
 export type AgentId = "gemini" | "claude" | "codex" | "copilot" | "kimi";
 
@@ -217,6 +218,21 @@ export interface LaunchSpec {
 	compactTools?: boolean;
 	/** Set when a newer adapter is started through npx although one is installed: the npm package to fall back from. */
 	adapterFallback?: string;
+	/**
+	 * The folder the program is started in, when that is not the folder its session works in:
+	 * the app's own, for a program that fetches a package and runs it (see launchPlace.ts).
+	 */
+	startIn?: string;
+}
+
+/** A launch through a package runner is started in the app's own folder, never in the document's. */
+function placed(spec: LaunchSpec): LaunchSpec | { error: string } {
+	if (!fetchesPackages(spec.command)) return spec;
+	try {
+		return { ...spec, startIn: ownLaunchFolder(path.dirname(settingsPath())) };
+	} catch (e: any) {
+		return { error: e instanceof LaunchPlaceError ? e.message : String(e?.message ?? e) };
+	}
 }
 
 export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
@@ -225,7 +241,7 @@ export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
 	if (override?.command) {
 		const command = which(override.command, env);
 		if (!command) return { error: `${override.command} (from settings.json) was not found.` };
-		return { command, args: override.args ?? [], env: { ...env, ...(override.env ?? {}) } };
+		return placed({ command, args: override.args ?? [], env: { ...env, ...(override.env ?? {}) } });
 	}
 	if ("candidates" in def.acp) {
 		for (const c of def.acp.candidates) {
@@ -245,7 +261,7 @@ export function launchSpec(def: AgentDef): LaunchSpec | { error: string } {
 	const choice = chooseAdapter(adapter ? { bin: adapter, version: installedAdapterVersion(adapter, def.acp.npxPackage) } : undefined, latestAdapterVersion(def.acp.npxPackage));
 	if (adapter && (choice.use === "installed" || !npx)) return { command: adapter, args: [], env };
 	if (!npx) return { error: `${def.acp.bin} is not installed and npx was not found. Install it with: ${def.install}` };
-	return { command: npx, args: ["-y", `${def.acp.npxPackage}${choice.use === "npx" && choice.version ? `@${choice.version}` : ""}`], env, ...(adapter ? { adapterFallback: def.acp.npxPackage } : {}) };
+	return placed({ command: npx, args: ["-y", `${def.acp.npxPackage}${choice.use === "npx" && choice.version ? `@${choice.version}` : ""}`], env, ...(adapter ? { adapterFallback: def.acp.npxPackage } : {}) });
 }
 
 export function agentStatuses(): AgentStatus[] {
