@@ -913,6 +913,44 @@ async function runLive(w: DiagramWindow, server: StaticServer, config: E2eConfig
 	await edit(w, [{ op: "addShape", label: "after", x: 500, y: 40, width: 80, height: 40 }]);
 	await new Promise((r) => setTimeout(r, 800));
 	log("liveApartAfterStop", (await cells(w)).length - (await cells(guest)).length);
+
+	// Settings → Sharing: the server that was given in the Go live window is there, can be asked
+	// whether it shares diagrams, and an address that is not one is not kept.
+	SettingsWindow.open(server, "sharing");
+	for (let i = 0; i < 50 && !SettingsWindow.window?.isVisible(); i++) await new Promise((r) => setTimeout(r, 100));
+	const sp = SettingsWindow.window!.webContents;
+	const inSettings = (js: string) => sp.executeJavaScript(js);
+	await new Promise((r) => setTimeout(r, 800));
+	const kept = await inSettings(`document.getElementById("sharingServer").value`);
+	await inSettings(`document.getElementById("sharingTest").click()`);
+	let checked = "";
+	for (const end = Date.now() + 10_000; Date.now() < end && !/can share|not|error|reached/i.test(checked); ) {
+		await new Promise((r) => setTimeout(r, 200));
+		checked = await inSettings(`document.getElementById("sharingCheck").textContent`);
+		if (/Asking|Asks the server/.test(checked)) checked = "";
+	}
+	await inSettings(`(() => { const i = document.getElementById("sharingServer"); i.value = "not an address"; i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+	await new Promise((r) => setTimeout(r, 500));
+	const refused = await inSettings(`document.getElementById("sharingServerHelp").textContent`);
+	// The Go live window is open while the address is changed in Settings: its field, not typed in,
+	// follows, so that Go live does not share through the address that was there before.
+	LiveDialog.window?.close();
+	await new Promise((r) => setTimeout(r, 300));
+	LiveDialog.open(server, w, "share");
+	await new Promise((r) => setTimeout(r, 1200));
+	const setServer = (value: string) => inSettings(`(() => { const i = document.getElementById("sharingServer"); i.value = ${JSON.stringify(value)}; i.dispatchEvent(new Event("change", { bubbles: true })); })()`);
+	const dialogBefore = await inDialog(`document.getElementById("server").value`);
+	await setServer("http://localhost:9");
+	await new Promise((r) => setTimeout(r, 600));
+	const dialogAfter = await inDialog(`document.getElementById("server").value`);
+	await setServer(config.live!.relay);
+	await new Promise((r) => setTimeout(r, 600));
+	LiveDialog.window?.close();
+	const sharing = { kept, isTheRelay: kept === config.live!.relay, checked, refused, dialogBefore, dialogAfter, stillKept: settings().sharing.server };
+	log("liveSettingsSharing", sharing);
+	fs.writeFileSync(path.join(config.out, "settings-sharing-checked.png"), (await sp.capturePage()).toPNG());
+	SettingsWindow.window?.close();
+	if (!sharing.isTheRelay || checked !== "This server can share diagrams." || !/not an address a server can be at/.test(refused) || sharing.stillKept !== config.live!.relay || dialogBefore !== config.live!.relay || dialogAfter !== "http://localhost:9") throw new Error("Settings → Sharing did not keep, check or refuse a server address as it should, or the Go live window did not follow it.");
 }
 
 function waitForTurn(w: DiagramWindow): Promise<{ stop?: string; error?: string }> {
@@ -1390,7 +1428,7 @@ async function runPolish(w: DiagramWindow, server: StaticServer, config: E2eConf
 		process.env.DRAWAI_THEME = theme;
 		updateSettings({ appearance: { ...settings().appearance, theme, iconStyle: "dots2d" } });
 		await pause(500);
-		for (const section of ["appearance", "agents", "chat", "editor", "shapes"]) {
+		for (const section of ["appearance", "agents", "chat", "editor", "shapes", "sharing"]) {
 			await sw.webContents.executeJavaScript(`document.querySelector('nav [data-section="${section}"]').click()`);
 			await pause(400);
 			await save(`settings-${theme}-${section}.png`, sw.webContents);

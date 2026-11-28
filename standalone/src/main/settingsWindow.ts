@@ -5,6 +5,8 @@ import { adapterPackages, AgentId, agentStatuses } from "./agents";
 import { refreshAdapterVersions } from "./adapterVersions";
 import { apiAccess } from "./api/catalog";
 import { ApiKeysPanel } from "./api/keysPanel";
+import { checkServer } from "./live/connection";
+import { serverOrigin } from "./live/protocol";
 import { chatToolList } from "./mcpServer";
 import { probeModels, probing } from "./modelProbe";
 import { paths } from "./paths";
@@ -85,6 +87,8 @@ export class SettingsWindow {
 			agents: agentStatuses().map((a) => ({ id: a.id, label: a.label, installed: a.installed, signedIn: a.signedIn, launch: a.launch, problem: a.problem, loadingModels: probing().includes(a.id), modelError: SettingsWindow.modelErrors.get(a.id) })),
 			// (whether a key is kept, never the key)
 			apis: SettingsWindow.keysPanel.rows(),
+			// (Sharing: what is wrong with the address last typed, and what the server last said when asked)
+			sharing: SettingsWindow.sharing,
 			file: settingsPath(),
 			version: app.getVersion(),
 		});
@@ -111,9 +115,40 @@ export class SettingsWindow {
 		);
 	}
 
+	private static sharing: { problem?: string; checking?: boolean; check?: { ok: boolean; text: string; server: string } } = {};
+
 	private static async onMessage(msg: any): Promise<void> {
 		if (SettingsWindow.keysPanel.onMessage(msg)) return;
 		switch (msg?.type) {
+			case "setSharing": {
+				// The server Go live shares through, and the name shown to others. The address is kept as
+				// its origin (https, or http for a server on this computer); one that is not an address
+				// is not kept, and the page says why.
+				const text = typeof msg.server === "string" ? msg.server.trim().slice(0, 300) : settings().sharing.server;
+				const name = typeof msg.name === "string" ? msg.name.trim().slice(0, 60) : settings().sharing.name;
+				const origin = text ? serverOrigin(text) : "";
+				if (origin === undefined) {
+					SettingsWindow.sharing = { problem: "That is not an address a server can be at. It looks like https://omnipad.example.com (http only for a server on this computer)." };
+					updateSettings({ sharing: { ...settings().sharing, name } });
+				} else {
+					if (origin !== settings().sharing.server) SettingsWindow.sharing = {};
+					else delete SettingsWindow.sharing.problem;
+					updateSettings({ sharing: { server: origin, name } });
+				}
+				SettingsWindow.postState();
+				break;
+			}
+			case "checkSharing": {
+				const server = settings().sharing.server;
+				if (!server || SettingsWindow.sharing.checking) break;
+				SettingsWindow.sharing = { ...SettingsWindow.sharing, checking: true, check: undefined };
+				SettingsWindow.postState();
+				const check = await checkServer(server);
+				// (the address may have been changed while the server was being asked: the answer is of the one that was asked)
+				SettingsWindow.sharing = { ...SettingsWindow.sharing, checking: false, check: { ...check, server } };
+				SettingsWindow.postState();
+				break;
+			}
 			case "ready":
 				SettingsWindow.postState();
 				void SettingsWindow.loadModels();

@@ -132,6 +132,7 @@ function touched(patch) {
  * `options.takeAnywayAt`, `options.busyAt`: as OmniPad's 200 and 1000.
  * `options.createDelayMs`, `options.deleteDelayMs`: how long sharing and ending a board take
  * (a slow server, for tests of what someone does meanwhile).
+ * `options.publicUrl`: the address the server goes by, when it knows one: the links it gives out start with it.
  */
 async function startBoardRelay(options = {}) {
 	/** pad id -> { id, ownerKey, boards: Map, people: Map, nextId } */
@@ -179,7 +180,7 @@ async function startBoardRelay(options = {}) {
 				const board = newBoard(String(body.title ?? "").slice(0, 80) || "Board", body.content ?? "");
 				pad.boards.set(board.id, board);
 				const path = `/b/${pad.id}/${board.id}`;
-				setTimeout(() => json(res, 200, { pad: pad.id, board: board.id, path, link: path, owner_key: pad.ownerKey }), options.createDelayMs ?? 0);
+				setTimeout(() => json(res, 200, { pad: pad.id, board: board.id, path, link: options.publicUrl ? options.publicUrl + path : path, owner_key: pad.ownerKey }), options.createDelayMs ?? 0);
 			});
 			return;
 		}
