@@ -455,12 +455,15 @@ export class HomeWindow {
 				}
 				case "removeCollection": {
 					let kept = false;
+					let failed: string[] = [];
 					await HomeWindow.moving(lib, lib.contents().docs.filter((d) => d.collection === text(msg.name)).map((d) => d.id), () => {
 						const r = lib.removeCollection(text(msg.name));
 						kept = r.kept;
+						failed = r.failed;
 						return r.moved;
 					});
-					if (kept) HomeWindow.post({ type: "note", text: `The folder ${text(msg.name)} has other files in it and was left in the library. Its diagrams and drawings are in the library's top now.` });
+					if (failed.length) HomeWindow.post({ type: "problem", text: `${failed.map((id) => id.split("/").pop()).join(", ")} could not be moved out of ${text(msg.name)}, so the collection stays. The others are in the library's top now.` });
+					else if (kept) HomeWindow.post({ type: "note", text: `The folder ${text(msg.name)} has other files in it and was left in the library. Its diagrams and drawings are in the library's top now.` });
 					break;
 				}
 				case "restore":

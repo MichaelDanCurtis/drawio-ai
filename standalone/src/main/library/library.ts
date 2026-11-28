@@ -129,6 +129,8 @@ export function cleanName(typed: string, what = "name"): string {
 	if (/[\\/:*?"<>|\u0000-\u001f]/.test(name)) throw new LibraryError(`A ${what} cannot have any of \\ / : * ? " < > | in it.`);
 	if (name.startsWith(".") || name.endsWith(".")) throw new LibraryError(`A ${what} cannot start or end with a dot.`);
 	if (/^(con|prn|aux|nul|com\d|lpt\d)$/i.test(name)) throw new LibraryError(`${name} is a name the system keeps for itself.`);
+	// (a folder of that name is passed over when the library is read: what is in it would not be seen)
+	if (what === "collection name" && name.toLowerCase() === "node_modules") throw new LibraryError(`${name} is a folder the library does not look in. Pick another name.`);
 	return name;
 }
 
@@ -553,11 +555,19 @@ export class Library {
 	 * library (`moved`: where each was, and where it is now). The folder goes if nothing else is
 	 * left in it; `kept` says when it stayed.
 	 */
-	public removeCollection(name: string): { moved: { from: string; to: string }[]; kept: boolean } {
+	public removeCollection(name: string): { moved: { from: string; to: string }[]; kept: boolean; failed: string[] } {
 		const dir = this.collectionDir(name);
-		const moved = this.contents()
-			.docs.filter((d) => d.collection === name)
-			.map((d) => ({ from: d.id, to: this.move(d.id, "") }));
+		// (each document on its own: one that cannot be moved stays, with the folder, and the others still say where they went)
+		const moved: { from: string; to: string }[] = [];
+		const failed: string[] = [];
+		for (const d of this.contents().docs.filter((d) => d.collection === name)) {
+			try {
+				moved.push({ from: d.id, to: this.move(d.id, "") });
+			} catch {
+				failed.push(d.id);
+			}
+		}
+		if (failed.length) return { moved, kept: true, failed };
 		let kept = false;
 		try {
 			// (empty folders that held documents go; a folder with anything else in it stays, and so does the collection's)
@@ -576,7 +586,7 @@ export class Library {
 		} catch {
 			kept = true;
 		}
-		return { moved, kept };
+		return { moved, kept, failed };
 	}
 
 	private collectionDir(name: string): string {
@@ -598,9 +608,16 @@ export class Library {
 		} catch {
 			// (as below)
 		}
+		// (what it is and where it was, written before it moves: a trash entry without them could be neither listed nor put back)
 		fs.mkdirSync(dir, { recursive: true });
-		fs.renameSync(file, path.join(dir, `item${type.ending}`));
-		fs.writeFileSync(path.join(dir, "info.json"), JSON.stringify({ from: id, at: now }));
+		try {
+			fs.writeFileSync(path.join(dir, "info.json"), JSON.stringify({ from: id, at: now }));
+			fs.renameSync(file, path.join(dir, `item${type.ending}`));
+		} catch (e) {
+			// (the document stays where it was; the half-made entry goes)
+			fs.rmSync(dir, { recursive: true, force: true });
+			throw e;
+		}
 		for (const [place, name] of [[() => this.versionsFolder(id), "versions"], [() => this.thumbFile(id), "thumb.png"]] as const) {
 			try {
 				const a = place();

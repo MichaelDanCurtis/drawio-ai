@@ -160,7 +160,7 @@ test("collections: made, renamed with what is in them, and taken away without th
 	fs.mkdirSync(path.join(root, "Customers", "sub"));
 	fs.writeFileSync(path.join(root, "Customers", "sub", "Deep.excalidraw"), "{}");
 	const removed = lib.removeCollection("Customers");
-	assert.deepEqual([removed.moved.sort((x, y) => x.from.localeCompare(y.from)), removed.kept], [[{ from: "Customers/Acme.drawio", to: "Acme 2.drawio" }, { from: "Customers/sub/Deep.excalidraw", to: "Deep.excalidraw" }], false]);
+	assert.deepEqual([removed.moved.sort((x, y) => x.from.localeCompare(y.from)), removed.kept, removed.failed], [[{ from: "Customers/Acme.drawio", to: "Acme 2.drawio" }, { from: "Customers/sub/Deep.excalidraw", to: "Deep.excalidraw" }], false, []]);
 	assert.deepEqual(ids(lib), ["Acme 2.drawio", "Acme.drawio", "Deep.excalidraw"]);
 	assert.equal(lib.versions("Acme 2.drawio").length, 1);
 	assert.equal(fs.existsSync(path.join(root, "Customers")), false);
@@ -168,7 +168,24 @@ test("collections: made, renamed with what is in them, and taken away without th
 	lib.createCollection("Mixed");
 	lib.create("Mixed", "One", ".drawio", B("1"));
 	fs.writeFileSync(path.join(root, "Mixed", "README.md"), "keep me");
-	assert.deepEqual(lib.removeCollection("Mixed"), { moved: [{ from: "Mixed/One.drawio", to: "One.drawio" }], kept: true });
+	assert.deepEqual(lib.removeCollection("Mixed"), { moved: [{ from: "Mixed/One.drawio", to: "One.drawio" }], kept: true, failed: [] });
+	// node_modules is passed over when the library is read: no collection may be called that
+	refused(() => lib.createCollection("node_modules"), /does not look in/);
+	refused(() => lib.renameCollection("Mixed", "Node_Modules"), /does not look in/);
+	refused(() => lib.create("node_modules", "x", ".drawio", B("")), /does not look in/);
+	// one document that cannot be moved out: it stays, with the collection, and the others say where they went
+	lib.createCollection("Stuck");
+	lib.create("Stuck", "Free", ".drawio", B("f"));
+	fs.mkdirSync(path.join(root, "Stuck", "locked"));
+	fs.writeFileSync(path.join(root, "Stuck", "locked", "Held.drawio"), "h");
+	fs.chmodSync(path.join(root, "Stuck", "locked"), 0o555);
+	try {
+		const r = lib.removeCollection("Stuck");
+		assert.deepEqual(r, { moved: [{ from: "Stuck/Free.drawio", to: "Free.drawio" }], kept: true, failed: ["Stuck/locked/Held.drawio"] });
+		assert.ok(fs.existsSync(path.join(root, "Stuck", "locked", "Held.drawio")));
+	} finally {
+		fs.chmodSync(path.join(root, "Stuck", "locked"), 0o755);
+	}
 	assert.equal(fs.readFileSync(path.join(root, "Mixed", "README.md"), "utf8"), "keep me");
 });
 
@@ -285,7 +302,7 @@ test("a collection that is there is taken by its name as it is spelled", () => {
 	// taken away: that one
 	fs.mkdirSync(path.join(root, "Team  A"));
 	fs.writeFileSync(path.join(root, "Team  A", "Again.drawio"), "again");
-	assert.deepEqual(lib.removeCollection("Team  A"), { moved: [{ from: "Team  A/Again.drawio", to: "Again.drawio" }], kept: false });
+	assert.deepEqual(lib.removeCollection("Team  A"), { moved: [{ from: "Team  A/Again.drawio", to: "Again.drawio" }], kept: false, failed: [] });
 	assert.deepEqual(ids(lib), ["Again.drawio", "Team A/Narrow.drawio", "Zeta/New.drawio", "Zeta/Wide.drawio"]);
 	// a name that is no folder's is still not one; and a new collection's name is tidied as before
 	for (const bad of ["Team  B", "../Team A", "Team A/x", ".omnidraw", ""]) refused(() => lib.renameCollection(bad, "x"), /not a collection/);
@@ -323,6 +340,21 @@ test("the trash: there with its versions, back where it was, or gone for good", 
 	// a picture of what the document was before it was last changed does not go with it
 	const later = new Date(Date.now() + 60_000);
 	fs.utimesSync(lib.pathOf("Team/Plan 2.excalidraw"), later, later);
+	// a trash entry whose record cannot be written: the document stays where it was, nothing half-made is left
+	const kept2 = lib.create("", "Keep", ".drawio", B("keep"));
+	const write = fs.writeFileSync;
+	fs.writeFileSync = (target, ...rest) => {
+		if (String(target).endsWith("info.json")) throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+		return write(target, ...rest);
+	};
+	try {
+		assert.throws(() => lib.trash(kept2), /ENOSPC/);
+	} finally {
+		fs.writeFileSync = write;
+	}
+	assert.equal(lib.read(kept2).toString(), "keep");
+	assert.equal(lib.contents().trash.length, 0);
+	fs.rmSync(lib.pathOf(kept2));
 	// gone for good, one or all; and nothing that is not a trash item is named
 	const t3 = lib.trash("Team/Plan 2.excalidraw");
 	assert.equal(lib.trashThumb(t3), undefined);

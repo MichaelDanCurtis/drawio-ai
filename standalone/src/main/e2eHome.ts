@@ -142,6 +142,7 @@ export async function runHome(server: StaticServer, config: E2eConfig, log: (k: 
 		return !!again && again !== w && !again.win.isDestroyed() && (await again.whenLoaded().then(() => elementIds(again))).length === 0;
 	});
 	// (what it was before going back was its last save: that version is kept from now on, and no later save takes its place)
+	log("homeWentBack", lib().versions(moved).map((v) => [v.key.split("-")[0], v.kept, lib().versionBytes(moved, v.key).includes("home-2"), lib().versionBytes(moved, v.key).includes("home-pending")]));
 	expect(lib().versions(moved).length === 2 && lib().versions(moved)[0].kept && lib().versionBytes(moved, lib().versions(moved)[0].key).includes("home-2"), "what it was before going back is kept, so that going back can be gone back on");
 
 	// ----- unsaved changes are not thrown out with the file -----
